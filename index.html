@@ -1,56 +1,34 @@
 <!DOCTYPE html>
 <html lang="ja">
-
 <head>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-	<title>パース定規グリッド（視点設定＋定規描画）</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>パース定規グリッド（視点設定＋定規描画）</title>
 
-	<!-- Split build stylesheet: all visual rules live in style.css. -->
-	<link rel="stylesheet" href="style.css">
+<!-- Split build stylesheet: all visual rules live in style.css. -->
+<link rel="stylesheet" href="style.css">
 </head>
-
 <body>
-	<!-- Left settings / scene panel. JavaScript fills this panel at startup. -->
-	<div id="side"></div>
-	<!-- Main application area: toolbar, canvas, and status hint. -->
-	<div id="main">
-		<div id="bar">
-			<div class="brand">
-				<div class="brandMark">◈</div>
-				<div class="brandText">CITY GRID STUDIO<small>perspective helper / v2</small></div>
-			</div>
-			<div class="barGroup"><button id="tg" title="設定パネルを開閉">設定</button><button id="mV"
-					class="on">視点</button><button id="mD">描画</button></div>
-			<div class="barGroup"><button id="tE" class="toolBtn">消す</button><button id="tS"
-					class="toolBtn">図形</button><button id="tM" class="toolBtn">編集</button><button id="tB"
-					class="toolBtn">範囲</button><button id="assetToggle" class="toolBtn">＋アセット</button></div>
-			<span class="barGrow"></span>
-			<div class="barGroup"><button id="undo" class="iconBtn" title="元に戻す (⌘/Ctrl+Z)">↶</button><button id="redo"
-					class="iconBtn" title="やり直す (⌘/Ctrl+Y)">↷</button><button id="zr"
-					title="ズームを100%に戻す">100%</button><button id="clr" class="warnBtn">消去</button></div>
-			<div class="barGroup"><button id="exportToggle">書き出し⌄</button>
-				<div id="exportMenu" class="exportMenu">
-					<button id="pngB">描画＋補助線 PNG（透過）</button><button id="pngL">描画のみ PNG（透過）</button><button
-						id="pngG">補助線のみ
-						PNG（透過）</button><button id="cpyL">線画をクリップボードにコピー</button>
-				</div><button id="svP" class="saveBtn">保存</button><button id="opP">開く</button><input type="file"
-					id="opF" accept=".json,application/json" hidden><button id="helpToggle" class="iconBtn"
-					title="操作ヘルプ">?</button>
-			</div>
-		</div>
-		<!-- Drawing stage. The canvas is the only drawing surface. -->
-		<div id="stage"><canvas id="cv"></canvas></div>
-		<div id="hint" class="note" style="padding:4px 10px"></div>
-	</div>
-	<!-- Split build application logic: all interaction and rendering live in script.js. -->
-	<script src="script.js"></script>
-	<script type="module"
-		src="https://static.cloudflareinsights.com/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
-		integrity="sha512-L0ha0OXavK/8okipN9F8BtP84dg9DUhPERbBXzwI6dgTA55d2+yweo3pn5CSFYs45/r8md2+xvUPtTdvTNRfjA=="
-		data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}'
-		crossorigin="anonymous"></script>
-	<script>(function () { function c() { var b = a.contentDocument || (a.contentWindow && a.contentWindow.document); if (b) { var d = b.createElement('script'); d.innerHTML = "window.__CF$cv$params={r:'a47d55301d69d3d5',t:'MTc5MTU0ODM1Nw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);"; b.getElementsByTagName('head')[0].appendChild(d) } } if (document.body) { var a = document.createElement('iframe'); a.height = 1; a.width = 1; a.style.position = 'absolute'; a.style.top = 0; a.style.left = 0; a.style.border = 'none'; a.style.visibility = 'hidden'; document.body.appendChild(a); if ('loading' !== document.readyState) c(); else if (window.addEventListener) document.addEventListener('DOMContentLoaded', c); else { var e = document.onreadystatechange || function () { }; document.onreadystatechange = function (b) { e(b); 'loading' !== document.readyState && (document.onreadystatechange = e, c()) } } } })();</script>
+<!-- Left settings / scene panel. JavaScript fills this panel at startup. -->
+<div id="side"></div>
+<!-- Main application area: toolbar, canvas, and status hint. -->
+<div id="main">
+  <div id="bar">
+    <div class="brand"><div class="brandMark">◈</div><div class="brandText">CITY GRID STUDIO<small>perspective helper / v2</small></div></div>
+    <div class="barGroup"><button id="tg" title="設定パネルを開閉">設定</button><button id="mV" class="on">視点</button><button id="mD">描画</button></div>
+    <div class="barGroup"><button id="tE" class="toolBtn">消す</button><button id="tS" class="toolBtn">図形</button><button id="tM" class="toolBtn">編集</button><button id="tB" class="toolBtn">範囲</button><button id="assetToggle" class="toolBtn">＋アセット</button></div><div class="barGroup" id="standardViews"><button id="viewFront" title="7：正面">7 正面</button><button id="viewSide" title="8：真横">8 真横</button><button id="viewTop" title="9：真上">9 真上</button><button id="viewHome" title="0：元の視点">0 元の視点</button></div>
+    <span class="barGrow"></span>
+    <div class="barGroup"><button id="undo" class="iconBtn" title="元に戻す (⌘/Ctrl+Z)">↶</button><button id="redo" class="iconBtn" title="やり直す (⌘/Ctrl+Y)">↷</button><button id="zr" title="ズームを100%に戻す">100%</button><button id="clr" class="warnBtn">消去</button></div>
+    <div class="barGroup"><button id="exportToggle">書き出し⌄</button><div id="exportMenu" class="exportMenu">
+      <button id="pngB">描画＋補助線 PNG（透過）</button><button id="pngL">描画のみ PNG（透過）</button><button id="pngG">補助線のみ PNG（透過）</button><button id="pngBH">描画＋補助線 PNG（背面処理・裏面非表示）</button><button id="pngLH">描画のみ PNG（背面処理・裏面非表示）</button><button id="pngGH">補助線のみ PNG（背面処理）</button><button id="cpyL">線画をクリップボードにコピー</button>
+    </div><button id="svP" class="saveBtn">保存</button><button id="opP">開く</button><input type="file" id="opF" accept=".json,application/json" hidden><button id="helpToggle" class="iconBtn" title="操作ヘルプ">?</button></div>
+  </div>
+  <!-- Drawing stage. The canvas is the only drawing surface. -->
+  <div id="stage"><canvas id="cv"></canvas></div>
+  <div id="hint" class="note" style="padding:4px 10px"></div>
+</div>
+<!-- Split build application logic: all interaction and rendering live in script.js. -->
+<script src="script.js"></script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920" integrity="sha512-L0ha0OXavK/8okipN9F8BtP84dg9DUhPERbBXzwI6dgTA55d2+yweo3pn5CSFYs45/r8md2+xvUPtTdvTNRfjA==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
 </body>
-
 </html>
