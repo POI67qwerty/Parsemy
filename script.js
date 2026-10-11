@@ -11,7 +11,8 @@
 
 /* ===========================================================================
    SECTION 1 — perspective ruler, camera, 3D drawing, editing, saving/export
-   =========================================================================== */
+   ===========================================================================
+   */
 const $=id=>document.getElementById(id);
 const cv=$('cv'),ctx=cv.getContext('2d');
 let W=1600,H=900;                       // キャンバスの内部サイズ（比率変更でHが変わる）
@@ -1065,6 +1066,7 @@ try{const t=localStorage.getItem(AK);if(t)unpack(JSON.parse(t))}catch(e){}   // 
 /* ===========================================================================
    SECTION 2 — City Grid Studio quick controls, assets, outliner, and presets
    ===========================================================================
+   */
 /* City Grid Studio v2 — usability layer and low-poly city asset library.
    The original perspective engine stays underneath so old projects remain compatible. */
 (function(){
@@ -1083,26 +1085,63 @@ try{const t=localStorage.getItem(AK);if(t)unpack(JSON.parse(t))}catch(e){}   // 
   quick.id='studioQuick';
   quick.innerHTML=`
     <h2>City Grid Studio</h2>
-    <div class="quickSub">サイバーパンクの街を組み立てるためのクイック操作</div>
-    <div class="quickRow">
-      <button class="primary" data-preset="alley">夜の路地</button>
-      <button data-preset="top">上から見下ろす</button>
-      <button data-preset="three">3点・見上げ</button>
-      <button data-preset="flat">1点・正面</button>
-    </div>
-    <div class="quickField"><span>人物の基準身長</span><input id="humanHeight" type="number" min="0.5" max="10" step="0.01" value="1.70"><em>m</em></div>
-    <div class="quickRow"><button id="applyHuman" class="primary">人物アセットに反映</button><button id="eyeHeight">目線を合わせる</button></div>
-    <div class="quickField"><span>階段の段数</span><input id="stairsSteps" type="number" min="2" max="24" step="1" value="6"><em>段</em></div>
-    <label class="quickCheck"><input id="stairsRail" type="checkbox" checked> 階段に手すりをつける</label>
-    <div class="quickRow"><button id="applyStairs" class="primary">選択中の階段に反映</button></div>
-    <div class="quickField"><span>アセット配置距離</span><input id="assetDepth" type="number" min="1" max="20" step="0.5" value="5"><em>m</em></div>
-    <div class="quickField"><span>生成方向</span><select id="assetAxis"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select><em></em></div>
-    <div class="quickRow" style="margin-top:7px"><button id="sampleRef">サンプル参照を表示</button><button id="clearRef">参照を外す</button></div>
-    <div class="floorTintBox"><label class="quickCheck"><input id="floorTint" type="checkbox"> 床に透明色をつける</label>
-      <div class="quickField"><span>床の色</span><input id="floorTintColor" type="color" value="#7fa8d8"><em></em></div>
-      <div class="quickField"><span>透明度</span><input id="floorTintA" type="range" min="0" max="0.60" step="0.01" value="0.16"><output id="floorTintAO">0.16</output></div>
-    </div>
-    <div class="quickHint">1：設定　2：視点　3：描画　4：編集　5：アセット　7：正面(正投影)　8：真横(正投影)　9：真上(正投影)　0：元の視点　・　Shift/右ドラッグ：水平移動<br>Apple Pencil：ペンで描画、指で視点。4本指タップ：プリミティブメニュー／3本指スワイプ：オブジェクト選択。書き出しには背面線除去版もあります。</div>
+    <div class="quickSub">身長・ポーズ・パースを切り替えて、人物と街を組み立てます</div>
+    <nav class="workspaceTabs" aria-label="作業画面">
+      <button type="button" class="workspaceTab" data-workspace-tab="character">身長・体型</button>
+      <button type="button" class="workspaceTab" data-workspace-tab="pose">ポーズ</button>
+      <button type="button" class="workspaceTab active" data-workspace-tab="perspective">パース（編集）</button>
+    </nav>
+
+    <section class="workspaceScreen" data-workspace-screen="character" hidden>
+      <div class="screenLead">人物アセットを選択してから、身長と体型を調整します。<small id="personSelectionStatus">人物を選択すると個別編集できます</small></div>
+      <div class="quickField"><span>基準身長</span><input id="humanHeight" type="number" min="0.5" max="10" step="0.01" value="1.70"><em>m</em></div>
+      <div class="quickRow"><button id="applyHuman" class="primary">全人物に反映</button><button id="eyeHeight">目線を合わせる</button></div>
+      <div class="quickField"><span>選択人物の身長</span><input id="personHeight" type="number" min="0.5" max="10" step="0.01" value="1.70"><em>m</em></div>
+      <div class="quickField"><span>体格の大きさ</span><input id="personBodyScale" type="number" min="0.6" max="1.8" step="0.05" value="1"><em>倍</em></div>
+      <div class="quickField"><span>肩幅</span><input id="personShoulderScale" type="number" min="0.6" max="1.6" step="0.05" value="1"><em>倍</em></div>
+      <div class="quickField"><span>頭の大きさ</span><input id="personHeadScale" type="number" min="0.7" max="1.5" step="0.05" value="1"><em>倍</em></div>
+      <div class="quickField"><span>脚の開き</span><input id="personLegSpread" type="number" min="0.6" max="1.8" step="0.05" value="1"><em>倍</em></div>
+      <div class="quickRow"><button id="applyPersonEdit" class="primary">選択人物に反映</button></div>
+      <div class="sceneNote">人物を出したあとでも変更できます。編集モードで人物を選ぶか、シーン一覧から選択してください。</div>
+    </section>
+
+    <section class="workspaceScreen" data-workspace-screen="pose" hidden>
+      <div class="screenLead">選択中の人物にポーズを適用します。腕は既存仕様どおり表示しません。<small id="poseSelectionStatus">人物を選択するとポーズを変更できます</small></div>
+      <div class="quickRow">
+        <button type="button" class="poseButton" data-person-pose="stand">直立</button>
+        <button type="button" class="poseButton" data-person-pose="walk">歩行</button>
+        <button type="button" class="poseButton" data-person-pose="crouch">しゃがみ</button>
+        <button type="button" class="poseButton" data-person-pose="sit">着席</button>
+      </div>
+      <div class="quickField"><span>歩幅</span><input id="personPoseStride" type="number" min="0" max="0.5" step="0.01" value="0"><em>m</em></div>
+      <div class="quickField"><span>しゃがみ量</span><input id="personPoseCrouch" type="number" min="0" max="1" step="0.05" value="0"><em>倍</em></div>
+      <div class="quickField"><span>体の傾き</span><input id="personPoseLean" type="number" min="-0.35" max="0.35" step="0.01" value="0"><em>m</em></div>
+      <div class="quickField"><span>頭の傾き</span><input id="personHeadTilt" type="number" min="-25" max="25" step="1" value="0"><em>°</em></div>
+      <div class="quickRow"><button id="applyPersonPoseDetail" class="primary">ポーズを微調整</button></div>
+      <div class="sceneNote">プリセット後に歩幅・しゃがみ量・体の傾き・頭の傾きを調整できます。身長・体型は保持されます。</div>
+    </section>
+
+    <section class="workspaceScreen" data-workspace-screen="perspective">
+      <div class="screenLead">現在のパース編集画面です。視点・定規・街並みアセットを操作します。</div>
+      <div class="quickRow">
+        <button class="primary" data-preset="alley">夜の路地</button>
+        <button data-preset="top">上から見下ろす</button>
+        <button data-preset="three">3点・見上げ</button>
+        <button data-preset="flat">1点・正面</button>
+      </div>
+      <div class="quickField"><span>階段の段数</span><input id="stairsSteps" type="number" min="2" max="24" step="1" value="6"><em>段</em></div>
+      <label class="quickCheck"><input id="stairsRail" type="checkbox" checked> 階段に手すりをつける</label>
+      <div class="quickRow"><button id="applyStairs" class="primary">選択中の階段に反映</button></div>
+      <div class="quickField"><span>アセット配置距離</span><input id="assetDepth" type="number" min="1" max="20" step="0.5" value="5"><em>m</em></div>
+      <div class="quickField"><span>生成方向</span><select id="assetAxis"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select><em></em></div>
+      <div class="quickRow" style="margin-top:7px"><button id="sampleRef">サンプル参照を表示</button><button id="clearRef">参照を外す</button></div>
+      <div class="floorTintBox"><label class="quickCheck"><input id="floorTint" type="checkbox"> 床に透明色をつける</label>
+        <div class="quickField"><span>床の色</span><input id="floorTintColor" type="color" value="#7fa8d8"><em></em></div>
+        <div class="quickField"><span>透明度</span><input id="floorTintA" type="range" min="0" max="0.60" step="0.01" value="0.16"><output id="floorTintAO">0.16</output></div>
+      </div>
+    </section>
+
+    <div class="quickHint">1：設定　2：視点　3：描画　4：編集　5：アセット　7：正面(正投影)　8：真横(正投影)　9：真上(正投影)　0：元の視点　・　Shift/右ドラッグ：水平移動<br>Apple Pencil：ペンで描画、指で視点。4本指タップ：プリミティブメニュー／3本指スワイプ：オブジェクト選択。書き出しには背面処理版もあります。</div>
     <div class="sceneTitle">シーン内オブジェクト</div>
     <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button></div>
     <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Y軸（高さ）</option><option value=2>Z軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
@@ -1111,6 +1150,54 @@ try{const t=localStorage.getItem(AK);if(t)unpack(JSON.parse(t))}catch(e){}   // 
   side.insertBefore(quick,side.firstChild);
   const humanInput=el('humanHeight');
   humanInput.value=Number(P.hm).toFixed(2);
+
+  // ===== Separate work screens: character height/body, pose, and perspective =====
+  function setStudioWorkspace(name){
+    const valid=['character','pose','perspective'],tab=valid.includes(name)?name:'perspective';
+    quick.querySelectorAll('[data-workspace-tab]').forEach(b=>b.classList.toggle('active',b.dataset.workspaceTab===tab));
+    quick.querySelectorAll('[data-workspace-screen]').forEach(screen=>{screen.hidden=screen.dataset.workspaceScreen!==tab});
+  }
+  quick.querySelectorAll('[data-workspace-tab]').forEach(b=>b.onclick=()=>setStudioWorkspace(b.dataset.workspaceTab));
+  window.cityStudioWorkspace=setStudioWorkspace;
+  const personHeightInput=el('personHeight'),personBodyInput=el('personBodyScale'),personShoulderInput=el('personShoulderScale'),personHeadInput=el('personHeadScale'),personLegInput=el('personLegSpread'),personStatus=el('personSelectionStatus'),poseStatus=el('poseSelectionStatus');
+  const personPoseStrideInput=el('personPoseStride'),personPoseCrouchInput=el('personPoseCrouch'),personPoseLeanInput=el('personPoseLean'),personHeadTiltInput=el('personHeadTilt');
+  const poseButtons=[...quick.querySelectorAll('[data-person-pose]')];
+  const poseDefaults={stand:{stride:0,crouch:0,lean:0,headTilt:0},walk:{stride:.22,crouch:0,lean:0,headTilt:0},crouch:{stride:.04,crouch:.65,lean:0,headTilt:0},sit:{stride:.10,crouch:.35,lean:0,headTilt:0}};
+  const selectedPerson=()=>{const o=sel&&obOf(sel);return o&&o.type==='asset'&&o.asset==='person'?o:null};
+  function personPoseDefaults(o){return poseDefaults[o?.pose]||{stride:Number(o?.poseStride)||0,crouch:Number(o?.poseCrouch)||0,lean:Number(o?.poseLean)||0,headTilt:Number(o?.headTilt)||0}}
+  function syncPersonControls(){
+    const o=selectedPerson(),h=o?Number(o.h)||Number(P.hm)||1.7:Number(P.hm)||1.7,pd=personPoseDefaults(o);
+    if(personHeightInput&&document.activeElement!==personHeightInput)personHeightInput.value=h.toFixed(2);
+    if(personBodyInput&&document.activeElement!==personBodyInput)personBodyInput.value=Number(o?.bodyScale??1).toFixed(2);
+    if(personShoulderInput&&document.activeElement!==personShoulderInput)personShoulderInput.value=Number(o?.shoulderScale??1).toFixed(2);
+    if(personHeadInput&&document.activeElement!==personHeadInput)personHeadInput.value=Number(o?.headScale??1).toFixed(2);
+    if(personLegInput&&document.activeElement!==personLegInput)personLegInput.value=Number(o?.legSpread??1).toFixed(2);
+    if(personPoseStrideInput&&document.activeElement!==personPoseStrideInput)personPoseStrideInput.value=Number(o?.poseStride??pd.stride).toFixed(2);
+    if(personPoseCrouchInput&&document.activeElement!==personPoseCrouchInput)personPoseCrouchInput.value=Number(o?.poseCrouch??pd.crouch).toFixed(2);
+    if(personPoseLeanInput&&document.activeElement!==personPoseLeanInput)personPoseLeanInput.value=Number(o?.poseLean??pd.lean).toFixed(2);
+    if(personHeadTiltInput&&document.activeElement!==personHeadTiltInput)personHeadTiltInput.value=Number(o?.headTilt??pd.headTilt).toFixed(0);
+    if(personStatus)personStatus.textContent=o?`選択中：人物アセット（身長 ${h.toFixed(2)} m）`:'人物アセットを選択すると個別編集できます';
+    if(poseStatus)poseStatus.textContent=o?`選択中のポーズ：${({stand:'直立',walk:'歩行',crouch:'しゃがみ',sit:'着席',custom:'カスタム'}[o.pose||'stand']||'カスタム')}`:'人物アセットを選択するとポーズを変更できます';
+    poseButtons.forEach(b=>b.classList.toggle('active',!!o&&(o.pose||'stand')===b.dataset.personPose));
+  }
+  function applySelectedPerson(){
+    const o=selectedPerson();if(!o){alert('先に人物アセットを選択してください');return}
+    const h=clamp(parseFloat(personHeightInput.value)||o.h||1.7,.5,10),body=clamp(parseFloat(personBodyInput.value)||1,.6,1.8),shoulder=clamp(parseFloat(personShoulderInput.value)||1,.6,1.6),head=clamp(parseFloat(personHeadInput.value)||1,.7,1.5),legs=clamp(parseFloat(personLegInput.value)||1,.6,1.8);
+    HU.push(S);RD=[];P.hm=h;humanInput.value=h.toFixed(2);setOb(o.id,{h,bodyScale:body,shoulderScale:shoulder,headScale:head,legSpread:legs,ra:h*.135*body*shoulder,rb:h*.088*body});render();
+  }
+  function applyPersonPose(pose){
+    const o=selectedPerson();if(!o){alert('先に人物アセットを選択してください');return}
+    const d=poseDefaults[pose]||poseDefaults.stand;HU.push(S);RD=[];setOb(o.id,{pose,poseStride:d.stride,poseCrouch:d.crouch,poseLean:d.lean,headTilt:d.headTilt});setStudioWorkspace('pose');render();
+  }
+  function applyPersonPoseDetail(){
+    const o=selectedPerson();if(!o){alert('先に人物アセットを選択してください');return}
+    const stride=clamp(parseFloat(personPoseStrideInput.value)||0,0,.5),crouch=clamp(parseFloat(personPoseCrouchInput.value)||0,0,1),lean=clamp(parseFloat(personPoseLeanInput.value)||0,-.35,.35),headTilt=clamp(parseFloat(personHeadTiltInput.value)||0,-25,25);
+    HU.push(S);RD=[];setOb(o.id,{pose:'custom',poseStride:stride,poseCrouch:crouch,poseLean:lean,headTilt});setStudioWorkspace('pose');render();
+  }
+  el('applyPersonEdit').onclick=applySelectedPerson;
+  el('applyPersonPoseDetail').onclick=applyPersonPoseDetail;
+  poseButtons.forEach(b=>b.onclick=()=>applyPersonPose(b.dataset.personPose));
+  syncPersonControls();
 
   // ===== Transparent floor tint =====
   const floorToggle=el('floorTint'),floorColor=el('floorTintColor'),floorAlpha=el('floorTintA'),floorAlphaOut=el('floorTintAO');
@@ -1274,22 +1361,37 @@ try{const t=localStorage.getItem(AK);if(t)unpack(JSON.parse(t))}catch(e){}   // 
       const q=[[-ix,fy,iz0],[ix,fy,iz0],[ix,fy,iz1],[-ix,fy,iz1]];
       out.push(polyA(o,q,a,1.1));
     }else if(kind==='person'){
-      const bw=.28*h,bd=.16*h,leg=.055*h,headR=.095*h;
-      // Feet / legs
-      out.push(...boxA(o,leg*1.5,bd*.85,0,.48*h,c));
-      const lx=-.09*h,rx=.09*h;
-      out.push(lineA(o,[[lx,-bd*.25,0],[lx,-bd*.25,.47*h]],c,1.4));
-      out.push(lineA(o,[[rx,-bd*.25,0],[rx,-bd*.25,.47*h]],c,1.4));
-      // Torso and shoulders
-      out.push(...boxA(o,bw,bd,.44*h,.78*h,c));
-      out.push(lineA(o,[[-bw*.48,0,.76*h],[bw*.48,0,.76*h]],a,1));
+      // 人物は配置後も高さ・体格・頭身・脚の開き・簡易ポーズを編集できる。
+      // 腕は既存仕様どおり描かず、立体感は胴体・脚・頭の線だけで表現する。
+      const bodyScale=clamp(Number(o.bodyScale)||1,.6,1.8),shoulderScale=clamp(Number(o.shoulderScale)||1,.6,1.6),headScale=clamp(Number(o.headScale)||1,.7,1.5),legSpread=clamp(Number(o.legSpread)||1,.6,1.8),pose=o.pose||'stand';
+      const defaults={stand:[0,0,0],walk:[.22,0,0],crouch:[.04,.65,0],sit:[.10,.35,0]},def=defaults[pose]||defaults.stand;
+      const stride=clamp(Number.isFinite(Number(o.poseStride))?Number(o.poseStride):def[0],0,.5),crouch=clamp(Number.isFinite(Number(o.poseCrouch))?Number(o.poseCrouch):def[1],0,1),lean=clamp(Number.isFinite(Number(o.poseLean))?Number(o.poseLean):def[2],-.35,.35),headTilt=clamp(Number(o.headTilt)||0,-25,25);
+      const bw=.28*h*bodyScale*shoulderScale,bd=.16*h*bodyScale,leg=.055*h*bodyScale,headR=.095*h*headScale;
+      let legTop=(.47-.16*crouch)*h,torso0=(.44-.16*crouch)*h,torso1=(.78-.18*crouch)*h,head0=(.84-.18*crouch)*h,head1=(.99-.18*crouch)*h,footY=[-stride,stride],kneeY=[-.02*h,.02*h],kneeX=[-.09*h*legSpread,.09*h*legSpread],poseTop=(1-.18*crouch)*h;
+      const bodyY=lean*.18,headY=lean*.42,headTopX=Math.sin(headTilt*DG)*.06*h;
+      if(pose==='walk'){kneeY=[-.05*h,.06*h];kneeX=[-.07*h*legSpread,.08*h*legSpread]}
+      if(pose==='crouch'){kneeY=[-.06*h,.06*h];kneeX=[-.10*h*legSpread,.10*h*legSpread]}
+      if(pose==='sit'){kneeY=[.20*h,.26*h];kneeX=[-.11*h*legSpread,.11*h*legSpread]}
+      // 足元の小さな台座と脚。歩幅・しゃがみ量・脚の開きを連続的に反映する。
+      out.push(...boxA(o,leg*1.5,bd*.85,0,.08*h,c));
+      if(pose==='sit'){
+        out.push(lineA(o,[[-.09*h*legSpread,bodyY,.32*h], [kneeX[0],kneeY[0],.30*h],[kneeX[0],footY[0],0]],c,1.4));
+        out.push(lineA(o,[[.09*h*legSpread,bodyY,.32*h], [kneeX[1],kneeY[1],.30*h],[kneeX[1],footY[1],0]],c,1.4));
+      }else{
+        out.push(lineA(o,[[kneeX[0],footY[0],0],[kneeX[0],kneeY[0],legTop]],c,1.4));
+        out.push(lineA(o,[[kneeX[1],footY[1],0],[kneeX[1],kneeY[1],legTop]],c,1.4));
+      }
+      // Torso and shoulders. leanは肩・首・頭の位置へ反映する。
+      out.push(...boxA(o,bw,bd,torso0,torso1,c));
+      out.push(lineA(o,[[-bw*.48,bodyY,torso1-.02*h],[bw*.48,bodyY,torso1-.02*h]],a,1));
       // 腕は省略。小さな人物シルエットとして使えるよう胴体と脚だけ残す。
-      // Neck and faceted head.
-      out.push(lineA(o,[[0,0,.78*h],[0,0,.84*h]],c,1.1));
-      out.push(ringA(o,headR,headR*.9,.84*h,8,c));out.push(ringA(o,headR*.86,headR*.78,.99*h,8,c));
-      for(let i=0;i<8;i++){const t=i/8*Math.PI*2;out.push(lineA(o,[[headR*Math.cos(t),headR*.9*Math.sin(t),.84*h],[headR*.86*Math.cos(t),headR*.78*Math.sin(t),.99*h]],c,.85))}
-      // A small measurement tick makes the height reference visible.
-      const mx=.42*h;out.push(lineA(o,[[mx,0,0],[mx,0,h]],a,.75));out.push(lineA(o,[[mx-.045*h,0,0],[mx+.045*h,0,0]],a,.75));out.push(lineA(o,[[mx-.045*h,0,h],[mx+.045*h,0,h]],a,.75));
+      // Head rings are shifted/tilted without adding arms.
+      const ringAt=(rx,ry,x0,y0,z,n,color)=>{const pts=[];for(let i=0;i<n;i++){const t=i/n*Math.PI*2;pts.push([x0+rx*Math.cos(t),y0+ry*Math.sin(t),z])}return polyA(o,pts,color)};
+      out.push(lineA(o,[[0,bodyY,torso1],[headTopX,headY,head0]],c,1.1));
+      out.push(ringAt(headR,headR*.9,0,headY,head0,8,c));out.push(ringAt(headR*.86,headR*.78,headTopX,headY+.02*h,head1,8,c));
+      for(let i=0;i<8;i++){const t=i/8*Math.PI*2;out.push(lineA(o,[[headR*Math.cos(t),headY+headR*.9*Math.sin(t),head0],[headTopX+headR*.86*Math.cos(t),headY+.02*h+headR*.78*Math.sin(t),head1]],c,.85))}
+      // A small measurement tick makes the current pose height reference visible.
+      const mx=.42*h;out.push(lineA(o,[[mx,0,0],[mx,0,poseTop]],a,.75));out.push(lineA(o,[[mx-.045*h,0,0],[mx+.045*h,0,0]],a,.75));out.push(lineA(o,[[mx-.045*h,0,poseTop],[mx+.045*h,0,poseTop]],a,.75));
     }else if(kind==='building'){
       out.push(...boxA(o,w,d,0,h,c));
       // Receding roof line and facade windows.
@@ -1348,11 +1450,11 @@ try{const t=localStorage.getItem(AK);if(t)unpack(JSON.parse(t))}catch(e){}   // 
     const base={id:uid(),k,d,off,ca:q[iu],cb:q[iv],rot:0,lift:0,wf:true,c:el('pc').value||'#222222',w:MASTER_W,accent:info.accent};
     const height=kind==='person'?Number(P.hm)||1.7:info.h;
     if(kind==='rect'||kind==='circle')return{...base,type:kind==='circle'?'circ':'rect',asset:kind,ra:info.w/2,rb:info.d/2,h:0,extrude:false};
-    return{...base,type:'asset',asset:kind,ra:info.w/2,rb:info.d/2,h:height,faceW:kind==='sign'?info.w*.70:undefined,faceH:kind==='sign'?info.h*.34:undefined,bevel:kind==='sign' ? 0 : undefined,steps:kind==='stairs'?Math.round(Number(el('stairsSteps')?.value)||6):undefined,handrail:kind==='stairs'?!!el('stairsRail')?.checked:undefined,stripes:kind==='crosswalk'?7:undefined};
+    return{...base,type:'asset',asset:kind,ra:info.w/2,rb:info.d/2,h:height,pose:kind==='person'?'stand':undefined,bodyScale:kind==='person'?1:undefined,shoulderScale:kind==='person'?1:undefined,headScale:kind==='person'?1:undefined,legSpread:kind==='person'?1:undefined,faceW:kind==='sign'?info.w*.70:undefined,faceH:kind==='sign'?info.h*.34:undefined,bevel:kind==='sign' ? 0 : undefined,steps:kind==='stairs'?Math.round(Number(el('stairsSteps')?.value)||6):undefined,handrail:kind==='stairs'?!!el('stairsRail')?.checked:undefined,stripes:kind==='crosswalk'?7:undefined};
   }
   function placeAsset(kind,p){
     sanitizeScene();const before=S.slice();
-    try{const o=newAsset(kind,p),lines=genShape(o);if(!lines.length||lines.some(s=>!validStroke(s)))throw new Error('asset geometry is empty or malformed');HU.push(S);RD=[];S=[...S,...lines];setSelection(o.id,false);tool='edit';setMode('draw');syncSel();render()}
+    try{const o=newAsset(kind,p),lines=genShape(o);if(!lines.length||lines.some(s=>!validStroke(s)))throw new Error('asset geometry is empty or malformed');HU.push(S);RD=[];S=[...S,...lines];setSelection(o.id,false);tool='edit';setMode('draw');if(kind==='person')setStudioWorkspace('character');syncSel();render()}
     catch(err){S=before;prev=null;clearSelection();console.error('City Grid asset error',err);try{render()}catch(e){}alert('アセットを配置できませんでした。壊れた線は取り除きました。もう一度クリックしてください。')}
   }
 
@@ -1402,7 +1504,8 @@ try{const t=localStorage.getItem(AK);if(t)unpack(JSON.parse(t))}catch(e){}   // 
     render();
   }
   list.addEventListener('click',e=>{
-    const b=e.target.closest('[data-object]');if(!b)return;const id=b.dataset.object;
+    const b=e.target.closest('[data-object]');if(!b)return;const id=b.dataset.object,chosen=obOf(id);
+    if(chosen&&chosen.type==='asset'&&chosen.asset==='person')setStudioWorkspace('character');
     if(e.target.matches('[data-object-check]')){
       if(e.target.checked){selIds.add(id);sel=id}else{selIds.delete(id);if(sel===id)sel=[...selIds].pop()||null}
       normalizeSelection();tool='edit';setMode('draw');syncSel();render();return;
@@ -1546,7 +1649,7 @@ try{const t=localStorage.getItem(AK);if(t)unpack(JSON.parse(t))}catch(e){}   // 
   }
   // Wrap render so the outliner follows undo/redo, opening files, and camera changes.
   const originalRender=render;
-  render=function(){sanitizeScene();originalRender();updateOutliner();syncAssetControls();syncSignPanel();syncFloorControls();syncAssetDepth();syncAssetAxis()};
+  render=function(){sanitizeScene();originalRender();updateOutliner();syncAssetControls();syncSignPanel();syncFloorControls();syncAssetDepth();syncAssetAxis();syncPersonControls()};
 
   // ===== Blender風の標準ビュー（7=正面 / 8=真横 / 9=真上 / 0=元の視点） =====
   // 標準ビューだけは透視ではなく正投影にし、真横90°・真上90°を正確に扱う。
@@ -1594,7 +1697,7 @@ try{const t=localStorage.getItem(AK);if(t)unpack(JSON.parse(t))}catch(e){}   // 
   el('applyHuman').onclick=()=>{
     const h=Math.max(.5,Math.min(10,parseFloat(humanInput.value)||1.7));P.hm=h;humanInput.value=h.toFixed(2);
     const people=sceneObjects().filter(o=>o.type==='asset'&&o.asset==='person');
-    if(people.length){HU.push(S);RD=[];people.forEach(o=>setOb(o.id,{h,ra:h*.135,rb:h*.088}));}
+    if(people.length){HU.push(S);RD=[];people.forEach(o=>{const body=Number(o.bodyScale)||1,shoulder=Number(o.shoulderScale)||1;setOb(o.id,{h,ra:h*.135*body*shoulder,rb:h*.088*body})});}
     render();
   };
   humanInput.onchange=()=>{P.hm=Math.max(.5,Math.min(10,parseFloat(humanInput.value)||1.7));humanInput.value=P.hm.toFixed(2)};
