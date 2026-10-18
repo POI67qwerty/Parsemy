@@ -780,6 +780,31 @@
 			font-size: 10px
 		}
 
+		.floorHistoryButtons {
+			display: flex;
+			gap: 4px;
+			flex: none
+		}
+
+		.floorHistoryButton {
+			min-width: 36px !important;
+			padding: 5px 7px !important
+		}
+
+		.floorPlanPanTools {
+			display: flex;
+			align-items: center;
+			gap: 4px;
+			flex: 0 0 auto;
+			color: #9eb1b1;
+			font-size: 10px
+		}
+
+		.floorPlanPanTools button {
+			min-width: 34px !important;
+			padding: 5px 6px !important
+		}
+
 		#floorPlanDock button {
 			min-width: 62px;
 			padding: 6px 8px !important;
@@ -822,6 +847,7 @@
 
 		#floorPlanDock.collapsed .floorPlanDockStatus,
 		#floorPlanDock.collapsed .dockHint,
+		#floorPlanDock.collapsed .floorPlanPanTools,
 		#floorPlanDock.collapsed [data-floor-dock-action]:not([data-floor-dock-action="collapse"]) {
 			display: none
 		}
@@ -3268,8 +3294,8 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			// 間取り上の操作対象。オブジェクトの前側の丸、カメラ本体、カメラ先端の丸を
 			// 3Dビューのギズモとは別に描き、参考サイトと同じ操作感にする。
 			const FLOOR_CAMERA_RAY = 3;
-			let floorPlanDrag = null;
-			const floorPlanDock = document.createElement('div'); floorPlanDock.id = 'floorPlanDock'; floorPlanDock.innerHTML = '<div class="floorPlanDockInner"><div class="floorPlanDockHeader"><div id="floorPlanDockStatus" class="floorPlanDockStatus">オブジェクトを選択すると、移動・回転・サイズ変更ができます。<small>カメラ本体：位置　／　先端の丸：向き</small></div><button type="button" class="dockCollapse" data-floor-dock-action="collapse" title="操作バーを折りたたむ">−</button></div><button type="button" data-floor-dock-action="left">↺ 15°</button><button type="button" data-floor-dock-action="right">↻ 15°</button><button type="button" data-floor-dock-action="90">90°回す</button><button type="button" data-floor-dock-action="assets">＋アセット</button><button type="button" data-floor-dock-action="delete">片付ける</button><span class="dockHint">前側の丸をドラッグ：回転　・　幅／奥行／高さハンドルをドラッグ：サイズ・押し出し　・　矢印キー：移動　・　磁石ONでX/Zスナップ</span></div>'; stage.appendChild(floorPlanDock);
+			let floorPlanDrag = null, floorPlanPanMode = false;
+			const floorPlanDock = document.createElement('div'); floorPlanDock.id = 'floorPlanDock'; floorPlanDock.innerHTML = '<div class="floorPlanDockInner"><div class="floorPlanDockHeader"><div id="floorPlanDockStatus" class="floorPlanDockStatus">オブジェクトを選択すると、移動・回転・サイズ変更ができます。<small>カメラ本体：位置　／　先端の丸：向き</small></div><div class="floorHistoryButtons"><button type="button" id="floorUndo" class="floorHistoryButton" title="間取りの操作を元に戻す">↶ 元に戻す</button><button type="button" id="floorRedo" class="floorHistoryButton" title="間取りの操作をやり直す">↷ やり直す</button></div><button type="button" class="dockCollapse" data-floor-dock-action="collapse" title="操作バーを折りたたむ">−</button></div><button type="button" data-floor-dock-action="left">↺ 15°</button><button type="button" data-floor-dock-action="right">↻ 15°</button><button type="button" data-floor-dock-action="90">90°回す</button><div class="floorPlanPanTools"><span>表示移動</span><button type="button" data-floor-dock-action="pan-up" title="表示を上へ">↑</button><button type="button" data-floor-dock-action="pan-down" title="表示を下へ">↓</button><button type="button" data-floor-dock-action="pan-left" title="表示を左へ">←</button><button type="button" data-floor-dock-action="pan-right" title="表示を右へ">→</button></div><button type="button" data-floor-dock-action="assets">＋アセット</button><button type="button" data-floor-dock-action="delete">片付ける</button><span class="dockHint">中／右ドラッグ：表示移動　・　表示移動ボタン／Alt＋矢印／WASD：キャンバス移動　・　家具の矢印キー移動はそのまま</span></div>'; stage.appendChild(floorPlanDock);
 			// アセット棚を開いたときは、間取り操作バーを棚の上へ逃がす。棚と操作バーを重ねないためのレイアウト調整。
 			function syncFloorPlanDockLayout() {
 				const tray = el('assetTray'); if (!tray) return;
@@ -3373,15 +3399,21 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				const o = floorPlanObject(), ground = !!(o && o.k === 1), label = o ? (o.type === 'asset' ? (assetLabel(o) || 'アセット') : '図形') : 'オブジェクト';
 				const text = o ? (ground ? `${label} を選択中（向き ${Math.round(angle360(o.rot))}°）` : `${label} を選択中（壁面オブジェクトは間取りでは表示のみ）`) : 'オブジェクトを選択すると、移動・回転できます。';
 				const status = el('floorPlanSelectionStatus'); if (status) status.textContent = text;
-				const dockStatus = el('floorPlanDockStatus'); if (dockStatus) dockStatus.innerHTML = `${text}<small>画面上の幅・奥行・高さハンドルでサイズ／押し出しを編集できます</small>`;
+				const dockStatus = el('floorPlanDockStatus'); if (dockStatus) dockStatus.innerHTML = `${text}<small>幅・奥行ハンドルは反対側の面を固定してサイズ変更　／　高さハンドルで高さ・押し出しを編集</small>`;
 				[['floorRotateLeft', ground], ['floorRotateRight', ground], ['floorRotate90', ground], ['floorDelete', !!o]].forEach(([id, on]) => { const b = el(id); if (b) b.disabled = !on });
 				floorPlanDock.querySelectorAll('[data-floor-dock-action]').forEach(b => { const a = b.dataset.floorDockAction; b.disabled = a === 'delete' ? !o : ['left', 'right', '90'].includes(a) ? !ground : false });
+				const undoButton = el('floorUndo'), redoButton = el('floorRedo'); if (undoButton) undoButton.disabled = !HU.length; if (redoButton) redoButton.disabled = !RD.length;
 			}
 			function floorDimensionPatch(o, name, value) {
 				const v = Math.max(name === 'h' ? 0 : .01, Number(value));
 				if (!Number.isFinite(v)) return null;
 				if (name === 'w' || name === 'd') {
-					const r = Math.max(.005, v / 2), patch = {};
+					const oldW = Math.max(.01, Number(o.ra || 0) * 2), oldD = Math.max(.01, Number(o.rb || 0) * 2), r = Math.max(.005, v / 2), patch = {};
+					// 幅／奥行ハンドルは手前側の面を動かす。反対側の面を固定するため、
+					// 中点をそのままにせず、中心(ca/cb)も半分の差分だけ同じ面側へ移動する。
+					const delta = (v - (name === 'w' ? oldW : oldD)) / 2, cs = Math.cos(Number(o.rot || 0) * DG), sn = Math.sin(Number(o.rot || 0) * DG);
+					if (name === 'w') { patch.ca = o.ca + delta * cs; patch.cb = o.cb + delta * sn }
+					else { patch.ca = o.ca - delta * sn; patch.cb = o.cb + delta * cs }
 					if (o.asset === 'sphere' || o.type === 'cyl') { patch.ra = r; patch.rb = r; if (o.asset === 'sphere') patch.h = r * 2 }
 					else patch[name === 'w' ? 'ra' : 'rb'] = r;
 					return patch;
@@ -3406,6 +3438,20 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				/* 間取りは水平面のca/cbだけを変え、Y高さ・lift・offを保持する。 */
 				objects.forEach(g => setOb(g.id, { ca: g.ca + q.d[0], cb: g.cb + q.d[2] })); render();
 			}
+			// カメラではなく、間取りキャンバスの表示中心だけを移動する。
+			// dx/dyは画面上の移動量(px)。オブジェクトやP.cx/P.czは変更しない。
+			function panFloorPlan(dx, dy) {
+				if (!window.cityFloorPlanActive) return;
+				if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
+				const sc = Math.max(1, Number(orthScale()) || 1), c = window.cityFloorPlanCenter || [0, 0];
+				window.cityFloorPlanCenter = [c[0] - dx / sc, c[1] + dy / sc]; render();
+			}
+			el('floorUndo').onclick = () => { floorPlanDrag = null; undo() };
+			el('floorRedo').onclick = () => { floorPlanDrag = null; redo() };
+			floorPlanDock.querySelector('[data-floor-dock-action="pan-up"]').onclick = () => panFloorPlan(0, -80);
+			floorPlanDock.querySelector('[data-floor-dock-action="pan-down"]').onclick = () => panFloorPlan(0, 80);
+			floorPlanDock.querySelector('[data-floor-dock-action="pan-left"]').onclick = () => panFloorPlan(-80, 0);
+			floorPlanDock.querySelector('[data-floor-dock-action="pan-right"]').onclick = () => panFloorPlan(80, 0);
 			el('floorRotateLeft').onclick = () => rotateFloorSelected(15);
 			el('floorRotateRight').onclick = () => rotateFloorSelected(-15);
 			el('floorRotate90').onclick = () => rotateFloorSelected(90);
@@ -3419,13 +3465,19 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			floorPlanDock.classList.add('collapsed'); floorDockCollapse.textContent = '＋ 操作'; floorDockCollapse.title = '操作バーを開く';
 			floorDockCollapse.onclick = () => { const collapsed = floorPlanDock.classList.toggle('collapsed'); floorDockCollapse.textContent = collapsed ? '＋ 操作' : '−'; floorDockCollapse.title = collapsed ? '操作バーを開く' : '操作バーを折りたたむ'; };
 			// カメラ／回転ハンドルだけを先に受け取り、それ以外のドラッグは既存の家具移動へ渡す。
+			function beginFloorPan(e, p, tapClear = false) {
+				if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
+				e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'pan', pointerId: e.pointerId, p0: p, center0: [...(window.cityFloorPlanCenter || [0, 0])], tapClear, moved: false }; try { cv.setPointerCapture(e.pointerId) } catch (err) { };
+			}
+			cv.addEventListener('contextmenu', e => { if (window.cityFloorPlanActive) e.preventDefault() }, true);
 			cv.addEventListener('pointerdown', e => {
 				if (!window.cityFloorPlanActive) return;
-				const p = pos(e), resize = floorPlanEditHandleAt(p);
+				const p = pos(e), panGesture = e.button === 1 || e.button === 2 || e.altKey || floorPlanPanMode;
+				if (panGesture && (orthView === 'top' || orthView === 'side')) { beginFloorPan(e, p); return; }
+				const resize = floorPlanEditHandleAt(p);
 				if (resize && (orthView === 'top' || orthView === 'side')) { e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'resize', pointerId: e.pointerId, id: resize.g.o.id, o0: { ...resize.g.o, off: [...(resize.g.o.off || [0, 0, 0])] }, handle: resize.h, p0: p, started: false }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
 				if (orthView !== 'top') {
-					e.preventDefault(); e.stopImmediatePropagation();
-					const hit = floorPlanItemAtSide(p); if (hit) { setSelection(hit.id, false); syncSel(); render() } else { setSelection(null, false); render() }
+					const hit = floorPlanItemAtSide(p); if (hit) { e.preventDefault(); e.stopImmediatePropagation(); setSelection(hit.id, false); syncSel(); render() } else beginFloorPan(e, p, true);
 					return;
 				}
 				const h = floorPlanHandles(), lim = 22 / Z;
@@ -3443,11 +3495,16 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 					// 選択済みオブジェクトをドラッグした場合は、選択中の地面オブジェクトを同じ量だけ動かす。
 					floorPlanDrag = { kind: 'item', pointerId: e.pointerId, id: hit.id, o0: { ...hit, off: [...(hit.off || [0, 0, 0])] }, group, base0: base, bb: snap.bb, targets: snap.targets, tau: snap.tau, dx: base[0] - w.x, dz: base[2] - w.z, started: false };
 					try { cv.setPointerCapture(e.pointerId) } catch (err) { } syncSel(); render()
-				} else { setSelection(null, false); floorPlanDrag = null; render() }
+				} else beginFloorPan(e, p, true);
 			}, true);
 			cv.addEventListener('pointermove', e => {
 				if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return;
 				e.preventDefault(); e.stopImmediatePropagation();
+				if (floorPlanDrag.kind === 'pan') {
+					const p = pos(e), sc = Math.max(1, Number(orthScale()) || 1), dx = p.x - floorPlanDrag.p0.x, dy = p.y - floorPlanDrag.p0.y;
+					if (Math.hypot(dx, dy) > 2) floorPlanDrag.moved = true;
+					window.cityFloorPlanCenter = [floorPlanDrag.center0[0] - dx / sc, floorPlanDrag.center0[1] + dy / sc]; render(); return;
+				}
 				if (floorPlanDrag.kind === 'resize') {
 					const o = floorPlanDrag.o0, h = floorPlanDrag.handle, p = pos(e), amount = ((p.x - floorPlanDrag.p0.x) * h.dir.x + (p.y - floorPlanDrag.p0.y) * h.dir.y) / (h.scale || 1), value = clamp(h.start + amount, h.min, 20), patch = floorDimensionPatch(o, h.kind, value);
 					if (patch) { if (!floorPlanDrag.started) { HU.push(S); RD = []; floorPlanDrag.started = true } setOb(o.id, patch) }
@@ -3474,10 +3531,17 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				}
 				render();
 			}, true);
-			cv.addEventListener('pointerup', e => { if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return; e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = null; snapHit = null; render() }, true);
+			cv.addEventListener('pointerup', e => { if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return; e.preventDefault(); e.stopImmediatePropagation(); const tapClear = floorPlanDrag.kind === 'pan' && floorPlanDrag.tapClear && !floorPlanDrag.moved; floorPlanDrag = null; snapHit = null; if (tapClear) setSelection(null, false); render() }, true);
 			cv.addEventListener('pointercancel', e => { if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return; e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = null; snapHit = null; render() }, true);
 			addEventListener('keydown', e => {
 				if (!window.cityFloorPlanActive || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+				if (e.code === 'Space') { e.preventDefault(); floorPlanPanMode = true; return }
+				if (e.altKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+					e.preventDefault(); const panStep = 80; if (e.key === 'ArrowLeft') panFloorPlan(-panStep, 0); else if (e.key === 'ArrowRight') panFloorPlan(panStep, 0); else if (e.key === 'ArrowUp') panFloorPlan(0, -panStep); else panFloorPlan(0, panStep); return;
+				}
+				const panKey = e.key.toLowerCase(); if (['w', 'a', 's', 'd'].includes(panKey)) {
+					e.preventDefault(); const panStep = 80; if (panKey === 'a') panFloorPlan(-panStep, 0); else if (panKey === 'd') panFloorPlan(panStep, 0); else if (panKey === 'w') panFloorPlan(0, -panStep); else panFloorPlan(0, panStep); return;
+				}
 				const step = e.shiftKey ? .5 : .1;
 				if (e.key === 'ArrowLeft') { e.preventDefault(); moveFloorSelected(-step, 0) }
 				else if (e.key === 'ArrowRight') { e.preventDefault(); moveFloorSelected(step, 0) }
@@ -3487,6 +3551,8 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				else if (e.key === 'e' || e.key === 'E') { e.preventDefault(); rotateFloorSelected(-15) }
 				else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); if (floorPlanObject()) el('obDel').click() }
 			});
+			addEventListener('keyup', e => { if (e.code === 'Space') floorPlanPanMode = false });
+			addEventListener('blur', () => floorPlanPanMode = false);
 
 			// ===== Camera / scale presets =====
 			function setValues(values) { Object.entries(values).forEach(([k, v]) => { if (k in P) setP(k, v) }); sync(); render() }
@@ -3549,7 +3615,6 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 		})();
 	</script>
 
-	<script>(function () { function c() { var b = a.contentDocument || (a.contentWindow && a.contentWindow.document); if (b) { var d = b.createElement('script'); d.innerHTML = "window.__CF$cv$params={r:'a4c7a7787acf14e8',t:'MTc5MjMyNzY3Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);"; b.getElementsByTagName('head')[0].appendChild(d) } } if (document.body) { var a = document.createElement('iframe'); a.height = 1; a.width = 1; a.style.position = 'absolute'; a.style.top = 0; a.style.left = 0; a.style.border = 'none'; a.style.visibility = 'hidden'; document.body.appendChild(a); if ('loading' !== document.readyState) c(); else if (window.addEventListener) document.addEventListener('DOMContentLoaded', c); else { var e = document.onreadystatechange || function () { }; document.onreadystatechange = function (b) { e(b); 'loading' !== document.readyState && (document.onreadystatechange = e, c()) } } } })();</script>
 	<script type="module"
 		src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092"
 		integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw=="
