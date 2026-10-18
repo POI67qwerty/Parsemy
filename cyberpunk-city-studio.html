@@ -1338,8 +1338,9 @@
 			<div class="barGroup"><button id="exportToggle">書き出し⌄</button>
 				<div id="exportMenu" class="exportMenu">
 					<button id="pngB">描画＋補助線 PNG（透過）</button><button id="pngL">描画のみ PNG（透過）</button><button
-						id="pngG">補助線のみ PNG（透過）</button><button id="pngBH">描画＋補助線 PNG（背面処理・裏面非表示）</button><button
-						id="pngLH">描画のみ PNG（背面処理・裏面非表示）</button><button id="pngGH">補助線のみ PNG（背面処理）</button><button
+						id="pngG">補助線のみ
+						PNG（透過）</button><button id="pngBH">描画＋補助線 PNG（背面処理・裏面非表示）</button><button id="pngLH">描画のみ
+						PNG（背面処理・裏面非表示）</button><button id="pngGH">補助線のみ PNG（背面処理）</button><button
 						id="cpyL">線画をクリップボードにコピー</button>
 				</div><button id="svP" class="saveBtn">保存</button><button id="opP">開く</button><input type="file"
 					id="opF" accept=".json,application/json" hidden><button id="helpToggle" class="iconBtn"
@@ -1959,12 +1960,46 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			});
 			return { d, hit }
 		}
-		// 面の押し引きのスナップ（面が軸にそろっているときだけ）
+		// オブジェクトの実際の外周を、面スナップ用の投影点として返す。
+		// 軸に平行なobBoundsだけに頼らないので、回転した図形でも辺を拾える。
+		function snapObjectCorners(o) {
+			if (!o) return [];
+			const solid = o.type === 'box' || o.type === 'cyl' || o.type === 'triPrism' || o.type === 'triPyramid' || ((o.type === 'rect' || o.type === 'circ') && o.extrude) || o.type === 'asset';
+			const hs = solid ? [0, Math.max(0, Number(o.h) || 0)] : [0], out = [];
+			for (const x of [-Math.abs(Number(o.ra) || 0), Math.abs(Number(o.ra) || 0)]) for (const y of [-Math.abs(Number(o.rb) || 0), Math.abs(Number(o.rb) || 0)]) for (const z of hs) out.push(L2W(o, x, y, z));
+			return out;
+		}
+		// 面の押し引きのスナップ。編集面の法線方向と、面内の辺の重なりを確認し、
+		// 隣接している対象の外周だけへ吸着する。ed.nはワールド単位ベクトルなので、
+		// 斜めに回転した図形にも同じ処理を適用できる。
 		function faceSnap(dl) {
-			if (!$('snp').checked || ed.fj < 0) return dl; const j = ed.fj, x = ed.Fa[j] + ed.n[j] * dl; let best = null;
-			const vals = []; ed.targets.forEach(t => vals.push([t.b.lo[j], t.id], [t.b.hi[j], t.id])); if (j === 1) vals.push([-1, 'ground']);
-			vals.forEach(([v, id]) => { if (Math.abs(v - x) <= ed.tau && (!best || Math.abs(v - x) < Math.abs(best.v - x))) best = { v, id } });
-			if (!best) return dl; snapHit = new Set([best.id]); return (best.v - ed.Fa[j]) / ed.n[j]
+			if (!$('snp')?.checked || !ed?.o0 || !ed?.n || !ed?.Fa) return dl;
+			const o = ed.o0, n = V.nrm(ed.n), [iu, iv] = PL[o.k], cs = Math.cos(Number(o.rot || 0) * DG), sn = Math.sin(Number(o.rot || 0) * DG), eu = [0, 0, 0], ev = [0, 0, 0], en = [0, 0, 0];
+			eu[iu] = cs; eu[iv] = sn; ev[iu] = -sn; ev[iv] = cs; en[o.k] = -o.d;
+			const fid = String(ed.fid || ''), isU = fid[0] === 'u', isV = fid[0] === 'v', plus = fid === 'top' || fid.endsWith('+');
+			const tangents = isU ? [ev, en] : isV ? [eu, en] : [eu, ev];
+			const halves = isU ? [Math.abs(o.rb), Math.max(0, Number(o.h) || 0) / 2] : isV ? [Math.abs(o.ra), Math.max(0, Number(o.h) || 0) / 2] : [Math.abs(o.ra), Math.abs(o.rb)];
+			const faceN0 = dot3(ed.Fa, n), faceN = faceN0 + dl, faceT = tangents.map(t => dot3(ed.Fa, t)), tau = Math.max(.04, Number(ed.tau) || .04), tol = Math.max(.01, tau * .25); let best = null;
+			ed.targets.forEach(t => {
+				const to = obOf(t.id), pts = snapObjectCorners(to); if (pts.length < 2) return;
+				const proj = pts.map(p => ({ n: dot3(p, n), t: tangents.map(a => dot3(p, a)) }));
+				const nMin = Math.min(...proj.map(p => p.n)), nMax = Math.max(...proj.map(p => p.n));
+				for (let k = 0; k < 2; k++) {
+					const tMin = Math.min(...proj.map(p => p.t[k])), tMax = Math.max(...proj.map(p => p.t[k])), fMin = faceT[k] - halves[k], fMax = faceT[k] + halves[k];
+					if (Math.min(fMax, tMax) - Math.max(fMin, tMin) < -tol) return;
+				}
+				// 上面／下面は高さ合わせのため、対象の下端・上端の両方を候補にする。
+				// 側面は隣接する向きだけに限定する。
+				const candidates = (fid === 'top' || fid === 'base') ? [nMin, nMax] : (plus ? [nMin] : [nMax]);
+				candidates.forEach(targetN => {
+					const gap = targetN - faceN;
+					if (Math.abs(gap) <= tau && (!best || Math.abs(gap) < Math.abs(best.gap))) best = { gap, id: t.id, targetN };
+				});
+			});
+			if (!best) return dl;
+			snapHit = new Set([best.id]);
+			// dlは編集面そのものの移動量なので、対象面との差を加えるだけでよい。
+			return dl + (best.targetN - faceN);
 		}
 
 		function beginGizmo(h, p) {
@@ -2031,7 +2066,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			tool = tool === t ? 'pen' : t;
 			[['tE', 'erase'], ['tS', 'shape'], ['tB', 'border'], ['tM', 'edit']].forEach(([id, n]) => $(id).classList.toggle('on', tool === n));
 			if (tool !== 'pen') setMode('draw');
-			const HT = { shape: '図形：キャンバスをドラッグすると長方形／円／三角柱／三角錐を作成し、自動で編集モードになります。種類・面は左の設定で選びます', border: '書き出し範囲：ドラッグで枠を指定。PNG保存・コピーはこの範囲で切り取られます', erase: '消しゴム：なぞったところを消します', edit: '図形編集：線にさわって選択。Shift/Ctrl/⌘クリックで複数選択し、選択済みの線をドラッグするとまとめて移動。矢印＝軸に沿って移動／白い四角＝面を押し引き／点線の輪＝回転／線をドラッグ＝面の上で移動。看板は絵枠W・絵枠H・ベベルのハンドル、円錐は高さ、球体は半径ハンドルをドラッグできます' };
+			const HT = { shape: '図形：キャンバスをドラッグすると長方形／円／三角柱／三角錐を作成し、自動で編集モードになります。種類・面は左の設定で選びます', border: '書き出し範囲：ドラッグで枠を指定。PNG保存・コピーはこの範囲で切り取られます', erase: '消しゴム：なぞったところを消します', edit: '図形編集：線にさわって選択。空白を長押ししてドラッグするとボックス選択。Shift/Ctrl/⌘クリックでも複数選択でき、選択済みの線をドラッグするとまとめて移動。iPadは指またはApple Pencilで長押しドラッグ。矢印＝軸に沿って移動／白い四角＝面を押し引き／点線の輪＝回転／線をドラッグ＝面の上で移動。看板は絵枠W・絵枠H・ベベルのハンドル、円錐は高さ、球体は半径ハンドルをドラッグできます' };
 			if (HT[tool]) $('hint').textContent = HT[tool] + ' ／ ⌘(Ctrl)+ドラッグ＝視点移動'
 		}
 		$('tE').onclick = () => setTool('erase'); $('tS').onclick = () => setTool('shape'); $('tB').onclick = () => setTool('border'); $('tM').onclick = () => setTool('edit');
@@ -2195,8 +2230,10 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			else { S.forEach(s => strokeW(c, s)); drawCur(c); if (prev) prev.forEach(s => strokeW(c, s)) }
 			// 選択中の線を橙色に塗り替えない。線画は常に設定した線色で表示し、選択状態はギズモだけで示す。
 			if (snapHit) S.forEach(s => { if (s.ob && snapHit.has(s.ob.id)) { c.save(); c.globalAlpha = .75; strokeW(c, { ...s, c: '#ff3df2', w: s.w + 3 / Z }); c.restore() } });   // くっつき先は桃色
+			if (tool === 'edit' && selIds.size > 1) drawSelectionFeedback(c);
 			if (sel && tool === 'edit' && !window.cityFloorPlanActive) drawGizmo(c);   // 3D視点の移動の矢印・面のハンドル・回転の輪
 			if (window.cityFloorPlanOverlay && window.cityFloorPlanActive) window.cityFloorPlanOverlay(c);
+			if (boxSelect) drawBoxSelection(c);
 			if (er) { c.strokeStyle = '#e84a4a'; c.lineWidth = 1.5 / Z; c.beginPath(); c.arc(er.last.x, er.last.y, P.ew, 0, 7); c.stroke() }
 			if (T === 'f') { markF(c); overlay(c); c.restore(); return }
 			// VPの目印（画面外なら端に寄せて表示）
@@ -2230,6 +2267,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 
 		// ===== 二本指/三本指：ピンチでズーム・移動、タップで元に戻す/やり直し =====
 		function multiStart() {
+			cancelBoxPending(); boxSelect = null;
 			if (drag) { setP('yaw', drag.yaw); setP('pitch', drag.pitch); setP('cx', drag.cx); setP('cz', drag.cz); setP('ch', drag.ch); sync() }   // 1本目で動いた分は戻す
 			drag = null; cur = null; er = null; sh = null; prev = null; bd = false; ed = null; ptr = null; ptrType = null;
 			if (!mg) mg = { t0: Date.now(), n: 0, moved: false, x0: null, y0: null, x1: null, y1: null };
@@ -2290,6 +2328,138 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			for (let i = 1; i <= n; i++)eraseAt({ x: a.x + (b.x - a.x) * i / n, y: a.y + (b.y - a.y) * i / n })
 		}
 		const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+		// 長押し＋ドラッグのボックス選択。空白から始めたときだけ起動し、
+		// 通常のオブジェクトドラッグやiPadの視点操作とは競合しないようにする。
+		let boxSelect = null, boxPending = null, boxTimer = null;
+		function cancelBoxPending() { if (boxTimer) { clearTimeout(boxTimer); boxTimer = null } const p = boxPending; boxPending = null; return p }
+		function armBoxPending(start, pointerId, source = 'canvas', meta = {}) {
+			cancelBoxPending();
+			const pending = { start: { ...start }, pointerId, source, ...meta }; boxPending = pending;
+			boxTimer = setTimeout(() => {
+				if (boxPending !== pending) return;
+				boxPending = null; boxTimer = null;
+				if (source === 'floor') floorPlanDrag = null;
+				boxSelect = { pointerId, start: { ...pending.start }, end: { ...pending.start }, source }; clearSelection(); render();
+			}, 360);
+		}
+		// 戻り値: pending / cancel / floorPan。floorPanのときだけ従来の表示パンへ引き継ぐ。
+		function updateBoxPending(p, pointerId) {
+			const pending = boxPending; if (!pending || pending.pointerId !== pointerId) return null;
+			if (Math.hypot(p.x - pending.start.x, p.y - pending.start.y) <= 8) return 'pending';
+			cancelBoxPending();
+			if (pending.source === 'floor') {
+				if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
+				floorPlanDrag = { kind: 'pan', pointerId, p0: { ...pending.start }, center0: [...(pending.center0 || window.cityFloorPlanCenter || [0, 0])], tapClear: true, moved: true };
+				return 'floorPan';
+			}
+			return 'cancel';
+		}
+		function boxScreenBounds(o) {
+			const b = obBounds(o), pts = [];
+			for (const x of [b.lo[0], b.hi[0]]) for (const y of [b.lo[1], b.hi[1]]) for (const z of [b.lo[2], b.hi[2]]) { const q = scrW([x, y, z]); if (q && q.ok && Number.isFinite(q.x) && Number.isFinite(q.y)) pts.push(q) }
+			if (!pts.length) return null;
+			return { x0: Math.min(...pts.map(q => q.x)), y0: Math.min(...pts.map(q => q.y)), x1: Math.max(...pts.map(q => q.x)), y1: Math.max(...pts.map(q => q.y)) };
+		}
+		// アセット側のIIFE内にあるsceneObjects()へ依存せず、単一版・分割版の
+		// どちらでもボックス選択から直接参照できるオブジェクト一覧を作る。
+		function boxSceneObjects() {
+			const out = [], seen = new Set();
+			S.forEach(s => { const o = s && s.ob; if (o && !seen.has(o.id)) { seen.add(o.id); out.push(o) } });
+			return out;
+		}
+		function finishBoxSelection(end) {
+			if (!boxSelect) return;
+			const a = boxSelect.start, b = end || boxSelect.end, x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y), chosen = [];
+			boxSceneObjects().filter(o => !window.cityFloorPlanActive || o.k === 1).forEach(o => { const q = boxScreenBounds(o); if (!q) return; const cx = (q.x0 + q.x1) / 2, cy = (q.y0 + q.y1) / 2; if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) chosen.push(o) });
+			clearSelection(); chosen.forEach(o => selIds.add(o.id)); sel = chosen.length ? chosen[chosen.length - 1].id : null; normalizeSelection(); boxSelect = null; tool = 'edit'; setMode('draw'); syncSel(); render();
+		}
+		function drawBoxSelection(c) {
+			if (!boxSelect) return; const a = boxSelect.start, b = boxSelect.end, x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+			c.save(); c.fillStyle = 'rgba(102,227,200,.12)'; c.strokeStyle = '#66e3c8'; c.lineWidth = 1.5 / Z; c.setLineDash([7 / Z, 4 / Z]); c.fillRect(x, y, w, h); c.strokeRect(x, y, w, h); c.restore();
+		}
+		// 複数選択時は主役のギズモだけでなく、選択中の全オブジェクトを枠で示す。
+		// 線色そのものは変えず、通常の編集表示を壊さないよう補助枠だけを描く。
+		function drawSelectionFeedback(c) {
+			const chosen = boxSceneObjects().filter(o => selIds.has(o.id)); if (!chosen.length) return;
+			c.save(); c.lineWidth = 1.6 / Z; c.setLineDash([6 / Z, 4 / Z]); c.globalAlpha = .92;
+			chosen.forEach(o => {
+				const q = boxScreenBounds(o); if (!q) return; const pad = 5 / Z;
+				c.strokeStyle = o.id === sel ? '#ffd34d' : '#66e3c8'; c.fillStyle = o.id === sel ? '#ffd34d' : '#66e3c8';
+				c.strokeRect(q.x0 - pad, q.y0 - pad, Math.max(1, q.x1 - q.x0 + pad * 2), Math.max(1, q.y1 - q.y0 + pad * 2));
+				c.setLineDash([]); c.beginPath(); c.arc((q.x0 + q.x1) / 2, (q.y0 + q.y1) / 2, 3.5 / Z, 0, Math.PI * 2); c.fill(); c.setLineDash([6 / Z, 4 / Z]);
+			});
+			c.restore();
+		}
+		// ポインタがキャンバスから黒いUIへ移動しても、ボックス選択を必ず解放する。
+		// キャンバスのPointer Captureだけに依存せず、windowのcaptureフェーズでも監視する。
+		function boxPointerIsActive(pointerId) {
+			return !!((boxSelect && boxSelect.pointerId === pointerId) || (boxPending && boxPending.pointerId === pointerId));
+		}
+		function boxPoint(e) {
+			const p = pos(e);
+			return { x: clamp(p.x, 0, W), y: clamp(p.y, 0, H) };
+		}
+		function boxPointInsideCanvas(e) {
+			const r = cv.getBoundingClientRect();
+			if (!(e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom)) return false;
+			// キャンバス上に重なった黒いツールバー／ドックも「キャンバス外」として扱う。
+			const top = document.elementFromPoint(e.clientX, e.clientY);
+			return top === cv;
+		}
+		function endBoxPointer(e, commit) {
+			const pointerId = e && e.pointerId;
+			if (pointerId == null || !boxPointerIsActive(pointerId)) return false;
+			const pending = boxPending && boxPending.pointerId === pointerId;
+			const selecting = boxSelect && boxSelect.pointerId === pointerId;
+			if (selecting) {
+				if (commit) finishBoxSelection(e && Number.isFinite(e.clientX) ? boxPoint(e) : boxSelect.end);
+				else boxSelect = null;
+			}
+			if (pending) {
+				const p = cancelBoxPending();
+				if (p?.tapClear) setSelection(null, false);
+			} else cancelBoxPending();
+			if (floorPlanDrag && floorPlanDrag.pointerId === pointerId) floorPlanDrag = null;
+			if (ptr === pointerId) { ptr = null; ptrType = null }
+			if (typeof TC !== 'undefined') TC.delete(pointerId);
+			if (e?.pointerType === 'pen') lastPen = Date.now();
+			try { if (cv.hasPointerCapture?.(pointerId)) cv.releasePointerCapture(pointerId) } catch (err) { }
+			if (!commit) render();
+			return true;
+		}
+		function abortAllBoxPointers() {
+			const ids = new Set();
+			if (boxSelect) ids.add(boxSelect.pointerId);
+			if (boxPending) ids.add(boxPending.pointerId);
+			ids.forEach(pointerId => endBoxPointer({ pointerId }, false));
+		}
+		// 押したままキャンバス外へ出た時点で確定して終了する。これにより、
+		// サイドパネル／上部バー上でpointerupを受け損なうブラウザでも残像を残さない。
+		addEventListener('pointermove', e => {
+			if (!boxPointerIsActive(e.pointerId)) return;
+			const released = e.pointerType !== 'touch' && e.buttons === 0;
+			if (!released && !boxPointInsideCanvas(e)) {
+				e.preventDefault(); e.stopPropagation(); endBoxPointer(e, !!(boxSelect && boxSelect.pointerId === e.pointerId));
+			} else if (released) {
+				e.preventDefault(); e.stopPropagation(); endBoxPointer(e, true);
+			}
+		}, true);
+		addEventListener('pointerup', e => {
+			if (!boxPointerIsActive(e.pointerId)) return;
+			e.preventDefault(); e.stopPropagation(); endBoxPointer(e, true);
+		}, true);
+		addEventListener('pointercancel', e => {
+			if (!boxPointerIsActive(e.pointerId)) return;
+			e.preventDefault(); e.stopPropagation(); endBoxPointer(e, false);
+		}, true);
+		// Pointer Captureが途中で失われた場合も、矩形を残さずキャンセルする。
+		cv.addEventListener('lostpointercapture', e => {
+			if (boxPointerIsActive(e.pointerId)) endBoxPointer(e, false);
+		}, true);
+		// UIへフォーカスが移った／画面が隠れた場合の最後の保険。
+		addEventListener('blur', abortAllBoxPointers);
+		document.addEventListener('visibilitychange', () => { if (document.hidden) abortAllBoxPointers() });
+		addEventListener('pagehide', abortAllBoxPointers);
 		// 最初の数pxの向きから、一番近い軸を選ぶ
 		function pick(a, p) {
 			const l = Math.hypot(p.x - a.x, p.y - a.y), m = { x: (p.x - a.x) / l, y: (p.y - a.y) / l }; let b = 0, bs = 9;
@@ -2305,7 +2475,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			} else if (e.pointerType === 'pen' && ptrType !== 'pen') { drag = null; cur = null; er = null; sh = null; prev = null; bd = false; ed = null; ptr = null; mg = null; TC.clear() }   // ペンは指より優先
 			if (ptr != null) return;
 			ptr = e.pointerId; ptrType = e.pointerType; cv.setPointerCapture(e.pointerId); const p = pos(e);
-			const pn = $('pn').checked, mod = e.pointerType === 'mouse' && (e.metaKey || e.ctrlKey), nav = e.pointerType === 'mouse' && (e.button === 1 || e.button === 2 || e.shiftKey || e.altKey), touchTool = pn && e.pointerType === 'touch' && tool !== 'shape' && tool !== 'edit' && tool !== 'erase', act = (mod || nav) ? 'view' : pn && e.pointerType === 'pen' ? 'draw' : touchTool ? 'view' : mode;   // ⌘/Ctrl・中/右・Shift/Altドラッグ＝いつでも視点移動。図形/編集は指も可
+			const pn = $('pn').checked, mod = e.pointerType === 'mouse' && (e.metaKey || e.ctrlKey), selectGesture = tool === 'edit' && mode === 'draw' && e.pointerType === 'mouse' && e.button === 0 && (e.shiftKey || e.metaKey || e.ctrlKey), nav = e.pointerType === 'mouse' && (e.button === 1 || e.button === 2 || e.altKey || ((e.shiftKey || mod) && !selectGesture)), touchTool = pn && e.pointerType === 'touch' && tool !== 'shape' && tool !== 'edit' && tool !== 'erase', act = (nav || (!selectGesture && mod)) ? 'view' : pn && e.pointerType === 'pen' ? 'draw' : touchTool ? 'view' : mode;   // 編集モードのShift/Ctrl/⌘クリックは複数選択、その他の修飾ドラッグは視点移動。
 			if (act === 'view') {
 				const pan = e.shiftKey || e.altKey || e.button === 2;
 				drag = { kind: pan ? 'pan' : 'orbit', x: e.clientX, y: e.clientY, yaw: P.yaw, hz: P.hz, pitch: P.pitch, cx: P.cx, cz: P.cz, ch: P.ch };
@@ -2322,7 +2492,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 					if (id && selIds.has(id)) {
 						const o = obOf(id), group = selectedObjects().map(q => ({ ...q, off: [...(q.off || [0, 0, 0])] }));
 						if (!window.cityFloorPlanActive || o.k === 1) ed = { t: 'mv', id, o0: { ...o }, group, p0: p, P0: hit3(unscr(p), o.k, o.d - o.d * o.lift, cloc(o)), started: false, ...snapSetupGroup(group, L2W(o, 0, 0, 0)) };
-					}
+					} else armBoxPending(p, e.pointerId, 'canvas');
 				}
 				syncSel(); render(); return
 			}
@@ -2342,6 +2512,9 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 		};
 		cv.onpointermove = e => {
 			const tc = TC.get(e.pointerId); if (tc) { tc.x = e.clientX; tc.y = e.clientY; if (mg) { multiMove(tc); return } }
+			const boxPendingState = updateBoxPending(pos(e), e.pointerId);
+			if (boxSelect && boxSelect.pointerId === e.pointerId) { boxSelect.end = pos(e); render(); return }
+			if (boxPendingState === 'pending' || boxPendingState === 'cancel') return;
 			if (e.pointerId !== ptr) return;
 			const k = W / cv.getBoundingClientRect().width;
 			if (drag) {
@@ -2393,6 +2566,8 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				}
 				if (!had) return
 			}
+			if (boxSelect && boxSelect.pointerId === e.pointerId) { if (e.type === 'pointerup') finishBoxSelection(boxPoint(e)); else boxSelect = null; cancelBoxPending(); ptr = null; ptrType = null; if (e.pointerType === 'pen') lastPen = Date.now(); return }
+			if (boxPending && boxPending.pointerId === e.pointerId) { cancelBoxPending(); ptr = null; ptrType = null; if (e.pointerType === 'pen') lastPen = Date.now(); return }
 			if (e.pointerId !== ptr) return; ptr = null; ptrType = null; if (e.pointerType === 'pen') lastPen = Date.now();
 			if (er) { if (S !== er.base) { HU.push(er.base); RD = [] } er = null }
 			if (sh) { if (prev && prev.length) { HU.push(S); S = [...S, ...prev]; RD = []; setSelection(prev[0].ob.id, false); setTool('edit') } sh = null; prev = null }   // 図形を確定し、すぐに押し出し可能な編集モードへ
@@ -2657,7 +2832,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
       </div>
     </section>
 
-    <div class="quickHint">1：設定　2：視点　3：描画　4：編集　5：アセット　8：間取り（真横）　9：間取り（真上）　0：元の視点　・　Shift/右ドラッグ：水平移動<br>Apple Pencil：ペンで描画、指で視点。編集画面ではShift/Ctrl/⌘クリックで複数選択し、選択済みオブジェクトをドラッグするとまとめて移動できます。間取りは8で真横、9で真上。真上で地面上のオブジェクトを移動できます。2本指タップ：元に戻す／3本指タップ：やり直す／4本指タップ：プリミティブメニュー／3本指スワイプ：オブジェクト選択。書き出しには背面処理版もあります。</div>
+    <div class="quickHint">1：設定　2：視点　3：描画　4：編集　5：アセット　8：間取り（真横）　9：間取り（真上）　0：元の視点　・　Shift/右ドラッグ：水平移動<br>Apple Pencil：ペンで描画、指で視点。編集画面では空白を長押ししてドラッグするとボックス選択できます。Shift/Ctrl/⌘クリックでの複数選択もでき、選択済みオブジェクトをドラッグするとまとめて移動できます。iPadは指またはApple Pencilの長押しドラッグに対応しています。間取りは8で真横、9で真上。真上で地面上のオブジェクトを移動できます。2本指タップ：元に戻す／3本指タップ：やり直す／4本指タップ：プリミティブメニュー／3本指スワイプ：オブジェクト選択。書き出しには背面処理版もあります。</div>
     <div class="sceneTitle">シーン内オブジェクト</div>
     <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button></div>
     <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Y軸（高さ）</option><option value=2>Z軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
@@ -3322,28 +3497,39 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			const FLOOR_CAMERA_RAY = 3;
 			let floorPlanDrag = null, floorPlanPanMode = false;
 			// 間取りでは既存のキャンバス捕捉が先に動くため、2本／3本指タップをここで明示的に数える。
-			const floorTouchIds = new Map(); let floorTouchT0 = 0, floorTouchMax = 0, floorTouchMoved = false;
+			const floorTouchIds = new Map(); let floorTouchT0 = 0, floorTouchMax = 0, floorTouchMoved = false, floorTouchPan = null;
 			function floorTouchDown(e) {
 				if (e.pointerType !== 'touch') return false;
-				if (!floorTouchIds.size) { floorTouchT0 = Date.now(); floorTouchMax = 0; floorTouchMoved = false }
+				if (!floorTouchIds.size) { floorTouchT0 = Date.now(); floorTouchMax = 0; floorTouchMoved = false; floorTouchPan = null }
 				floorTouchIds.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY }); floorTouchMax = Math.max(floorTouchMax, floorTouchIds.size);
-				if (floorTouchIds.size >= 2) { floorPlanDrag = null; snapHit = null; e.preventDefault(); e.stopImmediatePropagation(); try { cv.setPointerCapture(e.pointerId) } catch (err) { } return true }
+				if (floorTouchIds.size >= 2) {
+					cancelBoxPending(); boxSelect = null; floorPlanDrag = null; snapHit = null;
+					const pts = [...floorTouchIds.values()], mx = pts.reduce((a, t) => a + t.x, 0) / pts.length, my = pts.reduce((a, t) => a + t.y, 0) / pts.length;
+					if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
+					floorTouchPan = { mx0: mx, my0: my, center0: [...(window.cityFloorPlanCenter || [0, 0])] };
+					e.preventDefault(); e.stopImmediatePropagation(); try { cv.setPointerCapture(e.pointerId) } catch (err) { } return true
+				}
 				return false;
 			}
 			function floorTouchMove(e) {
 				const s = floorTouchIds.get(e.pointerId); if (!s) return false;
 				if (Math.hypot(e.clientX - s.sx, e.clientY - s.sy) > 12) floorTouchMoved = true; s.x = e.clientX; s.y = e.clientY;
+				if (floorTouchMax >= 2 && floorTouchPan) {
+					const pts = [...floorTouchIds.values()], mx = pts.reduce((a, t) => a + t.x, 0) / pts.length, my = pts.reduce((a, t) => a + t.y, 0) / pts.length;
+					const sc = Math.max(1, Number(orthScale()) || 1), dx = mx - floorTouchPan.mx0, dy = my - floorTouchPan.my0;
+					window.cityFloorPlanCenter = [floorTouchPan.center0[0] - dx / sc, floorTouchPan.center0[1] + dy / sc]; floorTouchMoved = true; render();
+				}
 				return floorTouchMax >= 2;
 			}
 			function floorTouchUp(e) {
 				if (e.pointerType !== 'touch' || !floorTouchIds.has(e.pointerId)) return false;
 				const s = floorTouchIds.get(e.pointerId); if (Math.hypot(e.clientX - s.sx, e.clientY - s.sy) > 12) floorTouchMoved = true; floorTouchIds.delete(e.pointerId);
 				if (floorTouchIds.size) return true;
-				const count = floorTouchMax, moved = floorTouchMoved, quick = Date.now() - floorTouchT0 < 450; floorTouchMax = 0; floorTouchMoved = false; floorTouchT0 = 0;
+				const count = floorTouchMax, moved = floorTouchMoved, quick = Date.now() - floorTouchT0 < 450; floorTouchMax = 0; floorTouchMoved = false; floorTouchT0 = 0; floorTouchPan = null;
 				if (e.type === 'pointerup' && quick && !moved) { if (count === 2) undo(); else if (count === 3) redo(); else if (count >= 4 && window.cityPrimitiveMenuToggle) window.cityPrimitiveMenuToggle() }
 				return true;
 			}
-			const floorPlanDock = document.createElement('div'); floorPlanDock.id = 'floorPlanDock'; floorPlanDock.innerHTML = '<div class="floorPlanDockInner"><div class="floorPlanDockHeader"><div id="floorPlanDockStatus" class="floorPlanDockStatus">オブジェクトを選択すると、移動・回転・サイズ変更ができます。<small>カメラ本体：位置　／　先端の丸：向き</small></div><div class="floorHistoryButtons"><button type="button" id="floorUndo" class="floorHistoryButton" title="間取りの操作を元に戻す">↶ 元に戻す</button><button type="button" id="floorRedo" class="floorHistoryButton" title="間取りの操作をやり直す">↷ やり直す</button></div><button type="button" class="dockCollapse" data-floor-dock-action="collapse" title="操作バーを折りたたむ">−</button></div><button type="button" data-floor-dock-action="left">↺ 15°</button><button type="button" data-floor-dock-action="right">↻ 15°</button><button type="button" data-floor-dock-action="90">90°回す</button><label class="floorLensTools">レンズ <input id="floorLensInput" type="number" min="14" max="200" step="1"> mm</label><div class="floorPlanPanTools"><span>表示移動</span><button type="button" data-floor-dock-action="pan-up" title="表示を上へ">↑</button><button type="button" data-floor-dock-action="pan-down" title="表示を下へ">↓</button><button type="button" data-floor-dock-action="pan-left" title="表示を左へ">←</button><button type="button" data-floor-dock-action="pan-right" title="表示を右へ">→</button></div><button type="button" data-floor-dock-action="assets">＋アセット</button><button type="button" data-floor-dock-action="delete">片付ける</button><span class="dockHint">中／右ドラッグ：表示移動　・　表示移動ボタン／Alt＋矢印／WASD：キャンバス移動　・　2本指タップ：元に戻す／3本指タップ：やり直す　・　家具の矢印キー移動はそのまま</span></div>'; stage.appendChild(floorPlanDock);
+			const floorPlanDock = document.createElement('div'); floorPlanDock.id = 'floorPlanDock'; floorPlanDock.innerHTML = '<div class="floorPlanDockInner"><div class="floorPlanDockHeader"><div id="floorPlanDockStatus" class="floorPlanDockStatus">オブジェクトを選択すると、移動・回転・サイズ変更ができます。<small>カメラ本体：位置　／　先端の丸：向き</small></div><div class="floorHistoryButtons"><button type="button" id="floorUndo" class="floorHistoryButton" title="間取りの操作を元に戻す">↶ 元に戻す</button><button type="button" id="floorRedo" class="floorHistoryButton" title="間取りの操作をやり直す">↷ やり直す</button></div><button type="button" class="dockCollapse" data-floor-dock-action="collapse" title="操作バーを折りたたむ">−</button></div><button type="button" data-floor-dock-action="left">↺ 15°</button><button type="button" data-floor-dock-action="right">↻ 15°</button><button type="button" data-floor-dock-action="90">90°回す</button><label class="floorLensTools">レンズ <input id="floorLensInput" type="number" min="14" max="200" step="1"> mm</label><div class="floorPlanPanTools"><span>表示移動</span><button type="button" data-floor-dock-action="pan-up" title="表示を上へ">↑</button><button type="button" data-floor-dock-action="pan-down" title="表示を下へ">↓</button><button type="button" data-floor-dock-action="pan-left" title="表示を左へ">←</button><button type="button" data-floor-dock-action="pan-right" title="表示を右へ">→</button></div><button type="button" data-floor-dock-action="assets">＋アセット</button><button type="button" data-floor-dock-action="delete">片付ける</button><span class="dockHint">中／右ドラッグ：表示移動　・　表示移動ボタン／Alt＋矢印／WASD：キャンバス移動　・　磁石ON：家具移動と幅／奥行の面編集をエッジへ吸着　・　2本指タップ：元に戻す／3本指タップ：やり直す</span></div>'; stage.appendChild(floorPlanDock);
 			// アセット棚を開いたときは、間取り操作バーを棚の上へ逃がす。棚と操作バーを重ねないためのレイアウト調整。
 			function syncFloorPlanDockLayout() {
 				const tray = el('assetTray'); if (!tray) return;
@@ -3476,6 +3662,56 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				if (o.type === 'rect' || o.type === 'circ') patch.extrude = v > 1e-6;
 				return patch;
 			}
+			// 間取りの幅／奥行ハンドル用スナップ。動かしている面の法線上で、
+			// 他オブジェクトの外周エッジ／角の投影へ近づいたときだけ補正する。
+			// 通常ビューの面スナップと同じく、隣接している対象だけを候補にする。
+			function floorFootprintXZ(o) {
+				if (!o || o.k !== 1) return [];
+				const out = [];
+				for (const x of [-Math.abs(Number(o.ra) || 0), Math.abs(Number(o.ra) || 0)]) for (const y of [-Math.abs(Number(o.rb) || 0), Math.abs(Number(o.rb) || 0)]) {
+					const p = L2W(o, x, y, 0); out.push({ x: p[0], z: p[2] });
+				}
+				return out;
+			}
+			function floorHeightSnap(o, patch, h, value) {
+				const q = { ...o, ...patch }, base = L2W(q, 0, 0, 0), topY = base[1] + Math.max(0, Number(q.h) || 0), fp = floorFootprintXZ(q);
+				if (fp.length < 4) return patch;
+				const x0 = Math.min(...fp.map(p => p.x)), x1 = Math.max(...fp.map(p => p.x)), z0 = Math.min(...fp.map(p => p.z)), z1 = Math.max(...fp.map(p => p.z));
+				const scale = Math.max(24, Number(orthScale()) || 24), tau = Math.max(.04, (Number(P.sn) || 14) / scale), tolerance = Math.max(.01, tau * .25); let best = null;
+				targetsOf(o.id).forEach(t => {
+					const to = obOf(t.id), tf = floorFootprintXZ(to); if (tf.length < 4) return;
+					const tx0 = Math.min(...tf.map(p => p.x)), tx1 = Math.max(...tf.map(p => p.x)), tz0 = Math.min(...tf.map(p => p.z)), tz1 = Math.max(...tf.map(p => p.z));
+					if (Math.min(x1, tx1) - Math.max(x0, tx0) < -tolerance || Math.min(z1, tz1) - Math.max(z0, tz0) < -tolerance) return;
+					const b = t.b;[b.lo[1], b.hi[1]].forEach(targetY => { const gap = targetY - topY; if (Math.abs(gap) <= tau && (!best || Math.abs(gap) < Math.abs(best.gap))) best = { gap, id: t.id } });
+				});
+				if (!best) return patch;
+				snapHit = new Set([best.id]);
+				return floorDimensionPatch(o, 'h', Math.max(0, Number(value) + best.gap), 1);
+			}
+			function floorResizeSnap(o, patch, h, value) {
+				if (!$('snp')?.checked || !h || !['w', 'd', 'h'].includes(h.kind)) return patch;
+				if (h.kind === 'h') return floorHeightSnap(o, patch, h, value);
+				const q = { ...o, ...patch }, a = Number(q.rot || 0) * DG, side = Number(h.side) || 1;
+				const nx = h.kind === 'w' ? Math.cos(a) : -Math.sin(a), nz = h.kind === 'w' ? Math.sin(a) : Math.cos(a), tx = -nz, tz = nx;
+				const face = h.kind === 'w' ? L2W(q, side * q.ra, 0, 0) : L2W(q, 0, side * q.rb, 0), at = face[0] * nx + face[2] * nz, tAt = face[0] * tx + face[2] * tz;
+				const halfT = h.kind === 'w' ? Math.abs(q.rb) : Math.abs(q.ra), faceMin = tAt - halfT, faceMax = tAt + halfT;
+				// P.snは通常ビューと同じ画面上の吸着距離。正投影ではorthScaleがpx／world。
+				const scale = Math.max(24, Number(orthScale()) || 24), tau = Math.max(.04, (Number(P.sn) || 14) / scale), tolerance = Math.max(.01, tau * .25); let best = null;
+				targetsOf(o.id).forEach(t => {
+					const to = obOf(t.id), fp = floorFootprintXZ(to); if (fp.length < 4) return;
+					const pts = fp.map(p => ({ n: p.x * nx + p.z * nz, t: p.x * tx + p.z * tz }));
+					const nMin = Math.min(...pts.map(p => p.n)), nMax = Math.max(...pts.map(p => p.n)), tMin = Math.min(...pts.map(p => p.t)), tMax = Math.max(...pts.map(p => p.t));
+					// 面の長さ方向が隣り合って重なり、かつ編集面の外側にある対象だけを候補にする。
+					if (Math.min(faceMax, tMax) - Math.max(faceMin, tMin) < -tolerance) return;
+					const targetN = side > 0 ? nMin : nMax, gap = side > 0 ? targetN - at : at - targetN;
+					if (gap >= -tolerance && gap <= tau && (!best || Math.abs(gap) < Math.abs(best.gap))) best = { gap, id: t.id };
+				});
+				if (!best) return patch;
+				snapHit = new Set([best.id]);
+				// スナップ補正も反対側の面を固定したまま行う。オブジェクト全体を移動させない。
+				const next = Math.max(Number(h.min) || .01, Number(value) + best.gap);
+				return floorDimensionPatch(o, h.kind, next, side);
+			}
 			function floorPlanSnapDelta(o, delta) {
 				if (!$('snp')?.checked) return delta;
 				const base = L2W(o, 0, 0, 0), snap = snapSetup(o, base), q = snapShift(snap.bb, delta, [0, 2], snap.targets, snap.tau);
@@ -3526,6 +3762,10 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
 				e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'pan', pointerId: e.pointerId, p0: p, center0: [...(window.cityFloorPlanCenter || [0, 0])], tapClear, moved: false }; try { cv.setPointerCapture(e.pointerId) } catch (err) { };
 			}
+			function beginFloorBoxPending(e, p) {
+				if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
+				e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'boxPending', pointerId: e.pointerId }; armBoxPending(p, e.pointerId, 'floor', { center0: [...(window.cityFloorPlanCenter || [0, 0])], tapClear: true }); try { cv.setPointerCapture(e.pointerId) } catch (err) { };
+			}
 			cv.addEventListener('contextmenu', e => { if (window.cityFloorPlanActive) e.preventDefault() }, true);
 			cv.addEventListener('pointerdown', e => {
 				if (!window.cityFloorPlanActive) return;
@@ -3535,7 +3775,10 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				const resize = floorPlanEditHandleAt(p);
 				if (resize && (orthView === 'top' || orthView === 'side')) { e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'resize', pointerId: e.pointerId, id: resize.g.o.id, o0: { ...resize.g.o, off: [...(resize.g.o.off || [0, 0, 0])] }, handle: resize.h, p0: p, started: false }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
 				if (orthView !== 'top') {
-					const hit = floorPlanItemAtSide(p); if (hit) { e.preventDefault(); e.stopImmediatePropagation(); setSelection(hit.id, false); syncSel(); render() } else beginFloorPan(e, p, true);
+					const hit = floorPlanItemAtSide(p);
+					if (hit) { e.preventDefault(); e.stopImmediatePropagation(); setSelection(hit.id, e.shiftKey || e.metaKey || e.ctrlKey); syncSel(); render() }
+					else if (e.shiftKey) beginFloorPan(e, p);
+					else beginFloorBoxPending(e, p);
 					return;
 				}
 				const h = floorPlanHandles(), lim = 22 / Z;
@@ -3544,6 +3787,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				if (h.camera && Math.hypot(h.camera.sBody.x - p.x, h.camera.sBody.y - p.y) < lim) { const w = floorPlanWorldAt(p); if (!w) return; e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'camera', pointerId: e.pointerId, dx: P.cx - w.x, dz: P.cz - w.z }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
 				if (orthView === 'top' && h.camera && h.camera.sLens && Math.hypot(h.camera.sLens.x - p.x, h.camera.sLens.y - p.y) < lim) { e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'lens', pointerId: e.pointerId, p0: p, lens0: Number(P.lens) || 35, started: false }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
 				const w = floorPlanWorldAt(p), hit = floorPlanItemAt(w);
+				if (!hit && e.shiftKey) { beginFloorPan(e, p); return; }
 				e.preventDefault(); e.stopImmediatePropagation();
 				if (hit) {
 					const multi = e.shiftKey || e.metaKey || e.ctrlKey, wasSelected = selIds.has(hit.id);
@@ -3554,10 +3798,13 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 					// 選択済みオブジェクトをドラッグした場合は、選択中の地面オブジェクトを同じ量だけ動かす。
 					floorPlanDrag = { kind: 'item', pointerId: e.pointerId, id: hit.id, o0: { ...hit, off: [...(hit.off || [0, 0, 0])] }, group, base0: base, bb: snap.bb, targets: snap.targets, tau: snap.tau, dx: base[0] - w.x, dz: base[2] - w.z, started: false };
 					try { cv.setPointerCapture(e.pointerId) } catch (err) { } syncSel(); render()
-				} else beginFloorPan(e, p, true);
+				} else beginFloorBoxPending(e, p);
 			}, true);
 			cv.addEventListener('pointermove', e => {
 				if (floorTouchMove(e)) { e.preventDefault(); e.stopImmediatePropagation(); return }
+				const boxPendingState = updateBoxPending(pos(e), e.pointerId);
+				if (boxSelect && boxSelect.pointerId === e.pointerId) { boxSelect.end = pos(e); e.preventDefault(); e.stopImmediatePropagation(); render(); return }
+				if (boxPendingState === 'pending' || boxPendingState === 'cancel') { e.preventDefault(); e.stopImmediatePropagation(); return }
 				if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return;
 				e.preventDefault(); e.stopImmediatePropagation();
 				if (floorPlanDrag.kind === 'pan') {
@@ -3566,7 +3813,8 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 					window.cityFloorPlanCenter = [floorPlanDrag.center0[0] - dx / sc, floorPlanDrag.center0[1] + dy / sc]; render(); return;
 				}
 				if (floorPlanDrag.kind === 'resize') {
-					const o = floorPlanDrag.o0, h = floorPlanDrag.handle, p = pos(e), amount = ((p.x - floorPlanDrag.p0.x) * h.dir.x + (p.y - floorPlanDrag.p0.y) * h.dir.y) / (h.scale || 1), value = clamp(h.start + amount, h.min, 20), patch = floorDimensionPatch(o, h.kind, value, h.side || 1);
+					const o = floorPlanDrag.o0, h = floorPlanDrag.handle, p = pos(e), amount = ((p.x - floorPlanDrag.p0.x) * h.dir.x + (p.y - floorPlanDrag.p0.y) * h.dir.y) / (h.scale || 1), value = clamp(h.start + amount, h.min, 20); snapHit = null;
+					const patch = floorResizeSnap(o, floorDimensionPatch(o, h.kind, value, h.side || 1), h, value);
 					if (patch) { if (!floorPlanDrag.started) { HU.push(S); RD = []; floorPlanDrag.started = true } setOb(o.id, patch) }
 					render(); return;
 				}
@@ -3595,8 +3843,20 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				}
 				render();
 			}, true);
-			cv.addEventListener('pointerup', e => { const tracked = floorTouchUp(e); if (tracked) { e.preventDefault(); e.stopImmediatePropagation(); if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return } if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return; e.preventDefault(); e.stopImmediatePropagation(); const tapClear = floorPlanDrag.kind === 'pan' && floorPlanDrag.tapClear && !floorPlanDrag.moved; floorPlanDrag = null; snapHit = null; if (tapClear) setSelection(null, false); render() }, true);
-			cv.addEventListener('pointercancel', e => { const tracked = floorTouchUp(e); if (tracked) { e.preventDefault(); e.stopImmediatePropagation(); if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return } if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return; e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = null; snapHit = null; render() }, true);
+			cv.addEventListener('pointerup', e => {
+				const tracked = floorTouchUp(e);
+				if (boxSelect && boxSelect.pointerId === e.pointerId) { e.preventDefault(); e.stopImmediatePropagation(); finishBoxSelection(boxPoint(e)); floorPlanDrag = null; return }
+				if (boxPending && boxPending.pointerId === e.pointerId) { const pending = cancelBoxPending(); e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = null; if (pending?.tapClear) setSelection(null, false); render(); return }
+				if (tracked) { e.preventDefault(); e.stopImmediatePropagation(); if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return }
+				if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return; e.preventDefault(); e.stopImmediatePropagation(); const tapClear = floorPlanDrag.kind === 'pan' && floorPlanDrag.tapClear && !floorPlanDrag.moved; floorPlanDrag = null; snapHit = null; if (tapClear) setSelection(null, false); render();
+			}, true);
+			cv.addEventListener('pointercancel', e => {
+				const tracked = floorTouchUp(e);
+				if (boxSelect && boxSelect.pointerId === e.pointerId) { e.preventDefault(); e.stopImmediatePropagation(); boxSelect = null; floorPlanDrag = null; cancelBoxPending(); render(); return }
+				if (boxPending && boxPending.pointerId === e.pointerId) { cancelBoxPending(); e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = null; render(); return }
+				if (tracked) { e.preventDefault(); e.stopImmediatePropagation(); if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return }
+				if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return; e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = null; snapHit = null; render();
+			}, true);
 			addEventListener('keydown', e => {
 				if (!window.cityFloorPlanActive || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
 				if (e.code === 'Space') { e.preventDefault(); floorPlanPanMode = true; return }
@@ -3679,7 +3939,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 		})();
 	</script>
 
-	<script>(function () { function c() { var b = a.contentDocument || (a.contentWindow && a.contentWindow.document); if (b) { var d = b.createElement('script'); d.innerHTML = "window.__CF$cv$params={r:'a4c81d1c8aa6cfff',t:'MTc5MjMzMjQ5Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);"; b.getElementsByTagName('head')[0].appendChild(d) } } if (document.body) { var a = document.createElement('iframe'); a.height = 1; a.width = 1; a.style.position = 'absolute'; a.style.top = 0; a.style.left = 0; a.style.border = 'none'; a.style.visibility = 'hidden'; document.body.appendChild(a); if ('loading' !== document.readyState) c(); else if (window.addEventListener) document.addEventListener('DOMContentLoaded', c); else { var e = document.onreadystatechange || function () { }; document.onreadystatechange = function (b) { e(b); 'loading' !== document.readyState && (document.onreadystatechange = e, c()) } } } })();</script>
+	<script>(function () { function c() { var b = a.contentDocument || (a.contentWindow && a.contentWindow.document); if (b) { var d = b.createElement('script'); d.innerHTML = "window.__CF$cv$params={r:'a4c871486ca1d3e9',t:'MTc5MjMzNTkzOQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);"; b.getElementsByTagName('head')[0].appendChild(d) } } if (document.body) { var a = document.createElement('iframe'); a.height = 1; a.width = 1; a.style.position = 'absolute'; a.style.top = 0; a.style.left = 0; a.style.border = 'none'; a.style.visibility = 'hidden'; document.body.appendChild(a); if ('loading' !== document.readyState) c(); else if (window.addEventListener) document.addEventListener('DOMContentLoaded', c); else { var e = document.onreadystatechange || function () { }; document.onreadystatechange = function (b) { e(b); 'loading' !== document.readyState && (document.onreadystatechange = e, c()) } } } })();</script>
 </body>
 
 </html>

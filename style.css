@@ -1,13 +1,3 @@
-/* City Grid Studio split build: style.css
- * index.htmlから読み込む外部スタイルシートです。
- *
- * 構成案内:
- *   1. Base layout — body、サイドバー、キャンバス、基本フォーム
- *   2. City Grid Studio theme — ツールバー、アセット棚、書き出し、シーン一覧
- *   3. Responsive rules — iPad / Mac / Windows の画面幅対応
- */
-
-/* ===== Base layout and original perspective-ruler styles ===== */
 :root {
 	--bg: #141513;
 	--pn: #1e201d;
@@ -216,7 +206,7 @@ output {
 	}
 }
 
-/* ===== City Grid Studio visual theme and responsive UI ===== */
+
 :root {
 	--bg: #0a0f14;
 	--panel: #121a21;
