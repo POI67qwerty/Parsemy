@@ -146,7 +146,12 @@ hideLegacyShapeControls();
 
 // ===== 値の同期 =====
 function sync() { for (const k in P) { const el = $('v_' + k); if (el && document.activeElement !== el) el.value = +(+P[k]).toFixed(3) } }   // 入力中の欄は上書きしない
-function leaveOrthView(changedKey) { if (standardApplying) return; if (orthView === 'top' && changedKey !== 'pitch') { P.pitch = -75; const pitchInput = $('pitch'); if (pitchInput) pitchInput.value = -75 } orthView = null }
+function leaveOrthView(changedKey) {
+    if (standardApplying) return;
+    // 間取り中のレンズ変更は正投影を解除せず、カメラの画角だけを更新する。
+    if (window.cityFloorPlanActive && changedKey === 'lens') return;
+    if (orthView === 'top' && changedKey !== 'pitch') { P.pitch = -75; const pitchInput = $('pitch'); if (pitchInput) pitchInput.value = -75 } orthView = null
+}
 function setP(k, v) { leaveOrthView(k); P[k] = v; const input = $(k); if (input) input.value = v }
 for (const k in P) {
     const el = $(k); el.value = P[k]; el.oninput = () => { leaveOrthView(k); P[k] = +el.value; sync(); render() };
@@ -1317,7 +1322,7 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
       </div>
     </section>
 
-    <div class="quickHint">1：設定　2：視点　3：描画　4：編集　5：アセット　8：間取り（真横）　9：間取り（真上）　0：元の視点　・　Shift/右ドラッグ：水平移動<br>Apple Pencil：ペンで描画、指で視点。編集画面ではShift/Ctrl/⌘クリックで複数選択し、選択済みオブジェクトをドラッグするとまとめて移動できます。間取りは8で真横、9で真上。真上で地面上のオブジェクトを移動できます。4本指タップ：プリミティブメニュー／3本指スワイプ：オブジェクト選択。書き出しには背面処理版もあります。</div>
+    <div class="quickHint">1：設定　2：視点　3：描画　4：編集　5：アセット　8：間取り（真横）　9：間取り（真上）　0：元の視点　・　Shift/右ドラッグ：水平移動<br>Apple Pencil：ペンで描画、指で視点。編集画面ではShift/Ctrl/⌘クリックで複数選択し、選択済みオブジェクトをドラッグするとまとめて移動できます。間取りは8で真横、9で真上。真上で地面上のオブジェクトを移動できます。2本指タップ：元に戻す／3本指タップ：やり直す／4本指タップ：プリミティブメニュー／3本指スワイプ：オブジェクト選択。書き出しには背面処理版もあります。</div>
     <div class="sceneTitle">シーン内オブジェクト</div>
     <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button></div>
     <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Y軸（高さ）</option><option value=2>Z軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
@@ -1960,7 +1965,8 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
     }
     function exitFloorPlan(restore = true) {
         if (!window.cityFloorPlanActive) return;
-        const keepCamera = { yaw: P.yaw, cx: P.cx, cz: P.cz };
+        // 間取り中に変更したカメラ位置・向き・レンズを3D視点へ引き継ぐ。
+        const keepCamera = { yaw: P.yaw, cx: P.cx, cz: P.cz, lens: P.lens };
         window.cityFloorPlanActive = false; floorPlanDock.classList.remove('open');
         const saved = floorPlanView, restoreSide = floorPlanAutoHidSide && !floorPlanSideWasHidden; floorPlanView = null; floorPlanSideWasHidden = null; floorPlanAutoHidSide = false; window.cityFloorPlanCenter = null; window.cityFloorPlanScale = null;
         if (restore) restoreStudioView(saved, keepCamera); else { setMode('view'); render() }
@@ -1980,7 +1986,29 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
     // 3Dビューのギズモとは別に描き、参考サイトと同じ操作感にする。
     const FLOOR_CAMERA_RAY = 3;
     let floorPlanDrag = null, floorPlanPanMode = false;
-    const floorPlanDock = document.createElement('div'); floorPlanDock.id = 'floorPlanDock'; floorPlanDock.innerHTML = '<div class="floorPlanDockInner"><div class="floorPlanDockHeader"><div id="floorPlanDockStatus" class="floorPlanDockStatus">オブジェクトを選択すると、移動・回転・サイズ変更ができます。<small>カメラ本体：位置　／　先端の丸：向き</small></div><div class="floorHistoryButtons"><button type="button" id="floorUndo" class="floorHistoryButton" title="間取りの操作を元に戻す">↶ 元に戻す</button><button type="button" id="floorRedo" class="floorHistoryButton" title="間取りの操作をやり直す">↷ やり直す</button></div><button type="button" class="dockCollapse" data-floor-dock-action="collapse" title="操作バーを折りたたむ">−</button></div><button type="button" data-floor-dock-action="left">↺ 15°</button><button type="button" data-floor-dock-action="right">↻ 15°</button><button type="button" data-floor-dock-action="90">90°回す</button><div class="floorPlanPanTools"><span>表示移動</span><button type="button" data-floor-dock-action="pan-up" title="表示を上へ">↑</button><button type="button" data-floor-dock-action="pan-down" title="表示を下へ">↓</button><button type="button" data-floor-dock-action="pan-left" title="表示を左へ">←</button><button type="button" data-floor-dock-action="pan-right" title="表示を右へ">→</button></div><button type="button" data-floor-dock-action="assets">＋アセット</button><button type="button" data-floor-dock-action="delete">片付ける</button><span class="dockHint">中／右ドラッグ：表示移動　・　表示移動ボタン／Alt＋矢印／WASD：キャンバス移動　・　家具の矢印キー移動はそのまま</span></div>'; stage.appendChild(floorPlanDock);
+    // 間取りでは既存のキャンバス捕捉が先に動くため、2本／3本指タップをここで明示的に数える。
+    const floorTouchIds = new Map(); let floorTouchT0 = 0, floorTouchMax = 0, floorTouchMoved = false;
+    function floorTouchDown(e) {
+        if (e.pointerType !== 'touch') return false;
+        if (!floorTouchIds.size) { floorTouchT0 = Date.now(); floorTouchMax = 0; floorTouchMoved = false }
+        floorTouchIds.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY }); floorTouchMax = Math.max(floorTouchMax, floorTouchIds.size);
+        if (floorTouchIds.size >= 2) { floorPlanDrag = null; snapHit = null; e.preventDefault(); e.stopImmediatePropagation(); try { cv.setPointerCapture(e.pointerId) } catch (err) { } return true }
+        return false;
+    }
+    function floorTouchMove(e) {
+        const s = floorTouchIds.get(e.pointerId); if (!s) return false;
+        if (Math.hypot(e.clientX - s.sx, e.clientY - s.sy) > 12) floorTouchMoved = true; s.x = e.clientX; s.y = e.clientY;
+        return floorTouchMax >= 2;
+    }
+    function floorTouchUp(e) {
+        if (e.pointerType !== 'touch' || !floorTouchIds.has(e.pointerId)) return false;
+        const s = floorTouchIds.get(e.pointerId); if (Math.hypot(e.clientX - s.sx, e.clientY - s.sy) > 12) floorTouchMoved = true; floorTouchIds.delete(e.pointerId);
+        if (floorTouchIds.size) return true;
+        const count = floorTouchMax, moved = floorTouchMoved, quick = Date.now() - floorTouchT0 < 450; floorTouchMax = 0; floorTouchMoved = false; floorTouchT0 = 0;
+        if (e.type === 'pointerup' && quick && !moved) { if (count === 2) undo(); else if (count === 3) redo(); else if (count >= 4 && window.cityPrimitiveMenuToggle) window.cityPrimitiveMenuToggle() }
+        return true;
+    }
+    const floorPlanDock = document.createElement('div'); floorPlanDock.id = 'floorPlanDock'; floorPlanDock.innerHTML = '<div class="floorPlanDockInner"><div class="floorPlanDockHeader"><div id="floorPlanDockStatus" class="floorPlanDockStatus">オブジェクトを選択すると、移動・回転・サイズ変更ができます。<small>カメラ本体：位置　／　先端の丸：向き</small></div><div class="floorHistoryButtons"><button type="button" id="floorUndo" class="floorHistoryButton" title="間取りの操作を元に戻す">↶ 元に戻す</button><button type="button" id="floorRedo" class="floorHistoryButton" title="間取りの操作をやり直す">↷ やり直す</button></div><button type="button" class="dockCollapse" data-floor-dock-action="collapse" title="操作バーを折りたたむ">−</button></div><button type="button" data-floor-dock-action="left">↺ 15°</button><button type="button" data-floor-dock-action="right">↻ 15°</button><button type="button" data-floor-dock-action="90">90°回す</button><label class="floorLensTools">レンズ <input id="floorLensInput" type="number" min="14" max="200" step="1"> mm</label><div class="floorPlanPanTools"><span>表示移動</span><button type="button" data-floor-dock-action="pan-up" title="表示を上へ">↑</button><button type="button" data-floor-dock-action="pan-down" title="表示を下へ">↓</button><button type="button" data-floor-dock-action="pan-left" title="表示を左へ">←</button><button type="button" data-floor-dock-action="pan-right" title="表示を右へ">→</button></div><button type="button" data-floor-dock-action="assets">＋アセット</button><button type="button" data-floor-dock-action="delete">片付ける</button><span class="dockHint">中／右ドラッグ：表示移動　・　表示移動ボタン／Alt＋矢印／WASD：キャンバス移動　・　2本指タップ：元に戻す／3本指タップ：やり直す　・　家具の矢印キー移動はそのまま</span></div>'; stage.appendChild(floorPlanDock);
     // アセット棚を開いたときは、間取り操作バーを棚の上へ逃がす。棚と操作バーを重ねないためのレイアウト調整。
     function syncFloorPlanDockLayout() {
         const tray = el('assetTray'); if (!tray) return;
@@ -2002,8 +2030,8 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
             out.object = { o, base, center: scrW(base), world: { x: base[0] - Math.sin(a) * dist, z: base[2] + Math.cos(a) * dist } };
             out.object.s = scrW([out.object.world.x, orthView === 'side' ? base[1] : -1, out.object.world.z]);
         }
-        const yaw = Number(P.yaw || 0) * DG, body = { x: P.cx, z: P.cz }, target = { x: P.cx - Math.sin(yaw) * FLOOR_CAMERA_RAY, z: P.cz + Math.cos(yaw) * FLOOR_CAMERA_RAY }, cameraY = orthView === 'side' ? P.ch - 1 : -1;
-        out.camera = { body, target, sBody: scrW([body.x, cameraY, body.z]), sTarget: scrW([target.x, cameraY, target.z]), yaw };
+        const yaw = Number(P.yaw || 0) * DG, body = { x: P.cx, z: P.cz }, target = { x: P.cx - Math.sin(yaw) * FLOOR_CAMERA_RAY, z: P.cz + Math.cos(yaw) * FLOOR_CAMERA_RAY }, cameraY = orthView === 'side' ? P.ch - 1 : -1, half = Math.atan(18 / Math.max(12, Number(P.lens) || 38)), lensWorld = orthView === 'top' ? [P.cx - Math.sin(yaw - half) * FLOOR_CAMERA_RAY, cameraY, P.cz + Math.cos(yaw - half) * FLOOR_CAMERA_RAY] : null;
+        out.camera = { body, target, sBody: scrW([body.x, cameraY, body.z]), sTarget: scrW([target.x, cameraY, target.z]), sLens: lensWorld ? scrW(lensWorld) : null, lensWorld, yaw };
         return out;
     }
     function floorPlanItemAt(w) {
@@ -2028,18 +2056,22 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
     function floorPlanEditHandles() {
         const o = floorPlanObject(); if (!o || o.k !== 1) return null;
         const base = L2W(o, 0, 0, 0), zc = Math.abs(Number(o.h) || 0) > 1e-6 ? Number(o.h) / 2 : 0, center = scrW(L2W(o, 0, 0, zc)), handles = [];
-        const add = (kind, label, point, probe, start, min = .01) => {
+        const add = (kind, label, point, probe, start, min = .01, side = 1) => {
             const s = scrW(point), q = scrW(probe); if (!s.ok || !q.ok) return; const dx = q.x - s.x, dy = q.y - s.y, px = Math.hypot(dx, dy); if (px < .01) return;
-            handles.push({ kind, label, s, dir: { x: dx / px, y: dy / px }, scale: px / .1, start, min });
+            handles.push({ kind, label, s, dir: { x: dx / px, y: dy / px }, scale: px / .1, start, min, side });
         };
         if (orthView === 'top') {
-            add('w', '幅', L2W(o, o.ra, 0, 0), L2W(o, o.ra + .1, 0, 0), Math.abs(o.ra) * 2);
-            add('d', '奥行', L2W(o, 0, o.rb, 0), L2W(o, 0, o.rb + .1, 0), Math.abs(o.rb) * 2);
+            // 幅・奥行はプラス側とマイナス側の両面にハンドルを出す。
+            add('w', '幅＋', L2W(o, o.ra, 0, 0), L2W(o, o.ra + .1, 0, 0), Math.abs(o.ra) * 2, .01, 1);
+            add('w', '幅−', L2W(o, -o.ra, 0, 0), L2W(o, -o.ra - .1, 0, 0), Math.abs(o.ra) * 2, .01, -1);
+            add('d', '奥行＋', L2W(o, 0, o.rb, 0), L2W(o, 0, o.rb + .1, 0), Math.abs(o.rb) * 2, .01, 1);
+            add('d', '奥行−', L2W(o, 0, -o.rb, 0), L2W(o, 0, -o.rb - .1, 0), Math.abs(o.rb) * 2, .01, -1);
             // 真上ではY方向が投影されないため、画面上へ高さハンドルを逃がして表示する。
             const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(Math.abs(Number(o.ra) || .5), Math.abs(Number(o.rb) || .5)) * orthScale() * .65));
             handles.push({ kind: 'h', label: '高さ', s: { x: center.x, y: center.y + gap, ok: true }, dir: { x: 0, y: 1 }, scale: orthScale(), start: Math.max(0, Number(o.h) || 0), min: 0, screen: true });
         } else if (orthView === 'side') {
-            add('d', '奥行', L2W(o, 0, o.rb, zc), L2W(o, 0, o.rb + .1, zc), Math.abs(o.rb) * 2);
+            add('d', '奥行＋', L2W(o, 0, o.rb, zc), L2W(o, 0, o.rb + .1, zc), Math.abs(o.rb) * 2, .01, 1);
+            add('d', '奥行−', L2W(o, 0, -o.rb, zc), L2W(o, 0, -o.rb - .1, zc), Math.abs(o.rb) * 2, .01, -1);
             const visualH = Math.abs(Number(o.h) || 0) > 1e-6 ? Math.abs(Number(o.h)) : .6;
             add('h', '高さ', L2W(o, 0, 0, visualH), L2W(o, 0, 0, visualH + .1), Math.max(0, Number(o.h) || 0), 0);
         }
@@ -2077,6 +2109,7 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
         c.beginPath(); c.moveTo(body.x, body.y); c.lineTo(target.x, target.y); c.stroke();
         c.fillStyle = '#66e3c8'; c.strokeStyle = '#164c4b'; c.lineWidth = 1.5 / Z; c.beginPath(); c.arc(body.x, body.y, r, 0, Math.PI * 2); c.fill(); c.stroke();
         c.fillStyle = '#fff'; c.strokeStyle = '#66e3c8'; c.beginPath(); c.arc(target.x, target.y, r * .82, 0, Math.PI * 2); c.fill(); c.stroke();
+        if (k.sLens && k.sLens.ok) { const q = k.sLens, s = 6 / Z; c.fillStyle = '#fff'; c.strokeStyle = '#ffd34d'; c.lineWidth = 1.5 / Z; c.beginPath(); c.moveTo(q.x, q.y - s); c.lineTo(q.x + s, q.y); c.lineTo(q.x, q.y + s); c.lineTo(q.x - s, q.y); c.closePath(); c.fill(); c.stroke(); c.fillStyle = '#ffe6a1'; c.font = `bold ${10 / Z}px system-ui`; c.fillText('レンズ', q.x + 8 / Z, q.y - 7 / Z) }
         c.restore();
     }
     window.cityFloorPlanOverlay = drawFloorPlanOverlay;
@@ -2088,8 +2121,9 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
         [['floorRotateLeft', ground], ['floorRotateRight', ground], ['floorRotate90', ground], ['floorDelete', !!o]].forEach(([id, on]) => { const b = el(id); if (b) b.disabled = !on });
         floorPlanDock.querySelectorAll('[data-floor-dock-action]').forEach(b => { const a = b.dataset.floorDockAction; b.disabled = a === 'delete' ? !o : ['left', 'right', '90'].includes(a) ? !ground : false });
         const undoButton = el('floorUndo'), redoButton = el('floorRedo'); if (undoButton) undoButton.disabled = !HU.length; if (redoButton) redoButton.disabled = !RD.length;
+        const lensInput = el('floorLensInput'); if (lensInput && document.activeElement !== lensInput) lensInput.value = Number(P.lens || 35).toFixed(0);
     }
-    function floorDimensionPatch(o, name, value) {
+    function floorDimensionPatch(o, name, value, side = 1) {
         const v = Math.max(name === 'h' ? 0 : .01, Number(value));
         if (!Number.isFinite(v)) return null;
         if (name === 'w' || name === 'd') {
@@ -2097,8 +2131,8 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
             // 幅／奥行ハンドルは手前側の面を動かす。反対側の面を固定するため、
             // 中点をそのままにせず、中心(ca/cb)も半分の差分だけ同じ面側へ移動する。
             const delta = (v - (name === 'w' ? oldW : oldD)) / 2, cs = Math.cos(Number(o.rot || 0) * DG), sn = Math.sin(Number(o.rot || 0) * DG);
-            if (name === 'w') { patch.ca = o.ca + delta * cs; patch.cb = o.cb + delta * sn }
-            else { patch.ca = o.ca - delta * sn; patch.cb = o.cb + delta * cs }
+            if (name === 'w') { patch.ca = o.ca + side * delta * cs; patch.cb = o.cb + side * delta * sn }
+            else { patch.ca = o.ca - side * delta * sn; patch.cb = o.cb + side * delta * cs }
             if (o.asset === 'sphere' || o.type === 'cyl') { patch.ra = r; patch.rb = r; if (o.asset === 'sphere') patch.h = r * 2 }
             else patch[name === 'w' ? 'ra' : 'rb'] = r;
             return patch;
@@ -2133,6 +2167,9 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
     }
     el('floorUndo').onclick = () => { floorPlanDrag = null; undo() };
     el('floorRedo').onclick = () => { floorPlanDrag = null; redo() };
+    const floorLensInput = el('floorLensInput');
+    floorLensInput.oninput = () => { const v = Number(floorLensInput.value); if (Number.isFinite(v)) { P.lens = clamp(v, 14, 200); sync(); render() } };
+    floorLensInput.onchange = () => { floorLensInput.value = Number(P.lens || 35).toFixed(0) };
     floorPlanDock.querySelector('[data-floor-dock-action="pan-up"]').onclick = () => panFloorPlan(0, -80);
     floorPlanDock.querySelector('[data-floor-dock-action="pan-down"]').onclick = () => panFloorPlan(0, 80);
     floorPlanDock.querySelector('[data-floor-dock-action="pan-left"]').onclick = () => panFloorPlan(-80, 0);
@@ -2157,6 +2194,7 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
     cv.addEventListener('contextmenu', e => { if (window.cityFloorPlanActive) e.preventDefault() }, true);
     cv.addEventListener('pointerdown', e => {
         if (!window.cityFloorPlanActive) return;
+        if (floorTouchDown(e)) return;
         const p = pos(e), panGesture = e.button === 1 || e.button === 2 || e.altKey || floorPlanPanMode;
         if (panGesture && (orthView === 'top' || orthView === 'side')) { beginFloorPan(e, p); return; }
         const resize = floorPlanEditHandleAt(p);
@@ -2169,6 +2207,7 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
         if (h.object && Math.hypot(h.object.s.x - p.x, h.object.s.y - p.y) < lim) { e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'turn', pointerId: e.pointerId, id: h.object.o.id, started: false }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
         if (h.camera && Math.hypot(h.camera.sTarget.x - p.x, h.camera.sTarget.y - p.y) < lim) { e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'aim', pointerId: e.pointerId }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
         if (h.camera && Math.hypot(h.camera.sBody.x - p.x, h.camera.sBody.y - p.y) < lim) { const w = floorPlanWorldAt(p); if (!w) return; e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'camera', pointerId: e.pointerId, dx: P.cx - w.x, dz: P.cz - w.z }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
+        if (orthView === 'top' && h.camera && h.camera.sLens && Math.hypot(h.camera.sLens.x - p.x, h.camera.sLens.y - p.y) < lim) { e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'lens', pointerId: e.pointerId, p0: p, lens0: Number(P.lens) || 35, started: false }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
         const w = floorPlanWorldAt(p), hit = floorPlanItemAt(w);
         e.preventDefault(); e.stopImmediatePropagation();
         if (hit) {
@@ -2183,6 +2222,7 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
         } else beginFloorPan(e, p, true);
     }, true);
     cv.addEventListener('pointermove', e => {
+        if (floorTouchMove(e)) { e.preventDefault(); e.stopImmediatePropagation(); return }
         if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return;
         e.preventDefault(); e.stopImmediatePropagation();
         if (floorPlanDrag.kind === 'pan') {
@@ -2191,8 +2231,12 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
             window.cityFloorPlanCenter = [floorPlanDrag.center0[0] - dx / sc, floorPlanDrag.center0[1] + dy / sc]; render(); return;
         }
         if (floorPlanDrag.kind === 'resize') {
-            const o = floorPlanDrag.o0, h = floorPlanDrag.handle, p = pos(e), amount = ((p.x - floorPlanDrag.p0.x) * h.dir.x + (p.y - floorPlanDrag.p0.y) * h.dir.y) / (h.scale || 1), value = clamp(h.start + amount, h.min, 20), patch = floorDimensionPatch(o, h.kind, value);
+            const o = floorPlanDrag.o0, h = floorPlanDrag.handle, p = pos(e), amount = ((p.x - floorPlanDrag.p0.x) * h.dir.x + (p.y - floorPlanDrag.p0.y) * h.dir.y) / (h.scale || 1), value = clamp(h.start + amount, h.min, 20), patch = floorDimensionPatch(o, h.kind, value, h.side || 1);
             if (patch) { if (!floorPlanDrag.started) { HU.push(S); RD = []; floorPlanDrag.started = true } setOb(o.id, patch) }
+            render(); return;
+        }
+        if (floorPlanDrag.kind === 'lens') {
+            const w = floorPlanWorldAt(pos(e)); if (w) { const yaw = Number(P.yaw || 0) * DG, dx = w.x - P.cx, dz = w.z - P.cz, len = Math.hypot(dx, dz); if (len > .05) { const forwardX = -Math.sin(yaw), forwardZ = Math.cos(yaw), dot = forwardX * dx + forwardZ * dz, cross = forwardX * dz - forwardZ * dx, half = Math.max(.02, Math.min(1.45, Math.abs(Math.atan2(cross, dot)))), lens = clamp(18 / Math.tan(half), 14, 200); P.lens = +lens.toFixed(1); sync() } }
             render(); return;
         }
         const w = floorPlanWorldAt(pos(e)); if (!w) return;
@@ -2216,8 +2260,8 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
         }
         render();
     }, true);
-    cv.addEventListener('pointerup', e => { if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return; e.preventDefault(); e.stopImmediatePropagation(); const tapClear = floorPlanDrag.kind === 'pan' && floorPlanDrag.tapClear && !floorPlanDrag.moved; floorPlanDrag = null; snapHit = null; if (tapClear) setSelection(null, false); render() }, true);
-    cv.addEventListener('pointercancel', e => { if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return; e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = null; snapHit = null; render() }, true);
+    cv.addEventListener('pointerup', e => { const tracked = floorTouchUp(e); if (tracked) { e.preventDefault(); e.stopImmediatePropagation(); if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return } if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return; e.preventDefault(); e.stopImmediatePropagation(); const tapClear = floorPlanDrag.kind === 'pan' && floorPlanDrag.tapClear && !floorPlanDrag.moved; floorPlanDrag = null; snapHit = null; if (tapClear) setSelection(null, false); render() }, true);
+    cv.addEventListener('pointercancel', e => { const tracked = floorTouchUp(e); if (tracked) { e.preventDefault(); e.stopImmediatePropagation(); if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return } if (!floorPlanDrag || e.pointerId !== floorPlanDrag.pointerId) return; e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = null; snapHit = null; render() }, true);
     addEventListener('keydown', e => {
         if (!window.cityFloorPlanActive || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
         if (e.code === 'Space') { e.preventDefault(); floorPlanPanMode = true; return }
