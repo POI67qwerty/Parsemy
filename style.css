@@ -586,6 +586,16 @@ canvas {
 	color: #e8fffb
 }
 
+.lensPresetRow {
+	margin-top: 6px
+}
+
+.lensPresetRow button {
+	flex: 1 1 92px;
+	font-size: 11px;
+	padding: 6px 5px
+}
+
 .quickField {
 	display: grid;
 	grid-template-columns: 1fr 88px 28px;

@@ -595,6 +595,16 @@
 			color: #e8fffb
 		}
 
+		.lensPresetRow {
+			margin-top: 6px
+		}
+
+		.lensPresetRow button {
+			flex: 1 1 92px;
+			font-size: 11px;
+			padding: 6px 5px
+		}
+
 		.quickField {
 			display: grid;
 			grid-template-columns: 1fr 88px 28px;
@@ -1338,9 +1348,8 @@
 			<div class="barGroup"><button id="exportToggle">書き出し⌄</button>
 				<div id="exportMenu" class="exportMenu">
 					<button id="pngB">描画＋補助線 PNG（透過）</button><button id="pngL">描画のみ PNG（透過）</button><button
-						id="pngG">補助線のみ
-						PNG（透過）</button><button id="pngBH">描画＋補助線 PNG（背面処理・裏面非表示）</button><button id="pngLH">描画のみ
-						PNG（背面処理・裏面非表示）</button><button id="pngGH">補助線のみ PNG（背面処理）</button><button
+						id="pngG">補助線のみ PNG（透過）</button><button id="pngBH">描画＋補助線 PNG（背面処理・裏面非表示）</button><button
+						id="pngLH">描画のみ PNG（背面処理・裏面非表示）</button><button id="pngGH">補助線のみ PNG（背面処理）</button><button
 						id="cpyL">線画をクリップボードにコピー</button>
 				</div><button id="svP" class="saveBtn">保存</button><button id="opP">開く</button><input type="file"
 					id="opF" accept=".json,application/json" hidden><button id="helpToggle" class="iconBtn"
@@ -1988,9 +1997,9 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 					const tMin = Math.min(...proj.map(p => p.t[k])), tMax = Math.max(...proj.map(p => p.t[k])), fMin = faceT[k] - halves[k], fMax = faceT[k] + halves[k];
 					if (Math.min(fMax, tMax) - Math.max(fMin, tMin) < -tol) return;
 				}
-				// 上面／下面は高さ合わせのため、対象の下端・上端の両方を候補にする。
-				// 側面は隣接する向きだけに限定する。
-				const candidates = (fid === 'top' || fid === 'base') ? [nMin, nMax] : (plus ? [nMin] : [nMax]);
+				// 対象の下端・上端の両方を候補にする。面の接線方向が重なり、
+				// かつ吸着距離内にある辺だけを通すので、遠い対象へは飛ばない。
+				const candidates = [nMin, nMax];
 				candidates.forEach(targetN => {
 					const gap = targetN - faceN;
 					if (Math.abs(gap) <= tau && (!best || Math.abs(gap) < Math.abs(best.gap))) best = { gap, id: t.id, targetN };
@@ -2473,9 +2482,12 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				if (TC.size >= 2) { multiStart(); return }
 				if (mg || Date.now() - lastPen < 600) return;                          // ペン直後の1本指(手のひら)は視点を動かさない。2本以上のジェスチャーは受け付ける
 			} else if (e.pointerType === 'pen' && ptrType !== 'pen') { drag = null; cur = null; er = null; sh = null; prev = null; bd = false; ed = null; ptr = null; mg = null; TC.clear() }   // ペンは指より優先
+			// iPadでpointerupを取りこぼした古いポインタが残っても、次の編集操作を止めない。
+			if (ptr != null && ptr !== e.pointerId && e.pointerType !== 'mouse' && !TC.has(ptr)) { ptr = null; ptrType = null; ed = null; drag = null; cur = null; mg = null }
+			if (tool === 'edit' && e.pointerType !== 'mouse' && mode !== 'draw') setMode('draw');
 			if (ptr != null) return;
 			ptr = e.pointerId; ptrType = e.pointerType; cv.setPointerCapture(e.pointerId); const p = pos(e);
-			const pn = $('pn').checked, mod = e.pointerType === 'mouse' && (e.metaKey || e.ctrlKey), selectGesture = tool === 'edit' && mode === 'draw' && e.pointerType === 'mouse' && e.button === 0 && (e.shiftKey || e.metaKey || e.ctrlKey), nav = e.pointerType === 'mouse' && (e.button === 1 || e.button === 2 || e.altKey || ((e.shiftKey || mod) && !selectGesture)), touchTool = pn && e.pointerType === 'touch' && tool !== 'shape' && tool !== 'edit' && tool !== 'erase', act = (nav || (!selectGesture && mod)) ? 'view' : pn && e.pointerType === 'pen' ? 'draw' : touchTool ? 'view' : mode;   // 編集モードのShift/Ctrl/⌘クリックは複数選択、その他の修飾ドラッグは視点移動。
+			const pn = $('pn').checked, mod = e.pointerType === 'mouse' && (e.metaKey || e.ctrlKey), selectGesture = tool === 'edit' && mode === 'draw' && e.pointerType === 'mouse' && e.button === 0 && (e.shiftKey || e.metaKey || e.ctrlKey), nav = e.pointerType === 'mouse' && (e.button === 1 || e.button === 2 || e.altKey || ((e.shiftKey || mod) && !selectGesture)), touchTool = pn && e.pointerType === 'touch' && tool !== 'shape' && tool !== 'edit' && tool !== 'erase', editPointer = tool === 'edit' && (e.pointerType === 'touch' || e.pointerType === 'pen'), act = (nav || (!selectGesture && mod)) ? 'view' : editPointer ? 'draw' : pn && e.pointerType === 'pen' ? 'draw' : touchTool ? 'view' : mode;   // 編集モードのShift/Ctrl/⌘クリックとiPadの編集入力は編集を優先し、その他の修飾ドラッグは視点移動。
 			if (act === 'view') {
 				const pan = e.shiftKey || e.altKey || e.button === 2;
 				drag = { kind: pan ? 'pan' : 'orbit', x: e.clientX, y: e.clientY, yaw: P.yaw, hz: P.hz, pitch: P.pitch, cx: P.cx, cz: P.cz, ch: P.ch };
@@ -2576,6 +2588,20 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			drag = null; if (cur && cur.pv) { if (cur.pv.p.length > 1) { HU.push(S); S = [...S, { c: cur.c, w: cur.w, d3: true, p: dens3(cur.pv.p) }]; RD = [] } }   // 3Dの線として保存
 			else if (cur && cur.p.length > 1) { HU.push(S); S = [...S, { c: cur.c, w: cur.w, p: dens(cur.p.map(unscr)) }]; RD = [] } cur = null; render()
 		};   // 向きに変換して保存
+
+		// iPad Safariでキャンバス外へ指／ペンを離した場合の一般操作用保険。
+		// ボックス選択以外の編集でも、古いpointerIdが次の操作をブロックしないようにする。
+		function releaseInputState(e) {
+			if (e?.pointerType === 'touch') {
+				TC.delete(e.pointerId);
+				if (!TC.size) mg = null;
+			}
+			if (e?.pointerType === 'pen') lastPen = Date.now();
+			if (ptr === e?.pointerId) { ptr = null; ptrType = null; ed = null; drag = null; cur = null; sh = null; bd = false; er = null; snapHit = null }
+		}
+		addEventListener('pointerup', releaseInputState, false);
+		addEventListener('pointercancel', releaseInputState, false);
+		addEventListener('blur', () => { if (!boxSelect && !boxPending) { ptr = null; ptrType = null; ed = null; drag = null; cur = null; sh = null; bd = false; er = null; TC.clear(); mg = null } });
 
 		// ===== モード・ボタン =====
 		function setMode(m) {
@@ -2820,6 +2846,26 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
         <button data-preset="three">3点・見上げ</button>
         <button data-preset="flat">1点・正面</button>
       </div>
+      <div class="sceneTitle">レンズをすぐ切り替え</div>
+      <div class="sceneNote">数値は35mm判換算の目安です。43mmは人間の目に近い画角、50mmは標準レンズです。</div>
+      <div class="quickRow lensPresetRow">
+        <button type="button" data-lens-preset="14">14mm 超広角</button>
+        <button type="button" data-lens-preset="24">24mm 広角</button>
+        <button type="button" data-lens-preset="35">35mm</button>
+        <button type="button" data-lens-preset="43">43mm 目</button>
+        <button type="button" data-lens-preset="50">50mm 標準</button>
+        <button type="button" data-lens-preset="85">85mm 人物</button>
+        <button type="button" data-lens-preset="135">135mm 望遠</button>
+      </div>
+      <div class="sceneTitle">カメラ・設定プリセット</div>
+      <div class="quickField"><span>プリセット名</span><input id="studioPresetName" type="text" placeholder="例：路地・50mm"><em></em></div>
+      <div class="quickRow">
+        <button type="button" id="studioPresetSave" class="primary">現在を保存</button>
+        <button type="button" id="studioPresetLoad">読み込み</button>
+        <button type="button" id="studioPresetDelete">削除</button>
+      </div>
+      <label><span>保存済み</span><select id="studioPresetSelect"><option value="">まだありません</option></select></label>
+      <div class="sceneNote">カメラ位置・向き・レンズ・透視設定・表示設定を保存します。線や家具などのシーン内容は含めません。</div>
       <div class="quickField"><span>階段の段数</span><input id="stairsSteps" type="number" min="2" max="24" step="1" value="6"><em>段</em></div>
       <label class="quickCheck"><input id="stairsRail" type="checkbox" checked> 階段に手すりをつける</label>
       <div class="quickRow"><button id="applyStairs" class="primary">選択中の階段に反映</button></div>
@@ -3666,11 +3712,18 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			// 他オブジェクトの外周エッジ／角の投影へ近づいたときだけ補正する。
 			// 通常ビューの面スナップと同じく、隣接している対象だけを候補にする。
 			function floorFootprintXZ(o) {
-				if (!o || o.k !== 1) return [];
-				const out = [];
-				for (const x of [-Math.abs(Number(o.ra) || 0), Math.abs(Number(o.ra) || 0)]) for (const y of [-Math.abs(Number(o.rb) || 0), Math.abs(Number(o.rb) || 0)]) {
-					const p = L2W(o, x, y, 0); out.push({ x: p[0], z: p[2] });
+				if (!o) return [];
+				// 地面オブジェクトは回転後の実際の四隅を使う。壁・天井の図形は
+				// L2W(o, ..., ..., 0)だけだと床面上の外周が退化するため、3D外周箱を
+				// X/Zへ投影して、間取り上で隣接判定できるようにする。
+				if (o.k === 1) {
+					const out = [];
+					for (const x of [-Math.abs(Number(o.ra) || 0), Math.abs(Number(o.ra) || 0)]) for (const y of [-Math.abs(Number(o.rb) || 0), Math.abs(Number(o.rb) || 0)]) {
+						const p = L2W(o, x, y, 0); out.push({ x: p[0], z: p[2] });
+					}
+					return out;
 				}
+				const b = obBounds(o), out = []; for (const x of [b.lo[0], b.hi[0]]) for (const z of [b.lo[2], b.hi[2]]) out.push({ x, z });
 				return out;
 			}
 			function floorHeightSnap(o, patch, h, value) {
@@ -3691,25 +3744,33 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			function floorResizeSnap(o, patch, h, value) {
 				if (!$('snp')?.checked || !h || !['w', 'd', 'h'].includes(h.kind)) return patch;
 				if (h.kind === 'h') return floorHeightSnap(o, patch, h, value);
-				const q = { ...o, ...patch }, a = Number(q.rot || 0) * DG, side = Number(h.side) || 1;
+				const q = { ...o, ...patch }, a = Number(q.rot || 0) * DG;
+				// sideは「＋側／−側」の面そのもの。0や未設定を＋側へ丸めるが、
+				// −1は絶対に失わない。間取り9の下辺はここで−1になる。
+				const side = Number(h.side) === -1 ? -1 : 1;
 				const nx = h.kind === 'w' ? Math.cos(a) : -Math.sin(a), nz = h.kind === 'w' ? Math.sin(a) : Math.cos(a), tx = -nz, tz = nx;
 				const face = h.kind === 'w' ? L2W(q, side * q.ra, 0, 0) : L2W(q, 0, side * q.rb, 0), at = face[0] * nx + face[2] * nz, tAt = face[0] * tx + face[2] * tz;
 				const halfT = h.kind === 'w' ? Math.abs(q.rb) : Math.abs(q.ra), faceMin = tAt - halfT, faceMax = tAt + halfT;
 				// P.snは通常ビューと同じ画面上の吸着距離。正投影ではorthScaleがpx／world。
-				const scale = Math.max(24, Number(orthScale()) || 24), tau = Math.max(.04, (Number(P.sn) || 14) / scale), tolerance = Math.max(.01, tau * .25); let best = null;
+				const scale = Math.max(24, Number(orthScale()) || 24), tau = Math.max(.04, (Number(P.sn) || 14) / scale); let best = null;
 				targetsOf(o.id).forEach(t => {
 					const to = obOf(t.id), fp = floorFootprintXZ(to); if (fp.length < 4) return;
 					const pts = fp.map(p => ({ n: p.x * nx + p.z * nz, t: p.x * tx + p.z * tz }));
 					const nMin = Math.min(...pts.map(p => p.n)), nMax = Math.max(...pts.map(p => p.n)), tMin = Math.min(...pts.map(p => p.t)), tMax = Math.max(...pts.map(p => p.t));
-					// 面の長さ方向が隣り合って重なり、かつ編集面の外側にある対象だけを候補にする。
-					if (Math.min(faceMax, tMax) - Math.max(faceMin, tMin) < -tolerance) return;
-					const targetN = side > 0 ? nMin : nMax, gap = side > 0 ? targetN - at : at - targetN;
-					if (gap >= -tolerance && gap <= tau && (!best || Math.abs(gap) < Math.abs(best.gap))) best = { gap, id: t.id };
+					// 面の長さ方向が重なる、または辺／角が吸着距離以内にある対象だけを候補にする。
+					// 真上の間取りでは、辺同士がちょうど接するケースも許可する。
+					const tangentGap = Math.max(faceMin - tMax, tMin - faceMax, 0); if (tangentGap > tau) return;
+					[nMin, nMax].forEach(targetN => {
+						const gap = targetN - at;
+						if (Math.abs(gap) <= tau && (!best || Math.abs(gap) < Math.abs(best.gap))) best = { gap, id: t.id };
+					});
 				});
 				if (!best) return patch;
 				snapHit = new Set([best.id]);
 				// スナップ補正も反対側の面を固定したまま行う。オブジェクト全体を移動させない。
-				const next = Math.max(Number(h.min) || .01, Number(value) + best.gap);
+				// マイナス側の辺は、幅／奥行を増やすと逆方向へ動く。
+				// そのため、面の補正量にsideを掛けて反対側の面を固定する。
+				const next = Math.max(Number(h.min) || .01, Number(value) + side * best.gap);
 				return floorDimensionPatch(o, h.kind, next, side);
 			}
 			function floorPlanSnapDelta(o, delta) {
@@ -3894,6 +3955,56 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				}
 				render();
 			}
+
+			// ===== User camera / settings presets =====
+			const STUDIO_PRESET_KEY = 'city-grid-studio-presets-v1';
+			const studioPresetNameInput = el('studioPresetName'), studioPresetSelect = el('studioPresetSelect');
+			const presetCheckIds = ['gon', 'hzl', 'bgw', 'bin', 'zf', 'gg', 'p3', 'snp'];
+			function readStudioPresets() { try { const a = JSON.parse(localStorage.getItem(STUDIO_PRESET_KEY) || '[]'); return Array.isArray(a) ? a : [] } catch (e) { return [] } }
+			function writeStudioPresets(a) { try { localStorage.setItem(STUDIO_PRESET_KEY, JSON.stringify(a)); return true } catch (e) { return false } }
+			function captureStudioPreset(name) {
+				const checks = {}; presetCheckIds.forEach(id => { const n = el(id); if (n) checks[id] = !!n.checked });
+				return {
+					name: name || '名称未設定', version: 1, P: { ...P }, gt: el('gt').value, orthView: orthView || null, mode, tool, ar: el('ar').value, show: [...show], checks, snap: el('snap').value, pc: el('pc').value,
+					floorActive: !!window.cityFloorPlanActive, floorCenter: Array.isArray(window.cityFloorPlanCenter) ? [...window.cityFloorPlanCenter] : null, floorScale: Number(window.cityFloorPlanScale) || null
+				};
+			}
+			function refreshStudioPresetList(selected = '') {
+				if (!studioPresetSelect) return; const list = readStudioPresets(); studioPresetSelect.textContent = '';
+				if (!list.length) { const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'まだありません'; studioPresetSelect.appendChild(empty) }
+				else list.forEach(p => { const option = document.createElement('option'); option.value = String(p.name); option.textContent = String(p.name); studioPresetSelect.appendChild(option) });
+				if (selected && list.some(p => p.name === selected)) studioPresetSelect.value = selected;
+			}
+			function applyStudioPreset(d) {
+				if (!d) return;
+				if (window.cityFloorPlanActive) window.cityFloorPlanExit?.(true);
+				if (d.ar != null) { el('ar').value = d.ar; el('ar').onchange() }
+				if (d.gt != null) { el('gt').value = d.gt; applyType(d.gt) }
+				if (d.P) Object.keys(d.P).forEach(k => { if (k in P && d.P[k] != null) setP(k, d.P[k]) });
+				if (Array.isArray(d.show)) d.show.forEach((v, i) => { if (i < show.length) { show[i] = !!v; const n = document.querySelector('[data-i="' + i + '"]'); if (n) n.checked = !!v } });
+				if (d.checks) Object.entries(d.checks).forEach(([id, v]) => { const n = el(id); if (n) n.checked = !!v });
+				if (d.snap != null) el('snap').value = d.snap; if (d.pc != null) el('pc').value = d.pc;
+				orthView = d.orthView || null;
+				sync();
+				if (d.floorActive) {
+					window.cityFloorPlanEnter?.(orthView === 'side' ? 'side' : 'top');
+					if (Array.isArray(d.floorCenter)) window.cityFloorPlanCenter = [...d.floorCenter];
+					if (Number.isFinite(d.floorScale)) window.cityFloorPlanScale = d.floorScale;
+					render();
+				} else { setMode(d.mode === 'draw' ? 'draw' : 'view'); render() }
+			}
+			el('studioPresetSave').onclick = () => {
+				const name = (studioPresetNameInput.value || '').trim() || `プリセット ${readStudioPresets().length + 1}`;
+				const list = readStudioPresets().filter(p => p.name !== name); list.push(captureStudioPreset(name));
+				if (writeStudioPresets(list)) { studioPresetNameInput.value = name; refreshStudioPresetList(name) }
+			};
+			el('studioPresetLoad').onclick = () => { const name = studioPresetSelect.value, p = readStudioPresets().find(q => q.name === name); if (p) applyStudioPreset(p) };
+			el('studioPresetDelete').onclick = () => { const name = studioPresetSelect.value; if (!name) return; const list = readStudioPresets().filter(p => p.name !== name); if (writeStudioPresets(list)) refreshStudioPresetList() };
+			studioPresetSelect.onchange = () => { const p = readStudioPresets().find(q => q.name === studioPresetSelect.value); if (p) studioPresetNameInput.value = p.name };
+			refreshStudioPresetList();
+
+			// ===== Common lens buttons =====
+			quick.querySelectorAll('[data-lens-preset]').forEach(b => b.onclick = () => { setP('lens', Number(b.dataset.lensPreset)); sync(); render() });
 			quick.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => preset(b.dataset.preset));
 			el('applyHuman').onclick = () => {
 				const h = Math.max(.5, Math.min(10, parseFloat(humanInput.value) || 1.7)); P.hm = h; humanInput.value = h.toFixed(2);
@@ -3939,7 +4050,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 		})();
 	</script>
 
-	<script>(function () { function c() { var b = a.contentDocument || (a.contentWindow && a.contentWindow.document); if (b) { var d = b.createElement('script'); d.innerHTML = "window.__CF$cv$params={r:'a4c871486ca1d3e9',t:'MTc5MjMzNTkzOQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);"; b.getElementsByTagName('head')[0].appendChild(d) } } if (document.body) { var a = document.createElement('iframe'); a.height = 1; a.width = 1; a.style.position = 'absolute'; a.style.top = 0; a.style.left = 0; a.style.border = 'none'; a.style.visibility = 'hidden'; document.body.appendChild(a); if ('loading' !== document.readyState) c(); else if (window.addEventListener) document.addEventListener('DOMContentLoaded', c); else { var e = document.onreadystatechange || function () { }; document.onreadystatechange = function (b) { e(b); 'loading' !== document.readyState && (document.onreadystatechange = e, c()) } } } })();</script>
+	<script>(function () { function c() { var b = a.contentDocument || (a.contentWindow && a.contentWindow.document); if (b) { var d = b.createElement('script'); d.innerHTML = "window.__CF$cv$params={r:'a4c975cccfeb838b',t:'MTc5MjM0NjYxMA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);"; b.getElementsByTagName('head')[0].appendChild(d) } } if (document.body) { var a = document.createElement('iframe'); a.height = 1; a.width = 1; a.style.position = 'absolute'; a.style.top = 0; a.style.left = 0; a.style.border = 'none'; a.style.visibility = 'hidden'; document.body.appendChild(a); if ('loading' !== document.readyState) c(); else if (window.addEventListener) document.addEventListener('DOMContentLoaded', c); else { var e = document.onreadystatechange || function () { }; document.onreadystatechange = function (b) { e(b); 'loading' !== document.readyState && (document.onreadystatechange = e, c()) } } } })();</script>
 </body>
 
 </html>
