@@ -781,6 +781,31 @@ canvas {
 	font-size: 10px
 }
 
+.floorHistoryButtons {
+	display: flex;
+	gap: 4px;
+	flex: none
+}
+
+.floorHistoryButton {
+	min-width: 36px !important;
+	padding: 5px 7px !important
+}
+
+.floorPlanPanTools {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex: 0 0 auto;
+	color: #9eb1b1;
+	font-size: 10px
+}
+
+.floorPlanPanTools button {
+	min-width: 34px !important;
+	padding: 5px 6px !important
+}
+
 #floorPlanDock button {
 	min-width: 62px;
 	padding: 6px 8px !important;
@@ -823,6 +848,7 @@ canvas {
 
 #floorPlanDock.collapsed .floorPlanDockStatus,
 #floorPlanDock.collapsed .dockHint,
+#floorPlanDock.collapsed .floorPlanPanTools,
 #floorPlanDock.collapsed [data-floor-dock-action]:not([data-floor-dock-action="collapse"]) {
 	display: none
 }
