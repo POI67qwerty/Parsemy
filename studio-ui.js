@@ -908,8 +908,10 @@
 			add('h', '下端', L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - .1), Math.max(0, Number(o.h) || 0), 0, -1);
 		} else if (orthView === 'front') {
 			// 正面では幅と高さを直接編集し、見えない奥行きは画面上へ逃がしたハンドルで編集する。
-			add('w', '幅＋', L2W(o, o.ra, 0, 0), L2W(o, o.ra + .1, 0, 0), Math.abs(o.ra) * 2, .01, 1);
-			add('w', '幅−', L2W(o, -o.ra, 0, 0), L2W(o, -o.ra - .1, 0, 0), Math.abs(o.ra) * 2, .01, -1);
+			// 正面の幅ハンドルも、看板では黒い外枠の下端へ置く。
+			// 全高の底面 z=0 に置くと、看板の外枠から下へ浮いてしまう。
+			add('w', '幅＋', L2W(o, o.ra, 0, z0), L2W(o, o.ra + .1, 0, z0), Math.abs(o.ra) * 2, .01, 1);
+			add('w', '幅−', L2W(o, -o.ra, 0, z0), L2W(o, -o.ra - .1, 0, z0), Math.abs(o.ra) * 2, .01, -1);
 			add('h', '上端', L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + .1), Math.max(0, Number(o.h) || 0), 0, 1);
 			add('h', '下端', L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - .1), Math.max(0, Number(o.h) || 0), 0, -1);
 			const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(Math.abs(Number(o.ra) || .5), Math.abs(Number(o.h) || .6)) * orthScale() * .65));
@@ -1128,7 +1130,9 @@
 			}
 		}
 		const resize = floorPlanEditHandleAt(p);
-		if (resize && (orthView === 'top' || orthView === 'side')) { e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'resize', pointerId: e.pointerId, id: resize.g.o.id, o0: { ...resize.g.o, off: [...(resize.g.o.off || [0, 0, 0])] }, handle: resize.h, p0: p, started: false }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
+		// 7 前も9 上・8 横と同じ面編集ハンドルを先に受け取る。
+		// ここから漏れると、ハンドルを押してもオブジェクト移動として処理される。
+		if (resize && (orthView === 'top' || orthView === 'side' || orthView === 'front')) { e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'resize', pointerId: e.pointerId, id: resize.g.o.id, o0: { ...resize.g.o, off: [...(resize.g.o.off || [0, 0, 0])] }, handle: resize.h, p0: p, started: false }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
 		if (orthView === 'side' || orthView === 'front') {
 			const verticalHandles = floorPlanHandles(), verticalLim = 22 / Z, verticalAxis = orthView === 'side' ? 'side' : 'front';
 			if (verticalHandles.camera && Math.hypot(verticalHandles.camera.sTarget.x - p.x, verticalHandles.camera.sTarget.y - p.y) < verticalLim) {
