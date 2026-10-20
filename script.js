@@ -1226,10 +1226,11 @@ cv.onpointerdown = e => {
 	} else if (e.pointerType === 'pen' && ptrType !== 'pen') { drag = null; cur = null; er = null; sh = null; prev = null; bd = false; ed = null; ptr = null; mg = null; TC.clear() }   // ペンは指より優先
 	// iPadでpointerupを取りこぼした古いポインタが残っても、次の編集操作を止めない。
 	if (ptr != null && ptr !== e.pointerId && e.pointerType !== 'mouse' && !TC.has(ptr)) { ptr = null; ptrType = null; ed = null; drag = null; cur = null; mg = null }
-	if (tool === 'edit' && e.pointerType !== 'mouse' && mode !== 'draw') setMode('draw');
+	// 「視点」ボタンで3Dを操作中は、編集ツールが残っていてもタッチ／ペンを
+	// 自動的に描画へ切り替えない。編集はmode='draw'のときだけ受け取る。
 	if (ptr != null) return;
 	ptr = e.pointerId; ptrType = e.pointerType; cv.setPointerCapture(e.pointerId); const p = pos(e);
-	const pn = $('pn').checked, mod = e.pointerType === 'mouse' && (e.metaKey || e.ctrlKey), selectGesture = tool === 'edit' && mode === 'draw' && e.pointerType === 'mouse' && e.button === 0 && (e.shiftKey || e.metaKey || e.ctrlKey), nav = e.pointerType === 'mouse' && (e.button === 1 || e.button === 2 || e.altKey || ((e.shiftKey || mod) && !selectGesture)), touchTool = pn && e.pointerType === 'touch' && tool !== 'shape' && tool !== 'edit' && tool !== 'erase', editPointer = tool === 'edit' && (e.pointerType === 'touch' || e.pointerType === 'pen'), act = (nav || (!selectGesture && mod)) ? 'view' : editPointer ? 'draw' : pn && e.pointerType === 'pen' ? 'draw' : touchTool ? 'view' : mode;   // 編集モードのShift/Ctrl/⌘クリックとiPadの編集入力は編集を優先し、その他の修飾ドラッグは視点移動。
+	const pn = $('pn').checked, mod = e.pointerType === 'mouse' && (e.metaKey || e.ctrlKey), selectGesture = tool === 'edit' && mode === 'draw' && e.pointerType === 'mouse' && e.button === 0 && (e.shiftKey || e.metaKey || e.ctrlKey), nav = e.pointerType === 'mouse' && (e.button === 1 || e.button === 2 || e.altKey || ((e.shiftKey || mod) && !selectGesture)), touchTool = pn && e.pointerType === 'touch' && tool !== 'shape' && tool !== 'edit' && tool !== 'erase', editPointer = tool === 'edit' && mode === 'draw' && (e.pointerType === 'touch' || e.pointerType === 'pen'), act = (nav || (!selectGesture && mod)) ? 'view' : editPointer ? 'draw' : pn && e.pointerType === 'pen' && mode === 'draw' ? 'draw' : touchTool ? 'view' : mode;   // 視点モードでは、残っている編集ツールよりもカメラ操作を優先する。
 	if (act === 'view') {
 		const pan = e.shiftKey || e.altKey || e.button === 2;
 		drag = { kind: pan ? 'pan' : 'orbit', x: e.clientX, y: e.clientY, yaw: P.yaw, hz: P.hz, pitch: P.pitch, cx: P.cx, cz: P.cz, ch: P.ch };
