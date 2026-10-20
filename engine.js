@@ -1,12 +1,10 @@
-/* City Grid Studio engine: perspective rendering, drawing, selection, history and export. */
-
 const $ = id => document.getElementById(id);
 const cv = $('cv'), ctx = cv.getContext('2d');
 let W = 1600, H = 900;                       // キャンバスの内部サイズ（比率変更でHが変わる）
 
 // ===== パラメータ（初期値の水平回転は参考サイトのy=39.912） =====
 const MASTER_W = 1.5;
-const P = { lens: 35, yaw: 39.912, hz: 50, pitch: 0, fov: 180, roll: 0, n: 48, ga: 0.45, gw: 0.7, pw: MASTER_W, pa: 0.5, ew: 24, bt: 128, hr: 100, ch: 1, cx: 0, cz: 0, sn: 14, gs: 1, gn: 30, dp: 8 };
+const P = { lens: 35, yaw: 39.912, hz: 50, pitch: 0, fov: 180, roll: 0, n: 48, ga: 0.45, gw: 0.7, pw: MASTER_W, pa: 0.5, ew: 24, bt: 128, hr: 100, ch: 1, cx: 0, cz: 0, sn: 14, gs: 1, gn: 30, dp: 8, surfaceMode: false };
 const show = [true, true, true];            // 軸ごとの補助線表示
 let S = [], RD = [], HU = [], Z = 1, ox = 0, oy = 0, mg = null, ptrType = null, er = null, tool = 'pen', sh = null, prev = null, CR = null, bd = false, snapHit = null, sel = null, selIds = new Set(), ed = null, cur = null, drag = null, IMG = null, mode = 'view', AX = [], AXC = [], T = 'r';  // T: 'r'=通常の透視 / 'f'=魚眼
 let orthView = null, standardApplying = false; // Blender風の正面・真横・真上では正投影を使う
@@ -77,7 +75,6 @@ ${RO('rot', '回転', -180, 180, 0.1, '°')}
 <div id=signP style="display:none"><h3>看板の内側</h3>
 <label><span>絵枠の幅</span><input type=number class=nv id=ov_faceW step=0.01 style="width:100px"><span class=un>m</span></label>
 <label><span>絵枠の高さ</span><input type=number class=nv id=ov_faceH step=0.01 style="width:100px"><span class=un>m</span></label>
-<label><span>角のベベル</span><input type=number class=nv id=ov_bevel step=0.01 style="width:100px"><span class=un>m</span></label>
 </div>
 <label><button id=obExtrude>押し出しを有効</button><button id=obGnd>地面につける</button><button id=obDup>複製</button><button id=obDel>削除</button><button id=obOff>選択解除</button></label>
 <div class="note">位置は底面の中心です。Yは地面からの高さ（0で地面につく）、X・Zは床の方向（VP1・VP2側）です</div>
@@ -132,7 +129,14 @@ function hideLegacyShapeControls() {
 hideLegacyShapeControls();
 
 // ===== 値の同期 =====
-function sync() { for (const k in P) { const el = $('v_' + k); if (el && document.activeElement !== el) el.value = +(+P[k]).toFixed(3) } }   // 入力中の欄は上書きしない
+function sync() { for (const k in P) { const el = $('v_' + k); if (el && document.activeElement !== el && typeof P[k] === 'number') el.value = +(+P[k]).toFixed(3) } syncSurfaceToggle() }   // 入力中の欄は上書きしない
+function syncSurfaceToggle() {
+	const b = $('surfaceToggle'); if (!b) return;
+	b.textContent = P.surfaceMode ? '面 ON' : '面 OFF';
+	b.classList.toggle('on', !!P.surfaceMode);
+	b.title = P.surfaceMode ? '画像全体：面表示ON／背面処理ON（クリックでOFF）' : '画像全体：面表示OFF（クリックで面表示＋背面処理）';
+}
+$('surfaceToggle').onclick = () => { P.surfaceMode = !P.surfaceMode; syncSurfaceToggle(); render() };
 function leaveOrthView(changedKey) {
 	if (standardApplying) return;
 	// 間取り中のレンズ変更は正投影を解除せず、カメラの画角だけを更新する。
@@ -141,7 +145,7 @@ function leaveOrthView(changedKey) {
 }
 function setP(k, v) { leaveOrthView(k); P[k] = v; const input = $(k); if (input) input.value = v }
 for (const k in P) {
-	const el = $(k); el.value = P[k]; el.oninput = () => { leaveOrthView(k); P[k] = +el.value; sync(); render() };
+	const el = $(k); if (!el) continue; el.value = P[k]; el.oninput = () => { leaveOrthView(k); P[k] = +el.value; sync(); render() };
 	const nv = $('v_' + k);   // 数値の直接入力（スライダーの範囲内に収める。本数だけは3000まで）
 	nv.oninput = () => { let v = parseFloat(nv.value); if (isNaN(v)) return; leaveOrthView(k); v = Math.max(+el.min, Math.min(k === 'n' ? 3000 : +el.max, v)); P[k] = v; if (v >= +el.min && v <= +el.max) el.value = v; render() };
 	nv.onchange = () => { nv.value = +P[k].toFixed(3) }
@@ -403,7 +407,7 @@ function L2W(o, x, y, z) {
 	v[o.k] = o.d - o.d * o.lift - o.d * z; v[iu] = o.ca + x * cs - y * sn; const f = o.off || [0, 0, 0]; v[iv] = o.cb + x * sn + y * cs; return [v[0] + f[0], v[1] + f[1], v[2] + f[2]]
 }
 // 古い保存データ（大きさ%・高さ%）を、幅・奥行き・高さの形に直す
-function fixOb(o) { let n = o; if (o.h === undefined) { const f = (o.sc || 100) / 100, ra = o.ra * f, rb = o.rb * f; n = { ...o, ra, rb, h: Math.min(ra, rb) * 2 * (o.hr || 100) / 100, sc: undefined, hr: undefined } } return n.off ? n : { ...n, off: [0, 0, 0] } }
+function fixOb(o) { let n = o; if (o.h === undefined) { const f = (o.sc || 100) / 100, ra = o.ra * f, rb = o.rb * f; n = { ...o, ra, rb, h: Math.min(ra, rb) * 2 * (o.hr || 100) / 100, sc: undefined, hr: undefined } } if (n?.asset === 'sign') delete n.bevel; return n.off ? n : { ...n, off: [0, 0, 0] } }
 // 選択中の図形の数値を、パネルに表示
 function syncSel() {
 	normalizeSelection();
@@ -464,35 +468,45 @@ function facePatch(o, fid, dl) {
 	else if (o.type === 'asset' && o.asset === 'sphere') { q.ra = r1; q.rb = r1; q.h = r1 * 2 }
 	else q[isU ? 'ra' : 'rb'] = r1; return q
 }
-// 看板専用のビュー内ハンドル。絵枠の幅・高さと外周ベベルを、
+// 看板の絵枠は常にカメラ側の面へ出す。反対側へ回り込んだ3D視点でも、
+// 編集ハンドルが看板の裏へ隠れず、実際に見えている面を編集できるようにする。
+function signFaceDepth(o, gap = .018) {
+	const [iu, iv] = PL[o.k], cs = Math.cos(Number(o.rot || 0) * DG), sn = Math.sin(Number(o.rot || 0) * DG), ev = [0, 0, 0];
+	ev[iu] = -sn; ev[iv] = cs;
+	const base = L2W(o, 0, 0, 0), rel = V.add(camPos(), base, 1, -1), side = V.dot(rel, ev) >= 0 ? 1 : -1, depth = Math.max(.02, Math.abs(Number(o.rb) || .1));
+	return side * (depth + gap);
+}
+// 看板専用のビュー内ハンドル。内側の絵枠の幅・高さを、
 // 左の数値欄だけでなくキャンバス上のハンドルをドラッグして編集できる。
 function signGizmo(o) {
 	if (!o || o.type !== 'asset' || o.asset !== 'sign') return null;
-	const w = Math.max(.08, o.ra * 2), d = Math.max(.04, o.rb * 2), h = Math.max(.08, o.h || 1), fy = -d / 2 - .018;
+	const w = Math.max(.08, o.ra * 2), d = Math.max(.04, o.rb * 2), h = Math.max(.08, o.h || 1), fy = signFaceDepth(o);
 	const board0 = .08 * h, board1 = .82 * h;
-	const maxW = w * .90, maxH = (board1 - board0) * .84, maxB = Math.min(w, d, h) * .39;
-	const faceW = clamp(Number(o.faceW) || w * .70, .08, maxW), faceH = clamp(Number(o.faceH) || h * .34, .08, maxH), bevel = clamp(Number.isFinite(Number(o.bevel)) ? Number(o.bevel) : 0, 0, maxB);
+	const maxW = w * .90, maxH = (board1 - board0) * .84;
+	const faceW = clamp(Number(o.faceW) || w * .70, .08, maxW), faceH = clamp(Number(o.faceH) || h * .34, .08, maxH);
 	const pr = (x, y, z) => scrW(L2W(o, x, y, z));
 	const iz0 = (board0 + board1 - faceH) / 2, iz1 = iz0 + faceH, zm = (iz0 + iz1) / 2;
 	const center = pr(0, fy, zm), right = pr(faceW / 2, fy, zm), top = pr(0, fy, iz1), frame = [pr(-faceW / 2, fy, iz0), pr(faceW / 2, fy, iz0), pr(faceW / 2, fy, iz1), pr(-faceW / 2, fy, iz1)];
-	const make = (kind, anchor, probe, base, min, max) => {
-		const dx = probe.x - anchor.x, dy = probe.y - anchor.y, step = Math.max(.0001, Number(probe._step) || .05), sc = Math.hypot(dx, dy) / step;
-		return { kind, s: anchor, dir: { x: dx / (Math.hypot(dx, dy) || 1), y: dy / (Math.hypot(dx, dy) || 1) }, scale: sc || 1, start: base, min, max };
+	const make = (kind, anchor, probe, base, min, max, fallbackAxis = null) => {
+		const dx = probe.x - anchor.x, dy = probe.y - anchor.y, step = Math.max(.0001, Number(probe._step) || .05), px = Math.hypot(dx, dy);
+		// 真横では絵枠の幅(X)が投影上つぶれ、真上では高さ(Y)がつぶれる。
+		// その場合も、立方体の面ハンドルと同じように画面上へ逃がして編集できるようにする。
+		if (fallbackAxis && (!anchor?.ok || !probe?.ok || px < 6 / Z)) {
+			const dir = fallbackAxis === 'x' ? { x: 1, y: 0 } : { x: 0, y: -1 }, gap = Math.max(38 / Z, Math.min(72 / Z, Math.max(34 / Z, step * (orthView ? orthScale() : 80))));
+			const s = { x: anchor.x + dir.x * gap, y: anchor.y + dir.y * gap, ok: !!anchor?.ok };
+			return { kind, s, dir, scale: orthView ? Math.max(1, orthScale()) : Math.max(24, px / step || 1), start: base, min, max, fallback: true };
+		}
+		return { kind, s: anchor, dir: { x: dx / (px || 1), y: dy / (px || 1) }, scale: px / step || 1, start: base, min, max };
 	};
 	// _step is kept on the temporary projected point so the screen scale can be measured.
 	const pw = Math.max(.05, w * .12), ph = Math.max(.05, h * .10);
 	const rw = pr(faceW / 2 + pw, fy, zm); rw._step = pw;
 	const ht = pr(0, fy, iz1 + ph); ht._step = ph;
-	const outer = pr(w / 2, fy, board1), bp = Math.max(.05, Math.min(maxB, .10));
-	const bi = pr(w / 2 - bp, fy, board1 - bp); bi._step = bp;
 	const handles = {
-		faceW: make('faceW', right, rw, faceW, .08, maxW),
-		faceH: make('faceH', top, ht, faceH, .08, maxH),
-		bevel: make('bevel', outer, bi, bevel, 0, maxB)
+		faceW: make('faceW', right, rw, faceW, .08, maxW, 'x'),
+		faceH: make('faceH', top, ht, faceH, .08, maxH, 'y')
 	};
-	const bh = handles.bevel, bo = Math.max(18 / Z, (bh.scale || 1) * bevel);
-	bh.s = { ...bh.s, x: outer.x + bh.dir.x * bo, y: outer.y + bh.dir.y * bo };
-	return { o, C3: L2W(o, 0, 0, (board0 + board1) / 2), center, frame, outer, handles };
+	return { o, C3: L2W(o, 0, 0, (board0 + board1) / 2), center, frame, handles };
 }
 function coneGizmo(o) {
 	if (!o || o.type !== 'asset' || o.asset !== 'cone') return null;
@@ -513,11 +527,12 @@ function drawSpecialGizmo(c, o) {
 	const sq = (q, col, diamond = false) => { if (!q || !q.ok) return; c.fillStyle = col; c.strokeStyle = '#102027'; c.lineWidth = 1.4 / Z; c.beginPath(); if (diamond) { c.moveTo(q.x, q.y - 7 / Z); c.lineTo(q.x + 7 / Z, q.y); c.lineTo(q.x, q.y + 7 / Z); c.lineTo(q.x - 7 / Z, q.y) } else c.rect(q.x - 6 / Z, q.y - 6 / Z, 12 / Z, 12 / Z); c.closePath(); c.fill(); c.stroke() };
 	if (sg.o.asset === 'sign') {
 		const h = sg.handles; c.setLineDash([5 / Z, 4 / Z]); c.lineWidth = 1.2 / Z;
-		c.strokeStyle = 'rgba(102,227,200,.9)'; c.beginPath(); c.moveTo(sg.center.x, sg.center.y); c.lineTo(h.faceW.s.x, h.faceW.s.y); c.moveTo(sg.center.x, sg.center.y); c.lineTo(h.faceH.s.x, h.faceH.s.y); c.stroke();
-		c.strokeStyle = 'rgba(255,159,104,.95)'; c.beginPath(); c.moveTo(sg.outer.x, sg.outer.y); c.lineTo(h.bevel.s.x, h.bevel.s.y); c.stroke(); c.setLineDash([]);
-		sq(h.faceW.s, '#66e3c8'); sq(h.faceH.s, '#66e3c8'); sq(h.bevel.s, '#ff9f68', true);
+		if (sg.frame && sg.frame.length === 4 && sg.frame.every(q => q && q.ok)) {
+			c.strokeStyle = 'rgba(102,227,200,.58)'; c.beginPath(); sg.frame.forEach((q, i) => i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)); c.closePath(); c.stroke();
+		}
+		c.strokeStyle = 'rgba(102,227,200,.9)'; c.beginPath(); c.moveTo(sg.center.x, sg.center.y); c.lineTo(h.faceW.s.x, h.faceW.s.y); c.moveTo(sg.center.x, sg.center.y); c.lineTo(h.faceH.s.x, h.faceH.s.y); c.stroke(); c.setLineDash([]);
+		sq(h.faceW.s, '#66e3c8'); sq(h.faceH.s, '#66e3c8');
 		c.fillStyle = '#66e3c8'; c.font = `bold ${12 / Z}px system-ui`; c.fillText('絵枠W', h.faceW.s.x + 8 / Z, h.faceW.s.y - 7 / Z); c.fillText('絵枠H', h.faceH.s.x + 8 / Z, h.faceH.s.y - 7 / Z);
-		c.fillStyle = '#ffb995'; c.fillText('ベベル', h.bevel.s.x + 9 / Z, h.bevel.s.y - 8 / Z);
 	} else if (sg.o.asset === 'cone') {
 		c.strokeStyle = 'rgba(255,179,111,.95)'; c.lineWidth = 1.5 / Z; c.beginPath(); c.moveTo(sg.base.x, sg.base.y); c.lineTo(sg.apex.x, sg.apex.y); c.stroke();
 		sq(sg.handle.s, '#ffb36f'); c.fillStyle = '#ffcf9f'; c.font = `bold ${12 / Z}px system-ui`; c.fillText('高さ', sg.handle.s.x + 9 / Z, sg.handle.s.y - 8 / Z);
@@ -531,7 +546,7 @@ function drawSpecialGizmo(c, o) {
 // 選択中の図形のギズモの位置（画面座標つき）
 function gizmo() {
 	const o = sel && obOf(sel); if (!o) return null;
-	const [iu, iv] = PL[o.k], cs = Math.cos(o.rot * DG), sn = Math.sin(o.rot * DG), solid = o.type === 'box' || o.type === 'cyl' || o.type === 'rect' || o.type === 'circ' || o.type === 'triPrism' || o.type === 'triPyramid' || (o.type === 'asset' && (o.asset === 'triPrism' || o.asset === 'triPyramid'));
+	const [iu, iv] = PL[o.k], cs = Math.cos(o.rot * DG), sn = Math.sin(o.rot * DG), solid = o.type === 'box' || o.type === 'cyl' || o.type === 'rect' || o.type === 'circ' || o.type === 'triPrism' || o.type === 'triPyramid' || (o.type === 'asset' && (o.asset === 'triPrism' || o.asset === 'triPyramid' || o.asset === 'sign' || o.asset === 'stairs'));
 	const C3 = L2W(o, 0, 0, solid ? o.h / 2 : 0), sC = scrW(C3); if (!sC.ok) return null;
 	const g = { o, C3, sC, axes: [], faces: [], ring: [] }, nC = Math.hypot(...V.add(C3, CO()));
 	[[1, 0, 0, '#e8743d', 'X'], [0, 1, 0, '#4a7be8', 'Y'], [0, 0, 1, '#2fb5a5', 'Z']].forEach(([x, y, z, col, nm]) => {   // 画面で約90pxになる長さの矢印
@@ -664,9 +679,9 @@ function beginGizmo(h, p) {
 function dragEdit(p) {
 	const o = ed.o0, [iu, iv] = PL[o.k], r = unscr(p), on = $('snp').checked; let patch = null; snapHit = null;
 	const snap = (delta, axes) => { if (!on) return delta; const q = snapShift(ed.bb, delta, axes, ed.targets, ed.tau); if (q.hit.size) snapHit = q.hit; return q.d };
-	if (ed.t === 'sign-faceW' || ed.t === 'sign-faceH' || ed.t === 'sign-bevel') {
+	if (ed.t === 'sign-faceW' || ed.t === 'sign-faceH') {
 		const h = ed.sign, deltaX = p.x - ed.p0.x, deltaY = p.y - ed.p0.y, amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1);
-		const min = h.min, max = h.max, v = clamp(h.start + amount, min, max); patch = { [ed.t === 'sign-faceW' ? 'faceW' : ed.t === 'sign-faceH' ? 'faceH' : 'bevel']: v };
+		const min = h.min, max = h.max, v = clamp(h.start + amount, min, max); patch = { [ed.t === 'sign-faceW' ? 'faceW' : 'faceH']: v };
 	} else if (ed.t === 'cone-height') {
 		const h = ed.sign, deltaX = p.x - ed.p0.x, deltaY = p.y - ed.p0.y, v = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max); patch = { h: v };
 	} else if (ed.t === 'sphere-radius') {
@@ -714,7 +729,7 @@ function setTool(t) {
 	tool = tool === t ? 'pen' : t;
 	[['tE', 'erase'], ['tS', 'shape'], ['tB', 'border'], ['tM', 'edit']].forEach(([id, n]) => $(id).classList.toggle('on', tool === n));
 	if (tool !== 'pen') setMode('draw');
-	const HT = { shape: '図形：キャンバスをドラッグすると長方形／円／三角柱／三角錐を作成し、自動で編集モードになります。種類・面は左の設定で選びます', border: '書き出し範囲：ドラッグで枠を指定。PNG保存・コピーはこの範囲で切り取られます', erase: '消しゴム：なぞったところを消します', edit: '図形編集：線にさわって選択。空白を長押ししてドラッグするとボックス選択。Shift/Ctrl/⌘クリックでも複数選択でき、選択済みの線をドラッグするとまとめて移動。iPadは指またはApple Pencilで長押しドラッグ。矢印＝軸に沿って移動／白い四角＝面を押し引き／点線の輪＝回転／線をドラッグ＝面の上で移動。看板は絵枠W・絵枠H・ベベルのハンドル、円錐は高さ、球体は半径ハンドルをドラッグできます' };
+	const HT = { shape: '図形：キャンバスをドラッグすると長方形／円／三角柱／三角錐を作成し、自動で編集モードになります。種類・面は左の設定で選びます', border: '書き出し範囲：ドラッグで枠を指定。PNG保存・コピーはこの範囲で切り取られます', erase: '消しゴム：なぞったところを消します', edit: '図形編集：線にさわって選択。空白を長押ししてドラッグするとボックス選択。Shift/Ctrl/⌘クリックでも複数選択でき、選択済みの線をドラッグするとまとめて移動。iPadは指またはApple Pencilで長押しドラッグ。矢印＝軸に沿って移動／白い四角＝面を押し引き／点線の輪＝回転／線をドラッグ＝面の上で移動。看板は絵枠W・絵枠Hと外形の面ハンドル、円錐は高さ、球体は半径ハンドルをドラッグできます' };
 	if (HT[tool]) $('hint').textContent = HT[tool] + ' ／ ⌘(Ctrl)+ドラッグ＝視点移動'
 }
 $('tE').onclick = () => setTool('erase'); $('tS').onclick = () => setTool('shape'); $('tB').onclick = () => setTool('border'); $('tM').onclick = () => setTool('edit');
@@ -739,13 +754,18 @@ function exportSurfaceTriangles(o) {
 	const L = (x, y, z) => L2W(o, x, y, z), tri = (a, b, c) => out.push([L(...a), L(...b), L(...c)]), quad = (a, b, c, d) => { tri(a, b, c); tri(a, c, d) };
 	const disk = (z, n = 24) => { const c = [0, 0, z]; for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2, b = (i + 1) / n * Math.PI * 2; tri(c, [w / 2 * Math.cos(a), d / 2 * Math.sin(a), z], [w / 2 * Math.cos(b), d / 2 * Math.sin(b), z]) } };
 	const cylinder = (z0, z1, n = 24) => { disk(z0, n); disk(z1, n); for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2, b = (i + 1) / n * Math.PI * 2, A = [w / 2 * Math.cos(a), d / 2 * Math.sin(a), z0], B = [w / 2 * Math.cos(b), d / 2 * Math.sin(b), z0], C = [w / 2 * Math.cos(b), d / 2 * Math.sin(b), z1], D = [w / 2 * Math.cos(a), d / 2 * Math.sin(a), z1]; quad(A, B, C, D) } };
+	const boxAt = (cx, cy, bw, bd, z0, z1) => { const x = bw / 2, y = bd / 2, v = [[cx - x, cy - y, z0], [cx + x, cy - y, z0], [cx + x, cy + y, z0], [cx - x, cy + y, z0], [cx - x, cy - y, z1], [cx + x, cy - y, z1], [cx + x, cy + y, z1], [cx - x, cy + y, z1]], f = [[0, 1, 2, 3], [4, 7, 6, 5], [0, 4, 5, 1], [1, 5, 6, 2], [2, 6, 7, 3], [3, 7, 4, 0]]; f.forEach(q => quad(v[q[0]], v[q[1]], v[q[2]], v[q[3]])) };
+	const ellipsoid = (cx, cy, cz, rx, ry, rz, lat = 8, lon = 12) => { for (let j = 0; j < lat; j++) { const p0 = -Math.PI / 2 + j * Math.PI / lat, p1 = -Math.PI / 2 + (j + 1) * Math.PI / lat; for (let i = 0; i < lon; i++) { const a = i * 2 * Math.PI / lon, b = (i + 1) * 2 * Math.PI / lon, q = (p, t) => [cx + rx * Math.cos(p) * Math.cos(t), cy + ry * Math.cos(p) * Math.sin(t), cz + rz * Math.sin(p)], A = q(p0, a), B = q(p0, b), C = q(p1, b), D = q(p1, a); tri(A, B, C); tri(A, C, D) } } };
+	const segment = (a, b, r, n = 6) => { const sub = (u, v) => u.map((x, i) => x - v[i]), add = (u, v) => u.map((x, i) => x + v[i]), mul = (u, s) => u.map(x => x * s), dotL = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2], crossL = (u, v) => [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], unit = u => { const q = Math.hypot(...u) || 1; return u.map(x => x / q) }, axis = unit(sub(b, a)), ref = Math.abs(axis[2]) < .85 ? [0, 0, 1] : [0, 1, 0], u = unit(crossL(axis, ref)), v = unit(crossL(axis, u)), ra = [], rb = []; for (let i = 0; i < n; i++) { const t = i / n * Math.PI * 2, off = add(mul(u, Math.cos(t) * r), mul(v, Math.sin(t) * r)); ra.push(add(a, off)); rb.push(add(b, off)) } for (let i = 0; i < n; i++) { const j = (i + 1) % n; quad(ra[i], ra[j], rb[j], rb[i]); tri(a, ra[j], ra[i]); tri(b, rb[i], rb[j]) } };
 	const kind = o.asset || o.type;
 	if ((o.type === 'rect' || kind === 'rect') && !o.extrude) { quad([-w / 2, -d / 2, 0], [w / 2, -d / 2, 0], [w / 2, d / 2, 0], [-w / 2, d / 2, 0]); return out }
 	if (o.type === 'rect' || kind === 'box' || kind === 'sign') { addExportBoxFaces(out, o, w, d, kind === 'sign' ? h * .08 : 0, kind === 'sign' ? h * .82 : h); return out }
 	if (o.type === 'circ' || kind === 'cylinder' || kind === 'lantern') { cylinder(kind === 'lantern' ? h * .22 : 0, kind === 'lantern' ? h * .70 : h, kind === 'lantern' ? 12 : 32); return out }
 	if (kind === 'crosswalk') { quad([-w / 2, -d / 2, .01], [w / 2, -d / 2, .01], [w / 2, d / 2, .01], [-w / 2, d / 2, .01]); return out }
 	if (kind === 'cone') {
-		disk(0, 32); const apex = [0, 0, h], n = 32; for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2, b = (i + 1) / n * Math.PI * 2; tri([0, 0, 0], [w / 2 * Math.cos(a), d / 2 * Math.sin(a), 0], apex); tri([0, 0, 0], apex, [w / 2 * Math.cos(b), d / 2 * Math.sin(b), 0]) } return out;
+		// 底面は中心からの三角形、側面は隣り合う外周頂点と頂点の一枚だけ。
+		// 各区間を二重に登録しないので、面ONでも重複・交差する三角面にならない。
+		disk(0, 32); const apex = [0, 0, h], n = 32; for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2, b = (i + 1) / n * Math.PI * 2; tri([w / 2 * Math.cos(a), d / 2 * Math.sin(a), 0], [w / 2 * Math.cos(b), d / 2 * Math.sin(b), 0], apex) } return out;
 	}
 	if (kind === 'triPrism') {
 		const x = w / 2, y = d / 2, A = [[-x, -y, 0], [x, -y, 0], [0, -y, h]], B = [[-x, y, 0], [x, y, 0], [0, y, h]]; quad(A[0], A[1], A[2], A[2]); quad(B[2], B[1], B[0], B[0]); for (let i = 0; i < 3; i++)quad(A[i], B[i], B[(i + 1) % 3], A[(i + 1) % 3]); return out;
@@ -756,10 +776,49 @@ function exportSurfaceTriangles(o) {
 	if (kind === 'sphere') {
 		const lat = 12, lon = 24; for (let j = 0; j < lat; j++) { const p0 = -Math.PI / 2 + j * Math.PI / lat, p1 = -Math.PI / 2 + (j + 1) * Math.PI / lat; for (let i = 0; i < lon; i++) { const a = i * 2 * Math.PI / lon, b = (i + 1) * 2 * Math.PI / lon; const q = (p, t) => [w / 2 * Math.cos(p) * Math.cos(t), d / 2 * Math.cos(p) * Math.sin(t), h / 2 + h / 2 * Math.sin(p)]; const A = q(p0, a), B = q(p0, b), C = q(p1, b), D = q(p1, a); tri(A, B, C); tri(A, C, D) } } return out;
 	}
-	if (kind === 'stairs') {
-		const n = Math.max(2, Math.min(24, Math.round(o.steps || 6))), sd = d / n, sh = h / n; for (let i = 0; i < n; i++) { const y0 = -d / 2 + i * sd, y1 = y0 + sd, z = (i + 1) * sh; quad([-w / 2, y0, 0], [w / 2, y0, 0], [w / 2, y1, z], [-w / 2, y1, z]); quad([-w / 2, y0, z], [w / 2, y0, z], [w / 2, y1, z], [-w / 2, y1, z]) } return out;
+	if (kind === 'person') {
+		// 人物は包絡箱ではなく、線画と同じ胴体・脚・頭の形へ面を付ける。
+		// これで面ON時に人物全体が大きな直方体で塗りつぶされない。
+		const bodyScale = clamp(Number(o.bodyScale) || 1, .6, 1.8), shoulderScale = clamp(Number(o.shoulderScale) || 1, .6, 1.6), headScale = clamp(Number(o.headScale) || 1, .7, 1.5), legSpread = clamp(Number(o.legSpread) || 1, .6, 1.8), pose = o.pose || 'stand';
+		const defaults = { stand: [0, 0, 0], walk: [.22, 0, 0], crouch: [.04, .65, 0], sit: [.10, .35, 0] }, def = defaults[pose] || defaults.stand;
+		const stride = clamp(Number.isFinite(Number(o.poseStride)) ? Number(o.poseStride) : def[0], 0, .5), crouch = clamp(Number.isFinite(Number(o.poseCrouch)) ? Number(o.poseCrouch) : def[1], 0, 1), lean = clamp(Number.isFinite(Number(o.poseLean)) ? Number(o.poseLean) : def[2], -.35, .35), headTilt = clamp(Number(o.headTilt) || 0, -25, 25);
+		const bw = .28 * h * bodyScale * shoulderScale, bd = .16 * h * bodyScale, leg = .055 * h * bodyScale, headR = .095 * h * headScale;
+		const legTop = (.47 - .16 * crouch) * h, torso0 = (.44 - .16 * crouch) * h, torso1 = (.78 - .18 * crouch) * h, head0 = (.84 - .18 * crouch) * h, head1 = (.99 - .18 * crouch) * h, footY = [-stride, stride], kneeY = [-.02 * h, .02 * h], kneeX = [-.09 * h * legSpread, .09 * h * legSpread], bodyY = lean * .18, headY = lean * .42, headTopX = Math.sin(headTilt * DG) * .06 * h;
+		const torsoR = Math.max(.012, Math.min(leg * .72, bd * .22));
+		boxAt(0, 0, leg * 1.5, bd * .85, 0, .08 * h);
+		if (pose === 'sit') {
+			segment([-.09 * h * legSpread, bodyY, .32 * h], [kneeX[0], kneeY[0], .30 * h], torsoR);
+			segment([kneeX[0], kneeY[0], .30 * h], [kneeX[0], footY[0], 0], torsoR);
+			segment([.09 * h * legSpread, bodyY, .32 * h], [kneeX[1], kneeY[1], .30 * h], torsoR);
+			segment([kneeX[1], kneeY[1], .30 * h], [kneeX[1], footY[1], 0], torsoR);
+		} else {
+			segment([kneeX[0], footY[0], 0], [kneeX[0], kneeY[0], legTop], torsoR);
+			segment([kneeX[1], footY[1], 0], [kneeX[1], kneeY[1], legTop], torsoR);
+		}
+		boxAt(0, 0, bw, bd, torso0, torso1);
+		ellipsoid(headTopX / 2, headY + .01 * h, (head0 + head1) / 2, headR, headR * .9, (head1 - head0) / 2, 8, 12);
+		return out;
 	}
-	// 人物など細分化された線画は、全体の包絡箱で背面線を落とす安全側の近似。
+	if (kind === 'stairs') {
+		// 階段は段板・蹴上げ・左右側面・底面・最奥面で閉じた実形状にする。
+		// 各段の側面を区間ごとの長方形に分けることで、重複面や斜めの包絡箱を作らない。
+		const n = Math.max(2, Math.min(24, Math.round(o.steps || 6))), sd = d / n, sh = h / n, x = w / 2;
+		for (let i = 0; i < n; i++) {
+			const y0 = -d / 2 + i * sd, y1 = y0 + sd, z = (i + 1) * sh, z0 = i * sh;
+			// 段板（水平）
+			quad([-x, y0, z], [x, y0, z], [x, y1, z], [-x, y1, z]);
+			// 蹴上げ（垂直）
+			quad([-x, y0, z0], [x, y0, z0], [x, y0, z], [-x, y0, z]);
+			// 左右の側面。各区間の下面から段板までを一枚で閉じる。
+			quad([-x, y0, 0], [-x, y1, 0], [-x, y1, z], [-x, y0, z]);
+			quad([x, y1, 0], [x, y0, 0], [x, y0, z], [x, y1, z]);
+		}
+		// 底面と最奥の立ち上がり面。
+		quad([-x, -d / 2, 0], [x, -d / 2, 0], [x, d / 2, 0], [-x, d / 2, 0]);
+		quad([-x, d / 2, 0], [x, d / 2, 0], [x, d / 2, h], [-x, d / 2, h]);
+		return out;
+	}
+	// 人物以外の細分化された線画は、全体の包絡箱で背面線を落とす安全側の近似。
 	addExportBoxFaces(out, o, w, d, h * .02, h); return out;
 }
 function exportPoint(v, tf) { const rel = V.add(v, CO()), q = scr3(rel); if (!q.ok) return null; const depth = orthView ? dot3(rel, orthBasis().depth) : T === 'f' ? Math.hypot(rel[0], rel[1], rel[2]) : cam(rel)[2]; return { x: q.x * tf[0] + tf[4], y: q.y * tf[3] + tf[5], depth } }
@@ -866,15 +925,42 @@ function guides(c) {
 
 // ===== 描画 =====
 function stroke(c, s) { c.strokeStyle = s.c; c.lineWidth = effectiveLineWidth(s); c.lineCap = c.lineJoin = 'round'; c.beginPath(); c.moveTo(s.p[0].x, s.p[0].y); for (let i = 1; i < s.p.length; i++)c.lineTo(s.p[i].x, s.p[i].y); c.stroke() }
+// 画像全体の面表示。surfaceMode=trueのとき、すべてのオブジェクトを半透明で塗る。
+// 面の三角形は既存の背面線除去用メッシュ定義を共有するので、線画と形状がずれない。
+function surfaceColor(o) { return o.surfaceColor || o.accent || '#66e3c8' }
+function surfaceAlpha(o) { const v = Number(o.surfaceAlpha); return Number.isFinite(v) ? clamp(v, .04, .9) : .22 }
+function drawObjectSurfaces(c) {
+	if (!P.surfaceMode) return;
+	const tris = [], seen = new Set();
+	S.forEach(s => {
+		const o = s && s.ob; if (!o || seen.has(o.id)) return; seen.add(o.id);
+		exportSurfaceTriangles(o).forEach(tr => {
+			const p = tr.map(v => exportPoint(v, [1, 0, 0, 1, 0, 0]));
+			if (p.some(q => !q || !Number.isFinite(q.x) || !Number.isFinite(q.y) || !Number.isFinite(q.depth))) return;
+			const area = (p[1].x - p[0].x) * (p[2].y - p[0].y) - (p[1].y - p[0].y) * (p[2].x - p[0].x);
+			if (Math.abs(area) < .001) return;
+			tris.push({ o, p, depth: (p[0].depth + p[1].depth + p[2].depth) / 3 });
+		});
+	});
+	// 遠い面から描く簡易ペインター法。半透明の面でもオブジェクト同士の重なりが自然になる。
+	tris.sort((a, b) => b.depth - a.depth);
+	c.save(); c.lineJoin = 'round';
+	tris.forEach(({ o, p }) => { c.globalAlpha = surfaceAlpha(o); c.fillStyle = surfaceColor(o); c.beginPath(); c.moveTo(p[0].x, p[0].y); c.lineTo(p[1].x, p[1].y); c.lineTo(p[2].x, p[2].y); c.closePath(); c.fill() });
+	c.restore();
+}
 function render() {
 	dirty = true; if (S.some(s => s.ob && s.cs !== sigNow())) regenObjects(); syncSel(); T === 'f' ? calcF() : calc(); const c = ctx;
 	c.clearRect(0, 0, W, H); c.fillStyle = $('bgw').checked ? '#fff' : '#23251f'; c.fillRect(0, 0, W, H); c.save(); c.setTransform(Z, 0, 0, Z, ox, oy);   // 以降はズーム/移動つき
 	if (IMG) { const s = Math.min(W / IMG.width, H / IMG.height), w = IMG.width * s, h = IMG.height * s; c.globalAlpha = P.pa; c.drawImage(IMG, (W - w) / 2, (H - h) / 2, w, h); c.globalAlpha = 1 }
 	if (window.cityFloorTint && $('floorTint')?.checked) window.cityFloorTint(c);
 	if ($('gg').checked) floorGrid(c);
+	drawObjectSurfaces(c);
 	if ($('gon').checked) { if (orthView) orthGuides(c); else T === 'f' ? guidesF(c) : guides(c); }
 	if ($('hzl').checked && !orthView) { c.strokeStyle = '#e8a33d'; c.lineWidth = 1.2; c.setLineDash([10, 8]); c.beginPath(); if (T === 'f') circ(c, AXC[0], AXC[1]); else { c.moveTo(0, AX.hy); c.lineTo(W, AX.hy) } c.stroke(); c.setLineDash([]) }
-	if ($('bin').checked) { c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(lineLayer(true, true), 0, 0); c.restore() }
+	if (P.surfaceMode) {
+		// 面表示中は面を深度バッファに使い、面の裏側に隠れるエッジを表示しない。
+		c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(lineLayer(true, true, W, H, null, true), 0, 0); c.restore();
+	} else if ($('bin').checked) { c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(lineLayer(true, true), 0, 0); c.restore() }
 	else { S.forEach(s => strokeW(c, s)); drawCur(c); if (prev) prev.forEach(s => strokeW(c, s)) }
 	// 選択中の線を橙色に塗り替えない。線画は常に設定した線色で表示し、選択状態はギズモだけで示す。
 	if (snapHit) S.forEach(s => { if (s.ob && snapHit.has(s.ob.id)) { c.save(); c.globalAlpha = .75; strokeW(c, { ...s, c: '#ff3df2', w: s.w + 3 / Z }); c.restore() } });   // くっつき先は桃色
@@ -1280,8 +1366,9 @@ const exportToggle = $('exportToggle'), exportMenu = $('exportMenu');
 if (exportMenu && exportMenu.parentElement !== document.body) document.body.appendChild(exportMenu);
 function setExportOpen(open) { if (!exportMenu) return; exportMenu.classList.toggle('open', !!open); exportMenu.style.display = open ? 'grid' : 'none' }
 exportToggle.onclick = e => { e.stopPropagation(); setExportOpen(!exportMenu.classList.contains('open')) };
-// ===== 書き出し（線画のみ・透過PNG） =====
-// m: 'line'=線画のみ / 'guide'=補助線のみ / 'both'=補助線＋線画（どれも背景透過・写真なし）
+// ===== 書き出し（透過PNG） =====
+// m: 'line'=描画のみ / 'guide'=補助線のみ / 'both'=補助線＋描画（どれも背景透過・写真なし）
+// 面表示がONなら、PNGにも面と背面処理を反映する。
 function out(m, hidden = false) {
 	// 書き出す範囲：ズーム中は「画面に見えている範囲」、範囲指定があればその枠との重なり。拡大率のまま出力する
 	const fit = $('zf').checked && Z > 1; let r = fit ? { x: -ox / Z, y: -oy / Z, w: W / Z, h: H / Z } : { x: 0, y: 0, w: W, h: H };
@@ -1293,12 +1380,13 @@ function out(m, hidden = false) {
 	}
 	const sc = fit ? Z : 1, cw = Math.max(1, Math.round(r.w * sc)), ch = Math.max(1, Math.round(r.h * sc)), tf = [sc, 0, 0, sc, -r.x * sc, -r.y * sc];
 	const c = document.createElement('canvas'); c.width = cw; c.height = ch; const x = c.getContext('2d');
+	if (P.surfaceMode && m !== 'guide') { x.setTransform(...tf); drawObjectSurfaces(x); x.setTransform(1, 0, 0, 1, 0, 0) }
 	if (m !== 'line') {
 		x.setTransform(...tf); T === 'f' ? calcF() : calc(); if (window.cityFloorTint && $('floorTint')?.checked) window.cityFloorTint(x); if ($('gg').checked) floorGrid(x); orthView ? orthGuides(x) : T === 'f' ? guidesF(x) : guides(x);
 		if ($('hzl').checked && !orthView) { x.strokeStyle = '#e8a33d'; x.lineWidth = 1.2; x.setLineDash([10, 8]); x.beginPath(); if (T === 'f') circ(x, AXC[0], AXC[1]); else { x.moveTo(0, AX.hy); x.lineTo(W, AX.hy) } x.stroke(); x.setLineDash([]) }
 		x.setTransform(1, 0, 0, 1, 0, 0)
 	}
-	if (m !== 'guide') x.drawImage(lineLayer(false, false, cw, ch, tf, hidden), 0, 0);   // 線画（二値化つき）
+	if (m !== 'guide') x.drawImage(lineLayer(false, false, cw, ch, tf, hidden || P.surfaceMode), 0, 0);   // 線画／背面処理（二値化つき）
 	return c
 }
 function closeExportMenu() { setExportOpen(false) }
@@ -1410,5 +1498,5 @@ addEventListener('keyup', e => { if (e.key === 'Meta' || e.key === 'Control') cu
 addEventListener('blur', curs); cv.oncontextmenu = e => e.preventDefault();
 
 // ===== 起動 =====
-cv.width = W; cv.height = H; sync(); applyType(2); try { setSide(localStorage.getItem('pgrid-side') === '1') } catch (e) { setSide(false) } fit();
+cv.width = W; cv.height = H; sync(); syncSurfaceToggle(); applyType(2); try { setSide(localStorage.getItem('pgrid-side') === '1') } catch (e) { setSide(false) } fit();
 try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (e) { }   // 前回の自動保存があれば復元

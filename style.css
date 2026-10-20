@@ -206,7 +206,6 @@ output {
 	}
 }
 
-
 :root {
 	--bg: #0a0f14;
 	--panel: #121a21;
@@ -1621,4 +1620,24 @@ canvas {
 	#stage {
 		padding: 6px
 	}
+}
+
+.toolIconButton {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+	min-width: 36px !important;
+	padding-inline: 8px !important
+}
+
+.toolIconButton svg {
+	display: block;
+	width: 18px;
+	height: 18px;
+	stroke: currentColor;
+	fill: none;
+	stroke-width: 1.9;
+	stroke-linecap: round;
+	stroke-linejoin: round
 }
