@@ -1505,7 +1505,7 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
       <label><span>保存済み</span><select id="studioPresetSelect"><option value="">まだありません</option></select></label>
       <div class="sceneNote">カメラ・レンズ・表示設定を保存。シーン内容は含みません。</div>
       <div class="quickField"><span>階段の段数</span><input id="stairsSteps" type="number" min="2" max="24" step="1" value="6"><em>段</em></div>
-      <label class="quickCheck"><input id="stairsRail" type="checkbox" checked> 階段に手すりをつける</label>
+      <label class="quickCheck"><input id="stairsRail" type="checkbox"> 階段に手すりをつける</label>
       <div class="quickRow"><button id="applyStairs" class="primary">選択中の階段に反映</button></div>
       <div class="quickField"><span>アセット配置距離</span><input id="assetDepth" type="number" min="1" max="20" step="0.5" value="5"><em>m</em></div>
       <div class="quickField"><span>生成方向</span><select id="assetAxis"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select><em></em></div>
@@ -1611,17 +1611,17 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
 	// 基本プリミティブを先頭にまとめ、その後に街並み用アセットを並べる。
 	// 円柱は円の押し出しで作れるため、アセット棚からは外している。
 	const ASSETS = {
-		rect: { label: '長方形', glyph: '□', sub: '押し出し可', w: 1.5, d: 1.0, h: 0, accent: '#66e3c8' },
-		circle: { label: '円', glyph: '○', sub: '押し出し可', w: 1.25, d: 1.25, h: 0, accent: '#ad9cff' },
-		cone: { label: '円錐', glyph: '△', sub: '頂点の高さを編集', w: 1.25, d: 1.25, h: 1.45, accent: '#ffb36f' },
-		sphere: { label: '球体', glyph: '●', sub: '円形の外周・比率固定', w: 1.3, d: 1.3, h: 1.3, accent: '#ad9cff' },
-		triPrism: { label: '三角柱', glyph: '△', sub: '頂点の高さを編集', w: 1.4, d: 1.8, h: 1.25, accent: '#ffb36f' },
-		triPyramid: { label: '三角錐', glyph: '▲', sub: '頂点の高さを編集', w: 1.5, d: 1.5, h: 1.45, accent: '#ff79ba' },
-		sign: { label: '看板', glyph: '▤', sub: '縦型ネオン看板', w: 1.0, d: .20, h: 2.15, accent: '#76d9ff' },
-		lantern: { label: 'ちょうちん', glyph: '◉', sub: '吊り下げ灯', w: .48, d: .48, h: 1.15, accent: '#ff795f' },
-		person: { label: '人物', glyph: '♙', sub: '腕なし・身長連動', w: .46, d: .30, h: 1.70, accent: '#ad9cff' },
-		stairs: { label: '階段', glyph: '▰', sub: '段数・手すり設定', w: 1.45, d: 2.4, h: .78, accent: '#ffb36f' },
-		crosswalk: { label: '横断歩道', glyph: '▥', sub: 'しましま', w: 3.2, d: 4.2, h: .02, accent: '#668cff' }
+		rect: { label: '長方形', glyph: '□', w: 1.5, d: 1.0, h: 0, accent: '#66e3c8' },
+		circle: { label: '円', glyph: '○', w: 1.25, d: 1.25, h: 0, accent: '#ad9cff' },
+		cone: { label: '円錐', glyph: '△', w: 1.25, d: 1.25, h: 1.45, accent: '#ffb36f' },
+		sphere: { label: '球体', glyph: '●', w: 1.3, d: 1.3, h: 1.3, accent: '#ad9cff' },
+		triPrism: { label: '三角柱', glyph: '△', w: 1.4, d: 1.8, h: 1.25, accent: '#ffb36f' },
+		triPyramid: { label: '三角錐', glyph: '▲', w: 1.5, d: 1.5, h: 1.45, accent: '#ff79ba' },
+		sign: { label: '看板', glyph: '▤', w: 1.0, d: .20, h: 2.15, accent: '#76d9ff' },
+		lantern: { label: 'ちょうちん', glyph: '◉', w: .48, d: .48, h: 1.15, accent: '#ff795f' },
+		person: { label: '人物', glyph: '♙', w: .46, d: .30, h: 1.70, accent: '#ad9cff' },
+		stairs: { label: '階段', glyph: '▰', w: 1.45, d: 2.4, h: .78, accent: '#ffb36f' },
+		crosswalk: { label: '横断歩道', glyph: '▥', w: 3.2, d: 4.2, h: .02, accent: '#668cff' }
 	};
 	const assetLabel = o => o.type === 'asset' ? (ASSETS[o.asset]?.label || (o.asset === 'cylinder' ? '円柱' : 'アセット')) : (o.type === 'rect' ? '長方形' : o.type === 'circ' ? '円' : o.type === 'box' ? '箱' : o.type === 'cyl' ? '円柱' : '図形');
 	const assetGlyph = o => o.type === 'asset' ? (ASSETS[o.asset]?.glyph || (o.asset === 'cylinder' ? '◉' : '◆')) : (o.type === 'rect' ? '□' : o.type === 'circ' ? '○' : '◇');
@@ -1678,7 +1678,7 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
 			out.push(lineA(o, [[-w / 2, -d / 2, 0], [-w / 2, d / 2, h]], a, 1.1));
 			out.push(lineA(o, [[w / 2, -d / 2, 0], [w / 2, d / 2, h]], a, 1.1));
 			// Rail posts and handrail. The quick setting can hide the whole rail.
-			if (o.handrail !== false) [-w / 2, w / 2].forEach(x => {
+			if (o.handrail === true) [-w / 2, w / 2].forEach(x => {
 				const p1 = [x, -d / 2, .48 * h], p2 = [x, d / 2, h + .35];
 				out.push(lineA(o, [p1, p2], a, 1.1));
 				for (let i = 0; i <= 3; i++) { const t = i / 3; out.push(lineA(o, [[x, -d / 2 + (d * t), (.48 * h) + (h + .35 - .48 * h) * t], [x, -d / 2 + (d * t), (.48 * h) + (h + .35 - .48 * h) * t + .22]], a, .8)) }
@@ -1872,7 +1872,7 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
 
 	// ===== Asset shelf on the canvas =====
 	const tray = document.createElement('div'); tray.id = 'assetTray';
-	tray.innerHTML = '<div class="assetTrayInner"><div class="assetTrayTitle">シーンに追加</div><div class="assetTrayTools"><label>生成面<select id="assetAxisTray"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select></label></div><div class="assetClipboardTools"><button type="button" id="objectCopy">コピー</button><button type="button" id="objectPaste" disabled>貼り付け</button></div>' + Object.entries(ASSETS).map(([k, v]) => `<button class="assetCard" data-asset="${k}" title="${v.label}を追加"><span class="assetGlyph">${v.glyph}</span><span>${v.label}<small>${v.sub}</small></span></button>`).join('') + '</div>';
+	tray.innerHTML = '<div class="assetTrayInner"><div class="assetTrayTitle">シーンに追加</div><div class="assetTrayTools"><label>生成面<select id="assetAxisTray"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select></label></div><div class="assetClipboardTools"><button type="button" id="objectCopy">コピー</button><button type="button" id="objectPaste" disabled>貼り付け</button></div>' + Object.entries(ASSETS).map(([k, v]) => `<button class="assetCard" data-asset="${k}" title="${v.label}を追加"><span class="assetGlyph">${v.glyph}</span><span>${v.label}</span></button>`).join('') + '</div>';
 	stage.appendChild(tray);
 	assetAxisTrayInput = el('assetAxisTray');
 	assetAxisTrayInput.onchange = () => setAssetAxis(assetAxisTrayInput.value);
@@ -2056,7 +2056,7 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
 		const o = sel && obOf(sel);
 		if (o && o.type === 'asset' && o.asset === 'stairs') {
 			if (document.activeElement !== el('stairsSteps')) el('stairsSteps').value = o.steps || 6;
-			el('stairsRail').checked = o.handrail !== false;
+			el('stairsRail').checked = o.handrail === true;
 		}
 	}
 	// Wrap render so the outliner follows undo/redo, opening files, and camera changes.
