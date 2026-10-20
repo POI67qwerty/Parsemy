@@ -265,9 +265,9 @@ const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const orthPlanCenter = () => window.cityFloorPlanActive && Array.isArray(window.cityFloorPlanCenter) ? window.cityFloorPlanCenter : [0, 0];
 const orthScale = () => window.cityFloorPlanActive && Number.isFinite(Number(window.cityFloorPlanScale)) ? Number(window.cityFloorPlanScale) : Math.min(W, H) / 7.2;
 function orthPoint(v) {
-	const b = orthBasis(), sc = orthScale(), pc = window.cityFloorPlanActive && (orthView === 'top' || orthView === 'side') ? orthPlanCenter() : [0, 0]; let rx = dot3(v, b.right), ry = dot3(v, b.up);
+	const b = orthBasis(), sc = orthScale(), pc = window.cityFloorPlanActive && (orthView === 'top' || orthView === 'side' || orthView === 'front') ? orthPlanCenter() : [0, 0]; let rx = dot3(v, b.right), ry = dot3(v, b.up);
 	// scrW() は先にカメラ原点へ移すため、正投影では表示軸だけワールド原点へ戻す。
-	if (window.cityFloorPlanActive && orthView === 'top') { rx += P.cx; ry += P.cz } else if (window.cityFloorPlanActive && orthView === 'side') { rx += P.cz; ry += P.ch - 1 }
+	if (window.cityFloorPlanActive && orthView === 'top') { rx += P.cx; ry += P.cz } else if (window.cityFloorPlanActive && orthView === 'side') { rx += P.cz; ry += P.ch - 1 } else if (window.cityFloorPlanActive && orthView === 'front') { rx += P.cx; ry += P.ch - 1 }
 	return { x: W / 2 + (rx - pc[0]) * sc, y: H / 2 - (ry - pc[1]) * sc, depth: dot3(v, b.depth), ok: true }
 }
 // ワールドの向き→画面（今のグリッド種類の投影）。okがfalseなら画角の外/カメラの後ろ
@@ -276,7 +276,7 @@ function scr(v) {
 	if (q[2] <= 0.02) return { ok: false }; const f = W * P.lens / 36; return { x: W / 2 + f * q[0] / q[2], y: H * P.hz / 100 - f * q[1] / q[2], ok: true }
 }
 // 画面の点→ワールドの向き
-function unscr(p) { if (orthView) { const b = orthBasis(), sc = orthScale(), x = (p.x - W / 2) / sc, y = -(p.y - H / 2) / sc, pc = window.cityFloorPlanActive && (orthView === 'top' || orthView === 'side') ? orthPlanCenter() : [0, 0], q = [b.right[0] * x + b.up[0] * y + b.depth[0], b.right[1] * x + b.up[1] * y + b.depth[1], b.right[2] * x + b.up[2] * y + b.depth[2]]; if (orthView === 'top') { q[0] += pc[0]; q[2] += pc[1] } else if (window.cityFloorPlanActive && orthView === 'side') { q[2] += pc[0]; q[1] += pc[1] } return V.nrm(q) } if (T === 'f') return wld(bf(p)); const f = W * P.lens / 36; return wld(V.nrm([(p.x - W / 2) / f, -(p.y - H * P.hz / 100) / f, 1])) }
+function unscr(p) { if (orthView) { const b = orthBasis(), sc = orthScale(), x = (p.x - W / 2) / sc, y = -(p.y - H / 2) / sc, pc = window.cityFloorPlanActive && (orthView === 'top' || orthView === 'side' || orthView === 'front') ? orthPlanCenter() : [0, 0], q = [b.right[0] * x + b.up[0] * y + b.depth[0], b.right[1] * x + b.up[1] * y + b.depth[1], b.right[2] * x + b.up[2] * y + b.depth[2]]; if (orthView === 'top') { q[0] += pc[0]; q[2] += pc[1] } else if (window.cityFloorPlanActive && orthView === 'side') { q[2] += pc[0]; q[1] += pc[1] } else if (window.cityFloorPlanActive && orthView === 'front') { q[0] += pc[0]; q[1] += pc[1] } return V.nrm(q) } if (T === 'f') return wld(bf(p)); const f = W * P.lens / 36; return wld(V.nrm([(p.x - W / 2) / f, -(p.y - H * P.hz / 100) / f, 1])) }
 // 保存済みの線を今の視点で描く（点の間は球面上で補間するので魚眼でも曲線になる）
 // d3=trueの線は3D座標の点（図形）、そうでなければ視線の向き（ペンで描いた線）
 function effectiveLineWidth(s) {
@@ -460,13 +460,30 @@ function moveBy(o, vec) { const [iu, iv] = PL[o.k]; return { ca: o.ca + vec[iu],
 // 面を動かしたときの変更内容（反対側の面は動かさない）
 function facePatch(o, fid, dl) {
 	const cs = Math.cos(o.rot * DG), sn = Math.sin(o.rot * DG), m = .005;
-	if (fid === 'top') return { h: Math.max(m, o.h + dl), extrude: true };
-	if (fid === 'base') { const h = Math.max(m, o.h + dl); return { h, extrude: true, lift: o.lift - (h - o.h) } }
+	if (fid === 'top') {
+		if (o.type === 'asset' && o.asset === 'sign') {
+			// 看板の実外周は0.08h〜0.82h。上端を動かすと下端を固定する。
+			const dh = dl / .74, h = Math.max(m, o.h + dh); return { h, extrude: true, lift: o.lift - .08 * (h - o.h) };
+		}
+		return { h: Math.max(m, o.h + dl), extrude: true };
+	}
+	if (fid === 'base') {
+		if (o.type === 'asset' && o.asset === 'sign') {
+			// 下端を動かすと上端を固定する。dlは下向き面の移動量。
+			const dh = dl / .74, h = Math.max(m, o.h + dh); return { h, extrude: true, lift: o.lift - .82 * (h - o.h) };
+		}
+		const h = Math.max(m, o.h + dl); return { h, extrude: true, lift: o.lift - (h - o.h) }
+	}
 	const sg = fid[1] === '+' ? 1 : -1, isU = fid[0] === 'u', r0 = isU ? o.ra : o.rb, r1 = Math.max(m, r0 + dl / 2), dr = r1 - r0, ex = isU ? [cs, sn] : [-sn, cs];
 	const q = { ca: o.ca + sg * dr * ex[0], cb: o.cb + sg * dr * ex[1] };
 	if (o.type === 'cyl') { q.ra = r1; q.rb = r1 }
 	else if (o.type === 'asset' && o.asset === 'sphere') { q.ra = r1; q.rb = r1; q.h = r1 * 2 }
 	else q[isU ? 'ra' : 'rb'] = r1; return q
+}
+// 看板の黒い外枠を構成する実高さ。全高の上下余白は外形ハンドルの対象にしない。
+function outerZRange(o) {
+	const h = Math.max(0, Number(o?.h) || 0);
+	return o?.type === 'asset' && o?.asset === 'sign' ? [h * .08, h * .82] : [0, h];
 }
 // 看板の絵枠は常にカメラ側の面へ出す。反対側へ回り込んだ3D視点でも、
 // 編集ハンドルが看板の裏へ隠れず、実際に見えている面を編集できるようにする。
@@ -490,11 +507,11 @@ function signGizmo(o) {
 	const make = (kind, anchor, probe, base, min, max, fallbackAxis = null) => {
 		const dx = probe.x - anchor.x, dy = probe.y - anchor.y, step = Math.max(.0001, Number(probe._step) || .05), px = Math.hypot(dx, dy);
 		// 真横では絵枠の幅(X)が投影上つぶれ、真上では高さ(Y)がつぶれる。
-		// その場合も、立方体の面ハンドルと同じように画面上へ逃がして編集できるようにする。
+		// 投影が縮退しても、緑の四角は絵枠の実際の辺から離さない。
+		// ドラッグ方向だけを画面軸へ固定し、見た目のアンカーは常に元の点に置く。
 		if (fallbackAxis && (!anchor?.ok || !probe?.ok || px < 6 / Z)) {
-			const dir = fallbackAxis === 'x' ? { x: 1, y: 0 } : { x: 0, y: -1 }, gap = Math.max(38 / Z, Math.min(72 / Z, Math.max(34 / Z, step * (orthView ? orthScale() : 80))));
-			const s = { x: anchor.x + dir.x * gap, y: anchor.y + dir.y * gap, ok: !!anchor?.ok };
-			return { kind, s, dir, scale: orthView ? Math.max(1, orthScale()) : Math.max(24, px / step || 1), start: base, min, max, fallback: true };
+			const dir = fallbackAxis === 'x' ? { x: 1, y: 0 } : { x: 0, y: -1 };
+			return { kind, s: anchor, dir, scale: orthView ? Math.max(1, orthScale()) : Math.max(24, px / step || 1), start: base, min, max, fallback: true };
 		}
 		return { kind, s: anchor, dir: { x: dx / (px || 1), y: dy / (px || 1) }, scale: px / step || 1, start: base, min, max };
 	};
@@ -546,8 +563,8 @@ function drawSpecialGizmo(c, o) {
 // 選択中の図形のギズモの位置（画面座標つき）
 function gizmo() {
 	const o = sel && obOf(sel); if (!o) return null;
-	const [iu, iv] = PL[o.k], cs = Math.cos(o.rot * DG), sn = Math.sin(o.rot * DG), solid = o.type === 'box' || o.type === 'cyl' || o.type === 'rect' || o.type === 'circ' || o.type === 'triPrism' || o.type === 'triPyramid' || (o.type === 'asset' && (o.asset === 'triPrism' || o.asset === 'triPyramid' || o.asset === 'sign' || o.asset === 'stairs'));
-	const C3 = L2W(o, 0, 0, solid ? o.h / 2 : 0), sC = scrW(C3); if (!sC.ok) return null;
+	const [iu, iv] = PL[o.k], cs = Math.cos(o.rot * DG), sn = Math.sin(o.rot * DG), solid = o.type === 'box' || o.type === 'cyl' || o.type === 'rect' || o.type === 'circ' || o.type === 'triPrism' || o.type === 'triPyramid' || (o.type === 'asset' && (o.asset === 'triPrism' || o.asset === 'triPyramid' || o.asset === 'sign' || o.asset === 'stairs')), [z0, z1] = outerZRange(o), zc = solid ? (z0 + z1) / 2 : 0;
+	const C3 = L2W(o, 0, 0, zc), sC = scrW(C3); if (!sC.ok) return null;
 	const g = { o, C3, sC, axes: [], faces: [], ring: [] }, nC = Math.hypot(...V.add(C3, CO()));
 	[[1, 0, 0, '#e8743d', 'X'], [0, 1, 0, '#4a7be8', 'Y'], [0, 0, 1, '#2fb5a5', 'Z']].forEach(([x, y, z, col, nm]) => {   // 画面で約90pxになる長さの矢印
 		const a = [x, y, z], eps = 0.01 * Math.max(.1, nC), s1 = scrW(V.add(C3, a, 1, eps)); if (!s1.ok) return;
@@ -555,11 +572,11 @@ function gizmo() {
 		const L = Math.min((90 / Z) / pu, 3 * nC + 1), sT = scrW(V.add(C3, a, 1, L)); if (sT.ok) g.axes.push({ a, col, nm, sT })
 	});
 	const en = [0, 0, 0], eu = [0, 0, 0], ev = [0, 0, 0]; en[o.k] = -o.d; eu[iu] = cs; eu[iv] = sn; ev[iu] = -sn; ev[iv] = cs;   // 高さ方向・幅方向・奥行き方向の単位ベクトル
-	const F = (id, x, y, z, n) => { const P3 = L2W(o, x, y, z), s = scrW(P3); g.faces.push({ id, n, P3, s }) }, zc = solid ? o.h / 2 : 0, neg = v => v.map(t => -t);
+	const F = (id, x, y, z, n) => { const P3 = L2W(o, x, y, z), s = scrW(P3); g.faces.push({ id, n, P3, s }) }, neg = v => v.map(t => -t);
 	F('u+', o.ra, 0, zc, eu); F('u-', -o.ra, 0, zc, neg(eu)); F('v+', 0, o.rb, zc, ev); F('v-', 0, -o.rb, zc, neg(ev));
-	if (solid) { F('top', 0, 0, o.h, en); F('base', 0, 0, 0, neg(en)) }
+	if (solid) { F('top', 0, 0, z1, en); F('base', 0, 0, z0, neg(en)) }
 	const R = Math.max(o.ra, o.rb) * 1.4;
-	for (let i = 0; i <= 72; i++) { const t = i / 72 * 2 * Math.PI; g.ring.push(scrW(L2W(o, R * Math.cos(t), R * Math.sin(t), 0))) }
+	for (let i = 0; i <= 72; i++) { const t = i / 72 * 2 * Math.PI; g.ring.push(scrW(L2W(o, R * Math.cos(t), R * Math.sin(t), solid ? z0 : 0))) }
 	return g
 }
 function drawGizmo(c) {
@@ -594,9 +611,9 @@ function hitGizmo(p) {
 }
 // 図形の外枠（ワールド軸に沿った箱）。スナップや接地に使う
 function obBounds(o) {
-	const pts = [], solid = o.type === 'box' || o.type === 'cyl' || o.type === 'triPrism' || o.type === 'triPyramid' || ((o.type === 'rect' || o.type === 'circ') && o.extrude), hs = solid ? [0, o.h] : [0];
-	if (o.type === 'rect' || o.type === 'box' || o.type === 'triPrism' || o.type === 'triPyramid') hs.forEach(z => [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([a, b]) => pts.push(L2W(o, a * o.ra, b * o.rb, z))));
-	else for (let i = 0; i < 48; i++) { const t = i / 48 * 2 * Math.PI; hs.forEach(z => pts.push(L2W(o, o.ra * Math.cos(t), o.rb * Math.sin(t), z))) }
+	const sign = o.type === 'asset' && o.asset === 'sign', pts = [], solid = o.type === 'box' || o.type === 'cyl' || o.type === 'triPrism' || o.type === 'triPyramid' || ((o.type === 'rect' || o.type === 'circ') && o.extrude) || sign, hs = solid ? (sign ? outerZRange(o) : [0, o.h]) : [0];
+	if (o.type === 'rect' || o.type === 'box' || o.type === 'triPrism' || o.type === 'triPyramid' || sign) hs.forEach(z => [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([a, b]) => pts.push(L2W(o, a * o.ra, b * o.rb, z))));
+	else for (let i = 0; i < 48; i++) { const t = i / 48 * Math.PI * 2; hs.forEach(z => pts.push(L2W(o, o.ra * Math.cos(t), o.rb * Math.sin(t), z))) }
 	const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; pts.forEach(v => { for (let j = 0; j < 3; j++) { lo[j] = Math.min(lo[j], v[j]); hi[j] = Math.max(hi[j], v[j]) } }); return { lo, hi }
 }
 // 動かしている図形以外の、くっつき先
@@ -627,8 +644,8 @@ function snapShift(bb, delta, axes, targets, tau) {
 // 軸に平行なobBoundsだけに頼らないので、回転した図形でも辺を拾える。
 function snapObjectCorners(o) {
 	if (!o) return [];
-	const solid = o.type === 'box' || o.type === 'cyl' || o.type === 'triPrism' || o.type === 'triPyramid' || ((o.type === 'rect' || o.type === 'circ') && o.extrude) || o.type === 'asset';
-	const hs = solid ? [0, Math.max(0, Number(o.h) || 0)] : [0], out = [];
+	const sign = o.type === 'asset' && o.asset === 'sign', solid = o.type === 'box' || o.type === 'cyl' || o.type === 'triPrism' || o.type === 'triPyramid' || ((o.type === 'rect' || o.type === 'circ') && o.extrude) || o.type === 'asset';
+	const hs = solid ? (sign ? outerZRange(o) : [0, Math.max(0, Number(o.h) || 0)]) : [0], out = [];
 	for (const x of [-Math.abs(Number(o.ra) || 0), Math.abs(Number(o.ra) || 0)]) for (const y of [-Math.abs(Number(o.rb) || 0), Math.abs(Number(o.rb) || 0)]) for (const z of hs) out.push(L2W(o, x, y, z));
 	return out;
 }
@@ -640,8 +657,8 @@ function faceSnap(dl) {
 	const o = ed.o0, n = V.nrm(ed.n), [iu, iv] = PL[o.k], cs = Math.cos(Number(o.rot || 0) * DG), sn = Math.sin(Number(o.rot || 0) * DG), eu = [0, 0, 0], ev = [0, 0, 0], en = [0, 0, 0];
 	eu[iu] = cs; eu[iv] = sn; ev[iu] = -sn; ev[iv] = cs; en[o.k] = -o.d;
 	const fid = String(ed.fid || ''), isU = fid[0] === 'u', isV = fid[0] === 'v', plus = fid === 'top' || fid.endsWith('+');
-	const tangents = isU ? [ev, en] : isV ? [eu, en] : [eu, ev];
-	const halves = isU ? [Math.abs(o.rb), Math.max(0, Number(o.h) || 0) / 2] : isV ? [Math.abs(o.ra), Math.max(0, Number(o.h) || 0) / 2] : [Math.abs(o.ra), Math.abs(o.rb)];
+	const tangents = isU ? [ev, en] : isV ? [eu, en] : [eu, ev], outerH = outerZRange(o)[1] - outerZRange(o)[0];
+	const halves = isU ? [Math.abs(o.rb), outerH / 2] : isV ? [Math.abs(o.ra), outerH / 2] : [Math.abs(o.ra), Math.abs(o.rb)];
 	const faceN0 = dot3(ed.Fa, n), faceN = faceN0 + dl, faceT = tangents.map(t => dot3(ed.Fa, t)), tau = Math.max(.04, Number(ed.tau) || .04), tol = Math.max(.01, tau * .25); let best = null;
 	ed.targets.forEach(t => {
 		const to = obOf(t.id), pts = snapObjectCorners(to); if (pts.length < 2) return;
@@ -1347,6 +1364,7 @@ addEventListener('keydown', e => {
 		if (e.key === '3') { tool = 'pen'; setTool('pen'); setMode('draw'); return }
 		if (e.key === '4') { tool = 'pen'; setTool('edit'); return }
 		if (e.key === '5') { document.getElementById('assetToggle')?.click(); return }
+		if (e.key === '7') { window.cityFloorPlanView?.('front'); return }
 		if (e.key === '8') { window.cityFloorPlanView?.('side'); return }
 		if (e.key === '9') { window.cityFloorPlanView?.('top'); return }
 		if (e.key === '0') { if (window.cityFloorPlanActive) window.cityFloorPlanExit?.(true); else window.cityStandardView?.('home'); return }

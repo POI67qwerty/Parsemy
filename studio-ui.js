@@ -101,7 +101,7 @@
       </div>
     </section>
 
-    <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　8 横　9 上　0 3D　／　詳細操作は「？」</div>
+    <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　7 前　8 横　9 上　0 3D　／　詳細操作は「？」</div>
     <div class="sceneTitle">シーン内オブジェクト</div>
     <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button></div>
     <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Y軸（高さ）</option><option value=2>Z軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
@@ -680,13 +680,14 @@
 		// 「上」へ移った瞬間や0 3Dへ戻った瞬間に失われる。
 		const keep = { ...cameraBefore, fov: 180, roll: 0 };
 		Object.entries(keep).forEach(([k, v]) => setP(k, v));
-		orthView = kind === 'side' ? 'side' : 'top';
+		orthView = kind === 'side' ? 'side' : kind === 'front' ? 'front' : 'top';
 		standardApplying = false; sync(); setMode('draw'); render();
 	}
 	function showFloorPlan(kind = 'top') {
 		if (window.cityFloorPlanActive) { setFloorPlanProjection(kind); fitFloorPlan(); render(); return }
 		enterFloorPlan(kind);
 	}
+	el('viewFloorFront').onclick = () => showFloorPlan('front');
 	el('viewFloorSide').onclick = () => showFloorPlan('side');
 	el('viewFloorTop').onclick = () => showFloorPlan('top');
 	el('viewHome').onclick = () => window.cityFloorPlanActive ? exitFloorPlan(true) : applyStandardView('home');
@@ -715,6 +716,17 @@
 			window.cityFloorPlanScale = Math.max(24, Math.min(220, fitScale));
 			return;
 		}
+		if (orthView === 'front') {
+			// 正面は画面の左右がワールドX、上下がワールドY。
+			if (!bounds.length) { window.cityFloorPlanCenter = [P.cx, P.ch - 1]; window.cityFloorPlanScale = Math.min(W, H) / 7.2; return }
+			const minX = Math.min(P.cx, tx, ...bounds.map(b => b.lo[0])), maxX = Math.max(P.cx, tx, ...bounds.map(b => b.hi[0]));
+			const minY = Math.min(P.ch - 1, ty, ...bounds.map(b => b.lo[1])), maxY = Math.max(P.ch - 1, ty, ...bounds.map(b => b.hi[1]));
+			const spanX = Math.max(.1, maxX - minX), spanY = Math.max(.1, maxY - minY), pad = Math.max(1, Math.max(spanX, spanY) * .16);
+			const fitScale = Math.min(W * .82 / (spanX + pad * 2), H * .82 / (spanY + pad * 2));
+			window.cityFloorPlanCenter = [(minX + maxX) / 2, (minY + maxY) / 2];
+			window.cityFloorPlanScale = Math.max(24, Math.min(220, fitScale));
+			return;
+		}
 		if (!bounds.length) { window.cityFloorPlanCenter = [P.cx, P.cz]; window.cityFloorPlanScale = Math.min(W, H) / 7.2; return }
 		const minX = Math.min(P.cx, tx, ...bounds.map(b => b.lo[0])), maxX = Math.max(P.cx, tx, ...bounds.map(b => b.hi[0])), minZ = Math.min(P.cz, tz, ...bounds.map(b => b.lo[2])), maxZ = Math.max(P.cz, tz, ...bounds.map(b => b.hi[2]));
 		const spanX = Math.max(.1, maxX - minX), spanZ = Math.max(.1, maxZ - minZ), pad = Math.max(1, Math.max(spanX, spanZ) * .16);
@@ -736,7 +748,7 @@
 		fitFloorPlan();
 		if (tool !== 'edit') setTool('edit');
 		setMode('draw');
-		const status = el('floorPlanStatus'); if (status) status.textContent = `間取りモード中：${kind === 'side' ? '真横' : '真上'}（家具は真上でX・Z移動）`;
+		const status = el('floorPlanStatus'); if (status) status.textContent = `間取りモード中：${kind === 'side' ? '真横' : kind === 'front' ? '正面' : '真上'}（表示面内でオブジェクトを移動・編集できます）`;
 		render();
 	}
 	function exitFloorPlan(restore = true) {
@@ -826,14 +838,29 @@
 		const sc = Math.max(1, Number(orthScale()) || 1), pc = window.cityFloorPlanCenter || [0, 0];
 		return { z: (p.x - W / 2) / sc + pc[0], y: -(p.y - H / 2) / sc + pc[1] };
 	}
+	function floorPlanFrontWorldAt(p) {
+		if (orthView !== 'front') return null;
+		if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
+		const sc = Math.max(1, Number(orthScale()) || 1), pc = window.cityFloorPlanCenter || [0, 0];
+		return { x: (p.x - W / 2) / sc + pc[0], y: -(p.y - H / 2) / sc + pc[1] };
+	}
+	function floorPlanVerticalWorldAt(p) {
+		return orthView === 'side' ? floorPlanSideWorldAt(p) : orthView === 'front' ? floorPlanFrontWorldAt(p) : null;
+	}
+	function floorPlanObjectZRange(o) {
+		const h = Math.max(0, Number(o?.h) || 0);
+		// 看板の黒い外枠は、アセット全高の上下にある余白を除いた板部分。
+		// 間取りの選択枠・高さハンドルも、この実際の外枠へ合わせる。
+		return o?.type === 'asset' && o?.asset === 'sign' ? [h * .08, h * .82] : [0, h];
+	}
 	function floorPlanHandles() {
 		const o = floorPlanObject(), out = { object: null, camera: null };
 		if (o && o.k === 1) {
-			const base = L2W(o, 0, 0, 0), a = (Number(o.rot) || 0) * DG, dist = Math.max(Math.abs(Number(o.ra) || .3), Math.abs(Number(o.rb) || .3)) + .42;
-			out.object = { o, base, center: scrW(base), world: { x: base[0] - Math.sin(a) * dist, z: base[2] + Math.cos(a) * dist } };
-			out.object.s = scrW([out.object.world.x, orthView === 'side' ? base[1] : -1, out.object.world.z]);
+			const [z0, z1] = floorPlanObjectZRange(o), base = L2W(o, 0, 0, z0), mid = L2W(o, 0, 0, (z0 + z1) / 2), a = (Number(o.rot) || 0) * DG, dist = Math.max(Math.abs(Number(o.ra) || .3), Math.abs(Number(o.rb) || .3)) + .42;
+			out.object = { o, base, center: scrW(mid), world: { x: base[0] - Math.sin(a) * dist, z: base[2] + Math.cos(a) * dist } };
+			out.object.s = orthView === 'front' ? scrW([base[0] + Math.cos(a) * dist, base[1], base[2]]) : scrW([out.object.world.x, orthView === 'side' ? base[1] : -1, out.object.world.z]);
 		}
-		const yaw = Number(P.yaw || 0) * DG, pitch = Number(P.pitch || 0) * DG, body = { x: P.cx, z: P.cz }, cameraY = orthView === 'side' ? P.ch - 1 : -1, horiz = Math.cos(pitch), target = { x: P.cx - Math.sin(yaw) * FLOOR_CAMERA_RAY * horiz, z: P.cz + Math.cos(yaw) * FLOOR_CAMERA_RAY * horiz }, targetY = orthView === 'side' ? cameraY + Math.sin(pitch) * FLOOR_CAMERA_RAY : cameraY, half = Math.atan(18 / Math.max(12, Number(P.lens) || 38)), lensWorld = orthView === 'top' ? [P.cx - Math.sin(yaw - half) * FLOOR_CAMERA_RAY * horiz, cameraY, P.cz + Math.cos(yaw - half) * FLOOR_CAMERA_RAY * horiz] : null;
+		const yaw = Number(P.yaw || 0) * DG, pitch = Number(P.pitch || 0) * DG, body = { x: P.cx, z: P.cz }, cameraY = orthView === 'side' || orthView === 'front' ? P.ch - 1 : -1, horiz = Math.cos(pitch), target = { x: P.cx - Math.sin(yaw) * FLOOR_CAMERA_RAY * horiz, z: P.cz + Math.cos(yaw) * FLOOR_CAMERA_RAY * horiz }, targetY = orthView === 'side' || orthView === 'front' ? cameraY + Math.sin(pitch) * FLOOR_CAMERA_RAY : cameraY, half = Math.atan(18 / Math.max(12, Number(P.lens) || 38)), lensWorld = orthView === 'top' ? [P.cx - Math.sin(yaw - half) * FLOOR_CAMERA_RAY * horiz, cameraY, P.cz + Math.cos(yaw - half) * FLOOR_CAMERA_RAY * horiz] : null;
 		out.camera = { body, target, targetY, sBody: scrW([body.x, cameraY, body.z]), sTarget: scrW([target.x, targetY, target.z]), sLens: lensWorld ? scrW(lensWorld) : null, lensWorld, yaw, pitch };
 		return out;
 	}
@@ -858,7 +885,7 @@
 	}
 	function floorPlanEditHandles() {
 		const o = floorPlanObject(); if (!o || o.k !== 1) return null;
-		const base = L2W(o, 0, 0, 0), zc = Math.abs(Number(o.h) || 0) > 1e-6 ? Number(o.h) / 2 : 0, center = scrW(L2W(o, 0, 0, zc)), handles = [];
+		const [z0, z1] = floorPlanObjectZRange(o), base = L2W(o, 0, 0, z0), zc = (z0 + z1) / 2, center = scrW(L2W(o, 0, 0, zc)), handles = [];
 		const add = (kind, label, point, probe, start, min = .01, side = 1) => {
 			const s = scrW(point), q = scrW(probe); if (!s.ok || !q.ok) return; const dx = q.x - s.x, dy = q.y - s.y, px = Math.hypot(dx, dy); if (px < .01) return;
 			handles.push({ kind, label, s, dir: { x: dx / px, y: dy / px }, scale: px / .1, start, min, side });
@@ -875,11 +902,18 @@
 		} else if (orthView === 'side') {
 			add('d', '奥行＋', L2W(o, 0, o.rb, zc), L2W(o, 0, o.rb + .1, zc), Math.abs(o.rb) * 2, .01, 1);
 			add('d', '奥行−', L2W(o, 0, -o.rb, zc), L2W(o, 0, -o.rb - .1, zc), Math.abs(o.rb) * 2, .01, -1);
-			const visualH = Math.abs(Number(o.h) || 0) > 1e-6 ? Math.abs(Number(o.h)) : .6;
-			// 真横ビューは上端・下端の両方を編集できるようにする。
-			// 上端は下端固定、下端は上端固定で高さを変更する。
-			add('h', '上端', L2W(o, 0, 0, visualH), L2W(o, 0, 0, visualH + .1), Math.max(0, Number(o.h) || 0), 0, 1);
-			add('h', '下端', L2W(o, 0, 0, 0), L2W(o, 0, 0, -.1), Math.max(0, Number(o.h) || 0), 0, -1);
+			// 真横ビューは黒い外枠の上端・下端へ高さハンドルを置く。
+			// 看板の内部余白を含む全高 h の外側へは逃がさない。
+			add('h', '上端', L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + .1), Math.max(0, Number(o.h) || 0), 0, 1);
+			add('h', '下端', L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - .1), Math.max(0, Number(o.h) || 0), 0, -1);
+		} else if (orthView === 'front') {
+			// 正面では幅と高さを直接編集し、見えない奥行きは画面上へ逃がしたハンドルで編集する。
+			add('w', '幅＋', L2W(o, o.ra, 0, 0), L2W(o, o.ra + .1, 0, 0), Math.abs(o.ra) * 2, .01, 1);
+			add('w', '幅−', L2W(o, -o.ra, 0, 0), L2W(o, -o.ra - .1, 0, 0), Math.abs(o.ra) * 2, .01, -1);
+			add('h', '上端', L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + .1), Math.max(0, Number(o.h) || 0), 0, 1);
+			add('h', '下端', L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - .1), Math.max(0, Number(o.h) || 0), 0, -1);
+			const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(Math.abs(Number(o.ra) || .5), Math.abs(Number(o.h) || .6)) * orthScale() * .65));
+			handles.push({ kind: 'd', label: '奥行き', s: { x: center.x + gap, y: center.y, ok: true }, dir: { x: 1, y: 0 }, scale: orthScale(), start: Math.abs(o.rb) * 2, min: .01, side: 1, screen: true });
 		}
 		return { o, base, center, handles };
 	}
@@ -894,15 +928,20 @@
 		c.restore();
 	}
 	function drawFloorPlanOverlay(c) {
-		if (orthView !== 'top' && orthView !== 'side') return;
+		if (orthView !== 'top' && orthView !== 'side' && orthView !== 'front') return;
 		const h = floorPlanHandles(), r = 9 / Z;
 		c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
 		// 選択中オブジェクト：前側の回転ハンドルと薄い外枠
 		if (h.object) {
-			const o = h.object.o, cs = Math.cos((Number(o.rot) || 0) * DG), sn = Math.sin((Number(o.rot) || 0) * DG), corners = [[-o.ra, -o.rb], [o.ra, -o.rb], [o.ra, o.rb], [-o.ra, o.rb], [-o.ra, -o.rb]];
-			c.strokeStyle = 'rgba(255,159,104,.9)'; c.lineWidth = 1.5 / Z; c.setLineDash([6 / Z, 4 / Z]); c.beginPath(); corners.forEach(([x, y], i) => { const p = L2W(o, x, y, 0), q = scrW(p); i ? q.ok ? c.lineTo(q.x, q.y) : null : c.moveTo(q.x, q.y) }); c.stroke(); c.setLineDash([]);
-			if (orthView === 'side' && Number(o.h) > 1e-6) {
-				const baseCorners = [[-o.ra, -o.rb], [o.ra, -o.rb], [o.ra, o.rb], [-o.ra, o.rb]]; c.strokeStyle = 'rgba(255,159,104,.75)'; c.lineWidth = 1.2 / Z; c.beginPath(); baseCorners.forEach(([x, y], i) => { const q = scrW(L2W(o, x, y, o.h)); i ? q.ok ? c.lineTo(q.x, q.y) : null : c.moveTo(q.x, q.y) }); c.closePath(); baseCorners.forEach(([x, y]) => { const a = scrW(L2W(o, x, y, 0)), b = scrW(L2W(o, x, y, o.h)); if (a.ok && b.ok) { c.moveTo(a.x, a.y); c.lineTo(b.x, b.y) } }); c.stroke();
+			const o = h.object.o, [z0, z1] = floorPlanObjectZRange(o), corners = [[-o.ra, -o.rb], [o.ra, -o.rb], [o.ra, o.rb], [-o.ra, o.rb], [-o.ra, -o.rb]];
+			c.strokeStyle = 'rgba(255,159,104,.9)'; c.lineWidth = 1.5 / Z; c.setLineDash([6 / Z, 4 / Z]); c.beginPath(); corners.forEach(([x, y], i) => { const p = L2W(o, x, y, z0), q = scrW(p); i ? q.ok ? c.lineTo(q.x, q.y) : null : c.moveTo(q.x, q.y) }); c.stroke(); c.setLineDash([]);
+			if (orthView === 'side' && z1 > z0) {
+				const baseCorners = [[-o.ra, -o.rb], [o.ra, -o.rb], [o.ra, o.rb], [-o.ra, o.rb]]; c.strokeStyle = 'rgba(255,159,104,.75)'; c.lineWidth = 1.2 / Z; c.beginPath(); baseCorners.forEach(([x, y], i) => { const q = scrW(L2W(o, x, y, z1)); i ? q.ok ? c.lineTo(q.x, q.y) : null : c.moveTo(q.x, q.y) }); c.closePath(); baseCorners.forEach(([x, y]) => { const a = scrW(L2W(o, x, y, z0)), b = scrW(L2W(o, x, y, z1)); if (a.ok && b.ok) { c.moveTo(a.x, a.y); c.lineTo(b.x, b.y) } }); c.stroke();
+			} else if (orthView === 'front') {
+				const frontCorners = o.type === 'asset' && o.asset === 'sign'
+					? [L2W(o, -o.ra, 0, z0), L2W(o, o.ra, 0, z0), L2W(o, o.ra, 0, z1), L2W(o, -o.ra, 0, z1)]
+					: (() => { const b = obBounds(o), z = (b.lo[2] + b.hi[2]) / 2; return [[b.lo[0], b.lo[1], z], [b.hi[0], b.lo[1], z], [b.hi[0], b.hi[1], z], [b.lo[0], b.hi[1], z]] })();
+				c.strokeStyle = 'rgba(255,159,104,.75)'; c.lineWidth = 1.2 / Z; c.beginPath(); frontCorners.forEach((v, i) => { const q = scrW(v); i ? q.ok ? c.lineTo(q.x, q.y) : null : c.moveTo(q.x, q.y) }); c.closePath(); c.stroke();
 			}
 			c.strokeStyle = '#ff9f68'; c.lineWidth = 1.5 / Z; c.beginPath(); c.moveTo(h.object.center.x, h.object.center.y); c.lineTo(h.object.s.x, h.object.s.y); c.stroke();
 			c.fillStyle = '#fff'; c.strokeStyle = '#ff9f68'; c.lineWidth = 2 / Z; c.beginPath(); c.arc(h.object.s.x, h.object.s.y, r, 0, Math.PI * 2); c.fill(); c.stroke();
@@ -910,7 +949,7 @@
 			drawFloorPlanEditHandles(c);
 		}
 		// カメラ：本体をドラッグして位置、先端の丸をドラッグして向き
-		const k = h.camera, half = Math.atan(18 / Math.max(12, Number(P.lens) || 38)), body = k.sBody, target = k.sTarget, cameraY = orthView === 'side' ? P.ch - 1 : -1, horiz = Math.cos(k.pitch), coneY = orthView === 'side' ? cameraY + Math.sin(k.pitch) * FLOOR_CAMERA_RAY : cameraY, left = scrW([P.cx - Math.sin(k.yaw - half) * FLOOR_CAMERA_RAY * horiz, coneY, P.cz + Math.cos(k.yaw - half) * FLOOR_CAMERA_RAY * horiz]), right = scrW([P.cx - Math.sin(k.yaw + half) * FLOOR_CAMERA_RAY * horiz, coneY, P.cz + Math.cos(k.yaw + half) * FLOOR_CAMERA_RAY * horiz]);
+		const k = h.camera, half = Math.atan(18 / Math.max(12, Number(P.lens) || 38)), body = k.sBody, target = k.sTarget, cameraY = orthView === 'side' || orthView === 'front' ? P.ch - 1 : -1, horiz = Math.cos(k.pitch), coneY = orthView === 'side' || orthView === 'front' ? cameraY + Math.sin(k.pitch) * FLOOR_CAMERA_RAY : cameraY, left = scrW([P.cx - Math.sin(k.yaw - half) * FLOOR_CAMERA_RAY * horiz, coneY, P.cz + Math.cos(k.yaw - half) * FLOOR_CAMERA_RAY * horiz]), right = scrW([P.cx - Math.sin(k.yaw + half) * FLOOR_CAMERA_RAY * horiz, coneY, P.cz + Math.cos(k.yaw + half) * FLOOR_CAMERA_RAY * horiz]);
 		c.fillStyle = 'rgba(102,227,200,.16)'; c.strokeStyle = '#66e3c8'; c.lineWidth = 1.2 / Z; c.beginPath(); c.moveTo(body.x, body.y); c.lineTo(left.x, left.y); c.lineTo(right.x, right.y); c.closePath(); c.fill(); c.stroke();
 		c.beginPath(); c.moveTo(body.x, body.y); c.lineTo(target.x, target.y); c.stroke();
 		c.fillStyle = '#66e3c8'; c.strokeStyle = '#164c4b'; c.lineWidth = 1.5 / Z; c.beginPath(); c.arc(body.x, body.y, r, 0, Math.PI * 2); c.fill(); c.stroke();
@@ -923,7 +962,7 @@
 		const o = floorPlanObject(), ground = !!(o && o.k === 1), label = o ? (o.type === 'asset' ? (assetLabel(o) || 'アセット') : '図形') : 'オブジェクト';
 		const text = o ? (ground ? `${label} を選択中（向き ${Math.round(angle360(o.rot))}°）` : `${label} を選択中（壁面オブジェクトは間取りでは表示のみ）`) : 'オブジェクトを選択すると、移動・回転できます。';
 		const status = el('floorPlanSelectionStatus'); if (status) status.textContent = text;
-		const dockStatus = el('floorPlanDockStatus'); if (dockStatus) { const cameraHint = orthView === 'side' ? '真横：カメラ本体＝位置・高さ　／　先端の丸＝上下の傾き' : 'カメラ本体：位置　／　先端の丸：向き'; dockStatus.innerHTML = `${text}<small>幅・奥行ハンドルは反対側の面を固定　／　${cameraHint}</small>`; }
+		const dockStatus = el('floorPlanDockStatus'); if (dockStatus) { const cameraHint = orthView === 'side' ? '真横：カメラ本体＝位置・高さ　／　先端の丸＝上下の傾き' : orthView === 'front' ? '正面：カメラ本体＝X位置・高さ　／　先端の丸＝上下の傾き' : 'カメラ本体：位置　／　先端の丸＝向き'; dockStatus.innerHTML = `${text}<small>幅・奥行ハンドルは反対側の面を固定　／　${cameraHint}</small>`; }
 		[['floorRotateLeft', ground], ['floorRotateRight', ground], ['floorRotate90', ground], ['floorDelete', !!o]].forEach(([id, on]) => { const b = el(id); if (b) b.disabled = !on });
 		floorPlanDock.querySelectorAll('[data-floor-dock-action]').forEach(b => { const a = b.dataset.floorDockAction; b.disabled = a === 'delete' ? !o : ['left', 'right', '90'].includes(a) ? !ground : false });
 		const undoButton = el('floorUndo'), redoButton = el('floorRedo'); if (undoButton) undoButton.disabled = !HU.length; if (redoButton) redoButton.disabled = !RD.length;
@@ -1027,10 +1066,14 @@
 	}
 	function moveFloorSelected(dx, dz) {
 		const objects = selectedObjects().filter(o => o.k === 1), o = objects.find(q => q.id === sel) || objects[0]; if (!o || !objects.length) return; HU.push(S); RD = []; snapHit = null;
-		const setup = snapSetupGroup(objects, L2W(o, 0, 0, 0)), q = $('snp')?.checked ? snapShift(setup.bb, [dx, 0, dz], [0, 2], setup.targets, setup.tau) : { d: [dx, 0, dz], hit: new Set() };
+		let delta, axes;
+		if (orthView === 'side') { delta = [0, dz, dx]; axes = [1, 2] }
+		else if (orthView === 'front') { delta = [dx, dz, 0]; axes = [0, 1] }
+		else { delta = [dx, 0, dz]; axes = [0, 2] }
+		const setup = snapSetupGroup(objects, L2W(o, 0, 0, 0)), q = $('snp')?.checked ? snapShift(setup.bb, delta, axes, setup.targets, setup.tau) : { d: delta, hit: new Set() };
 		snapHit = q.hit.size ? q.hit : null;
-		/* 間取りは水平面のca/cbだけを変え、Y高さ・lift・offを保持する。 */
-		objects.forEach(g => setOb(g.id, { ca: g.ca + q.d[0], cb: g.cb + q.d[2] })); render();
+		/* 上はX/Z、横はZ/Y、前はX/Yの表示面内を移動する。 */
+		objects.forEach(g => setOb(g.id, moveBy(g, q.d))); render();
 	}
 	// カメラではなく、間取りキャンバスの表示中心だけを移動する。
 	// dx/dyは画面上の移動量(px)。オブジェクトやP.cx/P.czは変更しない。
@@ -1086,20 +1129,29 @@
 		}
 		const resize = floorPlanEditHandleAt(p);
 		if (resize && (orthView === 'top' || orthView === 'side')) { e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'resize', pointerId: e.pointerId, id: resize.g.o.id, o0: { ...resize.g.o, off: [...(resize.g.o.off || [0, 0, 0])] }, handle: resize.h, p0: p, started: false }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
-		if (orthView === 'side') {
-			const sideHandles = floorPlanHandles(), sideLim = 22 / Z;
-			if (sideHandles.camera && Math.hypot(sideHandles.camera.sTarget.x - p.x, sideHandles.camera.sTarget.y - p.y) < sideLim) {
-				e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'aimSide', pointerId: e.pointerId }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return;
+		if (orthView === 'side' || orthView === 'front') {
+			const verticalHandles = floorPlanHandles(), verticalLim = 22 / Z, verticalAxis = orthView === 'side' ? 'side' : 'front';
+			if (verticalHandles.camera && Math.hypot(verticalHandles.camera.sTarget.x - p.x, verticalHandles.camera.sTarget.y - p.y) < verticalLim) {
+				e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'aimSide', axis: verticalAxis, pointerId: e.pointerId }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return;
 			}
-			if (sideHandles.camera && Math.hypot(sideHandles.camera.sBody.x - p.x, sideHandles.camera.sBody.y - p.y) < sideLim) {
-				const w = floorPlanSideWorldAt(p); if (!w) return;
-				e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'cameraSide', pointerId: e.pointerId, dz: P.cz - w.z, dy: (P.ch - 1) - w.y }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return;
+			if (verticalHandles.camera && Math.hypot(verticalHandles.camera.sBody.x - p.x, verticalHandles.camera.sBody.y - p.y) < verticalLim) {
+				const w = floorPlanVerticalWorldAt(p); if (!w) return;
+				e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'cameraSide', axis: verticalAxis, pointerId: e.pointerId, dx: orthView === 'front' ? P.cx - w.x : 0, dz: orthView === 'side' ? P.cz - w.z : 0, dy: (P.ch - 1) - w.y }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return;
 			}
 		}
-		if (orthView !== 'top') {
+		if (orthView === 'side' || orthView === 'front') {
 			const hit = floorPlanItemAtSide(p);
-			if (hit) { e.preventDefault(); e.stopImmediatePropagation(); setSelection(hit.id, e.shiftKey || e.metaKey || e.ctrlKey); syncSel(); render() }
-			else if (e.shiftKey) beginFloorPan(e, p);
+			if (hit) {
+				const multi = e.shiftKey || e.metaKey || e.ctrlKey, wasSelected = selIds.has(hit.id);
+				if (multi) setSelection(hit.id, true);
+				else if (!wasSelected || selIds.size <= 1) setSelection(hit.id, false);
+				if (!selIds.has(hit.id)) { syncSel(); render(); return }
+				const w = floorPlanVerticalWorldAt(p), base = L2W(hit, 0, 0, 0), group = selectedObjects().filter(o => o.k === 1), snap = snapSetupGroup(group, base);
+				if (!w) { syncSel(); render(); return }
+				e.preventDefault(); e.stopImmediatePropagation();
+				floorPlanDrag = { kind: 'itemVertical', axis: orthView === 'side' ? 'side' : 'front', pointerId: e.pointerId, id: hit.id, o0: { ...hit, off: [...(hit.off || [0, 0, 0])] }, group, base0: base, bb: snap.bb, targets: snap.targets, tau: snap.tau, dx: orthView === 'front' ? base[0] - w.x : 0, dz: orthView === 'side' ? base[2] - w.z : 0, dy: base[1] - w.y, started: false };
+				try { cv.setPointerCapture(e.pointerId) } catch (err) { } syncSel(); render();
+			} else if (e.shiftKey) beginFloorPan(e, p);
 			else beginFloorBoxPending(e, p);
 			return;
 		}
@@ -1145,15 +1197,35 @@
 			render(); return;
 		}
 		if (floorPlanDrag.kind === 'cameraSide' || floorPlanDrag.kind === 'aimSide') {
-			const w = floorPlanSideWorldAt(pos(e)); if (!w) return;
+			const w = floorPlanVerticalWorldAt(pos(e)); if (!w) return;
 			if (floorPlanDrag.kind === 'cameraSide') {
-				P.cz = +(w.z + floorPlanDrag.dz).toFixed(3);
+				if (floorPlanDrag.axis === 'front') P.cx = +(w.x + floorPlanDrag.dx).toFixed(3);
+				else P.cz = +(w.z + floorPlanDrag.dz).toFixed(3);
 				P.ch = +Math.max(.3, w.y + floorPlanDrag.dy + 1).toFixed(3);
 			} else {
 				const cameraY = Number(P.ch || 1.6) - 1;
 				P.pitch = +clamp(Math.asin(clamp((w.y - cameraY) / Math.max(1, FLOOR_CAMERA_RAY), -.985, .985)) / DG, -60, 60).toFixed(2);
+				if (floorPlanDrag.axis === 'front') {
+					const horiz = Math.max(.1, FLOOR_CAMERA_RAY * Math.cos(P.pitch * DG));
+					P.yaw = +clamp(Math.asin(clamp(-(w.x - P.cx) / horiz, -.985, .985)) / DG, -60, 60).toFixed(2);
+				}
 			}
 			sync(); render(); return;
+		}
+		if (floorPlanDrag.kind === 'itemVertical') {
+			const w = floorPlanVerticalWorldAt(pos(e)); if (!w) return;
+			const o = floorPlanDrag.o0;
+			if (o && o.k === 1) {
+				if (!floorPlanDrag.started) { HU.push(S); RD = []; floorPlanDrag.started = true }
+				const delta = floorPlanDrag.axis === 'front'
+					? [w.x + floorPlanDrag.dx - floorPlanDrag.base0[0], w.y + floorPlanDrag.dy - floorPlanDrag.base0[1], 0]
+					: [0, w.y + floorPlanDrag.dy - floorPlanDrag.base0[1], w.z + floorPlanDrag.dz - floorPlanDrag.base0[2]];
+				const axes = floorPlanDrag.axis === 'front' ? [0, 1] : [1, 2];
+				const q = $('snp')?.checked ? snapShift(floorPlanDrag.bb, delta, axes, floorPlanDrag.targets, floorPlanDrag.tau) : { d: delta, hit: new Set() };
+				snapHit = q.hit.size ? q.hit : null;
+				(floorPlanDrag.group || [o]).forEach(g => setOb(g.id, moveBy(g, q.d)));
+			}
+			render(); return;
 		}
 		const w = floorPlanWorldAt(pos(e)); if (!w) return;
 		if (floorPlanDrag.kind === 'turn') {

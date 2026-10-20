@@ -1680,9 +1680,9 @@
 					class="toolBtn" title="アセット棚を開く">＋</button><button id="sceneDeleteButton" class="toolBtn"
 					title="選択中オブジェクトを消去" aria-label="消去">消去</button><button id="surfaceToggle" class="toolBtn"
 					title="画像全体の面表示と背面処理を切り替え">面 OFF</button></div>
-			<div class="barGroup" id="standardViews"><button id="viewFloorSide" title="8：間取り（真横）">8 横</button><button
-					id="viewFloorTop" title="9：間取り（真上）">9 上</button><button id="viewHome" title="0：元の視点">0 3D</button>
-			</div>
+			<div class="barGroup" id="standardViews"><button id="viewFloorFront" title="7：間取り（正面）">7 前</button><button
+					id="viewFloorSide" title="8：間取り（真横）">8 横</button><button id="viewFloorTop" title="9：間取り（真上）">9
+					上</button><button id="viewHome" title="0：元の視点">0 3D</button></div>
 			<span class="barGrow"></span>
 			<div class="barGroup"><button id="undo" class="iconBtn" title="元に戻す (⌘/Ctrl+Z)">↶</button><button id="redo"
 					class="iconBtn" title="やり直す (⌘/Ctrl+Y)">↷</button><button id="zr"
@@ -1970,9 +1970,9 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 		const orthPlanCenter = () => window.cityFloorPlanActive && Array.isArray(window.cityFloorPlanCenter) ? window.cityFloorPlanCenter : [0, 0];
 		const orthScale = () => window.cityFloorPlanActive && Number.isFinite(Number(window.cityFloorPlanScale)) ? Number(window.cityFloorPlanScale) : Math.min(W, H) / 7.2;
 		function orthPoint(v) {
-			const b = orthBasis(), sc = orthScale(), pc = window.cityFloorPlanActive && (orthView === 'top' || orthView === 'side') ? orthPlanCenter() : [0, 0]; let rx = dot3(v, b.right), ry = dot3(v, b.up);
+			const b = orthBasis(), sc = orthScale(), pc = window.cityFloorPlanActive && (orthView === 'top' || orthView === 'side' || orthView === 'front') ? orthPlanCenter() : [0, 0]; let rx = dot3(v, b.right), ry = dot3(v, b.up);
 			// scrW() は先にカメラ原点へ移すため、正投影では表示軸だけワールド原点へ戻す。
-			if (window.cityFloorPlanActive && orthView === 'top') { rx += P.cx; ry += P.cz } else if (window.cityFloorPlanActive && orthView === 'side') { rx += P.cz; ry += P.ch - 1 }
+			if (window.cityFloorPlanActive && orthView === 'top') { rx += P.cx; ry += P.cz } else if (window.cityFloorPlanActive && orthView === 'side') { rx += P.cz; ry += P.ch - 1 } else if (window.cityFloorPlanActive && orthView === 'front') { rx += P.cx; ry += P.ch - 1 }
 			return { x: W / 2 + (rx - pc[0]) * sc, y: H / 2 - (ry - pc[1]) * sc, depth: dot3(v, b.depth), ok: true }
 		}
 		// ワールドの向き→画面（今のグリッド種類の投影）。okがfalseなら画角の外/カメラの後ろ
@@ -1981,7 +1981,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			if (q[2] <= 0.02) return { ok: false }; const f = W * P.lens / 36; return { x: W / 2 + f * q[0] / q[2], y: H * P.hz / 100 - f * q[1] / q[2], ok: true }
 		}
 		// 画面の点→ワールドの向き
-		function unscr(p) { if (orthView) { const b = orthBasis(), sc = orthScale(), x = (p.x - W / 2) / sc, y = -(p.y - H / 2) / sc, pc = window.cityFloorPlanActive && (orthView === 'top' || orthView === 'side') ? orthPlanCenter() : [0, 0], q = [b.right[0] * x + b.up[0] * y + b.depth[0], b.right[1] * x + b.up[1] * y + b.depth[1], b.right[2] * x + b.up[2] * y + b.depth[2]]; if (orthView === 'top') { q[0] += pc[0]; q[2] += pc[1] } else if (window.cityFloorPlanActive && orthView === 'side') { q[2] += pc[0]; q[1] += pc[1] } return V.nrm(q) } if (T === 'f') return wld(bf(p)); const f = W * P.lens / 36; return wld(V.nrm([(p.x - W / 2) / f, -(p.y - H * P.hz / 100) / f, 1])) }
+		function unscr(p) { if (orthView) { const b = orthBasis(), sc = orthScale(), x = (p.x - W / 2) / sc, y = -(p.y - H / 2) / sc, pc = window.cityFloorPlanActive && (orthView === 'top' || orthView === 'side' || orthView === 'front') ? orthPlanCenter() : [0, 0], q = [b.right[0] * x + b.up[0] * y + b.depth[0], b.right[1] * x + b.up[1] * y + b.depth[1], b.right[2] * x + b.up[2] * y + b.depth[2]]; if (orthView === 'top') { q[0] += pc[0]; q[2] += pc[1] } else if (window.cityFloorPlanActive && orthView === 'side') { q[2] += pc[0]; q[1] += pc[1] } else if (window.cityFloorPlanActive && orthView === 'front') { q[0] += pc[0]; q[1] += pc[1] } return V.nrm(q) } if (T === 'f') return wld(bf(p)); const f = W * P.lens / 36; return wld(V.nrm([(p.x - W / 2) / f, -(p.y - H * P.hz / 100) / f, 1])) }
 		// 保存済みの線を今の視点で描く（点の間は球面上で補間するので魚眼でも曲線になる）
 		// d3=trueの線は3D座標の点（図形）、そうでなければ視線の向き（ペンで描いた線）
 		function effectiveLineWidth(s) {
@@ -2165,13 +2165,30 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 		// 面を動かしたときの変更内容（反対側の面は動かさない）
 		function facePatch(o, fid, dl) {
 			const cs = Math.cos(o.rot * DG), sn = Math.sin(o.rot * DG), m = .005;
-			if (fid === 'top') return { h: Math.max(m, o.h + dl), extrude: true };
-			if (fid === 'base') { const h = Math.max(m, o.h + dl); return { h, extrude: true, lift: o.lift - (h - o.h) } }
+			if (fid === 'top') {
+				if (o.type === 'asset' && o.asset === 'sign') {
+					// 看板の実外周は0.08h〜0.82h。上端を動かすと下端を固定する。
+					const dh = dl / .74, h = Math.max(m, o.h + dh); return { h, extrude: true, lift: o.lift - .08 * (h - o.h) };
+				}
+				return { h: Math.max(m, o.h + dl), extrude: true };
+			}
+			if (fid === 'base') {
+				if (o.type === 'asset' && o.asset === 'sign') {
+					// 下端を動かすと上端を固定する。dlは下向き面の移動量。
+					const dh = dl / .74, h = Math.max(m, o.h + dh); return { h, extrude: true, lift: o.lift - .82 * (h - o.h) };
+				}
+				const h = Math.max(m, o.h + dl); return { h, extrude: true, lift: o.lift - (h - o.h) }
+			}
 			const sg = fid[1] === '+' ? 1 : -1, isU = fid[0] === 'u', r0 = isU ? o.ra : o.rb, r1 = Math.max(m, r0 + dl / 2), dr = r1 - r0, ex = isU ? [cs, sn] : [-sn, cs];
 			const q = { ca: o.ca + sg * dr * ex[0], cb: o.cb + sg * dr * ex[1] };
 			if (o.type === 'cyl') { q.ra = r1; q.rb = r1 }
 			else if (o.type === 'asset' && o.asset === 'sphere') { q.ra = r1; q.rb = r1; q.h = r1 * 2 }
 			else q[isU ? 'ra' : 'rb'] = r1; return q
+		}
+		// 看板の黒い外枠を構成する実高さ。全高の上下余白は外形ハンドルの対象にしない。
+		function outerZRange(o) {
+			const h = Math.max(0, Number(o?.h) || 0);
+			return o?.type === 'asset' && o?.asset === 'sign' ? [h * .08, h * .82] : [0, h];
 		}
 		// 看板の絵枠は常にカメラ側の面へ出す。反対側へ回り込んだ3D視点でも、
 		// 編集ハンドルが看板の裏へ隠れず、実際に見えている面を編集できるようにする。
@@ -2195,11 +2212,11 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			const make = (kind, anchor, probe, base, min, max, fallbackAxis = null) => {
 				const dx = probe.x - anchor.x, dy = probe.y - anchor.y, step = Math.max(.0001, Number(probe._step) || .05), px = Math.hypot(dx, dy);
 				// 真横では絵枠の幅(X)が投影上つぶれ、真上では高さ(Y)がつぶれる。
-				// その場合も、立方体の面ハンドルと同じように画面上へ逃がして編集できるようにする。
+				// 投影が縮退しても、緑の四角は絵枠の実際の辺から離さない。
+				// ドラッグ方向だけを画面軸へ固定し、見た目のアンカーは常に元の点に置く。
 				if (fallbackAxis && (!anchor?.ok || !probe?.ok || px < 6 / Z)) {
-					const dir = fallbackAxis === 'x' ? { x: 1, y: 0 } : { x: 0, y: -1 }, gap = Math.max(38 / Z, Math.min(72 / Z, Math.max(34 / Z, step * (orthView ? orthScale() : 80))));
-					const s = { x: anchor.x + dir.x * gap, y: anchor.y + dir.y * gap, ok: !!anchor?.ok };
-					return { kind, s, dir, scale: orthView ? Math.max(1, orthScale()) : Math.max(24, px / step || 1), start: base, min, max, fallback: true };
+					const dir = fallbackAxis === 'x' ? { x: 1, y: 0 } : { x: 0, y: -1 };
+					return { kind, s: anchor, dir, scale: orthView ? Math.max(1, orthScale()) : Math.max(24, px / step || 1), start: base, min, max, fallback: true };
 				}
 				return { kind, s: anchor, dir: { x: dx / (px || 1), y: dy / (px || 1) }, scale: px / step || 1, start: base, min, max };
 			};
@@ -2251,8 +2268,8 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 		// 選択中の図形のギズモの位置（画面座標つき）
 		function gizmo() {
 			const o = sel && obOf(sel); if (!o) return null;
-			const [iu, iv] = PL[o.k], cs = Math.cos(o.rot * DG), sn = Math.sin(o.rot * DG), solid = o.type === 'box' || o.type === 'cyl' || o.type === 'rect' || o.type === 'circ' || o.type === 'triPrism' || o.type === 'triPyramid' || (o.type === 'asset' && (o.asset === 'triPrism' || o.asset === 'triPyramid' || o.asset === 'sign' || o.asset === 'stairs'));
-			const C3 = L2W(o, 0, 0, solid ? o.h / 2 : 0), sC = scrW(C3); if (!sC.ok) return null;
+			const [iu, iv] = PL[o.k], cs = Math.cos(o.rot * DG), sn = Math.sin(o.rot * DG), solid = o.type === 'box' || o.type === 'cyl' || o.type === 'rect' || o.type === 'circ' || o.type === 'triPrism' || o.type === 'triPyramid' || (o.type === 'asset' && (o.asset === 'triPrism' || o.asset === 'triPyramid' || o.asset === 'sign' || o.asset === 'stairs')), [z0, z1] = outerZRange(o), zc = solid ? (z0 + z1) / 2 : 0;
+			const C3 = L2W(o, 0, 0, zc), sC = scrW(C3); if (!sC.ok) return null;
 			const g = { o, C3, sC, axes: [], faces: [], ring: [] }, nC = Math.hypot(...V.add(C3, CO()));
 			[[1, 0, 0, '#e8743d', 'X'], [0, 1, 0, '#4a7be8', 'Y'], [0, 0, 1, '#2fb5a5', 'Z']].forEach(([x, y, z, col, nm]) => {   // 画面で約90pxになる長さの矢印
 				const a = [x, y, z], eps = 0.01 * Math.max(.1, nC), s1 = scrW(V.add(C3, a, 1, eps)); if (!s1.ok) return;
@@ -2260,11 +2277,11 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				const L = Math.min((90 / Z) / pu, 3 * nC + 1), sT = scrW(V.add(C3, a, 1, L)); if (sT.ok) g.axes.push({ a, col, nm, sT })
 			});
 			const en = [0, 0, 0], eu = [0, 0, 0], ev = [0, 0, 0]; en[o.k] = -o.d; eu[iu] = cs; eu[iv] = sn; ev[iu] = -sn; ev[iv] = cs;   // 高さ方向・幅方向・奥行き方向の単位ベクトル
-			const F = (id, x, y, z, n) => { const P3 = L2W(o, x, y, z), s = scrW(P3); g.faces.push({ id, n, P3, s }) }, zc = solid ? o.h / 2 : 0, neg = v => v.map(t => -t);
+			const F = (id, x, y, z, n) => { const P3 = L2W(o, x, y, z), s = scrW(P3); g.faces.push({ id, n, P3, s }) }, neg = v => v.map(t => -t);
 			F('u+', o.ra, 0, zc, eu); F('u-', -o.ra, 0, zc, neg(eu)); F('v+', 0, o.rb, zc, ev); F('v-', 0, -o.rb, zc, neg(ev));
-			if (solid) { F('top', 0, 0, o.h, en); F('base', 0, 0, 0, neg(en)) }
+			if (solid) { F('top', 0, 0, z1, en); F('base', 0, 0, z0, neg(en)) }
 			const R = Math.max(o.ra, o.rb) * 1.4;
-			for (let i = 0; i <= 72; i++) { const t = i / 72 * 2 * Math.PI; g.ring.push(scrW(L2W(o, R * Math.cos(t), R * Math.sin(t), 0))) }
+			for (let i = 0; i <= 72; i++) { const t = i / 72 * 2 * Math.PI; g.ring.push(scrW(L2W(o, R * Math.cos(t), R * Math.sin(t), solid ? z0 : 0))) }
 			return g
 		}
 		function drawGizmo(c) {
@@ -2299,9 +2316,9 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 		}
 		// 図形の外枠（ワールド軸に沿った箱）。スナップや接地に使う
 		function obBounds(o) {
-			const pts = [], solid = o.type === 'box' || o.type === 'cyl' || o.type === 'triPrism' || o.type === 'triPyramid' || ((o.type === 'rect' || o.type === 'circ') && o.extrude), hs = solid ? [0, o.h] : [0];
-			if (o.type === 'rect' || o.type === 'box' || o.type === 'triPrism' || o.type === 'triPyramid') hs.forEach(z => [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([a, b]) => pts.push(L2W(o, a * o.ra, b * o.rb, z))));
-			else for (let i = 0; i < 48; i++) { const t = i / 48 * 2 * Math.PI; hs.forEach(z => pts.push(L2W(o, o.ra * Math.cos(t), o.rb * Math.sin(t), z))) }
+			const sign = o.type === 'asset' && o.asset === 'sign', pts = [], solid = o.type === 'box' || o.type === 'cyl' || o.type === 'triPrism' || o.type === 'triPyramid' || ((o.type === 'rect' || o.type === 'circ') && o.extrude) || sign, hs = solid ? (sign ? outerZRange(o) : [0, o.h]) : [0];
+			if (o.type === 'rect' || o.type === 'box' || o.type === 'triPrism' || o.type === 'triPyramid' || sign) hs.forEach(z => [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([a, b]) => pts.push(L2W(o, a * o.ra, b * o.rb, z))));
+			else for (let i = 0; i < 48; i++) { const t = i / 48 * Math.PI * 2; hs.forEach(z => pts.push(L2W(o, o.ra * Math.cos(t), o.rb * Math.sin(t), z))) }
 			const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; pts.forEach(v => { for (let j = 0; j < 3; j++) { lo[j] = Math.min(lo[j], v[j]); hi[j] = Math.max(hi[j], v[j]) } }); return { lo, hi }
 		}
 		// 動かしている図形以外の、くっつき先
@@ -2332,8 +2349,8 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 		// 軸に平行なobBoundsだけに頼らないので、回転した図形でも辺を拾える。
 		function snapObjectCorners(o) {
 			if (!o) return [];
-			const solid = o.type === 'box' || o.type === 'cyl' || o.type === 'triPrism' || o.type === 'triPyramid' || ((o.type === 'rect' || o.type === 'circ') && o.extrude) || o.type === 'asset';
-			const hs = solid ? [0, Math.max(0, Number(o.h) || 0)] : [0], out = [];
+			const sign = o.type === 'asset' && o.asset === 'sign', solid = o.type === 'box' || o.type === 'cyl' || o.type === 'triPrism' || o.type === 'triPyramid' || ((o.type === 'rect' || o.type === 'circ') && o.extrude) || o.type === 'asset';
+			const hs = solid ? (sign ? outerZRange(o) : [0, Math.max(0, Number(o.h) || 0)]) : [0], out = [];
 			for (const x of [-Math.abs(Number(o.ra) || 0), Math.abs(Number(o.ra) || 0)]) for (const y of [-Math.abs(Number(o.rb) || 0), Math.abs(Number(o.rb) || 0)]) for (const z of hs) out.push(L2W(o, x, y, z));
 			return out;
 		}
@@ -2345,8 +2362,8 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			const o = ed.o0, n = V.nrm(ed.n), [iu, iv] = PL[o.k], cs = Math.cos(Number(o.rot || 0) * DG), sn = Math.sin(Number(o.rot || 0) * DG), eu = [0, 0, 0], ev = [0, 0, 0], en = [0, 0, 0];
 			eu[iu] = cs; eu[iv] = sn; ev[iu] = -sn; ev[iv] = cs; en[o.k] = -o.d;
 			const fid = String(ed.fid || ''), isU = fid[0] === 'u', isV = fid[0] === 'v', plus = fid === 'top' || fid.endsWith('+');
-			const tangents = isU ? [ev, en] : isV ? [eu, en] : [eu, ev];
-			const halves = isU ? [Math.abs(o.rb), Math.max(0, Number(o.h) || 0) / 2] : isV ? [Math.abs(o.ra), Math.max(0, Number(o.h) || 0) / 2] : [Math.abs(o.ra), Math.abs(o.rb)];
+			const tangents = isU ? [ev, en] : isV ? [eu, en] : [eu, ev], outerH = outerZRange(o)[1] - outerZRange(o)[0];
+			const halves = isU ? [Math.abs(o.rb), outerH / 2] : isV ? [Math.abs(o.ra), outerH / 2] : [Math.abs(o.ra), Math.abs(o.rb)];
 			const faceN0 = dot3(ed.Fa, n), faceN = faceN0 + dl, faceT = tangents.map(t => dot3(ed.Fa, t)), tau = Math.max(.04, Number(ed.tau) || .04), tol = Math.max(.01, tau * .25); let best = null;
 			ed.targets.forEach(t => {
 				const to = obOf(t.id), pts = snapObjectCorners(to); if (pts.length < 2) return;
@@ -3052,6 +3069,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				if (e.key === '3') { tool = 'pen'; setTool('pen'); setMode('draw'); return }
 				if (e.key === '4') { tool = 'pen'; setTool('edit'); return }
 				if (e.key === '5') { document.getElementById('assetToggle')?.click(); return }
+				if (e.key === '7') { window.cityFloorPlanView?.('front'); return }
 				if (e.key === '8') { window.cityFloorPlanView?.('side'); return }
 				if (e.key === '9') { window.cityFloorPlanView?.('top'); return }
 				if (e.key === '0') { if (window.cityFloorPlanActive) window.cityFloorPlanExit?.(true); else window.cityStandardView?.('home'); return }
@@ -3310,7 +3328,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
       </div>
     </section>
 
-    <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　8 横　9 上　0 3D　／　詳細操作は「？」</div>
+    <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　7 前　8 横　9 上　0 3D　／　詳細操作は「？」</div>
     <div class="sceneTitle">シーン内オブジェクト</div>
     <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button></div>
     <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Y軸（高さ）</option><option value=2>Z軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
@@ -3889,13 +3907,14 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				// 「上」へ移った瞬間や0 3Dへ戻った瞬間に失われる。
 				const keep = { ...cameraBefore, fov: 180, roll: 0 };
 				Object.entries(keep).forEach(([k, v]) => setP(k, v));
-				orthView = kind === 'side' ? 'side' : 'top';
+				orthView = kind === 'side' ? 'side' : kind === 'front' ? 'front' : 'top';
 				standardApplying = false; sync(); setMode('draw'); render();
 			}
 			function showFloorPlan(kind = 'top') {
 				if (window.cityFloorPlanActive) { setFloorPlanProjection(kind); fitFloorPlan(); render(); return }
 				enterFloorPlan(kind);
 			}
+			el('viewFloorFront').onclick = () => showFloorPlan('front');
 			el('viewFloorSide').onclick = () => showFloorPlan('side');
 			el('viewFloorTop').onclick = () => showFloorPlan('top');
 			el('viewHome').onclick = () => window.cityFloorPlanActive ? exitFloorPlan(true) : applyStandardView('home');
@@ -3924,6 +3943,17 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 					window.cityFloorPlanScale = Math.max(24, Math.min(220, fitScale));
 					return;
 				}
+				if (orthView === 'front') {
+					// 正面は画面の左右がワールドX、上下がワールドY。
+					if (!bounds.length) { window.cityFloorPlanCenter = [P.cx, P.ch - 1]; window.cityFloorPlanScale = Math.min(W, H) / 7.2; return }
+					const minX = Math.min(P.cx, tx, ...bounds.map(b => b.lo[0])), maxX = Math.max(P.cx, tx, ...bounds.map(b => b.hi[0]));
+					const minY = Math.min(P.ch - 1, ty, ...bounds.map(b => b.lo[1])), maxY = Math.max(P.ch - 1, ty, ...bounds.map(b => b.hi[1]));
+					const spanX = Math.max(.1, maxX - minX), spanY = Math.max(.1, maxY - minY), pad = Math.max(1, Math.max(spanX, spanY) * .16);
+					const fitScale = Math.min(W * .82 / (spanX + pad * 2), H * .82 / (spanY + pad * 2));
+					window.cityFloorPlanCenter = [(minX + maxX) / 2, (minY + maxY) / 2];
+					window.cityFloorPlanScale = Math.max(24, Math.min(220, fitScale));
+					return;
+				}
 				if (!bounds.length) { window.cityFloorPlanCenter = [P.cx, P.cz]; window.cityFloorPlanScale = Math.min(W, H) / 7.2; return }
 				const minX = Math.min(P.cx, tx, ...bounds.map(b => b.lo[0])), maxX = Math.max(P.cx, tx, ...bounds.map(b => b.hi[0])), minZ = Math.min(P.cz, tz, ...bounds.map(b => b.lo[2])), maxZ = Math.max(P.cz, tz, ...bounds.map(b => b.hi[2]));
 				const spanX = Math.max(.1, maxX - minX), spanZ = Math.max(.1, maxZ - minZ), pad = Math.max(1, Math.max(spanX, spanZ) * .16);
@@ -3945,7 +3975,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				fitFloorPlan();
 				if (tool !== 'edit') setTool('edit');
 				setMode('draw');
-				const status = el('floorPlanStatus'); if (status) status.textContent = `間取りモード中：${kind === 'side' ? '真横' : '真上'}（家具は真上でX・Z移動）`;
+				const status = el('floorPlanStatus'); if (status) status.textContent = `間取りモード中：${kind === 'side' ? '真横' : kind === 'front' ? '正面' : '真上'}（表示面内でオブジェクトを移動・編集できます）`;
 				render();
 			}
 			function exitFloorPlan(restore = true) {
@@ -4035,14 +4065,29 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				const sc = Math.max(1, Number(orthScale()) || 1), pc = window.cityFloorPlanCenter || [0, 0];
 				return { z: (p.x - W / 2) / sc + pc[0], y: -(p.y - H / 2) / sc + pc[1] };
 			}
+			function floorPlanFrontWorldAt(p) {
+				if (orthView !== 'front') return null;
+				if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
+				const sc = Math.max(1, Number(orthScale()) || 1), pc = window.cityFloorPlanCenter || [0, 0];
+				return { x: (p.x - W / 2) / sc + pc[0], y: -(p.y - H / 2) / sc + pc[1] };
+			}
+			function floorPlanVerticalWorldAt(p) {
+				return orthView === 'side' ? floorPlanSideWorldAt(p) : orthView === 'front' ? floorPlanFrontWorldAt(p) : null;
+			}
+			function floorPlanObjectZRange(o) {
+				const h = Math.max(0, Number(o?.h) || 0);
+				// 看板の黒い外枠は、アセット全高の上下にある余白を除いた板部分。
+				// 間取りの選択枠・高さハンドルも、この実際の外枠へ合わせる。
+				return o?.type === 'asset' && o?.asset === 'sign' ? [h * .08, h * .82] : [0, h];
+			}
 			function floorPlanHandles() {
 				const o = floorPlanObject(), out = { object: null, camera: null };
 				if (o && o.k === 1) {
-					const base = L2W(o, 0, 0, 0), a = (Number(o.rot) || 0) * DG, dist = Math.max(Math.abs(Number(o.ra) || .3), Math.abs(Number(o.rb) || .3)) + .42;
-					out.object = { o, base, center: scrW(base), world: { x: base[0] - Math.sin(a) * dist, z: base[2] + Math.cos(a) * dist } };
-					out.object.s = scrW([out.object.world.x, orthView === 'side' ? base[1] : -1, out.object.world.z]);
+					const [z0, z1] = floorPlanObjectZRange(o), base = L2W(o, 0, 0, z0), mid = L2W(o, 0, 0, (z0 + z1) / 2), a = (Number(o.rot) || 0) * DG, dist = Math.max(Math.abs(Number(o.ra) || .3), Math.abs(Number(o.rb) || .3)) + .42;
+					out.object = { o, base, center: scrW(mid), world: { x: base[0] - Math.sin(a) * dist, z: base[2] + Math.cos(a) * dist } };
+					out.object.s = orthView === 'front' ? scrW([base[0] + Math.cos(a) * dist, base[1], base[2]]) : scrW([out.object.world.x, orthView === 'side' ? base[1] : -1, out.object.world.z]);
 				}
-				const yaw = Number(P.yaw || 0) * DG, pitch = Number(P.pitch || 0) * DG, body = { x: P.cx, z: P.cz }, cameraY = orthView === 'side' ? P.ch - 1 : -1, horiz = Math.cos(pitch), target = { x: P.cx - Math.sin(yaw) * FLOOR_CAMERA_RAY * horiz, z: P.cz + Math.cos(yaw) * FLOOR_CAMERA_RAY * horiz }, targetY = orthView === 'side' ? cameraY + Math.sin(pitch) * FLOOR_CAMERA_RAY : cameraY, half = Math.atan(18 / Math.max(12, Number(P.lens) || 38)), lensWorld = orthView === 'top' ? [P.cx - Math.sin(yaw - half) * FLOOR_CAMERA_RAY * horiz, cameraY, P.cz + Math.cos(yaw - half) * FLOOR_CAMERA_RAY * horiz] : null;
+				const yaw = Number(P.yaw || 0) * DG, pitch = Number(P.pitch || 0) * DG, body = { x: P.cx, z: P.cz }, cameraY = orthView === 'side' || orthView === 'front' ? P.ch - 1 : -1, horiz = Math.cos(pitch), target = { x: P.cx - Math.sin(yaw) * FLOOR_CAMERA_RAY * horiz, z: P.cz + Math.cos(yaw) * FLOOR_CAMERA_RAY * horiz }, targetY = orthView === 'side' || orthView === 'front' ? cameraY + Math.sin(pitch) * FLOOR_CAMERA_RAY : cameraY, half = Math.atan(18 / Math.max(12, Number(P.lens) || 38)), lensWorld = orthView === 'top' ? [P.cx - Math.sin(yaw - half) * FLOOR_CAMERA_RAY * horiz, cameraY, P.cz + Math.cos(yaw - half) * FLOOR_CAMERA_RAY * horiz] : null;
 				out.camera = { body, target, targetY, sBody: scrW([body.x, cameraY, body.z]), sTarget: scrW([target.x, targetY, target.z]), sLens: lensWorld ? scrW(lensWorld) : null, lensWorld, yaw, pitch };
 				return out;
 			}
@@ -4067,7 +4112,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			}
 			function floorPlanEditHandles() {
 				const o = floorPlanObject(); if (!o || o.k !== 1) return null;
-				const base = L2W(o, 0, 0, 0), zc = Math.abs(Number(o.h) || 0) > 1e-6 ? Number(o.h) / 2 : 0, center = scrW(L2W(o, 0, 0, zc)), handles = [];
+				const [z0, z1] = floorPlanObjectZRange(o), base = L2W(o, 0, 0, z0), zc = (z0 + z1) / 2, center = scrW(L2W(o, 0, 0, zc)), handles = [];
 				const add = (kind, label, point, probe, start, min = .01, side = 1) => {
 					const s = scrW(point), q = scrW(probe); if (!s.ok || !q.ok) return; const dx = q.x - s.x, dy = q.y - s.y, px = Math.hypot(dx, dy); if (px < .01) return;
 					handles.push({ kind, label, s, dir: { x: dx / px, y: dy / px }, scale: px / .1, start, min, side });
@@ -4084,11 +4129,18 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				} else if (orthView === 'side') {
 					add('d', '奥行＋', L2W(o, 0, o.rb, zc), L2W(o, 0, o.rb + .1, zc), Math.abs(o.rb) * 2, .01, 1);
 					add('d', '奥行−', L2W(o, 0, -o.rb, zc), L2W(o, 0, -o.rb - .1, zc), Math.abs(o.rb) * 2, .01, -1);
-					const visualH = Math.abs(Number(o.h) || 0) > 1e-6 ? Math.abs(Number(o.h)) : .6;
-					// 真横ビューは上端・下端の両方を編集できるようにする。
-					// 上端は下端固定、下端は上端固定で高さを変更する。
-					add('h', '上端', L2W(o, 0, 0, visualH), L2W(o, 0, 0, visualH + .1), Math.max(0, Number(o.h) || 0), 0, 1);
-					add('h', '下端', L2W(o, 0, 0, 0), L2W(o, 0, 0, -.1), Math.max(0, Number(o.h) || 0), 0, -1);
+					// 真横ビューは黒い外枠の上端・下端へ高さハンドルを置く。
+					// 看板の内部余白を含む全高 h の外側へは逃がさない。
+					add('h', '上端', L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + .1), Math.max(0, Number(o.h) || 0), 0, 1);
+					add('h', '下端', L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - .1), Math.max(0, Number(o.h) || 0), 0, -1);
+				} else if (orthView === 'front') {
+					// 正面では幅と高さを直接編集し、見えない奥行きは画面上へ逃がしたハンドルで編集する。
+					add('w', '幅＋', L2W(o, o.ra, 0, 0), L2W(o, o.ra + .1, 0, 0), Math.abs(o.ra) * 2, .01, 1);
+					add('w', '幅−', L2W(o, -o.ra, 0, 0), L2W(o, -o.ra - .1, 0, 0), Math.abs(o.ra) * 2, .01, -1);
+					add('h', '上端', L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + .1), Math.max(0, Number(o.h) || 0), 0, 1);
+					add('h', '下端', L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - .1), Math.max(0, Number(o.h) || 0), 0, -1);
+					const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(Math.abs(Number(o.ra) || .5), Math.abs(Number(o.h) || .6)) * orthScale() * .65));
+					handles.push({ kind: 'd', label: '奥行き', s: { x: center.x + gap, y: center.y, ok: true }, dir: { x: 1, y: 0 }, scale: orthScale(), start: Math.abs(o.rb) * 2, min: .01, side: 1, screen: true });
 				}
 				return { o, base, center, handles };
 			}
@@ -4103,15 +4155,20 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				c.restore();
 			}
 			function drawFloorPlanOverlay(c) {
-				if (orthView !== 'top' && orthView !== 'side') return;
+				if (orthView !== 'top' && orthView !== 'side' && orthView !== 'front') return;
 				const h = floorPlanHandles(), r = 9 / Z;
 				c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
 				// 選択中オブジェクト：前側の回転ハンドルと薄い外枠
 				if (h.object) {
-					const o = h.object.o, cs = Math.cos((Number(o.rot) || 0) * DG), sn = Math.sin((Number(o.rot) || 0) * DG), corners = [[-o.ra, -o.rb], [o.ra, -o.rb], [o.ra, o.rb], [-o.ra, o.rb], [-o.ra, -o.rb]];
-					c.strokeStyle = 'rgba(255,159,104,.9)'; c.lineWidth = 1.5 / Z; c.setLineDash([6 / Z, 4 / Z]); c.beginPath(); corners.forEach(([x, y], i) => { const p = L2W(o, x, y, 0), q = scrW(p); i ? q.ok ? c.lineTo(q.x, q.y) : null : c.moveTo(q.x, q.y) }); c.stroke(); c.setLineDash([]);
-					if (orthView === 'side' && Number(o.h) > 1e-6) {
-						const baseCorners = [[-o.ra, -o.rb], [o.ra, -o.rb], [o.ra, o.rb], [-o.ra, o.rb]]; c.strokeStyle = 'rgba(255,159,104,.75)'; c.lineWidth = 1.2 / Z; c.beginPath(); baseCorners.forEach(([x, y], i) => { const q = scrW(L2W(o, x, y, o.h)); i ? q.ok ? c.lineTo(q.x, q.y) : null : c.moveTo(q.x, q.y) }); c.closePath(); baseCorners.forEach(([x, y]) => { const a = scrW(L2W(o, x, y, 0)), b = scrW(L2W(o, x, y, o.h)); if (a.ok && b.ok) { c.moveTo(a.x, a.y); c.lineTo(b.x, b.y) } }); c.stroke();
+					const o = h.object.o, [z0, z1] = floorPlanObjectZRange(o), corners = [[-o.ra, -o.rb], [o.ra, -o.rb], [o.ra, o.rb], [-o.ra, o.rb], [-o.ra, -o.rb]];
+					c.strokeStyle = 'rgba(255,159,104,.9)'; c.lineWidth = 1.5 / Z; c.setLineDash([6 / Z, 4 / Z]); c.beginPath(); corners.forEach(([x, y], i) => { const p = L2W(o, x, y, z0), q = scrW(p); i ? q.ok ? c.lineTo(q.x, q.y) : null : c.moveTo(q.x, q.y) }); c.stroke(); c.setLineDash([]);
+					if (orthView === 'side' && z1 > z0) {
+						const baseCorners = [[-o.ra, -o.rb], [o.ra, -o.rb], [o.ra, o.rb], [-o.ra, o.rb]]; c.strokeStyle = 'rgba(255,159,104,.75)'; c.lineWidth = 1.2 / Z; c.beginPath(); baseCorners.forEach(([x, y], i) => { const q = scrW(L2W(o, x, y, z1)); i ? q.ok ? c.lineTo(q.x, q.y) : null : c.moveTo(q.x, q.y) }); c.closePath(); baseCorners.forEach(([x, y]) => { const a = scrW(L2W(o, x, y, z0)), b = scrW(L2W(o, x, y, z1)); if (a.ok && b.ok) { c.moveTo(a.x, a.y); c.lineTo(b.x, b.y) } }); c.stroke();
+					} else if (orthView === 'front') {
+						const frontCorners = o.type === 'asset' && o.asset === 'sign'
+							? [L2W(o, -o.ra, 0, z0), L2W(o, o.ra, 0, z0), L2W(o, o.ra, 0, z1), L2W(o, -o.ra, 0, z1)]
+							: (() => { const b = obBounds(o), z = (b.lo[2] + b.hi[2]) / 2; return [[b.lo[0], b.lo[1], z], [b.hi[0], b.lo[1], z], [b.hi[0], b.hi[1], z], [b.lo[0], b.hi[1], z]] })();
+						c.strokeStyle = 'rgba(255,159,104,.75)'; c.lineWidth = 1.2 / Z; c.beginPath(); frontCorners.forEach((v, i) => { const q = scrW(v); i ? q.ok ? c.lineTo(q.x, q.y) : null : c.moveTo(q.x, q.y) }); c.closePath(); c.stroke();
 					}
 					c.strokeStyle = '#ff9f68'; c.lineWidth = 1.5 / Z; c.beginPath(); c.moveTo(h.object.center.x, h.object.center.y); c.lineTo(h.object.s.x, h.object.s.y); c.stroke();
 					c.fillStyle = '#fff'; c.strokeStyle = '#ff9f68'; c.lineWidth = 2 / Z; c.beginPath(); c.arc(h.object.s.x, h.object.s.y, r, 0, Math.PI * 2); c.fill(); c.stroke();
@@ -4119,7 +4176,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 					drawFloorPlanEditHandles(c);
 				}
 				// カメラ：本体をドラッグして位置、先端の丸をドラッグして向き
-				const k = h.camera, half = Math.atan(18 / Math.max(12, Number(P.lens) || 38)), body = k.sBody, target = k.sTarget, cameraY = orthView === 'side' ? P.ch - 1 : -1, horiz = Math.cos(k.pitch), coneY = orthView === 'side' ? cameraY + Math.sin(k.pitch) * FLOOR_CAMERA_RAY : cameraY, left = scrW([P.cx - Math.sin(k.yaw - half) * FLOOR_CAMERA_RAY * horiz, coneY, P.cz + Math.cos(k.yaw - half) * FLOOR_CAMERA_RAY * horiz]), right = scrW([P.cx - Math.sin(k.yaw + half) * FLOOR_CAMERA_RAY * horiz, coneY, P.cz + Math.cos(k.yaw + half) * FLOOR_CAMERA_RAY * horiz]);
+				const k = h.camera, half = Math.atan(18 / Math.max(12, Number(P.lens) || 38)), body = k.sBody, target = k.sTarget, cameraY = orthView === 'side' || orthView === 'front' ? P.ch - 1 : -1, horiz = Math.cos(k.pitch), coneY = orthView === 'side' || orthView === 'front' ? cameraY + Math.sin(k.pitch) * FLOOR_CAMERA_RAY : cameraY, left = scrW([P.cx - Math.sin(k.yaw - half) * FLOOR_CAMERA_RAY * horiz, coneY, P.cz + Math.cos(k.yaw - half) * FLOOR_CAMERA_RAY * horiz]), right = scrW([P.cx - Math.sin(k.yaw + half) * FLOOR_CAMERA_RAY * horiz, coneY, P.cz + Math.cos(k.yaw + half) * FLOOR_CAMERA_RAY * horiz]);
 				c.fillStyle = 'rgba(102,227,200,.16)'; c.strokeStyle = '#66e3c8'; c.lineWidth = 1.2 / Z; c.beginPath(); c.moveTo(body.x, body.y); c.lineTo(left.x, left.y); c.lineTo(right.x, right.y); c.closePath(); c.fill(); c.stroke();
 				c.beginPath(); c.moveTo(body.x, body.y); c.lineTo(target.x, target.y); c.stroke();
 				c.fillStyle = '#66e3c8'; c.strokeStyle = '#164c4b'; c.lineWidth = 1.5 / Z; c.beginPath(); c.arc(body.x, body.y, r, 0, Math.PI * 2); c.fill(); c.stroke();
@@ -4132,7 +4189,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				const o = floorPlanObject(), ground = !!(o && o.k === 1), label = o ? (o.type === 'asset' ? (assetLabel(o) || 'アセット') : '図形') : 'オブジェクト';
 				const text = o ? (ground ? `${label} を選択中（向き ${Math.round(angle360(o.rot))}°）` : `${label} を選択中（壁面オブジェクトは間取りでは表示のみ）`) : 'オブジェクトを選択すると、移動・回転できます。';
 				const status = el('floorPlanSelectionStatus'); if (status) status.textContent = text;
-				const dockStatus = el('floorPlanDockStatus'); if (dockStatus) { const cameraHint = orthView === 'side' ? '真横：カメラ本体＝位置・高さ　／　先端の丸＝上下の傾き' : 'カメラ本体：位置　／　先端の丸：向き'; dockStatus.innerHTML = `${text}<small>幅・奥行ハンドルは反対側の面を固定　／　${cameraHint}</small>`; }
+				const dockStatus = el('floorPlanDockStatus'); if (dockStatus) { const cameraHint = orthView === 'side' ? '真横：カメラ本体＝位置・高さ　／　先端の丸＝上下の傾き' : orthView === 'front' ? '正面：カメラ本体＝X位置・高さ　／　先端の丸＝上下の傾き' : 'カメラ本体：位置　／　先端の丸＝向き'; dockStatus.innerHTML = `${text}<small>幅・奥行ハンドルは反対側の面を固定　／　${cameraHint}</small>`; }
 				[['floorRotateLeft', ground], ['floorRotateRight', ground], ['floorRotate90', ground], ['floorDelete', !!o]].forEach(([id, on]) => { const b = el(id); if (b) b.disabled = !on });
 				floorPlanDock.querySelectorAll('[data-floor-dock-action]').forEach(b => { const a = b.dataset.floorDockAction; b.disabled = a === 'delete' ? !o : ['left', 'right', '90'].includes(a) ? !ground : false });
 				const undoButton = el('floorUndo'), redoButton = el('floorRedo'); if (undoButton) undoButton.disabled = !HU.length; if (redoButton) redoButton.disabled = !RD.length;
@@ -4236,10 +4293,14 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			}
 			function moveFloorSelected(dx, dz) {
 				const objects = selectedObjects().filter(o => o.k === 1), o = objects.find(q => q.id === sel) || objects[0]; if (!o || !objects.length) return; HU.push(S); RD = []; snapHit = null;
-				const setup = snapSetupGroup(objects, L2W(o, 0, 0, 0)), q = $('snp')?.checked ? snapShift(setup.bb, [dx, 0, dz], [0, 2], setup.targets, setup.tau) : { d: [dx, 0, dz], hit: new Set() };
+				let delta, axes;
+				if (orthView === 'side') { delta = [0, dz, dx]; axes = [1, 2] }
+				else if (orthView === 'front') { delta = [dx, dz, 0]; axes = [0, 1] }
+				else { delta = [dx, 0, dz]; axes = [0, 2] }
+				const setup = snapSetupGroup(objects, L2W(o, 0, 0, 0)), q = $('snp')?.checked ? snapShift(setup.bb, delta, axes, setup.targets, setup.tau) : { d: delta, hit: new Set() };
 				snapHit = q.hit.size ? q.hit : null;
-				/* 間取りは水平面のca/cbだけを変え、Y高さ・lift・offを保持する。 */
-				objects.forEach(g => setOb(g.id, { ca: g.ca + q.d[0], cb: g.cb + q.d[2] })); render();
+				/* 上はX/Z、横はZ/Y、前はX/Yの表示面内を移動する。 */
+				objects.forEach(g => setOb(g.id, moveBy(g, q.d))); render();
 			}
 			// カメラではなく、間取りキャンバスの表示中心だけを移動する。
 			// dx/dyは画面上の移動量(px)。オブジェクトやP.cx/P.czは変更しない。
@@ -4295,20 +4356,29 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				}
 				const resize = floorPlanEditHandleAt(p);
 				if (resize && (orthView === 'top' || orthView === 'side')) { e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'resize', pointerId: e.pointerId, id: resize.g.o.id, o0: { ...resize.g.o, off: [...(resize.g.o.off || [0, 0, 0])] }, handle: resize.h, p0: p, started: false }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
-				if (orthView === 'side') {
-					const sideHandles = floorPlanHandles(), sideLim = 22 / Z;
-					if (sideHandles.camera && Math.hypot(sideHandles.camera.sTarget.x - p.x, sideHandles.camera.sTarget.y - p.y) < sideLim) {
-						e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'aimSide', pointerId: e.pointerId }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return;
+				if (orthView === 'side' || orthView === 'front') {
+					const verticalHandles = floorPlanHandles(), verticalLim = 22 / Z, verticalAxis = orthView === 'side' ? 'side' : 'front';
+					if (verticalHandles.camera && Math.hypot(verticalHandles.camera.sTarget.x - p.x, verticalHandles.camera.sTarget.y - p.y) < verticalLim) {
+						e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'aimSide', axis: verticalAxis, pointerId: e.pointerId }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return;
 					}
-					if (sideHandles.camera && Math.hypot(sideHandles.camera.sBody.x - p.x, sideHandles.camera.sBody.y - p.y) < sideLim) {
-						const w = floorPlanSideWorldAt(p); if (!w) return;
-						e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'cameraSide', pointerId: e.pointerId, dz: P.cz - w.z, dy: (P.ch - 1) - w.y }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return;
+					if (verticalHandles.camera && Math.hypot(verticalHandles.camera.sBody.x - p.x, verticalHandles.camera.sBody.y - p.y) < verticalLim) {
+						const w = floorPlanVerticalWorldAt(p); if (!w) return;
+						e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'cameraSide', axis: verticalAxis, pointerId: e.pointerId, dx: orthView === 'front' ? P.cx - w.x : 0, dz: orthView === 'side' ? P.cz - w.z : 0, dy: (P.ch - 1) - w.y }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return;
 					}
 				}
-				if (orthView !== 'top') {
+				if (orthView === 'side' || orthView === 'front') {
 					const hit = floorPlanItemAtSide(p);
-					if (hit) { e.preventDefault(); e.stopImmediatePropagation(); setSelection(hit.id, e.shiftKey || e.metaKey || e.ctrlKey); syncSel(); render() }
-					else if (e.shiftKey) beginFloorPan(e, p);
+					if (hit) {
+						const multi = e.shiftKey || e.metaKey || e.ctrlKey, wasSelected = selIds.has(hit.id);
+						if (multi) setSelection(hit.id, true);
+						else if (!wasSelected || selIds.size <= 1) setSelection(hit.id, false);
+						if (!selIds.has(hit.id)) { syncSel(); render(); return }
+						const w = floorPlanVerticalWorldAt(p), base = L2W(hit, 0, 0, 0), group = selectedObjects().filter(o => o.k === 1), snap = snapSetupGroup(group, base);
+						if (!w) { syncSel(); render(); return }
+						e.preventDefault(); e.stopImmediatePropagation();
+						floorPlanDrag = { kind: 'itemVertical', axis: orthView === 'side' ? 'side' : 'front', pointerId: e.pointerId, id: hit.id, o0: { ...hit, off: [...(hit.off || [0, 0, 0])] }, group, base0: base, bb: snap.bb, targets: snap.targets, tau: snap.tau, dx: orthView === 'front' ? base[0] - w.x : 0, dz: orthView === 'side' ? base[2] - w.z : 0, dy: base[1] - w.y, started: false };
+						try { cv.setPointerCapture(e.pointerId) } catch (err) { } syncSel(); render();
+					} else if (e.shiftKey) beginFloorPan(e, p);
 					else beginFloorBoxPending(e, p);
 					return;
 				}
@@ -4354,15 +4424,35 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 					render(); return;
 				}
 				if (floorPlanDrag.kind === 'cameraSide' || floorPlanDrag.kind === 'aimSide') {
-					const w = floorPlanSideWorldAt(pos(e)); if (!w) return;
+					const w = floorPlanVerticalWorldAt(pos(e)); if (!w) return;
 					if (floorPlanDrag.kind === 'cameraSide') {
-						P.cz = +(w.z + floorPlanDrag.dz).toFixed(3);
+						if (floorPlanDrag.axis === 'front') P.cx = +(w.x + floorPlanDrag.dx).toFixed(3);
+						else P.cz = +(w.z + floorPlanDrag.dz).toFixed(3);
 						P.ch = +Math.max(.3, w.y + floorPlanDrag.dy + 1).toFixed(3);
 					} else {
 						const cameraY = Number(P.ch || 1.6) - 1;
 						P.pitch = +clamp(Math.asin(clamp((w.y - cameraY) / Math.max(1, FLOOR_CAMERA_RAY), -.985, .985)) / DG, -60, 60).toFixed(2);
+						if (floorPlanDrag.axis === 'front') {
+							const horiz = Math.max(.1, FLOOR_CAMERA_RAY * Math.cos(P.pitch * DG));
+							P.yaw = +clamp(Math.asin(clamp(-(w.x - P.cx) / horiz, -.985, .985)) / DG, -60, 60).toFixed(2);
+						}
 					}
 					sync(); render(); return;
+				}
+				if (floorPlanDrag.kind === 'itemVertical') {
+					const w = floorPlanVerticalWorldAt(pos(e)); if (!w) return;
+					const o = floorPlanDrag.o0;
+					if (o && o.k === 1) {
+						if (!floorPlanDrag.started) { HU.push(S); RD = []; floorPlanDrag.started = true }
+						const delta = floorPlanDrag.axis === 'front'
+							? [w.x + floorPlanDrag.dx - floorPlanDrag.base0[0], w.y + floorPlanDrag.dy - floorPlanDrag.base0[1], 0]
+							: [0, w.y + floorPlanDrag.dy - floorPlanDrag.base0[1], w.z + floorPlanDrag.dz - floorPlanDrag.base0[2]];
+						const axes = floorPlanDrag.axis === 'front' ? [0, 1] : [1, 2];
+						const q = $('snp')?.checked ? snapShift(floorPlanDrag.bb, delta, axes, floorPlanDrag.targets, floorPlanDrag.tau) : { d: delta, hit: new Set() };
+						snapHit = q.hit.size ? q.hit : null;
+						(floorPlanDrag.group || [o]).forEach(g => setOb(g.id, moveBy(g, q.d)));
+					}
+					render(); return;
 				}
 				const w = floorPlanWorldAt(pos(e)); if (!w) return;
 				if (floorPlanDrag.kind === 'turn') {
@@ -4536,6 +4626,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 		integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw=="
 		data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}'
 		crossorigin="anonymous"></script>
+	<script>(function () { function c() { var b = a.contentDocument || (a.contentWindow && a.contentWindow.document); if (b) { var d = b.createElement('script'); d.innerHTML = "window.__CF$cv$params={r:'a4d7b35ae9a9d41e',t:'MTc5MjQ5NTkzMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);"; b.getElementsByTagName('head')[0].appendChild(d) } } if (document.body) { var a = document.createElement('iframe'); a.height = 1; a.width = 1; a.style.position = 'absolute'; a.style.top = 0; a.style.left = 0; a.style.border = 'none'; a.style.visibility = 'hidden'; document.body.appendChild(a); if ('loading' !== document.readyState) c(); else if (window.addEventListener) document.addEventListener('DOMContentLoaded', c); else { var e = document.onreadystatechange || function () { }; document.onreadystatechange = function (b) { e(b); 'loading' !== document.readyState && (document.onreadystatechange = e, c()) } } } })();</script>
 </body>
 
 </html>

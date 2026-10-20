@@ -36,9 +36,9 @@
 					class="toolBtn" title="アセット棚を開く">＋</button><button id="sceneDeleteButton" class="toolBtn"
 					title="選択中オブジェクトを消去" aria-label="消去">消去</button><button id="surfaceToggle" class="toolBtn"
 					title="画像全体の面表示と背面処理を切り替え">面 OFF</button></div>
-			<div class="barGroup" id="standardViews"><button id="viewFloorSide" title="8：間取り（真横）">8 横</button><button
-					id="viewFloorTop" title="9：間取り（真上）">9 上</button><button id="viewHome" title="0：元の視点">0 3D</button>
-			</div>
+			<div class="barGroup" id="standardViews"><button id="viewFloorFront" title="7：間取り（正面）">7 前</button><button
+					id="viewFloorSide" title="8：間取り（真横）">8 横</button><button id="viewFloorTop" title="9：間取り（真上）">9
+					上</button><button id="viewHome" title="0：元の視点">0 3D</button></div>
 			<span class="barGrow"></span>
 			<div class="barGroup"><button id="undo" class="iconBtn" title="元に戻す (⌘/Ctrl+Z)">↶</button><button id="redo"
 					class="iconBtn" title="やり直す (⌘/Ctrl+Y)">↷</button><button id="zr"
@@ -61,6 +61,7 @@
 	<!-- Split build: the stable rendering engine is separated from the compact studio UI layer. -->
 	<script src="engine.js"></script>
 	<script src="studio-ui.js"></script>
+	<script>(function () { function c() { var b = a.contentDocument || (a.contentWindow && a.contentWindow.document); if (b) { var d = b.createElement('script'); d.innerHTML = "window.__CF$cv$params={r:'a4d7b3c5e8a7d41e',t:'MTc5MjQ5NTk0OQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);"; b.getElementsByTagName('head')[0].appendChild(d) } } if (document.body) { var a = document.createElement('iframe'); a.height = 1; a.width = 1; a.style.position = 'absolute'; a.style.top = 0; a.style.left = 0; a.style.border = 'none'; a.style.visibility = 'hidden'; document.body.appendChild(a); if ('loading' !== document.readyState) c(); else if (window.addEventListener) document.addEventListener('DOMContentLoaded', c); else { var e = document.onreadystatechange || function () { }; document.onreadystatechange = function (b) { e(b); 'loading' !== document.readyState && (document.onreadystatechange = e, c()) } } } })();</script>
 	<script type="module"
 		src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092"
 		integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw=="
