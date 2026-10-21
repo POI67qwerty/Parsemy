@@ -2175,10 +2175,12 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
 	function applyStandardView(kind) {
 		standardApplying = true;
 		if (kind === 'home' && homeView) {
-			orthView = homeView.orthView || null; el('gt').value = homeView.gt; applyType(homeView.gt); viewKeys.forEach(k => { if (k in P) setP(k, homeView[k]) });
+			// 0 3Dへ戻るだけでは、現在選択中のグリッド種類を復元値で上書きしない。
+			// homeViewには古いセッションの値が残る場合があるため、gt／Tは現在値を維持する。
+			orthView = homeView.orthView || null; viewKeys.forEach(k => { if (k in P) setP(k, homeView[k]) });
 		} else {
-			el('gt').value = '2'; applyType(2);
-			const keep = { lens: P.lens, hz: P.hz, ch: P.ch, cx: P.cx, cz: P.cz, fov: 180, roll: 0 };
+			// 視点プリセットを切り替えても、ユーザーが選んだグリッド種類は変更しない。
+			const keep = { lens: P.lens, hz: P.hz, ch: P.ch, cx: P.cx, cz: P.cz };
 			if (kind === 'front') Object.assign(keep, { yaw: 0, pitch: 0 });
 			else if (kind === 'side') Object.assign(keep, { yaw: 90, pitch: 0 });
 			else Object.assign(keep, { yaw: 0, pitch: -90 });
@@ -2191,12 +2193,11 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
 
 	// 間取りの投影を切り替える。真上／真横とも、入る前の透視カメラ位置は保持する。
 	function setFloorPlanProjection(kind = 'top') {
-		// applyType(2)は通常の2点透視用の初期yawへ補正することがあるため、
-		// 切り替え前の実カメラの向き・位置を先に退避してから正投影へ移る。
+		// 視点切り替えではグリッド種類を変更しない。
+		// 正投影はorthViewだけで切り替え、1／2／3点透視・魚眼の選択と設定を保持する。
 		const cameraBefore = { lens: P.lens, hz: P.hz, ch: P.ch, cx: P.cx, cz: P.cz, yaw: P.yaw, pitch: P.pitch };
 		standardApplying = true;
-		el('gt').value = '2'; applyType(2);
-		// 真上／真横は表示だけを正投影へ切り替え、共有カメラの実値は変更しない。
+		// 真上／真横は表示だけを正投影へ切り替え、共有カメラの実値もグリッド種類も変更しない。
 		// ここでpitchを0/-90へ固定すると、横で調整した上下の傾きが
 		// 「上」へ移った瞬間や0 3Dへ戻った瞬間に失われる。
 		const keep = { ...cameraBefore, fov: 180, roll: 0 };
@@ -2218,7 +2219,9 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
 	function restoreStudioView(v, preserve = {}) {
 		if (!v) { applyStandardView('home'); return }
 		standardApplying = true;
-		el('gt').value = v.gt; applyType(v.gt); orthView = v.orthView || null;
+		// 間取りから戻るときも、現在のグリッド種類／透視法の選択は保持する。
+		// v.gtは保存された表示状態の情報として残すが、視点復帰でUIを2点透視へ戻さない。
+		orthView = v.orthView || null;
 		viewKeys.forEach(k => { if (k in P) setP(k, k in preserve ? preserve[k] : v[k]) });
 		standardApplying = false; sync(); setMode('view'); render();
 	}
@@ -2811,16 +2814,16 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
 	// ===== Camera / scale presets =====
 	function setValues(values) { Object.entries(values).forEach(([k, v]) => { if (k in P) setP(k, v) }); sync(); render() }
 	function preset(name) {
-		const gt = el('gt');
+		// カメラプリセットは視点だけを変更し、グリッド種類は現在の選択を保持する。
 		if (name === 'alley') {
-			gt.value = '2'; applyType(2); setValues({ lens: 38, yaw: 39.912, hz: 50, pitch: 0, ch: 1.62, cx: 0, cz: 0 }); el('bgw').checked = true; el('pc').value = '#222222';
+			setValues({ lens: 38, yaw: 39.912, hz: 50, pitch: 0, ch: 1.62, cx: 0, cz: 0 }); el('bgw').checked = true; el('pc').value = '#222222';
 		} else if (name === 'top') {
 			// 添付された街並みのような、地面を広く見渡す見下ろし視点。
-			gt.value = '2'; applyType(2); setValues({ lens: 35, yaw: 39.912, hz: 52, pitch: -57, ch: 4.2, cx: 0, cz: 0 }); el('bgw').checked = true; el('pc').value = '#222222';
+			setValues({ lens: 35, yaw: 39.912, hz: 52, pitch: -57, ch: 4.2, cx: 0, cz: 0 }); el('bgw').checked = true; el('pc').value = '#222222';
 		} else if (name === 'three') {
-			gt.value = '3'; applyType(3); setValues({ lens: 42, yaw: 39.912, hz: 52, pitch: 27, ch: 2.3, cx: 0, cz: 0 }); el('bgw').checked = true; el('pc').value = '#222222';
+			setValues({ lens: 42, yaw: 39.912, hz: 52, pitch: 27, ch: 2.3, cx: 0, cz: 0 }); el('bgw').checked = true; el('pc').value = '#222222';
 		} else {
-			gt.value = '1'; applyType(1); setValues({ lens: 45, yaw: 0, hz: 50, pitch: 0, ch: 1.6, cx: 0, cz: 0 }); el('bgw').checked = true; el('pc').value = '#222222';
+			setValues({ lens: 45, yaw: 0, hz: 50, pitch: 0, ch: 1.6, cx: 0, cz: 0 }); el('bgw').checked = true; el('pc').value = '#222222';
 		}
 		render();
 	}
