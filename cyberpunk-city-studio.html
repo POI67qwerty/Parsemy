@@ -966,6 +966,17 @@
 			white-space: nowrap
 		}
 
+		.groupMark {
+			display: inline-block;
+			margin-left: 4px;
+			padding: 1px 4px;
+			border: 1px solid #4b7779;
+			border-radius: 4px;
+			color: #baffea;
+			font-size: 9px;
+			vertical-align: 1px
+		}
+
 		.objectMeta small {
 			display: block;
 			color: #819397;
@@ -987,11 +998,12 @@
 		.sceneTools {
 			display: flex;
 			gap: 5px;
-			margin-top: 6px
+			margin-top: 6px;
+			flex-wrap: wrap
 		}
 
 		.sceneTools button {
-			flex: 1;
+			flex: 1 1 72px;
 			min-width: 0 !important;
 			padding: 6px 5px !important;
 			font-size: 11px !important
@@ -1692,7 +1704,8 @@
 					<button id="pngB">描画＋補助線 PNG（透過）</button><button id="pngL">描画のみ PNG（透過）</button><button
 						id="pngG">補助線のみ PNG（透過）</button><button id="pngBH">描画＋補助線 PNG（背面処理・裏面非表示）</button><button
 						id="pngLH">描画のみ PNG（背面処理・裏面非表示）</button><button id="pngGH">補助線のみ PNG（背面処理）</button><button
-						id="cpyL">線画をクリップボードにコピー</button>
+						id="cpyL">線画（透過）をクリップボードにコピー</button><button id="cpyG">補助線（透過）をクリップボードにコピー</button><button
+						id="cpyB">描画＋補助線（透過）をクリップボードにコピー</button>
 				</div><button id="svP" class="saveBtn">保存</button><button id="opP">開く</button><input type="file"
 					id="opF" accept=".json,application/json" hidden><button id="helpToggle" class="iconBtn"
 					title="操作ヘルプ">?</button>
@@ -1735,7 +1748,7 @@ ${R('cz', 'カメラ位置 Z', -30, 30, 0.01)}
 <label><span>画面比率</span><select id=ar><option value=1.7778>16:9<option value=1.3333>4:3<option value=1.5>3:2<option value=1>1:1<option value=0.8>4:5<option value=0.5625>9:16</select></label>
 <h3>補助線（細かくできます）</h3>
 ${R('n', '本数（各VP）', 2, 400, 1, '本')}
-${R('ga', '濃さ', 0.05, 1, 0.01)}
+${R('ga', '補助線の透過度', 0.05, 1, 0.01)}
 ${R('gw', '線の太さ', 0.2, 3, 0.1, 'px')}
 <label><span>表示する軸</span>
  <span><input type=checkbox data-i=0 checked>VP1 <input type=checkbox data-i=1 checked>VP2 <input type=checkbox data-i=2 checked>垂直</span></label>
@@ -1782,6 +1795,8 @@ ${RO('rot', '回転', -180, 180, 0.1, '°')}
 <label><span>絵枠の高さ</span><input type=number class=nv id=ov_faceH step=0.01 style="width:100px"><span class=un>m</span></label>
 </div>
 <label><button id=obExtrude>押し出しを有効</button><button id=obGnd>地面につける</button><button id=obDup>複製</button><button id=obDel>削除</button><button id=obOff>選択解除</button></label>
+<label><button id=objectInfoCopy aria-label="JSONコピー" title="選択中オブジェクトの定義JSONをコピー" disabled>JSONコピー</button><button id=objectInfoSave aria-label="JSON保存" title="選択中オブジェクトの定義JSONを保存" disabled>JSON保存</button></label>
+<div class="note">JSON保存は寸法・位置・向き・アセット固有設定をテキストで書き出します。後から線画化できる定義形式です。</div>
 <div class="note">位置は底面の中心です。Yは地面からの高さ（0で地面につく）、X・Zは床の方向（VP1・VP2側）です</div>
 </div>
 <h3>書き出し範囲（上の「範囲」ボタン）</h3>
@@ -2082,17 +2097,30 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 		const obOf = id => { const s = S.find(s => s.ob && s.ob.id === id); return s && s.ob };
 		// 選択状態は「操作対象の主役 sel」と、複数選択用の selIds を分けて持つ。
 		// 旧データや既存の操作経路が sel だけを書き換えても壊れないよう、ここで同期する。
+		function groupMemberIds(id) {
+			const o = obOf(id); if (!o) return [];
+			if (!o.groupId) return [id];
+			const ids = []; S.forEach(s => { const q = s && s.ob; if (q && q.groupId === o.groupId && !ids.includes(q.id)) ids.push(q.id) });
+			return ids.length ? ids : [id];
+		}
 		function normalizeSelection() {
 			if (sel && !selIds.has(sel)) selIds.add(sel);
 			[...selIds].forEach(id => { if (!obOf(id)) selIds.delete(id) });
+			// グループは常に一体選択。行・キャンバスのどのメンバーを選んでも全員を選ぶ。
+			[...selIds].forEach(id => groupMemberIds(id).forEach(member => selIds.add(member)));
 			if (sel && !obOf(sel)) sel = null;
 			if (!sel && selIds.size) sel = [...selIds][selIds.size - 1];
 			if (sel && !selIds.has(sel)) selIds.add(sel);
 		}
 		function setSelection(id, add = false) {
+			const members = id ? groupMemberIds(id) : [];
 			if (!add) selIds.clear();
-			if (id) { if (add && selIds.has(id)) selIds.delete(id); else selIds.add(id); sel = selIds.has(id) ? id : ([...selIds][selIds.size - 1] || null) }
-			else if (!add) { sel = null }
+			if (id) {
+				const selected = members.some(member => selIds.has(member));
+				if (add && selected) members.forEach(member => selIds.delete(member));
+				else members.forEach(member => selIds.add(member));
+				sel = selIds.has(id) ? id : ([...selIds][selIds.size - 1] || null)
+			} else if (!add) { sel = null }
 			normalizeSelection();
 		}
 		function clearSelection() { sel = null; selIds.clear(); }
@@ -2150,7 +2178,11 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			const o = obOf(sel); if (!o) return; const bb = obBounds(o), dy = -1 - bb.lo[1];   // 一番低い点を地面(y=-1)に合わせる
 			HU.push(S); RD = []; setOb(sel, moveBy(o, [0, dy, 0])); render()
 		};
-		$('obDup').onclick = () => { const o = obOf(sel); if (!o) return; const n = { ...o, id: uid(), ca: o.ca + o.ra * 2.4 }; HU.push(S); S = [...S, ...genShape(n)]; RD = []; setSelection(n.id); render() };
+		$('obDup').onclick = () => {
+			const objects = selectedObjects(); if (!objects.length) return; const lead = objects.find(o => o.id === sel) || objects[0], newGroup = objects.length > 1 && objects.some(o => o.groupId) ? 'group-' + uid() : null, shift = Number(lead.ra || .5) * 2.4;
+			const clones = objects.map(o => { const n = { ...o, id: uid(), ca: o.ca + shift, off: [...(o.off || [0, 0, 0])] }; if (newGroup) n.groupId = newGroup; return n });
+			HU.push(S); S = [...S, ...clones.flatMap(n => genShape(n))]; RD = []; clearSelection(); clones.forEach(n => selIds.add(n.id)); sel = clones[0].id; normalizeSelection(); render()
+		};
 		$('obDel').onclick = () => { const ids = new Set(selectedObjects().map(o => o.id)); if (!ids.size) return; HU.push(S); S = S.filter(s => !(s.ob && ids.has(s.ob.id))); RD = []; clearSelection(); render() };
 		$('obOff').onclick = () => { clearSelection(); render() };
 		// ===== ブレンダー風ギズモ：矢印(XYZ軸の移動)・白い四角(面の押し引き)・点線の輪(回転) =====
@@ -2447,11 +2479,16 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 		};
 
 		// ===== ツール切り替え（消しゴム・図形・範囲）と設定パネルの開閉 =====
+		function syncInteractionButtons() {
+			// 視点／鉛筆と、編集／消しゴム／図形／範囲を同じ「ON」表示にしない。
+			// 視点中はツールボタンをすべてOFF、描画中は選択した1ツールだけをONにする。
+			$('mV').classList.toggle('on', mode === 'view');
+			$('mD').classList.toggle('on', mode === 'draw' && tool === 'pen');
+			[['tE', 'erase'], ['tS', 'shape'], ['tB', 'border'], ['tM', 'edit']].forEach(([id, n]) => $(id).classList.toggle('on', mode === 'draw' && tool === n));
+		}
 		function setTool(t) {
-			tool = tool === t ? 'pen' : t;
-			[['tE', 'erase'], ['tS', 'shape'], ['tB', 'border'], ['tM', 'edit']].forEach(([id, n]) => $(id).classList.toggle('on', tool === n));
-			if (tool !== 'pen') setMode('draw');
-			const HT = { shape: '図形：キャンバスをドラッグすると長方形／円／三角柱／三角錐を作成し、自動で編集モードになります。種類・面は左の設定で選びます', border: '書き出し範囲：ドラッグで枠を指定。PNG保存・コピーはこの範囲で切り取られます', erase: '消しゴム：なぞったところを消します', edit: '図形編集：線にさわって選択。空白を長押ししてドラッグするとボックス選択。Shift/Ctrl/⌘クリックでも複数選択でき、選択済みの線をドラッグするとまとめて移動。iPadは指またはApple Pencilで長押しドラッグ。矢印＝軸に沿って移動／白い四角＝面を押し引き／点線の輪＝回転／線をドラッグ＝面の上で移動。看板は絵枠W・絵枠Hと外形の面ハンドル、円錐は高さ、球体は半径ハンドルをドラッグできます' };
+			tool = t; setMode('draw');
+			const HT = { shape: '図形：キャンバスをドラッグすると長方形／円／三角柱／三角錐を作成し、自動で編集モードになります。種類・面は左の設定で選びます', border: '書き出し範囲：ドラッグで枠を指定。範囲指定はPNG保存・コピーに反映されます', erase: '消しゴム：なぞったところを消します', edit: '図形編集：線にさわって選択。空白を長押ししてドラッグするとボックス選択。Shift/Ctrl/⌘クリックでも複数選択でき、選択済みの線をドラッグするとまとめて移動。iPadは指またはApple Pencilで長押しドラッグ。矢印＝軸に沿って移動／白い四角＝面を押し引き／点線の輪＝回転／線をドラッグ＝面の上で移動。看板は絵枠W・絵枠Hと外形の面ハンドル、円錐は高さ、球体は半径ハンドルをドラッグできます' };
 			if (HT[tool]) $('hint').textContent = HT[tool] + ' ／ ⌘(Ctrl)+ドラッグ＝視点移動'
 		}
 		$('tE').onclick = () => setTool('erase'); $('tS').onclick = () => setTool('shape'); $('tB').onclick = () => setTool('border'); $('tM').onclick = () => setTool('edit');
@@ -3053,10 +3090,10 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 
 		// ===== モード・ボタン =====
 		function setMode(m) {
-			mode = m; $('mV').classList.toggle('on', m === 'view'); $('mD').classList.toggle('on', m === 'draw'); cv.style.cursor = m === 'view' ? 'move' : 'crosshair';
+			mode = m; syncInteractionButtons(); cv.style.cursor = m === 'view' ? 'move' : 'crosshair';
 			$('hint').textContent = ($('pn').checked ? '【指＝視点／ペン＝描画】' : '') + (m === 'view' ? (T === 'f' ? 'ドラッグ：視点を回転／Shiftまたは右ドラッグ：水平移動／ホイール：ズーム' : 'ドラッグ：視点を回転／Shiftまたは右ドラッグ：水平移動／ホイール：ズーム（矢印キーでも可）') : '線を引くと、向かっているVPへ自動で吸着します。Ctrl/⌘+Zで元に戻す') + ' ／ 中ドラッグ：回転・Shift+ドラッグ：パン'
 		}
-		$('mV').onclick = () => setMode('view'); $('mD').onclick = () => setMode('draw');
+		$('mV').onclick = () => setMode('view'); $('mD').onclick = () => setTool('pen');
 		const undo = () => { if (HU.length) { RD.push(S); S = HU.pop(); render() } }, redo = () => { if (RD.length) { HU.push(S); S = RD.pop(); render() } };
 		$('undo').onclick = undo; $('redo').onclick = redo; $('clr').onclick = () => { if (S.length && confirm('全部消しますか？')) { HU.push(S); S = []; RD = []; render() } };
 		addEventListener('keydown', e => {
@@ -3129,17 +3166,21 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 		$('pngBH').onclick = () => save('both', 'perspective-guide-line-visible.png', true);
 		$('pngLH').onclick = () => save('line', 'perspective-line-visible.png', true);
 		$('pngGH').onclick = () => save('guide', 'perspective-guide-visible.png', true);
-		// 線画をクリップボードへコピー（PNG透過）。未対応ブラウザではボタンに状態を表示する。
-		$('cpyL').onclick = async () => {
-			const button = $('cpyL'), label = '線画をクリップボードにコピー';
+		// 線画・補助線・合成画像を、いずれも透過PNGとしてクリップボードへコピーする。
+		// 未対応ブラウザでは各ボタンに状態を表示する。
+		async function copyExportToClipboard(kind, id, label) {
+			const button = $(id); if (!button) return;
 			try {
 				if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('Clipboard image API is unavailable');
-				const blob = await new Promise(resolve => out('line').toBlob(resolve, 'image/png'));
+				const blob = await new Promise(resolve => out(kind).toBlob(resolve, 'image/png'));
 				if (!blob) throw new Error('PNG blob was not created');
 				await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); button.textContent = 'コピー済み'; closeExportMenu();
 			} catch (e) { console.error('City Grid clipboard export error', e); button.textContent = 'コピー不可' }
-			setTimeout(() => button.textContent = label, 1500)
-		};
+			setTimeout(() => button.textContent = label, 1500);
+		}
+		$('cpyL').onclick = () => copyExportToClipboard('line', 'cpyL', '線画（透過）をクリップボードにコピー');
+		$('cpyG').onclick = () => copyExportToClipboard('guide', 'cpyG', '補助線（透過）をクリップボードにコピー');
+		$('cpyB').onclick = () => copyExportToClipboard('both', 'cpyB', '描画＋補助線（透過）をクリップボードにコピー');
 
 		// ===== 参考写真 =====
 		let IMGsrc = null, dirty = false;   // IMGsrc=保存用の写真データ(dataURL)
@@ -3316,7 +3357,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
         <button type="button" id="studioPresetDelete">削除</button>
       </div>
       <label><span>保存済み</span><select id="studioPresetSelect"><option value="">まだありません</option></select></label>
-      <div class="sceneNote">カメラ・レンズ・表示設定を保存。シーン内容は含みません。</div>
+      <div class="sceneNote">カメラ・グリッド・補助線・ペン・消しゴム・画面比率など、オブジェクト以外の設定を保存します。シーン内容は含みません。</div>
       <div class="quickField"><span>階段の段数</span><input id="stairsSteps" type="number" min="2" max="24" step="1" value="6"><em>段</em></div>
       <label class="quickCheck"><input id="stairsRail" type="checkbox"> 階段に手すりをつける</label>
       <div class="quickRow"><button id="applyStairs" class="primary">選択中の階段に反映</button></div>
@@ -3331,9 +3372,9 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 
     <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　7 前　8 横　9 上　0 3D　／　詳細操作は「？」</div>
     <div class="sceneTitle">シーン内オブジェクト</div>
-    <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button></div>
+    <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button></div>
     <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Y軸（高さ）</option><option value=2>Z軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
-    <div class="sceneNote">行のチェックで複数選択。整列は2個以上を選んでください。</div>
+    <div class="sceneNote">行のチェックで複数選択。整列は2個以上を選んでください。グループ化したオブジェクトは選択・移動・削除を一体として扱います。</div>
     <div id="objectList"><div class="emptyList">まだオブジェクトがありません</div></div>`;
 			side.insertBefore(quick, side.firstChild);
 			const humanInput = el('humanHeight');
@@ -3641,9 +3682,10 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				if (!objectClipboard.length) return false;
 				sanitizeScene(); const before = S.slice(), added = [];
 				try {
-					const lines = [];
+					const lines = [], groupMap = new Map();
 					objectClipboard.forEach((source, i) => {
 						const n = JSON.parse(JSON.stringify(source)); n.id = uid(); n.off = [...(n.off || [0, 0, 0])];
+						if (source.groupId) { if (!groupMap.has(source.groupId)) groupMap.set(source.groupId, 'group-' + uid()); n.groupId = groupMap.get(source.groupId) }
 						// 元の場所を保ちつつ、貼り付け先が見つけやすいようにca方向へ少しずらす。
 						n.ca = Number(n.ca) || 0; n.ca += Math.max(.35, Math.abs(Number(n.ra) || .25) * 2.4) + i * .18;
 						const made = genShape(n); if (!made.length || made.some(s => !validStroke(s))) throw new Error('pasted object geometry is empty or malformed');
@@ -3706,38 +3748,68 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			primitiveMenu.addEventListener('click', e => { const b = e.target.closest('[data-primitive]'); if (!b) return; placeAsset(b.dataset.primitive); closePrimitiveMenu() });
 			document.addEventListener('pointerdown', e => { if (!e.target.closest('#primitiveQuickMenu') && !e.target.closest('#cv')) closePrimitiveMenu() });
 
-			// ===== Scene outliner =====
+			// ===== Scene outliner / object groups =====
 			const list = el('objectList');
 			function sceneObjects() { const a = [], seen = new Set(); S.forEach(s => { if (s.ob && !seen.has(s.ob.id)) { seen.add(s.ob.id); a.push(s.ob) } }); return a }
+			function rewriteObjectDefs(ids, change) {
+				const wanted = new Set(ids);
+				S = S.map(s => {
+					if (!s?.ob || !wanted.has(s.ob.id)) return s;
+					const ob = { ...s.ob, ...change };
+					return { ...s, ob };
+				});
+			}
+			function groupSelectedScene() {
+				const objects = selectedObjects(); if (objects.length < 2) { alert('グループ化するオブジェクトを2個以上選択してください'); return }
+				const groupId = 'group-' + uid(); HU.push(S); RD = []; rewriteObjectDefs(objects.map(o => o.id), { groupId }); normalizeSelection(); render();
+			}
+			function ungroupSelectedScene() {
+				const objects = selectedObjects().filter(o => o.groupId); if (!objects.length) return;
+				HU.push(S); RD = []; const wanted = new Set(objects.map(o => o.id));
+				S = S.map(s => { if (!s?.ob || !wanted.has(s.ob.id)) return s; const ob = { ...s.ob }; delete ob.groupId; return { ...s, ob } });
+				normalizeSelection(); render();
+			}
+			function syncGroupActions() {
+				const group = el('sceneGroupSel'), ungroup = el('sceneUngroupSel'), objects = selectedObjects(), units = new Set(objects.map(o => o.groupId || o.id));
+				if (group) group.disabled = units.size < 2;
+				if (ungroup) ungroup.disabled = !objects.some(o => o.groupId);
+			}
 			function updateOutliner() {
 				if (!list) return; normalizeSelection(); const objects = sceneObjects();
-				list.innerHTML = objects.length ? objects.map((o, i) => `<div class="objectRow ${selIds.has(o.id) ? 'selected' : ''}" data-object="${o.id}"><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? 'checked' : ''} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1}<small>${o.type === 'asset' && o.asset === 'person' ? Number(o.h).toFixed(2) + ' m' : (o.type === 'asset' ? 'low-poly asset' : 'vector shape')}</small></span></div>`).join('') : '<div class="emptyList">まだオブジェクトがありません</div>';
+				list.innerHTML = objects.length ? objects.map((o, i) => { const group = o.groupId ? `<span class="groupMark">グループ</span>` : ''; const detail = o.type === 'asset' && o.asset === 'person' ? Number(o.h).toFixed(2) + ' m' : (o.type === 'asset' ? 'low-poly asset' : 'vector shape'); return `<div class="objectRow ${selIds.has(o.id) ? 'selected' : ''}" data-object="${o.id}"><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? 'checked' : ''} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1} ${group}<small>${detail}</small></span></div>` }).join('') : '<div class="emptyList">まだオブジェクトがありません</div>';
+				syncGroupActions();
 			}
 			function deleteSelectedScene() {
 				const ids = new Set(selectedObjects().map(o => o.id)); if (!ids.size) return;
 				HU.push(S); S = S.filter(s => !(s.ob && ids.has(s.ob.id))); RD = []; clearSelection(); render();
 			}
 			function alignSelectedScene() {
-				const objects = selectedObjects(); if (objects.length < 2) { alert('整列するオブジェクトを2個以上選択してください'); return }
-				const axis = +$('alignAxis').value, kind = $('alignMode').value, bs = objects.map(o => ({ o, b: obBounds(o) }));
-				const target = kind === 'min' ? Math.min(...bs.map(x => x.b.lo[axis])) : kind === 'max' ? Math.max(...bs.map(x => x.b.hi[axis])) : (Math.min(...bs.map(x => x.b.lo[axis])) + Math.max(...bs.map(x => x.b.hi[axis]))) / 2;
+				const objects = selectedObjects(), units = [], unitMap = new Map();
+				objects.forEach(o => { const key = o.groupId || o.id; if (!unitMap.has(key)) { const unit = { objects: [], b: null }; unitMap.set(key, unit); units.push(unit) } unitMap.get(key).objects.push(o) });
+				units.forEach(unit => unit.b = groupBounds(unit.objects));
+				if (units.length < 2) { alert('整列するオブジェクトを2個以上選択してください'); return }
+				const axis = +$('alignAxis').value, kind = $('alignMode').value;
+				const target = kind === 'min' ? Math.min(...units.map(x => x.b.lo[axis])) : kind === 'max' ? Math.max(...units.map(x => x.b.hi[axis])) : (Math.min(...units.map(x => x.b.lo[axis])) + Math.max(...units.map(x => x.b.hi[axis]))) / 2;
 				HU.push(S); RD = [];
-				bs.forEach(({ o, b }) => { const current = kind === 'min' ? b.lo[axis] : kind === 'max' ? b.hi[axis] : (b.lo[axis] + b.hi[axis]) / 2, delta = [0, 0, 0]; delta[axis] = target - current; if (Math.abs(delta[axis]) > 1e-7) setOb(o.id, moveBy(o, delta)) });
+				units.forEach(({ objects, b }) => { const current = kind === 'min' ? b.lo[axis] : kind === 'max' ? b.hi[axis] : (b.lo[axis] + b.hi[axis]) / 2, delta = [0, 0, 0]; delta[axis] = target - current; if (Math.abs(delta[axis]) > 1e-7) objects.forEach(o => setOb(o.id, moveBy(o, delta))) });
 				render();
 			}
 			list.addEventListener('click', e => {
 				const b = e.target.closest('[data-object]'); if (!b) return; const id = b.dataset.object, chosen = obOf(id);
 				if (chosen && chosen.type === 'asset' && chosen.asset === 'person') setStudioWorkspace('character');
 				if (e.target.matches('[data-object-check]')) {
-					if (e.target.checked) { selIds.add(id); sel = id } else { selIds.delete(id); if (sel === id) sel = [...selIds].pop() || null }
-					normalizeSelection(); tool = 'edit'; setMode('draw'); syncSel(); render(); return;
+					if (e.target.checked) setSelection(id, true);
+					else { groupMemberIds(id).forEach(member => selIds.delete(member)); if (sel === id) sel = [...selIds].pop() || null; normalizeSelection() }
+					tool = 'edit'; setMode('draw'); syncSel(); render(); return;
 				}
 				setSelection(id, e.shiftKey || e.metaKey || e.ctrlKey); tool = 'edit'; setMode('draw'); syncSel(); render();
 			});
-			el('sceneSelectAll').onclick = () => { selIds.clear(); sceneObjects().forEach(o => selIds.add(o.id)); sel = [...selIds].pop() || null; tool = 'edit'; setMode('draw'); syncSel(); render() };
+			el('sceneSelectAll').onclick = () => { selIds.clear(); sceneObjects().forEach(o => selIds.add(o.id)); sel = [...selIds].pop() || null; normalizeSelection(); tool = 'edit'; setMode('draw'); syncSel(); render() };
 			el('sceneClearSel').onclick = () => { clearSelection(); render() };
 			el('sceneDeleteSel').onclick = deleteSelectedScene;
 			el('sceneDeleteButton').onclick = deleteSelectedScene;
+			el('sceneGroupSel').onclick = groupSelectedScene;
+			el('sceneUngroupSel').onclick = ungroupSelectedScene;
 			el('alignApply').onclick = alignSelectedScene;
 			// iPadの3本指スワイプ：指先にあるオブジェクトを選び、何もなければ選択対象を順番に切り替える。
 			window.cityThreeFingerSelect = (dx, dy, clientX, clientY) => {
@@ -4538,13 +4610,18 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 			// ===== User camera / settings presets =====
 			const STUDIO_PRESET_KEY = 'city-grid-studio-presets-v1';
 			const studioPresetNameInput = el('studioPresetName'), studioPresetSelect = el('studioPresetSelect');
-			const presetCheckIds = ['gon', 'hzl', 'bgw', 'bin', 'zf', 'gg', 'p3', 'snp'];
+			// オブジェクトを除く、カメラ・グリッド・補助線・ペン・消しゴム・表示設定をまとめて保存する。
+			const presetCheckIds = ['gon', 'hzl', 'bgw', 'bin', 'zf', 'gg', 'p3', 'snp', 'pn', 'sq', 'wf'];
+			const presetSelectIds = ['snap', 'em', 'shT', 'shK'];
 			function readStudioPresets() { try { const a = JSON.parse(localStorage.getItem(STUDIO_PRESET_KEY) || '[]'); return Array.isArray(a) ? a : [] } catch (e) { return [] } }
 			function writeStudioPresets(a) { try { localStorage.setItem(STUDIO_PRESET_KEY, JSON.stringify(a)); return true } catch (e) { return false } }
 			function captureStudioPreset(name) {
-				const checks = {}; presetCheckIds.forEach(id => { const n = el(id); if (n) checks[id] = !!n.checked });
+				const checks = {}, selects = {}; presetCheckIds.forEach(id => { const n = el(id); if (n) checks[id] = !!n.checked }); presetSelectIds.forEach(id => { const n = el(id); if (n) selects[id] = n.value });
+				const ui = { sideHidden: el('side')?.classList.contains('hide') || false, details: [...document.querySelectorAll('#side details')].map(d => !!d.open), trayOpen: el('assetTray')?.style.display === 'block', workspace: quick?.querySelector('[data-workspace-tab].active')?.dataset.workspaceTab || 'perspective' };
+				const strokes = S.filter(s => !s?.ob).map(s => JSON.parse(JSON.stringify(s)));
 				return {
-					name: name || '名称未設定', version: 1, P: { ...P }, gt: el('gt').value, orthView: orthView || null, mode, tool, ar: el('ar').value, show: [...show], checks, snap: el('snap').value, pc: el('pc').value,
+					name: name || '名称未設定', version: 3, P: { ...P }, gt: el('gt').value, orthView: orthView || null, mode, tool, ar: el('ar').value, show: [...show], checks, selects, snap: el('snap').value, pc: el('pc').value,
+					cr: CR ? { ...CR } : null, zoom: { Z, ox, oy }, photo: typeof IMGsrc === 'string' && IMGsrc.startsWith('data:') ? IMGsrc : null, strokes, ui,
 					floorActive: !!window.cityFloorPlanActive, floorCenter: Array.isArray(window.cityFloorPlanCenter) ? [...window.cityFloorPlanCenter] : null, floorScale: Number(window.cityFloorPlanScale) || null
 				};
 			}
@@ -4560,17 +4637,37 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 				if (d.ar != null) { el('ar').value = d.ar; el('ar').onchange() }
 				if (d.gt != null) { el('gt').value = d.gt; applyType(d.gt) }
 				if (d.P) Object.keys(d.P).forEach(k => { if (k in P && d.P[k] != null) setP(k, d.P[k]) });
+				// 3Dオブジェクトは現在のシーンを維持し、プリセット側に保存した線画だけを復元する。
+				if (Array.isArray(d.strokes)) {
+					const objects = S.filter(s => s?.ob); S = [...d.strokes.map(s => JSON.parse(JSON.stringify(s))), ...objects];
+				}
 				if (Array.isArray(d.show)) d.show.forEach((v, i) => { if (i < show.length) { show[i] = !!v; const n = document.querySelector('[data-i="' + i + '"]'); if (n) n.checked = !!v } });
 				if (d.checks) Object.entries(d.checks).forEach(([id, v]) => { const n = el(id); if (n) n.checked = !!v });
+				if (d.selects) Object.entries(d.selects).forEach(([id, v]) => { const n = el(id); if (n && v != null) n.value = v });
 				if (d.snap != null) el('snap').value = d.snap; if (d.pc != null) el('pc').value = d.pc;
-				orthView = d.orthView || null;
+				if (d.cr !== undefined) CR = d.cr ? { ...d.cr } : null;
+				if (d.zoom && Number.isFinite(Number(d.zoom.Z))) { Z = clamp(Number(d.zoom.Z), 1, 10); ox = Number(d.zoom.ox) || 0; oy = Number(d.zoom.oy) || 0; updZ(); }
+				if ('photo' in d) {
+					if (d.photo) { const im = new Image(); im.onload = () => { IMG = im; IMGsrc = d.photo; render() }; im.src = d.photo }
+					else { IMG = null; IMGsrc = null }
+				}
+				orthView = d.orthView || null; tool = d.tool || tool;
+				if (d.ui) {
+					if (Array.isArray(d.ui.details)) document.querySelectorAll('#side details').forEach((section, i) => { if (i < d.ui.details.length) section.open = !!d.ui.details[i] });
+					if (typeof d.ui.sideHidden === 'boolean') { setSide(d.ui.sideHidden); fit() }
+					const tray = el('assetTray'); if (tray && typeof d.ui.trayOpen === 'boolean') { tray.style.display = d.ui.trayOpen ? 'block' : 'none'; el('assetToggle')?.classList.toggle('on', d.ui.trayOpen); tray.classList.toggle('floorAssetTray', !!window.cityFloorPlanActive && d.ui.trayOpen) }
+				}
 				sync();
 				if (d.floorActive) {
-					window.cityFloorPlanEnter?.(orthView === 'side' ? 'side' : 'top');
+					window.cityFloorPlanEnter?.(orthView === 'side' ? 'side' : orthView === 'front' ? 'front' : 'top');
 					if (Array.isArray(d.floorCenter)) window.cityFloorPlanCenter = [...d.floorCenter];
 					if (Number.isFinite(d.floorScale)) window.cityFloorPlanScale = d.floorScale;
-					render();
-				} else { setMode(d.mode === 'draw' ? 'draw' : 'view'); render() }
+					if (d.ui?.workspace === 'floorplan') {
+						quick.querySelectorAll('[data-workspace-tab]').forEach(b => b.classList.toggle('active', b.dataset.workspaceTab === 'floorplan'));
+						quick.querySelectorAll('[data-workspace-screen]').forEach(screen => { screen.hidden = screen.dataset.workspaceScreen !== 'floorplan' });
+					}
+					setMode(d.mode === 'view' ? 'view' : 'draw'); render();
+				} else { if (d.ui?.workspace && window.cityStudioWorkspace) window.cityStudioWorkspace(d.ui.workspace); setMode(d.mode === 'draw' ? 'draw' : 'view'); render() }
 			}
 			el('studioPresetSave').onclick = () => {
 				const name = (studioPresetNameInput.value || '').trim() || `プリセット ${readStudioPresets().length + 1}`;
@@ -4634,7 +4731,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 		integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw=="
 		data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}'
 		crossorigin="anonymous"></script>
-	<script>(function () { function c() { var b = a.contentDocument || (a.contentWindow && a.contentWindow.document); if (b) { var d = b.createElement('script'); d.innerHTML = "window.__CF$cv$params={r:'a4dff9073b5c21d5',t:'MTc5MjU4MjY3Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);"; b.getElementsByTagName('head')[0].appendChild(d) } } if (document.body) { var a = document.createElement('iframe'); a.height = 1; a.width = 1; a.style.position = 'absolute'; a.style.top = 0; a.style.left = 0; a.style.border = 'none'; a.style.visibility = 'hidden'; document.body.appendChild(a); if ('loading' !== document.readyState) c(); else if (window.addEventListener) document.addEventListener('DOMContentLoaded', c); else { var e = document.onreadystatechange || function () { }; document.onreadystatechange = function (b) { e(b); 'loading' !== document.readyState && (document.onreadystatechange = e, c()) } } } })();</script>
+	<script>(function () { function c() { var b = a.contentDocument || (a.contentWindow && a.contentWindow.document); if (b) { var d = b.createElement('script'); d.innerHTML = "window.__CF$cv$params={r:'a4e0427d8d8d2ea4',t:'MTc5MjU4NTY4MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);"; b.getElementsByTagName('head')[0].appendChild(d) } } if (document.body) { var a = document.createElement('iframe'); a.height = 1; a.width = 1; a.style.position = 'absolute'; a.style.top = 0; a.style.left = 0; a.style.border = 'none'; a.style.visibility = 'hidden'; document.body.appendChild(a); if ('loading' !== document.readyState) c(); else if (window.addEventListener) document.addEventListener('DOMContentLoaded', c); else { var e = document.onreadystatechange || function () { }; document.onreadystatechange = function (b) { e(b); 'loading' !== document.readyState && (document.onreadystatechange = e, c()) } } } })();</script>
 </body>
 
 </html>

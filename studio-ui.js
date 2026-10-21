@@ -88,7 +88,7 @@
         <button type="button" id="studioPresetDelete">削除</button>
       </div>
       <label><span>保存済み</span><select id="studioPresetSelect"><option value="">まだありません</option></select></label>
-      <div class="sceneNote">カメラ・レンズ・表示設定を保存。シーン内容は含みません。</div>
+      <div class="sceneNote">カメラ・グリッド・補助線・ペン・消しゴム・画面比率など、オブジェクト以外の設定を保存します。シーン内容は含みません。</div>
       <div class="quickField"><span>階段の段数</span><input id="stairsSteps" type="number" min="2" max="24" step="1" value="6"><em>段</em></div>
       <label class="quickCheck"><input id="stairsRail" type="checkbox"> 階段に手すりをつける</label>
       <div class="quickRow"><button id="applyStairs" class="primary">選択中の階段に反映</button></div>
@@ -103,9 +103,9 @@
 
     <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　7 前　8 横　9 上　0 3D　／　詳細操作は「？」</div>
     <div class="sceneTitle">シーン内オブジェクト</div>
-    <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button></div>
+    <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button></div>
     <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Y軸（高さ）</option><option value=2>Z軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
-    <div class="sceneNote">行のチェックで複数選択。整列は2個以上を選んでください。</div>
+    <div class="sceneNote">行のチェックで複数選択。整列は2個以上を選んでください。グループ化したオブジェクトは選択・移動・削除を一体として扱います。</div>
     <div id="objectList"><div class="emptyList">まだオブジェクトがありません</div></div>`;
 	side.insertBefore(quick, side.firstChild);
 	const humanInput = el('humanHeight');
@@ -413,9 +413,10 @@
 		if (!objectClipboard.length) return false;
 		sanitizeScene(); const before = S.slice(), added = [];
 		try {
-			const lines = [];
+			const lines = [], groupMap = new Map();
 			objectClipboard.forEach((source, i) => {
 				const n = JSON.parse(JSON.stringify(source)); n.id = uid(); n.off = [...(n.off || [0, 0, 0])];
+				if (source.groupId) { if (!groupMap.has(source.groupId)) groupMap.set(source.groupId, 'group-' + uid()); n.groupId = groupMap.get(source.groupId) }
 				// 元の場所を保ちつつ、貼り付け先が見つけやすいようにca方向へ少しずらす。
 				n.ca = Number(n.ca) || 0; n.ca += Math.max(.35, Math.abs(Number(n.ra) || .25) * 2.4) + i * .18;
 				const made = genShape(n); if (!made.length || made.some(s => !validStroke(s))) throw new Error('pasted object geometry is empty or malformed');
@@ -478,38 +479,68 @@
 	primitiveMenu.addEventListener('click', e => { const b = e.target.closest('[data-primitive]'); if (!b) return; placeAsset(b.dataset.primitive); closePrimitiveMenu() });
 	document.addEventListener('pointerdown', e => { if (!e.target.closest('#primitiveQuickMenu') && !e.target.closest('#cv')) closePrimitiveMenu() });
 
-	// ===== Scene outliner =====
+	// ===== Scene outliner / object groups =====
 	const list = el('objectList');
 	function sceneObjects() { const a = [], seen = new Set(); S.forEach(s => { if (s.ob && !seen.has(s.ob.id)) { seen.add(s.ob.id); a.push(s.ob) } }); return a }
+	function rewriteObjectDefs(ids, change) {
+		const wanted = new Set(ids);
+		S = S.map(s => {
+			if (!s?.ob || !wanted.has(s.ob.id)) return s;
+			const ob = { ...s.ob, ...change };
+			return { ...s, ob };
+		});
+	}
+	function groupSelectedScene() {
+		const objects = selectedObjects(); if (objects.length < 2) { alert('グループ化するオブジェクトを2個以上選択してください'); return }
+		const groupId = 'group-' + uid(); HU.push(S); RD = []; rewriteObjectDefs(objects.map(o => o.id), { groupId }); normalizeSelection(); render();
+	}
+	function ungroupSelectedScene() {
+		const objects = selectedObjects().filter(o => o.groupId); if (!objects.length) return;
+		HU.push(S); RD = []; const wanted = new Set(objects.map(o => o.id));
+		S = S.map(s => { if (!s?.ob || !wanted.has(s.ob.id)) return s; const ob = { ...s.ob }; delete ob.groupId; return { ...s, ob } });
+		normalizeSelection(); render();
+	}
+	function syncGroupActions() {
+		const group = el('sceneGroupSel'), ungroup = el('sceneUngroupSel'), objects = selectedObjects(), units = new Set(objects.map(o => o.groupId || o.id));
+		if (group) group.disabled = units.size < 2;
+		if (ungroup) ungroup.disabled = !objects.some(o => o.groupId);
+	}
 	function updateOutliner() {
 		if (!list) return; normalizeSelection(); const objects = sceneObjects();
-		list.innerHTML = objects.length ? objects.map((o, i) => `<div class="objectRow ${selIds.has(o.id) ? 'selected' : ''}" data-object="${o.id}"><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? 'checked' : ''} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1}<small>${o.type === 'asset' && o.asset === 'person' ? Number(o.h).toFixed(2) + ' m' : (o.type === 'asset' ? 'low-poly asset' : 'vector shape')}</small></span></div>`).join('') : '<div class="emptyList">まだオブジェクトがありません</div>';
+		list.innerHTML = objects.length ? objects.map((o, i) => { const group = o.groupId ? `<span class="groupMark">グループ</span>` : ''; const detail = o.type === 'asset' && o.asset === 'person' ? Number(o.h).toFixed(2) + ' m' : (o.type === 'asset' ? 'low-poly asset' : 'vector shape'); return `<div class="objectRow ${selIds.has(o.id) ? 'selected' : ''}" data-object="${o.id}"><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? 'checked' : ''} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1} ${group}<small>${detail}</small></span></div>` }).join('') : '<div class="emptyList">まだオブジェクトがありません</div>';
+		syncGroupActions();
 	}
 	function deleteSelectedScene() {
 		const ids = new Set(selectedObjects().map(o => o.id)); if (!ids.size) return;
 		HU.push(S); S = S.filter(s => !(s.ob && ids.has(s.ob.id))); RD = []; clearSelection(); render();
 	}
 	function alignSelectedScene() {
-		const objects = selectedObjects(); if (objects.length < 2) { alert('整列するオブジェクトを2個以上選択してください'); return }
-		const axis = +$('alignAxis').value, kind = $('alignMode').value, bs = objects.map(o => ({ o, b: obBounds(o) }));
-		const target = kind === 'min' ? Math.min(...bs.map(x => x.b.lo[axis])) : kind === 'max' ? Math.max(...bs.map(x => x.b.hi[axis])) : (Math.min(...bs.map(x => x.b.lo[axis])) + Math.max(...bs.map(x => x.b.hi[axis]))) / 2;
+		const objects = selectedObjects(), units = [], unitMap = new Map();
+		objects.forEach(o => { const key = o.groupId || o.id; if (!unitMap.has(key)) { const unit = { objects: [], b: null }; unitMap.set(key, unit); units.push(unit) } unitMap.get(key).objects.push(o) });
+		units.forEach(unit => unit.b = groupBounds(unit.objects));
+		if (units.length < 2) { alert('整列するオブジェクトを2個以上選択してください'); return }
+		const axis = +$('alignAxis').value, kind = $('alignMode').value;
+		const target = kind === 'min' ? Math.min(...units.map(x => x.b.lo[axis])) : kind === 'max' ? Math.max(...units.map(x => x.b.hi[axis])) : (Math.min(...units.map(x => x.b.lo[axis])) + Math.max(...units.map(x => x.b.hi[axis]))) / 2;
 		HU.push(S); RD = [];
-		bs.forEach(({ o, b }) => { const current = kind === 'min' ? b.lo[axis] : kind === 'max' ? b.hi[axis] : (b.lo[axis] + b.hi[axis]) / 2, delta = [0, 0, 0]; delta[axis] = target - current; if (Math.abs(delta[axis]) > 1e-7) setOb(o.id, moveBy(o, delta)) });
+		units.forEach(({ objects, b }) => { const current = kind === 'min' ? b.lo[axis] : kind === 'max' ? b.hi[axis] : (b.lo[axis] + b.hi[axis]) / 2, delta = [0, 0, 0]; delta[axis] = target - current; if (Math.abs(delta[axis]) > 1e-7) objects.forEach(o => setOb(o.id, moveBy(o, delta))) });
 		render();
 	}
 	list.addEventListener('click', e => {
 		const b = e.target.closest('[data-object]'); if (!b) return; const id = b.dataset.object, chosen = obOf(id);
 		if (chosen && chosen.type === 'asset' && chosen.asset === 'person') setStudioWorkspace('character');
 		if (e.target.matches('[data-object-check]')) {
-			if (e.target.checked) { selIds.add(id); sel = id } else { selIds.delete(id); if (sel === id) sel = [...selIds].pop() || null }
-			normalizeSelection(); tool = 'edit'; setMode('draw'); syncSel(); render(); return;
+			if (e.target.checked) setSelection(id, true);
+			else { groupMemberIds(id).forEach(member => selIds.delete(member)); if (sel === id) sel = [...selIds].pop() || null; normalizeSelection() }
+			tool = 'edit'; setMode('draw'); syncSel(); render(); return;
 		}
 		setSelection(id, e.shiftKey || e.metaKey || e.ctrlKey); tool = 'edit'; setMode('draw'); syncSel(); render();
 	});
-	el('sceneSelectAll').onclick = () => { selIds.clear(); sceneObjects().forEach(o => selIds.add(o.id)); sel = [...selIds].pop() || null; tool = 'edit'; setMode('draw'); syncSel(); render() };
+	el('sceneSelectAll').onclick = () => { selIds.clear(); sceneObjects().forEach(o => selIds.add(o.id)); sel = [...selIds].pop() || null; normalizeSelection(); tool = 'edit'; setMode('draw'); syncSel(); render() };
 	el('sceneClearSel').onclick = () => { clearSelection(); render() };
 	el('sceneDeleteSel').onclick = deleteSelectedScene;
 	el('sceneDeleteButton').onclick = deleteSelectedScene;
+	el('sceneGroupSel').onclick = groupSelectedScene;
+	el('sceneUngroupSel').onclick = ungroupSelectedScene;
 	el('alignApply').onclick = alignSelectedScene;
 	// iPadの3本指スワイプ：指先にあるオブジェクトを選び、何もなければ選択対象を順番に切り替える。
 	window.cityThreeFingerSelect = (dx, dy, clientX, clientY) => {
@@ -1310,13 +1341,18 @@
 	// ===== User camera / settings presets =====
 	const STUDIO_PRESET_KEY = 'city-grid-studio-presets-v1';
 	const studioPresetNameInput = el('studioPresetName'), studioPresetSelect = el('studioPresetSelect');
-	const presetCheckIds = ['gon', 'hzl', 'bgw', 'bin', 'zf', 'gg', 'p3', 'snp'];
+	// オブジェクトを除く、カメラ・グリッド・補助線・ペン・消しゴム・表示設定をまとめて保存する。
+	const presetCheckIds = ['gon', 'hzl', 'bgw', 'bin', 'zf', 'gg', 'p3', 'snp', 'pn', 'sq', 'wf'];
+	const presetSelectIds = ['snap', 'em', 'shT', 'shK'];
 	function readStudioPresets() { try { const a = JSON.parse(localStorage.getItem(STUDIO_PRESET_KEY) || '[]'); return Array.isArray(a) ? a : [] } catch (e) { return [] } }
 	function writeStudioPresets(a) { try { localStorage.setItem(STUDIO_PRESET_KEY, JSON.stringify(a)); return true } catch (e) { return false } }
 	function captureStudioPreset(name) {
-		const checks = {}; presetCheckIds.forEach(id => { const n = el(id); if (n) checks[id] = !!n.checked });
+		const checks = {}, selects = {}; presetCheckIds.forEach(id => { const n = el(id); if (n) checks[id] = !!n.checked }); presetSelectIds.forEach(id => { const n = el(id); if (n) selects[id] = n.value });
+		const ui = { sideHidden: el('side')?.classList.contains('hide') || false, details: [...document.querySelectorAll('#side details')].map(d => !!d.open), trayOpen: el('assetTray')?.style.display === 'block', workspace: quick?.querySelector('[data-workspace-tab].active')?.dataset.workspaceTab || 'perspective' };
+		const strokes = S.filter(s => !s?.ob).map(s => JSON.parse(JSON.stringify(s)));
 		return {
-			name: name || '名称未設定', version: 1, P: { ...P }, gt: el('gt').value, orthView: orthView || null, mode, tool, ar: el('ar').value, show: [...show], checks, snap: el('snap').value, pc: el('pc').value,
+			name: name || '名称未設定', version: 3, P: { ...P }, gt: el('gt').value, orthView: orthView || null, mode, tool, ar: el('ar').value, show: [...show], checks, selects, snap: el('snap').value, pc: el('pc').value,
+			cr: CR ? { ...CR } : null, zoom: { Z, ox, oy }, photo: typeof IMGsrc === 'string' && IMGsrc.startsWith('data:') ? IMGsrc : null, strokes, ui,
 			floorActive: !!window.cityFloorPlanActive, floorCenter: Array.isArray(window.cityFloorPlanCenter) ? [...window.cityFloorPlanCenter] : null, floorScale: Number(window.cityFloorPlanScale) || null
 		};
 	}
@@ -1332,17 +1368,37 @@
 		if (d.ar != null) { el('ar').value = d.ar; el('ar').onchange() }
 		if (d.gt != null) { el('gt').value = d.gt; applyType(d.gt) }
 		if (d.P) Object.keys(d.P).forEach(k => { if (k in P && d.P[k] != null) setP(k, d.P[k]) });
+		// 3Dオブジェクトは現在のシーンを維持し、プリセット側に保存した線画だけを復元する。
+		if (Array.isArray(d.strokes)) {
+			const objects = S.filter(s => s?.ob); S = [...d.strokes.map(s => JSON.parse(JSON.stringify(s))), ...objects];
+		}
 		if (Array.isArray(d.show)) d.show.forEach((v, i) => { if (i < show.length) { show[i] = !!v; const n = document.querySelector('[data-i="' + i + '"]'); if (n) n.checked = !!v } });
 		if (d.checks) Object.entries(d.checks).forEach(([id, v]) => { const n = el(id); if (n) n.checked = !!v });
+		if (d.selects) Object.entries(d.selects).forEach(([id, v]) => { const n = el(id); if (n && v != null) n.value = v });
 		if (d.snap != null) el('snap').value = d.snap; if (d.pc != null) el('pc').value = d.pc;
-		orthView = d.orthView || null;
+		if (d.cr !== undefined) CR = d.cr ? { ...d.cr } : null;
+		if (d.zoom && Number.isFinite(Number(d.zoom.Z))) { Z = clamp(Number(d.zoom.Z), 1, 10); ox = Number(d.zoom.ox) || 0; oy = Number(d.zoom.oy) || 0; updZ(); }
+		if ('photo' in d) {
+			if (d.photo) { const im = new Image(); im.onload = () => { IMG = im; IMGsrc = d.photo; render() }; im.src = d.photo }
+			else { IMG = null; IMGsrc = null }
+		}
+		orthView = d.orthView || null; tool = d.tool || tool;
+		if (d.ui) {
+			if (Array.isArray(d.ui.details)) document.querySelectorAll('#side details').forEach((section, i) => { if (i < d.ui.details.length) section.open = !!d.ui.details[i] });
+			if (typeof d.ui.sideHidden === 'boolean') { setSide(d.ui.sideHidden); fit() }
+			const tray = el('assetTray'); if (tray && typeof d.ui.trayOpen === 'boolean') { tray.style.display = d.ui.trayOpen ? 'block' : 'none'; el('assetToggle')?.classList.toggle('on', d.ui.trayOpen); tray.classList.toggle('floorAssetTray', !!window.cityFloorPlanActive && d.ui.trayOpen) }
+		}
 		sync();
 		if (d.floorActive) {
-			window.cityFloorPlanEnter?.(orthView === 'side' ? 'side' : 'top');
+			window.cityFloorPlanEnter?.(orthView === 'side' ? 'side' : orthView === 'front' ? 'front' : 'top');
 			if (Array.isArray(d.floorCenter)) window.cityFloorPlanCenter = [...d.floorCenter];
 			if (Number.isFinite(d.floorScale)) window.cityFloorPlanScale = d.floorScale;
-			render();
-		} else { setMode(d.mode === 'draw' ? 'draw' : 'view'); render() }
+			if (d.ui?.workspace === 'floorplan') {
+				quick.querySelectorAll('[data-workspace-tab]').forEach(b => b.classList.toggle('active', b.dataset.workspaceTab === 'floorplan'));
+				quick.querySelectorAll('[data-workspace-screen]').forEach(screen => { screen.hidden = screen.dataset.workspaceScreen !== 'floorplan' });
+			}
+			setMode(d.mode === 'view' ? 'view' : 'draw'); render();
+		} else { if (d.ui?.workspace && window.cityStudioWorkspace) window.cityStudioWorkspace(d.ui.workspace); setMode(d.mode === 'draw' ? 'draw' : 'view'); render() }
 	}
 	el('studioPresetSave').onclick = () => {
 		const name = (studioPresetNameInput.value || '').trim() || `プリセット ${readStudioPresets().length + 1}`;

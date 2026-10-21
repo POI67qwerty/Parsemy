@@ -936,6 +936,17 @@ canvas {
 	white-space: nowrap
 }
 
+.groupMark {
+	display: inline-block;
+	margin-left: 4px;
+	padding: 1px 4px;
+	border: 1px solid #4b7779;
+	border-radius: 4px;
+	color: #baffea;
+	font-size: 9px;
+	vertical-align: 1px
+}
+
 .objectMeta small {
 	display: block;
 	color: #819397;
@@ -957,11 +968,12 @@ canvas {
 .sceneTools {
 	display: flex;
 	gap: 5px;
-	margin-top: 6px
+	margin-top: 6px;
+	flex-wrap: wrap
 }
 
 .sceneTools button {
-	flex: 1;
+	flex: 1 1 72px;
 	min-width: 0 !important;
 	padding: 6px 5px !important;
 	font-size: 11px !important

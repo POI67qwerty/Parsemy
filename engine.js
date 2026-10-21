@@ -30,7 +30,7 @@ ${R('cz', 'カメラ位置 Z', -30, 30, 0.01)}
 <label><span>画面比率</span><select id=ar><option value=1.7778>16:9<option value=1.3333>4:3<option value=1.5>3:2<option value=1>1:1<option value=0.8>4:5<option value=0.5625>9:16</select></label>
 <h3>補助線（細かくできます）</h3>
 ${R('n', '本数（各VP）', 2, 400, 1, '本')}
-${R('ga', '濃さ', 0.05, 1, 0.01)}
+${R('ga', '補助線の透過度', 0.05, 1, 0.01)}
 ${R('gw', '線の太さ', 0.2, 3, 0.1, 'px')}
 <label><span>表示する軸</span>
  <span><input type=checkbox data-i=0 checked>VP1 <input type=checkbox data-i=1 checked>VP2 <input type=checkbox data-i=2 checked>垂直</span></label>
@@ -77,6 +77,8 @@ ${RO('rot', '回転', -180, 180, 0.1, '°')}
 <label><span>絵枠の高さ</span><input type=number class=nv id=ov_faceH step=0.01 style="width:100px"><span class=un>m</span></label>
 </div>
 <label><button id=obExtrude>押し出しを有効</button><button id=obGnd>地面につける</button><button id=obDup>複製</button><button id=obDel>削除</button><button id=obOff>選択解除</button></label>
+<label><button id=objectInfoCopy aria-label="JSONコピー" title="選択中オブジェクトの定義JSONをコピー" disabled>JSONコピー</button><button id=objectInfoSave aria-label="JSON保存" title="選択中オブジェクトの定義JSONを保存" disabled>JSON保存</button></label>
+<div class="note">JSON保存は寸法・位置・向き・アセット固有設定をテキストで書き出します。後から線画化できる定義形式です。</div>
 <div class="note">位置は底面の中心です。Yは地面からの高さ（0で地面につく）、X・Zは床の方向（VP1・VP2側）です</div>
 </div>
 <h3>書き出し範囲（上の「範囲」ボタン）</h3>
@@ -377,17 +379,30 @@ function buildShape(sh, p1) {
 const obOf = id => { const s = S.find(s => s.ob && s.ob.id === id); return s && s.ob };
 // 選択状態は「操作対象の主役 sel」と、複数選択用の selIds を分けて持つ。
 // 旧データや既存の操作経路が sel だけを書き換えても壊れないよう、ここで同期する。
+function groupMemberIds(id) {
+	const o = obOf(id); if (!o) return [];
+	if (!o.groupId) return [id];
+	const ids = []; S.forEach(s => { const q = s && s.ob; if (q && q.groupId === o.groupId && !ids.includes(q.id)) ids.push(q.id) });
+	return ids.length ? ids : [id];
+}
 function normalizeSelection() {
 	if (sel && !selIds.has(sel)) selIds.add(sel);
 	[...selIds].forEach(id => { if (!obOf(id)) selIds.delete(id) });
+	// グループは常に一体選択。行・キャンバスのどのメンバーを選んでも全員を選ぶ。
+	[...selIds].forEach(id => groupMemberIds(id).forEach(member => selIds.add(member)));
 	if (sel && !obOf(sel)) sel = null;
 	if (!sel && selIds.size) sel = [...selIds][selIds.size - 1];
 	if (sel && !selIds.has(sel)) selIds.add(sel);
 }
 function setSelection(id, add = false) {
+	const members = id ? groupMemberIds(id) : [];
 	if (!add) selIds.clear();
-	if (id) { if (add && selIds.has(id)) selIds.delete(id); else selIds.add(id); sel = selIds.has(id) ? id : ([...selIds][selIds.size - 1] || null) }
-	else if (!add) { sel = null }
+	if (id) {
+		const selected = members.some(member => selIds.has(member));
+		if (add && selected) members.forEach(member => selIds.delete(member));
+		else members.forEach(member => selIds.add(member));
+		sel = selIds.has(id) ? id : ([...selIds][selIds.size - 1] || null)
+	} else if (!add) { sel = null }
 	normalizeSelection();
 }
 function clearSelection() { sel = null; selIds.clear(); }
@@ -445,7 +460,11 @@ $('obGnd').onclick = () => {
 	const o = obOf(sel); if (!o) return; const bb = obBounds(o), dy = -1 - bb.lo[1];   // 一番低い点を地面(y=-1)に合わせる
 	HU.push(S); RD = []; setOb(sel, moveBy(o, [0, dy, 0])); render()
 };
-$('obDup').onclick = () => { const o = obOf(sel); if (!o) return; const n = { ...o, id: uid(), ca: o.ca + o.ra * 2.4 }; HU.push(S); S = [...S, ...genShape(n)]; RD = []; setSelection(n.id); render() };
+$('obDup').onclick = () => {
+	const objects = selectedObjects(); if (!objects.length) return; const lead = objects.find(o => o.id === sel) || objects[0], newGroup = objects.length > 1 && objects.some(o => o.groupId) ? 'group-' + uid() : null, shift = Number(lead.ra || .5) * 2.4;
+	const clones = objects.map(o => { const n = { ...o, id: uid(), ca: o.ca + shift, off: [...(o.off || [0, 0, 0])] }; if (newGroup) n.groupId = newGroup; return n });
+	HU.push(S); S = [...S, ...clones.flatMap(n => genShape(n))]; RD = []; clearSelection(); clones.forEach(n => selIds.add(n.id)); sel = clones[0].id; normalizeSelection(); render()
+};
 $('obDel').onclick = () => { const ids = new Set(selectedObjects().map(o => o.id)); if (!ids.size) return; HU.push(S); S = S.filter(s => !(s.ob && ids.has(s.ob.id))); RD = []; clearSelection(); render() };
 $('obOff').onclick = () => { clearSelection(); render() };
 // ===== ブレンダー風ギズモ：矢印(XYZ軸の移動)・白い四角(面の押し引き)・点線の輪(回転) =====
@@ -742,11 +761,16 @@ $('crF').onclick = () => {
 };
 
 // ===== ツール切り替え（消しゴム・図形・範囲）と設定パネルの開閉 =====
+function syncInteractionButtons() {
+	// 視点／鉛筆と、編集／消しゴム／図形／範囲を同じ「ON」表示にしない。
+	// 視点中はツールボタンをすべてOFF、描画中は選択した1ツールだけをONにする。
+	$('mV').classList.toggle('on', mode === 'view');
+	$('mD').classList.toggle('on', mode === 'draw' && tool === 'pen');
+	[['tE', 'erase'], ['tS', 'shape'], ['tB', 'border'], ['tM', 'edit']].forEach(([id, n]) => $(id).classList.toggle('on', mode === 'draw' && tool === n));
+}
 function setTool(t) {
-	tool = tool === t ? 'pen' : t;
-	[['tE', 'erase'], ['tS', 'shape'], ['tB', 'border'], ['tM', 'edit']].forEach(([id, n]) => $(id).classList.toggle('on', tool === n));
-	if (tool !== 'pen') setMode('draw');
-	const HT = { shape: '図形：キャンバスをドラッグすると長方形／円／三角柱／三角錐を作成し、自動で編集モードになります。種類・面は左の設定で選びます', border: '書き出し範囲：ドラッグで枠を指定。PNG保存・コピーはこの範囲で切り取られます', erase: '消しゴム：なぞったところを消します', edit: '図形編集：線にさわって選択。空白を長押ししてドラッグするとボックス選択。Shift/Ctrl/⌘クリックでも複数選択でき、選択済みの線をドラッグするとまとめて移動。iPadは指またはApple Pencilで長押しドラッグ。矢印＝軸に沿って移動／白い四角＝面を押し引き／点線の輪＝回転／線をドラッグ＝面の上で移動。看板は絵枠W・絵枠Hと外形の面ハンドル、円錐は高さ、球体は半径ハンドルをドラッグできます' };
+	tool = t; setMode('draw');
+	const HT = { shape: '図形：キャンバスをドラッグすると長方形／円／三角柱／三角錐を作成し、自動で編集モードになります。種類・面は左の設定で選びます', border: '書き出し範囲：ドラッグで枠を指定。範囲指定はPNG保存・コピーに反映されます', erase: '消しゴム：なぞったところを消します', edit: '図形編集：線にさわって選択。空白を長押ししてドラッグするとボックス選択。Shift/Ctrl/⌘クリックでも複数選択でき、選択済みの線をドラッグするとまとめて移動。iPadは指またはApple Pencilで長押しドラッグ。矢印＝軸に沿って移動／白い四角＝面を押し引き／点線の輪＝回転／線をドラッグ＝面の上で移動。看板は絵枠W・絵枠Hと外形の面ハンドル、円錐は高さ、球体は半径ハンドルをドラッグできます' };
 	if (HT[tool]) $('hint').textContent = HT[tool] + ' ／ ⌘(Ctrl)+ドラッグ＝視点移動'
 }
 $('tE').onclick = () => setTool('erase'); $('tS').onclick = () => setTool('shape'); $('tB').onclick = () => setTool('border'); $('tM').onclick = () => setTool('edit');
@@ -1348,10 +1372,10 @@ addEventListener('blur', () => { if (!boxSelect && !boxPending) { ptr = null; pt
 
 // ===== モード・ボタン =====
 function setMode(m) {
-	mode = m; $('mV').classList.toggle('on', m === 'view'); $('mD').classList.toggle('on', m === 'draw'); cv.style.cursor = m === 'view' ? 'move' : 'crosshair';
+	mode = m; syncInteractionButtons(); cv.style.cursor = m === 'view' ? 'move' : 'crosshair';
 	$('hint').textContent = ($('pn').checked ? '【指＝視点／ペン＝描画】' : '') + (m === 'view' ? (T === 'f' ? 'ドラッグ：視点を回転／Shiftまたは右ドラッグ：水平移動／ホイール：ズーム' : 'ドラッグ：視点を回転／Shiftまたは右ドラッグ：水平移動／ホイール：ズーム（矢印キーでも可）') : '線を引くと、向かっているVPへ自動で吸着します。Ctrl/⌘+Zで元に戻す') + ' ／ 中ドラッグ：回転・Shift+ドラッグ：パン'
 }
-$('mV').onclick = () => setMode('view'); $('mD').onclick = () => setMode('draw');
+$('mV').onclick = () => setMode('view'); $('mD').onclick = () => setTool('pen');
 const undo = () => { if (HU.length) { RD.push(S); S = HU.pop(); render() } }, redo = () => { if (RD.length) { HU.push(S); S = RD.pop(); render() } };
 $('undo').onclick = undo; $('redo').onclick = redo; $('clr').onclick = () => { if (S.length && confirm('全部消しますか？')) { HU.push(S); S = []; RD = []; render() } };
 addEventListener('keydown', e => {
@@ -1424,17 +1448,21 @@ $('pngB').onclick = () => save('both', 'perspective-guide-line.png');
 $('pngBH').onclick = () => save('both', 'perspective-guide-line-visible.png', true);
 $('pngLH').onclick = () => save('line', 'perspective-line-visible.png', true);
 $('pngGH').onclick = () => save('guide', 'perspective-guide-visible.png', true);
-// 線画をクリップボードへコピー（PNG透過）。未対応ブラウザではボタンに状態を表示する。
-$('cpyL').onclick = async () => {
-	const button = $('cpyL'), label = '線画をクリップボードにコピー';
+// 線画・補助線・合成画像を、いずれも透過PNGとしてクリップボードへコピーする。
+// 未対応ブラウザでは各ボタンに状態を表示する。
+async function copyExportToClipboard(kind, id, label) {
+	const button = $(id); if (!button) return;
 	try {
 		if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('Clipboard image API is unavailable');
-		const blob = await new Promise(resolve => out('line').toBlob(resolve, 'image/png'));
+		const blob = await new Promise(resolve => out(kind).toBlob(resolve, 'image/png'));
 		if (!blob) throw new Error('PNG blob was not created');
 		await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); button.textContent = 'コピー済み'; closeExportMenu();
 	} catch (e) { console.error('City Grid clipboard export error', e); button.textContent = 'コピー不可' }
-	setTimeout(() => button.textContent = label, 1500)
-};
+	setTimeout(() => button.textContent = label, 1500);
+}
+$('cpyL').onclick = () => copyExportToClipboard('line', 'cpyL', '線画（透過）をクリップボードにコピー');
+$('cpyG').onclick = () => copyExportToClipboard('guide', 'cpyG', '補助線（透過）をクリップボードにコピー');
+$('cpyB').onclick = () => copyExportToClipboard('both', 'cpyB', '描画＋補助線（透過）をクリップボードにコピー');
 
 // ===== 参考写真 =====
 let IMGsrc = null, dirty = false;   // IMGsrc=保存用の写真データ(dataURL)
