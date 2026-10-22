@@ -103,9 +103,9 @@
 
     <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　7 前　8 横　9 上　0 3D　／　詳細操作は「？」</div>
     <div class="sceneTitle">シーン内オブジェクト</div>
-    <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button></div>
+    <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button><button id="sceneCombineSel">結合</button><button id="sceneSeparateSel">結合解除</button></div>
     <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Y軸（高さ）</option><option value=2>Z軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
-    <div class="sceneNote">行のチェックで複数選択。整列は2個以上を選んでください。グループ化したオブジェクトは選択・移動・削除を一体として扱います。</div>
+    <div class="sceneNote">行のチェックで複数選択。整列は2個以上を選んでください。グループ化は後から解除できます。結合は複数の定義を一つの複合オブジェクトにまとめ、結合解除まで一体として扱います。</div>
     <div id="objectList"><div class="emptyList">まだオブジェクトがありません</div></div>`;
 	side.insertBefore(quick, side.firstChild);
 	const humanInput = el('humanHeight');
@@ -207,8 +207,8 @@
 		stairs: { label: '階段', glyph: '▰', w: 1.45, d: 2.4, h: .78, accent: '#ffb36f' },
 		crosswalk: { label: '横断歩道', glyph: '▥', w: 3.2, d: 4.2, h: .02, accent: '#668cff' }
 	};
-	const assetLabel = o => o.type === 'asset' ? (ASSETS[o.asset]?.label || (o.asset === 'cylinder' ? '円柱' : 'アセット')) : (o.type === 'rect' ? '長方形' : o.type === 'circ' ? '円' : o.type === 'box' ? '箱' : o.type === 'cyl' ? '円柱' : '図形');
-	const assetGlyph = o => o.type === 'asset' ? (ASSETS[o.asset]?.glyph || (o.asset === 'cylinder' ? '◉' : '◆')) : (o.type === 'rect' ? '□' : o.type === 'circ' ? '○' : '◇');
+	const assetLabel = o => o.type === 'compound' ? '結合オブジェクト' : o.type === 'asset' ? (ASSETS[o.asset]?.label || (o.asset === 'cylinder' ? '円柱' : 'アセット')) : (o.type === 'rect' ? '長方形' : o.type === 'circ' ? '円' : o.type === 'box' ? '箱' : o.type === 'cyl' ? '円柱' : '図形');
+	const assetGlyph = o => o.type === 'compound' ? '◆' : o.type === 'asset' ? (ASSETS[o.asset]?.glyph || (o.asset === 'cylinder' ? '◉' : '◆')) : (o.type === 'rect' ? '□' : o.type === 'circ' ? '○' : '◇');
 
 	// Coordinate helpers. Local asset coordinates are x=width, y=depth, z=up.
 	const pt = (o, x, y, z) => L2W(o, x, y, z);
@@ -418,7 +418,8 @@
 				const n = JSON.parse(JSON.stringify(source)); n.id = uid(); n.off = [...(n.off || [0, 0, 0])];
 				if (source.groupId) { if (!groupMap.has(source.groupId)) groupMap.set(source.groupId, 'group-' + uid()); n.groupId = groupMap.get(source.groupId) }
 				// 元の場所を保ちつつ、貼り付け先が見つけやすいようにca方向へ少しずらす。
-				n.ca = Number(n.ca) || 0; n.ca += Math.max(.35, Math.abs(Number(n.ra) || .25) * 2.4) + i * .18;
+				const shift = Math.max(.35, Math.abs(Number(n.ra) || .25) * 2.4) + i * .18;
+				if (n.type === 'compound') Object.assign(n, moveBy(n, [shift, 0, 0])); else { n.ca = Number(n.ca) || 0; n.ca += shift }
 				const made = genShape(n); if (!made.length || made.some(s => !validStroke(s))) throw new Error('pasted object geometry is empty or malformed');
 				lines.push(...made); added.push(n.id);
 			});
@@ -500,14 +501,34 @@
 		S = S.map(s => { if (!s?.ob || !wanted.has(s.ob.id)) return s; const ob = { ...s.ob }; delete ob.groupId; return { ...s, ob } });
 		normalizeSelection(); render();
 	}
+	function combineSelectedScene() {
+		const objects = selectedObjects(); if (objects.length < 2) { alert('結合するオブジェクトを2個以上選択してください'); return }
+		const parts = [];
+		objects.forEach(o => {
+			const sources = o.type === 'compound' ? compoundPartsAt(o) : [o];
+			sources.forEach(source => { const q = JSON.parse(JSON.stringify(source)); q.id = uid(); delete q.groupId; parts.push(q) });
+		});
+		if (parts.length < 2) { alert('結合するパーツがありません'); return }
+		const b = groupBounds(parts), lead = objects.find(o => o.id === sel) || objects[0], compound = { id: uid(), type: 'compound', parts, tx: 0, ty: 0, tz: 0, k: 1, d: -1, ca: (b.lo[0] + b.hi[0]) / 2, cb: (b.lo[2] + b.hi[2]) / 2, ra: Math.max(.005, (b.hi[0] - b.lo[0]) / 2), rb: Math.max(.005, (b.hi[2] - b.lo[2]) / 2), h: Math.max(.005, b.hi[1] - b.lo[1]), rot: 0, compoundRot: 0, lift: 0, off: [0, 0, 0], c: lead.c || '#222222', w: lead.w || MASTER_W, accent: lead.accent || '#66e3c8', surfaceColor: lead.surfaceColor, surfaceAlpha: lead.surfaceAlpha };
+		const lines = genShape(compound); if (!lines.length || lines.some(s => !validStroke(s))) { alert('結合できない形状が含まれています'); return }
+		const wanted = new Set(objects.map(o => o.id)); HU.push(S); RD = []; S = [...S.filter(s => !(s.ob && wanted.has(s.ob.id))), ...lines]; clearSelection(); setSelection(compound.id, false); render();
+	}
+	function separateSelectedScene() {
+		const objects = selectedObjects().filter(o => o.type === 'compound'); if (!objects.length) return;
+		const wanted = new Set(objects.map(o => o.id)), parts = [];
+		objects.forEach(o => compoundPartsAt(o).forEach(source => { const q = JSON.parse(JSON.stringify(source)); q.id = uid(); delete q.groupId; parts.push(q) }));
+		const lines = parts.flatMap(part => genShape(part)); HU.push(S); RD = []; S = [...S.filter(s => !(s.ob && wanted.has(s.ob.id))), ...lines]; clearSelection(); parts.forEach(part => selIds.add(part.id)); sel = parts[0]?.id || null; normalizeSelection(); render();
+	}
 	function syncGroupActions() {
-		const group = el('sceneGroupSel'), ungroup = el('sceneUngroupSel'), objects = selectedObjects(), units = new Set(objects.map(o => o.groupId || o.id));
+		const group = el('sceneGroupSel'), ungroup = el('sceneUngroupSel'), combine = el('sceneCombineSel'), separate = el('sceneSeparateSel'), objects = selectedObjects(), units = new Set(objects.map(o => o.groupId || o.id));
 		if (group) group.disabled = units.size < 2;
 		if (ungroup) ungroup.disabled = !objects.some(o => o.groupId);
+		if (combine) combine.disabled = objects.length < 2;
+		if (separate) separate.disabled = !objects.some(o => o.type === 'compound');
 	}
 	function updateOutliner() {
 		if (!list) return; normalizeSelection(); const objects = sceneObjects();
-		list.innerHTML = objects.length ? objects.map((o, i) => { const group = o.groupId ? `<span class="groupMark">グループ</span>` : ''; const detail = o.type === 'asset' && o.asset === 'person' ? Number(o.h).toFixed(2) + ' m' : (o.type === 'asset' ? 'low-poly asset' : 'vector shape'); return `<div class="objectRow ${selIds.has(o.id) ? 'selected' : ''}" data-object="${o.id}"><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? 'checked' : ''} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1} ${group}<small>${detail}</small></span></div>` }).join('') : '<div class="emptyList">まだオブジェクトがありません</div>';
+		list.innerHTML = objects.length ? objects.map((o, i) => { const group = o.type === 'compound' ? `<span class="compoundMark">結合</span>` : o.groupId ? `<span class="groupMark">グループ</span>` : ''; const detail = o.type === 'compound' ? `${Array.isArray(o.parts) ? o.parts.length : 0}パーツ・複合オブジェクト` : o.type === 'asset' && o.asset === 'person' ? Number(o.h).toFixed(2) + ' m' : (o.type === 'asset' ? 'low-poly asset' : 'vector shape'); return `<div class="objectRow ${selIds.has(o.id) ? 'selected' : ''}" data-object="${o.id}"><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? 'checked' : ''} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1} ${group}<small>${detail}</small></span></div>` }).join('') : '<div class="emptyList">まだオブジェクトがありません</div>';
 		syncGroupActions();
 	}
 	function deleteSelectedScene() {
@@ -541,6 +562,8 @@
 	el('sceneDeleteButton').onclick = deleteSelectedScene;
 	el('sceneGroupSel').onclick = groupSelectedScene;
 	el('sceneUngroupSel').onclick = ungroupSelectedScene;
+	el('sceneCombineSel').onclick = combineSelectedScene;
+	el('sceneSeparateSel').onclick = separateSelectedScene;
 	el('alignApply').onclick = alignSelectedScene;
 	// iPadの3本指スワイプ：指先にあるオブジェクトを選び、何もなければ選択対象を順番に切り替える。
 	window.cityThreeFingerSelect = (dx, dy, clientX, clientY) => {
@@ -890,9 +913,15 @@
 	function floorPlanHandles() {
 		const o = floorPlanObject(), out = { object: null, camera: null };
 		if (o && o.k === 1) {
-			const [z0, z1] = floorPlanObjectZRange(o), base = L2W(o, 0, 0, z0), mid = L2W(o, 0, 0, (z0 + z1) / 2), a = (Number(o.rot) || 0) * DG, dist = Math.max(Math.abs(Number(o.ra) || .3), Math.abs(Number(o.rb) || .3)) + .42;
-			out.object = { o, base, center: scrW(mid), world: { x: base[0] - Math.sin(a) * dist, z: base[2] + Math.cos(a) * dist } };
-			out.object.s = orthView === 'front' ? scrW([base[0] + Math.cos(a) * dist, base[1], base[2]]) : scrW([out.object.world.x, orthView === 'side' ? base[1] : -1, out.object.world.z]);
+			if (o.type === 'compound') {
+				const b = obBounds(o), base = objectAnchorWorld(o), dist = Math.max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], .6) * .5 + .42;
+				out.object = { o, base, center: scrW(base), world: { x: base[0], z: base[2] + dist } };
+				out.object.s = orthView === 'front' ? scrW([base[0] + dist, base[1], base[2]]) : scrW([base[0], orthView === 'side' ? base[1] : -1, base[2] + dist]);
+			} else {
+				const [z0, z1] = floorPlanObjectZRange(o), base = L2W(o, 0, 0, z0), mid = L2W(o, 0, 0, (z0 + z1) / 2), a = (Number(o.rot) || 0) * DG, dist = Math.max(Math.abs(Number(o.ra) || .3), Math.abs(Number(o.rb) || .3)) + .42;
+				out.object = { o, base, center: scrW(mid), world: { x: base[0] - Math.sin(a) * dist, z: base[2] + Math.cos(a) * dist } };
+				out.object.s = orthView === 'front' ? scrW([base[0] + Math.cos(a) * dist, base[1], base[2]]) : scrW([out.object.world.x, orthView === 'side' ? base[1] : -1, out.object.world.z]);
+			}
 		}
 		const yaw = Number(P.yaw || 0) * DG, pitch = Number(P.pitch || 0) * DG, body = { x: P.cx, z: P.cz }, cameraY = orthView === 'side' || orthView === 'front' ? P.ch - 1 : -1, horiz = Math.cos(pitch), target = { x: P.cx - Math.sin(yaw) * FLOOR_CAMERA_RAY * horiz, z: P.cz + Math.cos(yaw) * FLOOR_CAMERA_RAY * horiz }, targetY = orthView === 'side' || orthView === 'front' ? cameraY + Math.sin(pitch) * FLOOR_CAMERA_RAY : cameraY, half = Math.atan(18 / Math.max(12, Number(P.lens) || 38)), lensWorld = orthView === 'top' ? [P.cx - Math.sin(yaw - half) * FLOOR_CAMERA_RAY * horiz, cameraY, P.cz + Math.cos(yaw - half) * FLOOR_CAMERA_RAY * horiz] : null;
 		out.camera = { body, target, targetY, sBody: scrW([body.x, cameraY, body.z]), sTarget: scrW([target.x, targetY, target.z]), sLens: lensWorld ? scrW(lensWorld) : null, lensWorld, yaw, pitch };
@@ -902,6 +931,7 @@
 		if (!w) return null;
 		return sceneObjects().slice().reverse().find(o => {
 			if (!o || o.k !== 1) return false;
+			if (o.type === 'compound') { const b = obBounds(o); return w.x >= b.lo[0] - .08 && w.x <= b.hi[0] + .08 && w.z >= b.lo[2] - .08 && w.z <= b.hi[2] + .08 }
 			const base = L2W(o, 0, 0, 0), dx = w.x - base[0], dz = w.z - base[2], a = (Number(o.rot) || 0) * DG, cx = dx * Math.cos(a) + dz * Math.sin(a), cz = -dx * Math.sin(a) + dz * Math.cos(a);
 			return Math.abs(cx) <= Math.abs(Number(o.ra) || .25) + .08 && Math.abs(cz) <= Math.abs(Number(o.rb) || .25) + .08;
 		}) || null;
@@ -917,8 +947,17 @@
 			return p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
 		}) || null;
 	}
+	// 真横／正面では高さ0の地面オブジェクトが細い1本線になるため、
+	// 外枠判定に加えて中心アンカーも許容する。これで線上のクリックを確実に家具移動へ渡す。
+	function floorPlanAnchorAtSide(p) {
+		if (!p) return null;
+		return sceneObjects().slice().reverse().find(o => {
+			if (!o || o.k !== 1) return false; const q = scrW(objectAnchorWorld(o));
+			return q.ok && Math.hypot(q.x - p.x, q.y - p.y) <= 28 / Z;
+		}) || null;
+	}
 	function floorPlanEditHandles() {
-		const o = floorPlanObject(); if (!o || o.k !== 1) return null;
+		const o = floorPlanObject(); if (!o || o.k !== 1 || o.type === 'compound') return null;
 		const [z0, z1] = floorPlanObjectZRange(o), base = L2W(o, 0, 0, z0), zc = (z0 + z1) / 2, center = scrW(L2W(o, 0, 0, zc)), handles = [];
 		const add = (kind, label, point, probe, start, min = .01, side = 1) => {
 			const s = scrW(point), q = scrW(probe); if (!s.ok || !q.ok) return; const dx = q.x - s.x, dy = q.y - s.y, px = Math.hypot(dx, dy); if (px < .01) return;
@@ -1106,7 +1145,7 @@
 		if (orthView === 'side') { delta = [0, dz, dx]; axes = [1, 2] }
 		else if (orthView === 'front') { delta = [dx, dz, 0]; axes = [0, 1] }
 		else { delta = [dx, 0, dz]; axes = [0, 2] }
-		const setup = snapSetupGroup(objects, L2W(o, 0, 0, 0)), q = $('snp')?.checked ? snapShift(setup.bb, delta, axes, setup.targets, setup.tau) : { d: delta, hit: new Set() };
+		const setup = snapSetupGroup(objects, objectAnchorWorld(o)), q = $('snp')?.checked ? snapShift(setup.bb, delta, axes, setup.targets, setup.tau) : { d: delta, hit: new Set() };
 		snapHit = q.hit.size ? q.hit : null;
 		/* 上はX/Z、横はZ/Y、前はX/Yの表示面内を移動する。 */
 		objects.forEach(g => setOb(g.id, moveBy(g, q.d))); render();
@@ -1178,13 +1217,13 @@
 			}
 		}
 		if (orthView === 'side' || orthView === 'front') {
-			const hit = floorPlanItemAtSide(p);
+			const hit = floorPlanItemAtSide(p) || floorPlanAnchorAtSide(p);
 			if (hit) {
 				const multi = e.shiftKey || e.metaKey || e.ctrlKey, wasSelected = selIds.has(hit.id);
 				if (multi) setSelection(hit.id, true);
 				else if (!wasSelected || selIds.size <= 1) setSelection(hit.id, false);
 				if (!selIds.has(hit.id)) { syncSel(); render(); return }
-				const w = floorPlanVerticalWorldAt(p), base = L2W(hit, 0, 0, 0), group = selectedObjects().filter(o => o.k === 1), snap = snapSetupGroup(group, base);
+				const w = floorPlanVerticalWorldAt(p), base = objectAnchorWorld(hit), group = selectedObjects().filter(o => o.k === 1), snap = snapSetupGroup(group, base);
 				if (!w) { syncSel(); render(); return }
 				e.preventDefault(); e.stopImmediatePropagation();
 				floorPlanDrag = { kind: 'itemVertical', axis: orthView === 'side' ? 'side' : 'front', pointerId: e.pointerId, id: hit.id, o0: { ...hit, off: [...(hit.off || [0, 0, 0])] }, group, base0: base, bb: snap.bb, targets: snap.targets, tau: snap.tau, dx: orthView === 'front' ? base[0] - w.x : 0, dz: orthView === 'side' ? base[2] - w.z : 0, dy: base[1] - w.y, started: false };
@@ -1194,7 +1233,12 @@
 			return;
 		}
 		const h = floorPlanHandles(), lim = 22 / Z;
-		if (h.object && Math.hypot(h.object.s.x - p.x, h.object.s.y - p.y) < lim) { e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'turn', pointerId: e.pointerId, id: h.object.o.id, started: false }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
+		if (h.object && h.object.s && Math.hypot(h.object.s.x - p.x, h.object.s.y - p.y) < lim) {
+			e.preventDefault(); e.stopImmediatePropagation();
+			const center = objectAnchorWorld(h.object.o), angle0 = Math.atan2(h.object.world.x - center[0], h.object.world.z - center[2]);
+			floorPlanDrag = { kind: 'turn', pointerId: e.pointerId, id: h.object.o.id, o0: h.object.o.type === 'compound' ? JSON.parse(JSON.stringify(h.object.o)) : null, center, angle0, started: false };
+			try { cv.setPointerCapture(e.pointerId) } catch (err) { } return
+		}
 		if (h.camera && Math.hypot(h.camera.sTarget.x - p.x, h.camera.sTarget.y - p.y) < lim) { e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'aim', pointerId: e.pointerId }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
 		if (h.camera && Math.hypot(h.camera.sBody.x - p.x, h.camera.sBody.y - p.y) < lim) { const w = floorPlanWorldAt(p); if (!w) return; e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'camera', pointerId: e.pointerId, dx: P.cx - w.x, dz: P.cz - w.z }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
 		if (orthView === 'top' && h.camera && h.camera.sLens && Math.hypot(h.camera.sLens.x - p.x, h.camera.sLens.y - p.y) < lim) { e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'lens', pointerId: e.pointerId, p0: p, lens0: Number(P.lens) || 35, started: false }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
@@ -1206,7 +1250,7 @@
 			if (multi) setSelection(hit.id, true);
 			else if (!wasSelected || selIds.size <= 1) setSelection(hit.id, false);
 			if (!selIds.has(hit.id)) { floorPlanDrag = null; syncSel(); render(); return }
-			const base = L2W(hit, 0, 0, 0), group = selectedObjects().filter(o => o.k === 1), snap = snapSetupGroup(group, base);
+			const base = objectAnchorWorld(hit), group = selectedObjects().filter(o => o.k === 1), snap = snapSetupGroup(group, base);
 			// 選択済みオブジェクトをドラッグした場合は、選択中の地面オブジェクトを同じ量だけ動かす。
 			floorPlanDrag = { kind: 'item', pointerId: e.pointerId, id: hit.id, o0: { ...hit, off: [...(hit.off || [0, 0, 0])] }, group, base0: base, bb: snap.bb, targets: snap.targets, tau: snap.tau, dx: base[0] - w.x, dz: base[2] - w.z, started: false };
 			try { cv.setPointerCapture(e.pointerId) } catch (err) { } syncSel(); render()
@@ -1267,7 +1311,17 @@
 		}
 		const w = floorPlanWorldAt(pos(e)); if (!w) return;
 		if (floorPlanDrag.kind === 'turn') {
-			const o = obOf(floorPlanDrag.id); if (o && o.k === 1) { let a = Math.atan2(w.x - L2W(o, 0, 0, 0)[0], w.z - L2W(o, 0, 0, 0)[2]) / DG; if (!e.shiftKey) a = Math.round(a / 15) * 15; if (!floorPlanDrag.started) { HU.push(S); RD = []; floorPlanDrag.started = true } setOb(o.id, { rot: angle360(a) }) }
+			const o = obOf(floorPlanDrag.id); if (o && o.k === 1) {
+				if (o.type === 'compound') {
+					let delta = (Math.atan2(w.x - floorPlanDrag.center[0], w.z - floorPlanDrag.center[2]) - floorPlanDrag.angle0) / DG;
+					if (!e.shiftKey) delta = Math.round(delta / 15) * 15;
+					if (!floorPlanDrag.started) { HU.push(S); RD = []; floorPlanDrag.started = true }
+					setOb(o.id, rotateCompoundBy(floorPlanDrag.o0 || o, delta));
+				} else {
+					let a = Math.atan2(w.x - L2W(o, 0, 0, 0)[0], w.z - L2W(o, 0, 0, 0)[2]) / DG; if (!e.shiftKey) a = Math.round(a / 15) * 15;
+					if (!floorPlanDrag.started) { HU.push(S); RD = []; floorPlanDrag.started = true } setOb(o.id, { rot: angle360(a) })
+				}
+			}
 		} else if (floorPlanDrag.kind === 'item') {
 			const o = floorPlanDrag.o0;
 			if (o && o.k === 1) {
@@ -1276,7 +1330,7 @@
 				const delta = [w.x + floorPlanDrag.dx - floorPlanDrag.base0[0], 0, w.z + floorPlanDrag.dz - floorPlanDrag.base0[2]];
 				const q = $('snp')?.checked ? snapShift(floorPlanDrag.bb, delta, [0, 2], floorPlanDrag.targets, floorPlanDrag.tau) : { d: delta, hit: new Set() };
 				snapHit = q.hit.size ? q.hit : null;
-				(floorPlanDrag.group || [o]).forEach(g => setOb(g.id, { ca: g.ca + q.d[0], cb: g.cb + q.d[2] }));
+				(floorPlanDrag.group || [o]).forEach(g => setOb(g.id, moveBy(g, q.d)));
 			}
 		} else if (floorPlanDrag.kind === 'camera') {
 			P.cx = +(w.x + floorPlanDrag.dx).toFixed(3); P.cz = +(w.z + floorPlanDrag.dz).toFixed(3); sync();

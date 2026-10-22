@@ -936,7 +936,8 @@ canvas {
 	white-space: nowrap
 }
 
-.groupMark {
+.groupMark,
+.compoundMark {
 	display: inline-block;
 	margin-left: 4px;
 	padding: 1px 4px;
@@ -945,6 +946,11 @@ canvas {
 	color: #baffea;
 	font-size: 9px;
 	vertical-align: 1px
+}
+
+.compoundMark {
+	border-color: #b38a48;
+	color: #ffe0a0
 }
 
 .objectMeta small {
