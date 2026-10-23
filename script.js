@@ -461,6 +461,10 @@ function fieldPatch(o, name, v) {
 			const j = { px: 0, py: 1, pz: 2 }[name], anchor = objectAnchorWorld(o), target = name === 'py' ? v - 1 : v, delta = [0, 0, 0]; delta[j] = target - anchor[j]; return moveBy(o, delta);
 		}
 		if (name === 'rot') return rotateCompoundBy(o, v - (Number(o.compoundRot) || 0));
+		if (['w', 'dp', 'h'].includes(name)) {
+			const b = obBounds(o), axis = { w: 0, dp: 2, h: 1 }[name], old = Math.max(.005, b.hi[axis] - b.lo[axis]), pivot = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2];
+			if (name === 'h') pivot[1] = b.lo[1]; return scaleCompoundDefinition(o, pivot, [axis === 0 ? Math.max(.005, v) / old : 1, axis === 1 ? Math.max(.005, v) / old : 1, axis === 2 ? Math.max(.005, v) / old : 1]);
+		}
 		return {};
 	}
 	const [iu, iv] = PL[o.k];
@@ -626,9 +630,47 @@ function drawSpecialGizmo(c, o) {
 	c.restore();
 }
 
+// 複合オブジェクトをワールド軸方向へ拡縮する。子パーツの相対配置と定義を
+// 保持したまま、各パーツを同じアフィン変換で作り直す。
+function scaleCompoundPart(part, pivot, scale) {
+	const q = { ...part, off: [...(part.off || [0, 0, 0])] };
+	if (!PL[q.k]) return q;
+	const base = L2W(q, 0, 0, 0), nb = base.map((v, j) => pivot[j] + (v - pivot[j]) * (Number(scale[j]) || 1)), [iu, iv] = PL[q.k], d = Number(q.d) || 1;
+	q.ca = nb[iu] - q.off[iu]; q.cb = nb[iv] - q.off[iv]; q.lift = (d + q.off[q.k] - nb[q.k]) / d;
+	const rot = Number(q.rot) || 0, cs = Math.cos(rot * DG), sn = Math.sin(rot * DG), su = Math.hypot(scale[iu] * cs, scale[iv] * sn), sv = Math.hypot(scale[iu] * sn, scale[iv] * cs);
+	q.ra = Math.max(.002, Math.abs(Number(q.ra) || .002) * Math.max(.002, su)); q.rb = Math.max(.002, Math.abs(Number(q.rb) || .002) * Math.max(.002, sv));
+	if (su > .0001) q.rot = wrap180(Math.atan2(scale[iv] * sn, scale[iu] * cs) / DG);
+	if (Number(q.h) > 0) q.h = Math.max(.002, Number(q.h) * Math.abs(Number(scale[q.k]) || 1));
+	return q;
+}
+function scaleCompoundDefinition(o, pivot, scale) {
+	const parts = compoundPartsAt(o).map(part => scaleCompoundPart(part, pivot, scale)), b = groupBounds(parts), center = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2];
+	return { parts, tx: 0, ty: 0, tz: 0, ca: center[0], cb: center[2], ra: Math.max(.005, (b.hi[0] - b.lo[0]) / 2), rb: Math.max(.005, (b.hi[2] - b.lo[2]) / 2), h: Math.max(0, b.hi[1] - b.lo[1]) };
+}
+function compoundFacePatch(o, fid, dl) {
+	const b = obBounds(o), map = { 'x+': [0, 1], 'x-': [0, -1], 'y+': [1, 1], 'y-': [1, -1], 'z+': [2, 1], 'z-': [2, -1] }, spec = map[fid]; if (!spec) return {};
+	const axis = spec[0], side = spec[1], span = Math.max(.005, b.hi[axis] - b.lo[axis]), pivot = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2], fixed = side > 0 ? b.lo[axis] : b.hi[axis], edge = side > 0 ? b.hi[axis] + dl : b.lo[axis] + dl, newSpan = Math.max(.005, side > 0 ? edge - b.lo[axis] : b.hi[axis] - edge), scale = [1, 1, 1];
+	pivot[axis] = fixed; scale[axis] = newSpan / span; return scaleCompoundDefinition(o, pivot, scale);
+}
+function compoundGizmo(o) {
+	const b = obBounds(o), C3 = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2], sC = scrW(C3); if (!sC.ok) return null;
+	const g = { o, C3, sC, axes: [], faces: [], ring: [], compound: true, bounds: b }, nC = Math.hypot(...V.add(C3, CO()));
+	[[1, 0, 0, '#e8743d', 'X'], [0, 1, 0, '#4a7be8', 'Y'], [0, 0, 1, '#2fb5a5', 'Z']].forEach(([x, y, z, col, nm]) => {
+		const a = [x, y, z], eps = .01 * Math.max(.1, nC), s1 = scrW(V.add(C3, a, 1, eps)); if (!s1.ok) return; const pu = Math.hypot(s1.x - sC.x, s1.y - sC.y) / eps; if (pu < 1e-6) return;
+		const L = Math.min((90 / Z) / pu, 3 * nC + 1), sT = scrW(V.add(C3, a, 1, L)); if (sT.ok) g.axes.push({ a, col, nm, sT });
+	});
+	const center = [...C3], neg = v => v.map(t => -t), face = (id, p, n) => g.faces.push({ id, n, P3: p, s: scrW(p) });
+	face('x+', [b.hi[0], center[1], center[2]], [1, 0, 0]); face('x-', [b.lo[0], center[1], center[2]], [-1, 0, 0]);
+	face('y+', [center[0], b.hi[1], center[2]], [0, 1, 0]); face('y-', [center[0], b.lo[1], center[2]], [0, -1, 0]);
+	face('z+', [center[0], center[1], b.hi[2]], [0, 0, 1]); face('z-', [center[0], center[1], b.lo[2]], [0, 0, -1]);
+	const R = Math.max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], .25) * .7;
+	for (let i = 0; i <= 72; i++) { const t = i / 72 * 2 * Math.PI; g.ring.push(scrW([C3[0] + R * Math.cos(t), C3[1], C3[2] + R * Math.sin(t)])); }
+	return g;
+}
 // 選択中の図形のギズモの位置（画面座標つき）
 function gizmo() {
-	const o = sel && obOf(sel); if (!o || o.type === 'compound') return null;
+	const o = sel && obOf(sel); if (!o) return null;
+	if (o.type === 'compound') return compoundGizmo(o);
 	const [iu, iv] = PL[o.k], cs = Math.cos(o.rot * DG), sn = Math.sin(o.rot * DG), solid = o.type === 'box' || o.type === 'cyl' || o.type === 'rect' || o.type === 'circ' || o.type === 'triPrism' || o.type === 'triPyramid' || (o.type === 'asset' && (o.asset === 'triPrism' || o.asset === 'triPyramid' || o.asset === 'sign' || o.asset === 'stairs')), [z0, z1] = outerZRange(o), zc = solid ? (z0 + z1) / 2 : 0;
 	const C3 = L2W(o, 0, 0, zc), sC = scrW(C3); if (!sC.ok) return null;
 	const g = { o, C3, sC, axes: [], faces: [], ring: [] }, nC = Math.hypot(...V.add(C3, CO()));
@@ -759,13 +801,14 @@ function faceSnap(dl) {
 }
 
 function beginGizmo(h, p) {
-	const o = h.g.o, r = unscr(p), co = CO(), group = selectedObjects(), base = { id: o.id, o0: { ...o }, group: group.map(q => ({ ...q, off: [...(q.off || [0, 0, 0])] })), started: false, ...(group.length > 1 ? snapSetupGroup(group, h.g.C3) : snapSetup(o, h.g.C3)) };
+	const o = h.g.o, r = unscr(p), co = CO(), group = selectedObjects(), base = { id: o.id, o0: o.type === 'compound' ? JSON.parse(JSON.stringify(o)) : { ...o }, group: group.map(q => ({ ...q, off: [...(q.off || [0, 0, 0])] })), started: false, ...(group.length > 1 ? snapSetupGroup(group, h.g.C3) : snapSetup(o, h.g.C3)) };
 	if (h.t.startsWith('sign-') || h.t === 'cone-height' || h.t === 'sphere-radius') ed = { ...base, t: h.t, sign: h.sign, p0: p };
 	else if (h.t === 'axis') { const C0 = V.add(h.g.C3, co), t0 = lineParam(r, C0, h.a.a); if (t0 != null) ed = { ...base, t: 'axis', a: h.a.a, aj: h.a.a.indexOf(1), C0, t0 } }
 	else if (h.t === 'face') {
 		const F0 = V.add(h.f.P3, co), t0 = lineParam(r, F0, h.f.n);
 		if (t0 != null) { const fj = [0, 1, 2].find(j => Math.abs(h.f.n[j]) > .999); ed = { ...base, t: 'face', fid: h.f.id, n: h.f.n, F0, Fa: h.f.P3, fj: fj === undefined ? -1 : fj, t0 } }
 	}
+	else if (o.type === 'compound') ed = { ...base, t: 'ring', sC: h.g.sC, ang0: Math.atan2(p.y - h.g.sC.y, p.x - h.g.sC.x) };
 	else { const dd = o.d - o.d * o.lift, P1 = hit3(r, o.k, dd, cloc(o)), [iu, iv] = PL[o.k]; if (P1) ed = { ...base, t: 'ring', dd, ang0: Math.atan2(P1[iv] - o.cb, P1[iu] - o.ca) } }
 }
 // キャンバス上のドラッグで編集（ed=いまの編集操作）。磁石スナップがONなら他の図形・地面にくっつく
@@ -792,8 +835,12 @@ function dragEdit(p) {
 		}
 	}
 	else if (ed.t === 'axis') { const t = lineParam(r, ed.C0, ed.a); if (t != null) { ed.moveDelta = snap(ed.a.map(x => x * (t - ed.t0)), [ed.aj]); patch = moveBy(o, ed.moveDelta) } }   // 矢印＝その軸に沿って移動
-	else if (ed.t === 'face') { const t = lineParam(r, ed.F0, ed.n); if (t != null) patch = facePatch(o, ed.fid, faceSnap(t - ed.t0)) }              // 白い四角＝面の押し引き
-	else if (ed.t === 'ring') { const P1 = hit3(r, o.k, ed.dd, cloc(o)); if (P1) patch = { rot: wrap180(o.rot + (Math.atan2(P1[iv] - o.cb, P1[iu] - o.ca) - ed.ang0) / DG) } }   // 輪＝回転
+	else if (ed.t === 'face') { const t = lineParam(r, ed.F0, ed.n); if (t != null) { const dl = t - ed.t0; patch = o.type === 'compound' ? compoundFacePatch(o, ed.fid, dl) : facePatch(o, ed.fid, faceSnap(dl)) } }              // 白い四角＝面の押し引き
+	else if (ed.t === 'ring') {
+		if (o.type === 'compound') {
+			const delta = wrap180((Math.atan2(p.y - ed.sC.y, p.x - ed.sC.x) - ed.ang0) / DG); patch = rotateCompoundBy(ed.o0 || o, delta);
+		} else { const P1 = hit3(r, o.k, ed.dd, cloc(o)); if (P1) patch = { rot: wrap180(o.rot + (Math.atan2(P1[iv] - o.cb, P1[iu] - o.ca) - ed.ang0) / DG) } }
+	}   // 輪＝回転
 	if (!patch) return; if (!ed.started) { HU.push(S); RD = []; ed.started = true }
 	if ((ed.t === 'mv' || ed.t === 'axis') && ed.group && ed.group.length > 1 && ed.moveDelta) {
 		// 初期スナップショットから再生成するので、ポインタ移動のたびに位置が累積しない。
@@ -2564,8 +2611,31 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
 			return q.ok && Math.hypot(q.x - p.x, q.y - p.y) <= 28 / Z;
 		}) || null;
 	}
+	function floorCompoundEditHandles(o) {
+		const b = obBounds(o), centerWorld = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2], center = scrW(centerWorld), handles = [];
+		const add = (kind, label, point, probe, start, min = .01, side = 1) => { const s = scrW(point), q = scrW(probe); if (!s.ok || !q.ok) return; const dx = q.x - s.x, dy = q.y - s.y, px = Math.hypot(dx, dy); if (px < .01) return; handles.push({ kind, label, s, dir: { x: dx / px, y: dy / px }, scale: px / .1, start, min, side }) };
+		const addScreen = (kind, label, point, dir, start, min = 0) => handles.push({ kind, label, s: point, dir, scale: Math.max(1, orthScale()), start, min, side: 1, screen: true });
+		if (orthView === 'top') {
+			add('w', '幅＋', [b.hi[0], centerWorld[1], centerWorld[2]], [b.hi[0] + .1, centerWorld[1], centerWorld[2]], b.hi[0] - b.lo[0], .01, 1);
+			add('w', '幅−', [b.lo[0], centerWorld[1], centerWorld[2]], [b.lo[0] - .1, centerWorld[1], centerWorld[2]], b.hi[0] - b.lo[0], .01, -1);
+			add('d', '奥行＋', [centerWorld[0], centerWorld[1], b.hi[2]], [centerWorld[0], centerWorld[1], b.hi[2] + .1], b.hi[2] - b.lo[2], .01, 1);
+			add('d', '奥行−', [centerWorld[0], centerWorld[1], b.lo[2]], [centerWorld[0], centerWorld[1], b.lo[2] - .1], b.hi[2] - b.lo[2], .01, -1);
+			const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], .6) * orthScale() * .35)); addScreen('h', '高さ', { x: center.x, y: center.y + gap, ok: true }, { x: 0, y: 1 }, Math.max(0, b.hi[1] - b.lo[1]));
+		} else if (orthView === 'side') {
+			add('d', '奥行＋', [centerWorld[0], centerWorld[1], b.hi[2]], [centerWorld[0], centerWorld[1], b.hi[2] + .1], b.hi[2] - b.lo[2], .01, 1);
+			add('d', '奥行−', [centerWorld[0], centerWorld[1], b.lo[2]], [centerWorld[0], centerWorld[1], b.lo[2] - .1], b.hi[2] - b.lo[2], .01, -1);
+			const height = b.hi[1] - b.lo[1]; if (height > .01) { add('h', '上端', [centerWorld[0], b.hi[1], centerWorld[2]], [centerWorld[0], b.hi[1] + .1, centerWorld[2]], height, 0, 1); add('h', '下端', [centerWorld[0], b.lo[1], centerWorld[2]], [centerWorld[0], b.lo[1] - .1, centerWorld[2]], height, 0, -1) } else addScreen('h', '高さ', { x: center.x, y: center.y - 52 / Z, ok: true }, { x: 0, y: -1 }, 0);
+		} else if (orthView === 'front') {
+			add('w', '幅＋', [b.hi[0], centerWorld[1], centerWorld[2]], [b.hi[0] + .1, centerWorld[1], centerWorld[2]], b.hi[0] - b.lo[0], .01, 1);
+			add('w', '幅−', [b.lo[0], centerWorld[1], centerWorld[2]], [b.lo[0] - .1, centerWorld[1], centerWorld[2]], b.hi[0] - b.lo[0], .01, -1);
+			const height = b.hi[1] - b.lo[1]; if (height > .01) { add('h', '上端', [centerWorld[0], b.hi[1], centerWorld[2]], [centerWorld[0], b.hi[1] + .1, centerWorld[2]], height, 0, 1); add('h', '下端', [centerWorld[0], b.lo[1], centerWorld[2]], [centerWorld[0], b.lo[1] - .1, centerWorld[2]], height, 0, -1) } else addScreen('h', '高さ', { x: center.x, y: center.y - 52 / Z, ok: true }, { x: 0, y: -1 }, 0);
+			const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(b.hi[0] - b.lo[0], .6) * orthScale() * .35)); addScreen('d', '奥行き', { x: center.x + gap, y: center.y, ok: true }, { x: 1, y: 0 }, b.hi[2] - b.lo[2], .01);
+		}
+		return { o, base: centerWorld, center, handles };
+	}
 	function floorPlanEditHandles() {
-		const o = floorPlanObject(); if (!o || o.k !== 1 || o.type === 'compound') return null;
+		const o = floorPlanObject(); if (!o || o.k !== 1) return null;
+		if (o.type === 'compound') return floorCompoundEditHandles(o);
 		const [z0, z1] = floorPlanObjectZRange(o), base = L2W(o, 0, 0, z0), zc = (z0 + z1) / 2, center = scrW(L2W(o, 0, 0, zc)), handles = [];
 		const add = (kind, label, point, probe, start, min = .01, side = 1) => {
 			const s = scrW(point), q = scrW(probe); if (!s.ok || !q.ok) return; const dx = q.x - s.x, dy = q.y - s.y, px = Math.hypot(dx, dy); if (px < .01) return;
@@ -2654,6 +2724,10 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
 	function floorDimensionPatch(o, name, value, side = 1) {
 		const v = Math.max(name === 'h' ? 0 : .01, Number(value));
 		if (!Number.isFinite(v)) return null;
+		if (o.type === 'compound') {
+			const b = obBounds(o), axis = { w: 0, d: 2, h: 1 }[name]; if (axis === undefined) return null;
+			const oldSpan = Math.max(.005, b.hi[axis] - b.lo[axis]), pivot = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2], fixed = side < 0 ? b.hi[axis] : b.lo[axis], scale = [1, 1, 1]; pivot[axis] = fixed; scale[axis] = Math.max(.005, v) / oldSpan; return scaleCompoundDefinition(o, pivot, scale);
+		}
 		if (name === 'w' || name === 'd') {
 			const oldW = Math.max(.01, Number(o.ra || 0) * 2), oldD = Math.max(.01, Number(o.rb || 0) * 2), r = Math.max(.005, v / 2), patch = {};
 			// 幅／奥行ハンドルは手前側の面を動かす。反対側の面を固定するため、
@@ -2707,6 +2781,7 @@ try { const t = localStorage.getItem(AK); if (t) unpack(JSON.parse(t)) } catch (
 		return floorDimensionPatch(o, 'h', Math.max(0, Number(value) + side * best.gap), side);
 	}
 	function floorResizeSnap(o, patch, h, value) {
+		if (o.type === 'compound') return patch;
 		if (!$('snp')?.checked || !h || !['w', 'd', 'h'].includes(h.kind)) return patch;
 		if (h.kind === 'h') return floorHeightSnap(o, patch, h, value);
 		const q = { ...o, ...patch }, a = Number(q.rot || 0) * DG;

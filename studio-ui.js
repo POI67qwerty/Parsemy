@@ -956,8 +956,31 @@
 			return q.ok && Math.hypot(q.x - p.x, q.y - p.y) <= 28 / Z;
 		}) || null;
 	}
+	function floorCompoundEditHandles(o) {
+		const b = obBounds(o), centerWorld = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2], center = scrW(centerWorld), handles = [];
+		const add = (kind, label, point, probe, start, min = .01, side = 1) => { const s = scrW(point), q = scrW(probe); if (!s.ok || !q.ok) return; const dx = q.x - s.x, dy = q.y - s.y, px = Math.hypot(dx, dy); if (px < .01) return; handles.push({ kind, label, s, dir: { x: dx / px, y: dy / px }, scale: px / .1, start, min, side }) };
+		const addScreen = (kind, label, point, dir, start, min = 0) => handles.push({ kind, label, s: point, dir, scale: Math.max(1, orthScale()), start, min, side: 1, screen: true });
+		if (orthView === 'top') {
+			add('w', '幅＋', [b.hi[0], centerWorld[1], centerWorld[2]], [b.hi[0] + .1, centerWorld[1], centerWorld[2]], b.hi[0] - b.lo[0], .01, 1);
+			add('w', '幅−', [b.lo[0], centerWorld[1], centerWorld[2]], [b.lo[0] - .1, centerWorld[1], centerWorld[2]], b.hi[0] - b.lo[0], .01, -1);
+			add('d', '奥行＋', [centerWorld[0], centerWorld[1], b.hi[2]], [centerWorld[0], centerWorld[1], b.hi[2] + .1], b.hi[2] - b.lo[2], .01, 1);
+			add('d', '奥行−', [centerWorld[0], centerWorld[1], b.lo[2]], [centerWorld[0], centerWorld[1], b.lo[2] - .1], b.hi[2] - b.lo[2], .01, -1);
+			const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], .6) * orthScale() * .35)); addScreen('h', '高さ', { x: center.x, y: center.y + gap, ok: true }, { x: 0, y: 1 }, Math.max(0, b.hi[1] - b.lo[1]));
+		} else if (orthView === 'side') {
+			add('d', '奥行＋', [centerWorld[0], centerWorld[1], b.hi[2]], [centerWorld[0], centerWorld[1], b.hi[2] + .1], b.hi[2] - b.lo[2], .01, 1);
+			add('d', '奥行−', [centerWorld[0], centerWorld[1], b.lo[2]], [centerWorld[0], centerWorld[1], b.lo[2] - .1], b.hi[2] - b.lo[2], .01, -1);
+			const height = b.hi[1] - b.lo[1]; if (height > .01) { add('h', '上端', [centerWorld[0], b.hi[1], centerWorld[2]], [centerWorld[0], b.hi[1] + .1, centerWorld[2]], height, 0, 1); add('h', '下端', [centerWorld[0], b.lo[1], centerWorld[2]], [centerWorld[0], b.lo[1] - .1, centerWorld[2]], height, 0, -1) } else addScreen('h', '高さ', { x: center.x, y: center.y - 52 / Z, ok: true }, { x: 0, y: -1 }, 0);
+		} else if (orthView === 'front') {
+			add('w', '幅＋', [b.hi[0], centerWorld[1], centerWorld[2]], [b.hi[0] + .1, centerWorld[1], centerWorld[2]], b.hi[0] - b.lo[0], .01, 1);
+			add('w', '幅−', [b.lo[0], centerWorld[1], centerWorld[2]], [b.lo[0] - .1, centerWorld[1], centerWorld[2]], b.hi[0] - b.lo[0], .01, -1);
+			const height = b.hi[1] - b.lo[1]; if (height > .01) { add('h', '上端', [centerWorld[0], b.hi[1], centerWorld[2]], [centerWorld[0], b.hi[1] + .1, centerWorld[2]], height, 0, 1); add('h', '下端', [centerWorld[0], b.lo[1], centerWorld[2]], [centerWorld[0], b.lo[1] - .1, centerWorld[2]], height, 0, -1) } else addScreen('h', '高さ', { x: center.x, y: center.y - 52 / Z, ok: true }, { x: 0, y: -1 }, 0);
+			const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(b.hi[0] - b.lo[0], .6) * orthScale() * .35)); addScreen('d', '奥行き', { x: center.x + gap, y: center.y, ok: true }, { x: 1, y: 0 }, b.hi[2] - b.lo[2], .01);
+		}
+		return { o, base: centerWorld, center, handles };
+	}
 	function floorPlanEditHandles() {
-		const o = floorPlanObject(); if (!o || o.k !== 1 || o.type === 'compound') return null;
+		const o = floorPlanObject(); if (!o || o.k !== 1) return null;
+		if (o.type === 'compound') return floorCompoundEditHandles(o);
 		const [z0, z1] = floorPlanObjectZRange(o), base = L2W(o, 0, 0, z0), zc = (z0 + z1) / 2, center = scrW(L2W(o, 0, 0, zc)), handles = [];
 		const add = (kind, label, point, probe, start, min = .01, side = 1) => {
 			const s = scrW(point), q = scrW(probe); if (!s.ok || !q.ok) return; const dx = q.x - s.x, dy = q.y - s.y, px = Math.hypot(dx, dy); if (px < .01) return;
@@ -1046,6 +1069,10 @@
 	function floorDimensionPatch(o, name, value, side = 1) {
 		const v = Math.max(name === 'h' ? 0 : .01, Number(value));
 		if (!Number.isFinite(v)) return null;
+		if (o.type === 'compound') {
+			const b = obBounds(o), axis = { w: 0, d: 2, h: 1 }[name]; if (axis === undefined) return null;
+			const oldSpan = Math.max(.005, b.hi[axis] - b.lo[axis]), pivot = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2], fixed = side < 0 ? b.hi[axis] : b.lo[axis], scale = [1, 1, 1]; pivot[axis] = fixed; scale[axis] = Math.max(.005, v) / oldSpan; return scaleCompoundDefinition(o, pivot, scale);
+		}
 		if (name === 'w' || name === 'd') {
 			const oldW = Math.max(.01, Number(o.ra || 0) * 2), oldD = Math.max(.01, Number(o.rb || 0) * 2), r = Math.max(.005, v / 2), patch = {};
 			// 幅／奥行ハンドルは手前側の面を動かす。反対側の面を固定するため、
@@ -1099,6 +1126,7 @@
 		return floorDimensionPatch(o, 'h', Math.max(0, Number(value) + side * best.gap), side);
 	}
 	function floorResizeSnap(o, patch, h, value) {
+		if (o.type === 'compound') return patch;
 		if (!$('snp')?.checked || !h || !['w', 'd', 'h'].includes(h.kind)) return patch;
 		if (h.kind === 'h') return floorHeightSnap(o, patch, h, value);
 		const q = { ...o, ...patch }, a = Number(q.rot || 0) * DG;
