@@ -1,12 +1,13 @@
+/* City Grid Studio engine: camera, projection, drawing, selection and core input. */
 const $ = id => document.getElementById(id);
 const cv = $('cv'), ctx = cv.getContext('2d');
 let W = 1600, H = 900;                       // キャンバスの内部サイズ（比率変更でHが変わる）
 
 // ===== パラメータ（初期値の水平回転は参考サイトのy=39.912） =====
 const MASTER_W = 1.5;
-const P = { lens: 50, yaw: 39.912, hz: 50, pitch: 0, fov: 180, roll: 0, n: 48, ga: 0.45, gw: 0.7, pw: MASTER_W, pa: 0.5, ew: 24, bt: 128, hr: 100, ch: 1, cx: 0, cz: 0, sn: 14, gs: 1, gn: 30, dp: 8, surfaceMode: false };
+const P = { lens: 50, yaw: 39.912, hz: 50, pitch: 0, fov: 180, roll: 0, n: 48, ga: 0.45, gw: 0.7, pw: MASTER_W, pa: 0.5, ew: 24, bt: 128, ch: 1, cx: 0, cz: 0, sn: 14, gs: 1, gn: 30, dp: 8, surfaceMode: false };
 const show = [true, true, true];            // 軸ごとの補助線表示
-let S = [], RD = [], HU = [], Z = 1, ox = 0, oy = 0, mg = null, ptrType = null, er = null, tool = 'pen', sh = null, prev = null, CR = null, bd = false, snapHit = null, sel = null, selIds = new Set(), ed = null, cur = null, drag = null, IMG = null, mode = 'view', AX = [], AXC = [], T = 'r';  // T: 'r'=通常の透視 / 'f'=魚眼
+let S = [], RD = [], HU = [], Z = 1, ox = 0, oy = 0, mg = null, ptrType = null, er = null, tool = 'pen', prev = null, CR = null, bd = false, snapHit = null, sel = null, selIds = new Set(), ed = null, cur = null, drag = null, IMG = null, mode = 'view', AX = [], AXC = [], T = 'r';  // T: 'r'=通常の透視 / 'f'=魚眼
 let orthView = null, standardApplying = false; // Blender風の正面・真横・真上では正投影を使う
 
 // ===== 操作パネルの組み立て =====
@@ -53,18 +54,12 @@ ${R('pw', '線の太さ（全体）', 0.5, 20, 0.5, 'px')}
 <label><input type=checkbox id=bin checked> 線画のアンチエイリアスをオフ（二値）</label>
 ${R('bt', 'しきい値', 16, 240, 1)}
 <div class="note">値を下げると線が太く、上げると細くなります。細い線(1px未満)は消えやすいので、太さは1px以上がおすすめ</div>
-<h3>図形（上の「図形」ボタンでON/OFF）</h3>
-<label><span>種類</span><select id=shT style="flex:1"><option value=rect>長方形・正方形<option value=circ>円・楕円<option value=triPrism>三角柱<option value=triPyramid>三角錐</select></label>
-<label><span>置く面</span><select id=shK style="flex:1"><option value=1>床・天井（水平）<option value=2>壁（VP1に向かう面）<option value=0>壁（VP2に向かう面）</select></label>
-<label><input type=checkbox id=sq> 正方形／真円に固定</label>
-<label><input type=checkbox id=wf> 裏側の線も描く（ワイヤー）</label>
+<h3>編集・スナップ</h3>
 <label><input type=checkbox id=snp checked> 磁石でスナップ（他の図形・地面にくっつく）</label>
 ${R('sn', '吸着する距離', 4, 60, 1, 'px')}
-${R('hr', '高さ（短辺の％）', 10, 400, 1, '%')}
-<div class="note">ドラッグした2点が対角になります。描き終わると自動的に編集モードへ切り替わります。選択中の白いハンドル、または「押し出しを有効」から厚みを作れます。</div>
-<div class="note">「図形編集」ボタンをONにして図形の線にさわると選択できます（描いた直後は自動で選択）。<br>・色つきの矢印＝その軸（X赤・Y青・Z緑）に沿って移動<br>・白い四角＝その面を押し引き（幅・奥行き・高さが変わる）<br>・点線の輪＝回転<br>・線そのものをドラッグ＝面の上で移動<br>下の数値でも微調整できます。消しゴムで消した図形は編集できなくなります</div>
+<div class="note">編集モードで線を選択できます。色つきの矢印＝軸移動、白い四角＝面の押し引き、点線の輪＝回転。選択中の線をドラッグすると移動し、間取りでは専用ハンドルで寸法を調整できます。</div>
 <div id=objP style="display:none">
-<h3>選択中の図形</h3>
+<h3>選択中のオブジェクト</h3>
 ${RO('rot', '回転', -180, 180, 0.1, '°')}
 <label><span>幅</span><input type=number class=nv id=ov_w step=0.05 style="width:100px"></label>
 <label><span>奥行き</span><input type=number class=nv id=ov_dp step=0.05 style="width:100px"></label>
@@ -79,7 +74,7 @@ ${RO('rot', '回転', -180, 180, 0.1, '°')}
 <div id=buildingP style="display:none"><h3>建物の開口</h3>
 <label><span>開口の幅</span><input type=number class=nv id=ov_openingW step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><span>開口の高さ</span><input type=number class=nv id=ov_openingH step=0.05 style="width:100px"><span class=un>m</span></label>
-<div class="note">建物の外形は軸・回転で編集します。緑のハンドルで開口の幅・高さ、オレンジの「奥の面」で閉じた内壁の奥行きを編集できます。</div>
+<div class="note">建物の外形は軸・回転に加え、3Dの白い外側面ハンドルでも幅・奥行き・高さを編集できます。緑のハンドルで開口の幅・高さ、オレンジの「奥の面」で閉じた内壁の奥行きを編集できます。</div>
 </div>
 <label><button id=obExtrude>押し出しを有効</button><button id=obGnd>地面につける</button><button id=obDup>複製</button><button id=obDel>消去</button><button id=obOff>選択解除</button></label>
 <label><button id=objectInfoCopy aria-label="JSONコピー" title="選択中オブジェクトの定義JSONをコピー" disabled>JSONコピー</button><button id=objectInfoSave aria-label="JSON保存" title="選択中オブジェクトの定義JSONを保存" disabled>JSON保存</button></label>
@@ -105,7 +100,7 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 
 // ===== 見出しごとに折りたためるようにする（開閉の状態は覚える） =====
 (function () {
-	const side = $('side'), kids = [...side.children], closedDef = ['グリッドの種類', 'カメラ', '補助線', 'ペン', '図形', '選択中の図形', '書き出し範囲', '消しゴム', '参考写真', '保存', '読み取り']; let st = {}, det = null;
+	const side = $('side'), kids = [...side.children], closedDef = ['グリッドの種類', 'カメラ', '補助線', 'ペン', '編集・スナップ', '書き出し範囲', '消しゴム', '参考写真', '保存', '読み取り']; let st = {}, det = null;
 	try { if (localStorage.getItem('city-grid-ui-compact-v1') !== '1') { localStorage.removeItem('pgrid-sec'); localStorage.setItem('city-grid-ui-compact-v1', '1') } st = JSON.parse(localStorage.getItem('pgrid-sec') || '{}') } catch (e) { }
 	side.innerHTML = '<div class="secbar"><button id=secC>すべて閉じる</button><button id=secO>すべて開く</button></div>';
 	kids.forEach(k => {
@@ -118,23 +113,6 @@ ${R('pa', '写真の濃さ', 0, 1, 0.05)}
 	$('secC').onclick = () => side.querySelectorAll('details').forEach(d => d.open = false);
 	$('secO').onclick = () => side.querySelectorAll('details').forEach(d => d.open = true);
 })();
-// 図形はアセット棚（長方形・円など）を使うため、旧式の「作成設定」だけ非表示にする。
-// 選択後に表示する objP（幅・高さ・削除など）は残し、既存データとの互換性も保つ。
-function hideLegacyShapeControls() {
-	[...$('side').querySelectorAll('details')].forEach(d => {
-		const sm = d.querySelector('summary');
-		if (!sm || !sm.textContent.trim().startsWith('図形')) return;
-		sm.textContent = '選択中のオブジェクト';
-		let legacy = true;
-		[...d.children].forEach(ch => {
-			if (ch === sm) return;
-			if (ch.id === 'objP') { legacy = false; return }
-			if (legacy) ch.style.display = 'none';
-		});
-	});
-}
-hideLegacyShapeControls();
-
 // ===== 値の同期 =====
 function sync() { for (const k in P) { const el = $('v_' + k); if (el && document.activeElement !== el && typeof P[k] === 'number') el.value = +(+P[k]).toFixed(3) } syncSurfaceToggle() }   // 入力中の欄は上書きしない
 function syncSurfaceToggle() {
@@ -327,7 +305,7 @@ function genCompoundShape(ob) {
 	compoundPartsAt(ob).forEach(part => genShape(part).forEach(s => out.push({ ...s, ob, c: s.c || ob.c, w: s.w || ob.w })));
 	return out;
 }
-const hit3 = (r, k, d, c = [0, 0, 0]) => { const den = r[k]; if (!Number.isFinite(den) || Math.abs(den) < 1e-7) return null; const t = (d - c[k]) / den, q = [c[0] + r[0] * t, c[1] + r[1] * t, c[2] + r[2] * t]; return t > 0 && q.every(Number.isFinite) ? q : null };   // 視線rが面(k座標=d)と交わる点（cはカメラ位置）   // 視線rが面(k座標=d)と交わる3D点
+const hit3 = (r, k, d, c = [0, 0, 0]) => { const den = r[k]; if (!Number.isFinite(den) || Math.abs(den) < 1e-7) return null; const t = (d - c[k]) / den, q = [c[0] + r[0] * t, c[1] + r[1] * t, c[2] + r[2] * t]; return t > 0 && q.every(Number.isFinite) ? q : null };   // 視線rが面(k座標=d)と交わる3D点（cはカメラ位置）
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 // 図形の定義 ob（面の向きk・中心・半径・回転・大きさ・浮かせ量…）から線を作る。ob を直せば作り直せる＝移動・回転ができる
 function genShape(ob) {
@@ -385,21 +363,6 @@ function genShape(ob) {
 	}
 	return L.map(pl => ({ c: ob.c, w: ob.w, ob, d3: true, cs: sigNow(), p: dens3(pl) }));
 }
-// ドラッグした2点（対角）から図形の定義を作る
-function buildShape(sh, p1) {
-	const { k, d, A, off, cl } = sh, [iu, iv] = PL[k];
-	// 地平線付近では選択した床/壁面と視線が交差しないことがあるため、
-	// その場合はカメラ前方の仮想平面にフォールバックして必ず図形を作れるようにする。
-	const B = hit3(unscr(p1), k, d, cl) || V.add(cl, unscr(p1), 1, P.dp);
-	if (!A || !B) return null;
-	const type = $('shT').value; let du = B[iu] - A[iu], dv = B[iv] - A[iv];
-	if ($('sq').checked && type === 'circ') { const m = Math.max(Math.abs(du), Math.abs(dv)); du = du < 0 ? -m : m; dv = dv < 0 ? -m : m }
-	if (Math.abs(du) < 1e-4 || Math.abs(dv) < 1e-4) return null;
-	if (!sh.id) sh.id = uid();
-	const baseH = (type === 'triPrism' || type === 'triPyramid') ? Math.min(Math.abs(du), Math.abs(dv)) * P.hr / 100 : 0;
-	return genShape({ id: sh.id, type, k, d, off, ca: A[iu] + du / 2, cb: A[iv] + dv / 2, ra: Math.abs(du) / 2, rb: Math.abs(dv) / 2, h: baseH, extrude: false, rot: 0, lift: 0, wf: $('wf').checked, c: $('pc').value, w: MASTER_W });
-}
-
 // ===== 図形の編集（選択・移動・回転・大きさ・浮かせる） =====
 const obOf = id => { const s = S.find(s => s.ob && s.ob.id === id); return s && s.ob };
 // 選択状態は「操作対象の主役 sel」と、複数選択用の selIds を分けて持つ。
@@ -494,7 +457,6 @@ function fieldPatch(o, name, v) {
 	const j = { px: 0, py: 1, pz: 2 }[name], vv = (name === 'py' ? v - 1 : v) - (o.off ? o.off[j] : 0);   // Yは地面からの高さ。図形の座標系に直す
 	if (j === iu) return { ca: vv }; if (j === iv) return { cb: vv }; return { lift: 1 - vv * o.d }
 }   // 面に垂直な方向は「浮かせ量」
-// パネルの数値を変えたとき（1回の入力ごとに元に戻す履歴を1つだけ作る）
 // パネルの数値を変えたとき（1回の入力ごとに元に戻す履歴を1つだけ作る）
 let obS = false, lastSel = null;
 function applyOb(name, v) { const o = sel && obOf(sel); if (!o) return; if (!obS) { HU.push(S); RD = []; obS = true } setOb(sel, fieldPatch(o, name, v)); render() }
@@ -738,12 +700,10 @@ function gizmo() {
 	});
 	const en = [0, 0, 0], eu = [0, 0, 0], ev = [0, 0, 0]; en[o.k] = -o.d; eu[iu] = cs; eu[iv] = sn; ev[iu] = -sn; ev[iv] = cs;   // 高さ方向・幅方向・奥行き方向の単位ベクトル
 	const F = (id, x, y, z, n) => { const P3 = L2W(o, x, y, z), s = scrW(P3); g.faces.push({ id, n, P3, s }) }, neg = v => v.map(t => -t);
-	// 開口建物の外側面は、緑の開口ハンドル／通常の軸・回転だけを使う。
-	// Blender風の白〜オレンジの外形面ハンドルは、内側の閉じた面へ役割を譲る。
-	if (!(o.type === 'asset' && o.asset === 'building')) {
-		F('u+', o.ra, 0, zc, eu); F('u-', -o.ra, 0, zc, neg(eu)); F('v+', 0, o.rb, zc, ev); F('v-', 0, -o.rb, zc, neg(ev));
-		if (solid) { F('top', 0, 0, z1, en); F('base', 0, 0, z0, neg(en)) }
-	}
+	// 外形の6面は、開口のある建物でも編集対象にする。
+	// 特殊ハンドル（開口W/H・奥の面）とは別に、白い四角で外側の幅・奥行・高さを編集できる。
+	F('u+', o.ra, 0, zc, eu); F('u-', -o.ra, 0, zc, neg(eu)); F('v+', 0, o.rb, zc, ev); F('v-', 0, -o.rb, zc, neg(ev));
+	if (solid) { F('top', 0, 0, z1, en); F('base', 0, 0, z0, neg(en)) }
 	const R = Math.max(o.ra, o.rb) * 1.4;
 	for (let i = 0; i <= 72; i++) { const t = i / 72 * 2 * Math.PI; g.ring.push(scrW(L2W(o, R * Math.cos(t), R * Math.sin(t), solid ? z0 : 0))) }
 	return g
@@ -953,14 +913,14 @@ function syncInteractionButtons() {
 	// 視点中はツールボタンをすべてOFF、描画中は選択した1ツールだけをONにする。
 	$('mV').classList.toggle('on', mode === 'view');
 	$('mD').classList.toggle('on', mode === 'draw' && tool === 'pen');
-	[['tE', 'erase'], ['tS', 'shape'], ['tB', 'border'], ['tM', 'edit']].forEach(([id, n]) => $(id).classList.toggle('on', mode === 'draw' && tool === n));
+	[['tE', 'erase'], ['tB', 'border'], ['tM', 'edit']].forEach(([id, n]) => $(id).classList.toggle('on', mode === 'draw' && tool === n));
 }
 function setTool(t) {
 	tool = t; setMode('draw');
-	const HT = { shape: '図形：キャンバスをドラッグすると長方形／円／三角柱／三角錐を作成し、自動で編集モードになります。種類・面は左の設定で選びます', border: '書き出し範囲：ドラッグで枠を指定。範囲指定はPNG保存・コピーに反映されます', erase: '消しゴム：なぞったところを消します', edit: '図形編集：線にさわって選択。空白を長押ししてドラッグするとボックス選択。Shift/Ctrl/⌘クリックでも複数選択でき、選択済みの線をドラッグするとまとめて移動。iPadは指またはApple Pencilで長押しドラッグ。矢印＝軸に沿って移動／白い四角＝面を押し引き／点線の輪＝回転／線をドラッグ＝面の上で移動。看板は絵枠W・絵枠Hと外形の面ハンドル、円錐は高さ、球体は半径ハンドルをドラッグできます' };
+	const HT = { border: '書き出し範囲：ドラッグで枠を指定。範囲指定はPNG保存・コピーに反映されます', erase: '消しゴム：なぞったところを消します', edit: '図形編集：線にさわって選択。空白を長押ししてドラッグするとボックス選択。Shift/Ctrl/⌘クリックでも複数選択でき、選択済みの線をドラッグするとまとめて移動。iPadは指またはApple Pencilで長押しドラッグ。矢印＝軸に沿って移動／白い四角＝面を押し引き／点線の輪＝回転／線をドラッグ＝面の上で移動。看板は絵枠W・絵枠Hと外形の面ハンドル、建物は開口W/H・奥面と外側面、円錐は高さ、球体は半径ハンドルをドラッグできます' };
 	if (HT[tool]) $('hint').textContent = HT[tool] + ' ／ ⌘(Ctrl)+ドラッグ＝視点移動'
 }
-$('tE').onclick = () => setTool('erase'); $('tS').onclick = () => setTool('shape'); $('tB').onclick = () => setTool('border'); $('tM').onclick = () => setTool('edit');
+$('tE').onclick = () => setTool('erase'); $('tB').onclick = () => setTool('border'); $('tM').onclick = () => setTool('edit');
 const edge = document.createElement('button'); edge.id = 'edgeTab'; edge.title = '設定パネルを開閉'; document.body.appendChild(edge);   // パネルの端にいつも出るタブ
 function setSide(h) {
 	const sd = $('side'); sd.classList.toggle('hide', h); $('tg').textContent = h ? '設定を開く' : '設定を隠す'; edge.textContent = h ? '▶' : '◀';
@@ -1250,7 +1210,7 @@ cv.addEventListener('wheel', e => {
 function multiStart() {
 	cancelBoxPending(); boxSelect = null;
 	if (drag) { setP('yaw', drag.yaw); setP('pitch', drag.pitch); setP('cx', drag.cx); setP('cz', drag.cz); setP('ch', drag.ch); sync() }   // 1本目で動いた分は戻す
-	drag = null; cur = null; er = null; sh = null; prev = null; bd = false; ed = null; ptr = null; ptrType = null;
+	drag = null; cur = null; er = null; prev = null; bd = false; ed = null; ptr = null; ptrType = null;
 	if (!mg) mg = { t0: Date.now(), n: 0, moved: false, x0: null, y0: null, x1: null, y1: null };
 	const pts = [...TC.values()]; mg.n = Math.max(mg.n, pts.length); mg.view = mode === 'view';
 	const cx = pts.reduce((a, t) => a + t.x, 0) / Math.max(1, pts.length), cy = pts.reduce((a, t) => a + t.y, 0) / Math.max(1, pts.length);
@@ -1453,14 +1413,14 @@ cv.onpointerdown = e => {
 		TC.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY }); cv.setPointerCapture(e.pointerId);
 		if (TC.size >= 2) { multiStart(); return }
 		if (mg || Date.now() - lastPen < 600) return;                          // ペン直後の1本指(手のひら)は視点を動かさない。2本以上のジェスチャーは受け付ける
-	} else if (e.pointerType === 'pen' && ptrType !== 'pen') { drag = null; cur = null; er = null; sh = null; prev = null; bd = false; ed = null; ptr = null; mg = null; TC.clear() }   // ペンは指より優先
+	} else if (e.pointerType === 'pen' && ptrType !== 'pen') { drag = null; cur = null; er = null; prev = null; bd = false; ed = null; ptr = null; mg = null; TC.clear() }   // ペンは指より優先
 	// iPadでpointerupを取りこぼした古いポインタが残っても、次の編集操作を止めない。
 	if (ptr != null && ptr !== e.pointerId && e.pointerType !== 'mouse' && !TC.has(ptr)) { ptr = null; ptrType = null; ed = null; drag = null; cur = null; mg = null }
 	// 「視点」ボタンで3Dを操作中は、編集ツールが残っていてもタッチ／ペンを
 	// 自動的に描画へ切り替えない。編集はmode='draw'のときだけ受け取る。
 	if (ptr != null) return;
 	ptr = e.pointerId; ptrType = e.pointerType; cv.setPointerCapture(e.pointerId); const p = pos(e);
-	const pn = $('pn').checked, mod = e.pointerType === 'mouse' && (e.metaKey || e.ctrlKey), selectGesture = tool === 'edit' && mode === 'draw' && e.pointerType === 'mouse' && e.button === 0 && (e.shiftKey || e.metaKey || e.ctrlKey), nav = e.pointerType === 'mouse' && (e.button === 1 || e.button === 2 || e.altKey || ((e.shiftKey || mod) && !selectGesture)), touchTool = pn && e.pointerType === 'touch' && tool !== 'shape' && tool !== 'edit' && tool !== 'erase', editPointer = tool === 'edit' && mode === 'draw' && (e.pointerType === 'touch' || e.pointerType === 'pen'), act = (nav || (!selectGesture && mod)) ? 'view' : editPointer ? 'draw' : pn && e.pointerType === 'pen' && mode === 'draw' ? 'draw' : touchTool ? 'view' : mode;   // 視点モードでは、残っている編集ツールよりもカメラ操作を優先する。
+	const pn = $('pn').checked, mod = e.pointerType === 'mouse' && (e.metaKey || e.ctrlKey), selectGesture = tool === 'edit' && mode === 'draw' && e.pointerType === 'mouse' && e.button === 0 && (e.shiftKey || e.metaKey || e.ctrlKey), nav = e.pointerType === 'mouse' && (e.button === 1 || e.button === 2 || e.altKey || ((e.shiftKey || mod) && !selectGesture)), touchTool = pn && e.pointerType === 'touch' && tool !== 'edit' && tool !== 'erase', editPointer = tool === 'edit' && mode === 'draw' && (e.pointerType === 'touch' || e.pointerType === 'pen'), act = (nav || (!selectGesture && mod)) ? 'view' : editPointer ? 'draw' : pn && e.pointerType === 'pen' && mode === 'draw' ? 'draw' : touchTool ? 'view' : mode;   // 視点モードでは、残っている編集ツールよりもカメラ操作を優先する。
 	if (act === 'view') {
 		const pan = e.shiftKey || e.altKey || e.button === 2;
 		drag = { kind: pan ? 'pan' : 'orbit', x: e.clientX, y: e.clientY, yaw: P.yaw, hz: P.hz, pitch: P.pitch, cx: P.cx, cz: P.cz, ch: P.ch };
@@ -1480,11 +1440,6 @@ cv.onpointerdown = e => {
 			} else armBoxPending(p, e.pointerId, 'canvas');
 		}
 		syncSel(); render(); return
-	}
-	if (act === 'draw' && tool === 'shape') {
-		const k = +$('shK').value, r0 = unscr(p), d = r0[k] >= 0 ? 1 : -1, c = camPos(), off = [c[0], k === 1 && r0[1] < 0 ? 0 : c[1], c[2]], cl = V.add(c, off, 1, -1);
-		const A = hit3(r0, k, d, cl) || V.add(cl, r0, 1, P.dp);
-		sh = { k, d, off, cl, A }; prev = null; render(); return;
 	}
 	if (act === 'draw' && tool === 'border') { bd = true; CR = { x0: clamp(p.x, 0, W), y0: clamp(p.y, 0, H), x1: clamp(p.x, 0, W), y1: clamp(p.y, 0, H) }; render(); return }
 	if (act === 'draw' && tool === 'erase') { er = { base: S, last: p }; stepErase(p, p); render(); return }   // 消しゴム
@@ -1518,7 +1473,6 @@ cv.onpointermove = e => {
 		sync(); render(); return
 	}
 	if (ed) { dragEdit(pos(e)); return }
-	if (sh) { prev = buildShape(sh, pos(e)); render(); return }
 	if (bd) { const p = pos(e); CR.x1 = clamp(p.x, 0, W); CR.y1 = clamp(p.y, 0, H); render(); return }
 	if (er) { const p = pos(e); stepErase(er.last, p); er.last = p; render(); return }
 	if (!cur) return; const p = pos(e), a = cur.a;
@@ -1555,7 +1509,6 @@ cv.onpointerup = cv.onpointercancel = e => {
 	if (boxPending && boxPending.pointerId === e.pointerId) { cancelBoxPending(); ptr = null; ptrType = null; if (e.pointerType === 'pen') lastPen = Date.now(); return }
 	if (e.pointerId !== ptr) return; ptr = null; ptrType = null; if (e.pointerType === 'pen') lastPen = Date.now();
 	if (er) { if (S !== er.base) { HU.push(er.base); RD = [] } er = null }
-	if (sh) { if (prev && prev.length) { HU.push(S); S = [...S, ...prev]; RD = []; setSelection(prev[0].ob.id, false); setTool('edit') } sh = null; prev = null }   // 図形を確定し、すぐに押し出し可能な編集モードへ
 	if (bd) { bd = false; const r = crect(); if (r.w < 8 || r.h < 8) CR = null }
 	ed = null; snapHit = null;
 	drag = null; if (cur && cur.pv) { if (cur.pv.p.length > 1) { HU.push(S); S = [...S, { c: cur.c, w: cur.w, d3: true, p: dens3(cur.pv.p) }]; RD = [] } }   // 3Dの線として保存
@@ -1570,11 +1523,11 @@ function releaseInputState(e) {
 		if (!TC.size) mg = null;
 	}
 	if (e?.pointerType === 'pen') lastPen = Date.now();
-	if (ptr === e?.pointerId) { ptr = null; ptrType = null; ed = null; drag = null; cur = null; sh = null; bd = false; er = null; snapHit = null }
+	if (ptr === e?.pointerId) { ptr = null; ptrType = null; ed = null; drag = null; cur = null; bd = false; er = null; snapHit = null }
 }
 addEventListener('pointerup', releaseInputState, false);
 addEventListener('pointercancel', releaseInputState, false);
-addEventListener('blur', () => { if (!boxSelect && !boxPending) { ptr = null; ptrType = null; ed = null; drag = null; cur = null; sh = null; bd = false; er = null; TC.clear(); mg = null } });
+addEventListener('blur', () => { if (!boxSelect && !boxPending) { ptr = null; ptrType = null; ed = null; drag = null; cur = null; bd = false; er = null; TC.clear(); mg = null } });
 
 // ===== モード・ボタン =====
 function setMode(m) {
@@ -1725,7 +1678,7 @@ function unpack(d) {
 	{
 		const st = d.S.map(s => s.ob ? { ...s, ob: fixOb(s.ob) } : s), seen = new Set(), gen = [];   // 前の版の図形（向きで保存）は、3Dで作り直す
 		st.forEach(s => { if (s.ob && !s.d3 && !seen.has(s.ob.id)) { seen.add(s.ob.id); gen.push(...genShape(s.ob)) } }); S = [...st.filter(s => !(s.ob && !s.d3)), ...gen]
-	} CR = d.cr || null; HU = []; RD = []; cur = null; er = null; sh = null; prev = null; clearSelection(); ed = null; Z = 1; ox = oy = 0; updZ();
+	} CR = d.cr || null; HU = []; RD = []; cur = null; er = null; prev = null; clearSelection(); ed = null; Z = 1; ox = oy = 0; updZ();
 	if (d.photo) { const im = new Image(); im.onload = () => { IMG = im; IMGsrc = d.photo; render() }; im.src = d.photo } else { IMG = null; IMGsrc = null }
 	orthView = d.orthView || null;
 	sync(); render()

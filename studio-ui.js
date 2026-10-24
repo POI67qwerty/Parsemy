@@ -1,4 +1,4 @@
-/* City Grid Studio compact layer — UI, gestures, floor tools and asset library.
+/* City Grid Studio studio layer — UI, gestures, floor tools and asset library.
    The perspective engine stays underneath so old projects remain compatible. */
 (function () {
 	'use strict';
@@ -226,20 +226,9 @@
 	function ringA(o, rx, ry, z, n = 8, color = o.c || '#e7fff4') {
 		const a = []; for (let i = 0; i < n; i++) { const t = i / n * Math.PI * 2; a.push([rx * Math.cos(t), ry * Math.sin(t), z]) } return polyA(o, a, color);
 	}
-	function boxPartA(o, cx, w, d, z0, z1, color = o.c || '#e7fff4') {
-		const x = w / 2, y = d / 2, out = [], v = (xx, yy, zz) => [cx + xx, yy, zz];
-		out.push(polyA(o, [v(-x, -y, z0), v(x, -y, z0), v(x, y, z0), v(-x, y, z0)], color));
-		out.push(polyA(o, [v(-x, -y, z1), v(x, -y, z1), v(x, y, z1), v(-x, y, z1)], color));
-		[[-x, -y], [x, -y], [x, y], [-x, y]].forEach(([xx, yy]) => out.push(lineA(o, [v(xx, yy, z0), v(xx, yy, z1)], color)));
-		return out;
-	}
 	function buildingParams(o) {
 		const g = buildingGeometry(o), w = g.w, d = g.d, h = g.h, openingW = g.openingW, openingH = g.openingH;
 		return { w, d, h, openingW, openingH, backY: g.backY, sideT: Math.max(.05, (w - openingW) / 2), topT: Math.max(.05, h - openingH) };
-	}
-	function assetFaceDepth(o) {
-		const base = L2W(o, 0, 0, 0), edge = L2W(o, 0, 1, 0), axis = V.nrm(V.add(edge, base, 1, -1)), rel = V.add(camPos(), base, 1, -1), d = Math.max(.02, Math.abs(Number(o.rb) || .1));
-		return (V.dot(rel, axis) >= 0 ? 1 : -1) * (d + .018);
 	}
 	function assetLines(o) {
 		const kind = o.asset, w = o.ra * 2, d = o.rb * 2, h = o.h, c = o.c || '#222222', a = c, out = []; // アセットも線画と同じ色で描く
@@ -392,11 +381,11 @@
 	function genAsset(o) { const q = normalizedAsset(o); return assetLines(q).map(s => ({ ...s, ob: q, d3: true, cs: sigNow() })); }
 
 	// Route the existing shape pipeline through the asset generator.
-	const originalGenShape = genShape;
-	genShape = function (o) { return o && o.type === 'asset' ? genAsset(o) : originalGenShape(o) };
-	const originalObBounds = obBounds;
+	const baseGenShape = genShape;
+	genShape = function (o) { return o && o.type === 'asset' ? genAsset(o) : baseGenShape(o) };
+	const baseObBounds = obBounds;
 	obBounds = function (o) {
-		if (!o || o.type !== 'asset') return originalObBounds(o);
+		if (!o || o.type !== 'asset') return baseObBounds(o);
 		const pts = []; const hs = [0, o.h], xs = [-o.ra, o.ra], ys = [-o.rb, o.rb];
 		hs.forEach(z => xs.forEach(x => ys.forEach(y => pts.push(pt(o, x, y, z)))));
 		const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]; pts.forEach(v => v.forEach((n, i) => { lo[i] = Math.min(lo[i], n); hi[i] = Math.max(hi[i], n) }));
@@ -468,10 +457,7 @@
 		} catch (err) { S = before; console.error('City Grid object paste error', err); render(); return false }
 	}
 
-	// The old shape section is no longer a separate tool; rectangle/circle now live in the asset shelf.
-	hideLegacyShapeControls();
-	el('tS')?.style.setProperty('display', 'none');
-
+	// Rectangle/circle and the other primitives are created from the asset shelf.
 	// ===== Asset shelf on the canvas =====
 	const tray = document.createElement('div'); tray.id = 'assetTray';
 	tray.innerHTML = '<div class="assetTrayInner"><div class="assetTrayTitle">シーンに追加</div><div class="assetTrayTools"><label>生成面<select id="assetAxisTray"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select></label></div><div class="assetClipboardTools"><button type="button" id="objectCopy">コピー</button><button type="button" id="objectPaste" disabled>貼り付け</button></div>' + Object.entries(ASSETS).map(([k, v]) => `<button class="assetCard" data-asset="${k}" title="${v.label}を追加"><span class="assetGlyph">${v.glyph}</span><span>${v.label}</span></button>`).join('') + '</div>';
@@ -640,78 +626,9 @@
 	migrateLineArt();
 	el('p3').checked = true; el('p3').disabled = true;
 	if (el('p3').closest('label')) el('p3').closest('label').style.opacity = '.6';
-	const legacyUnpack = unpack;
-	unpack = function (d) { legacyUnpack(d); migrateLineArt(); el('p3').checked = true; el('p3').disabled = true; render() };
+	const baseUnpack = unpack;
+	unpack = function (d) { baseUnpack(d); migrateLineArt(); el('p3').checked = true; el('p3').disabled = true; render() };
 	try { if (!localStorage.getItem('city-grid-v4-floor')) { P.floorOn = true; P.floorAlpha = .24; localStorage.setItem('city-grid-v4-floor', '1') } } catch (e) { }
-
-	// 図形モード専用の安全な作成経路。既存の3D交差判定に失敗しても、
-	// 画面上のドラッグを必ず編集可能な図形として確定する。
-	let shapeDrag = null;
-	const finite3 = q => q && q.every(Number.isFinite) ? q : null;
-	function fallbackShape(type, id) {
-		const q = groundAt({ x: W * .5, y: H * .64 }) || [0, -1, 4], isTri = type === 'triPrism' || type === 'triPyramid';
-		const o = { id: id || uid(), type, k: 1, d: -1, off: [0, 0, 0], ca: q[0], cb: q[2], ra: .75, rb: .75, h: isTri ? .75 : 0, extrude: false, rot: 0, lift: 0, wf: $('wf').checked, c: $('pc').value, w: MASTER_W };
-		return genShape(o);
-	}
-	function visibleShape(lines) {
-		if (!lines || !lines.length) return false;
-		try { return lines.some(s => validStroke(s) && s.p.some(v => { const q = sp(s, v); return q && q.ok && q.x > -W * .25 && q.x < W * 1.25 && q.y > -H * .25 && q.y < H * 1.25 })) } catch (e) { return false }
-	}
-	function makeDraggedShape(start, end, id) {
-		const k = +$('shK').value, type = $('shT').value, r0 = unscr(start), d = r0[k] >= 0 ? 1 : -1, c = camPos();
-		const off = [c[0], k === 1 && r0[1] < 0 ? 0 : c[1], c[2]], cl = V.add(c, off, 1, -1), A = finite3(hit3(r0, k, d, cl)) || V.add(cl, r0, 1, P.dp);
-		const r1 = unscr(end), B = finite3(hit3(r1, k, d, cl)) || V.add(cl, r1, 1, P.dp), [iu, iv] = PL[k];
-		let du = B[iu] - A[iu], dv = B[iv] - A[iv];
-		if (type === 'circ' && $('sq').checked) { const m = Math.max(Math.abs(du), Math.abs(dv)); du = du < 0 ? -m : m; dv = dv < 0 ? -m : m }
-		if (!Number.isFinite(du) || !Number.isFinite(dv) || Math.abs(du) < .002 || Math.abs(dv) < .002) return null;
-		const baseH = (type === 'triPrism' || type === 'triPyramid') ? Math.min(Math.abs(du), Math.abs(dv)) * P.hr / 100 : 0;
-		const lines = genShape({ id: id || uid(), type, k, d, off, ca: A[iu] + du / 2, cb: A[iv] + dv / 2, ra: Math.abs(du) / 2, rb: Math.abs(dv) / 2, h: baseH, extrude: false, rot: 0, lift: 0, wf: $('wf').checked, c: $('pc').value, w: MASTER_W });
-		return visibleShape(lines) ? lines : fallbackShape(type, id);
-	}
-	const legacyDown = cv.onpointerdown, legacyMove = cv.onpointermove, legacyUp = cv.onpointerup;
-	const isShapePointer = e => mode === 'draw' && tool === 'shape' && e.pointerType !== 'mouse' || mode === 'draw' && tool === 'shape' && e.pointerType === 'mouse' && !e.button && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey;
-	cv.onpointerdown = e => {
-		if (isShapePointer(e)) {
-			e.preventDefault(); cv.setPointerCapture(e.pointerId); shapeDrag = { id: uid(), pointerId: e.pointerId, start: pos(e), preview: null }; prev = null; render(); return;
-		}
-		legacyDown && legacyDown.call(cv, e);
-	};
-	cv.onpointermove = e => {
-		if (shapeDrag && e.pointerId === shapeDrag.pointerId) { e.preventDefault(); shapeDrag.preview = makeDraggedShape(shapeDrag.start, pos(e), shapeDrag.id); prev = shapeDrag.preview; render(); return; }
-		legacyMove && legacyMove.call(cv, e);
-	};
-	cv.onpointerup = cv.onpointercancel = e => {
-		if (shapeDrag && e.pointerId === shapeDrag.pointerId) {
-			e.preventDefault(); const made = shapeDrag.preview;
-			if (e.type === 'pointercancel') { shapeDrag = null; prev = null; render(); return }
-			if (made && made.length && made[0].ob) { HU.push(S); S = [...S, ...made]; RD = []; setSelection(made[0].ob.id, false); prev = null; shapeDrag = null; setTool('edit'); syncSel(); render(); }
-			else { shapeDrag = null; prev = null; render(); }
-			return;
-		}
-		legacyUp && legacyUp.call(cv, e);
-	};
-	// Capture phase is intentionally used here so the old canvas handler cannot consume
-	// the drag before the reliable shape path sees it.
-	cv.addEventListener('pointerdown', e => {
-		if (!isShapePointer(e)) return;
-		e.preventDefault(); e.stopImmediatePropagation(); cv.setPointerCapture(e.pointerId);
-		sh = null; cur = null; ed = null; drag = null; shapeDrag = { id: uid(), pointerId: e.pointerId, start: pos(e), preview: null }; prev = null; render();
-	}, true);
-	cv.addEventListener('pointermove', e => {
-		if (!shapeDrag || e.pointerId !== shapeDrag.pointerId) return;
-		e.preventDefault(); e.stopImmediatePropagation(); shapeDrag.preview = makeDraggedShape(shapeDrag.start, pos(e), shapeDrag.id); prev = shapeDrag.preview; render();
-	}, true);
-	cv.addEventListener('pointerup', e => {
-		if (!shapeDrag || e.pointerId !== shapeDrag.pointerId) return;
-		e.preventDefault(); e.stopImmediatePropagation();
-		const made = shapeDrag.preview;
-		if (made && made.length && made[0].ob) { HU.push(S); S = [...S, ...made]; RD = []; setSelection(made[0].ob.id, false); prev = null; shapeDrag = null; setTool('edit'); syncSel(); render(); }
-		else { shapeDrag = null; prev = null; render(); }
-	}, true);
-	cv.addEventListener('pointercancel', e => {
-		if (!shapeDrag || e.pointerId !== shapeDrag.pointerId) return;
-		e.preventDefault(); e.stopImmediatePropagation(); shapeDrag = null; prev = null; render();
-	}, true);
 
 	let signEditSession = false, buildingEditSession = false;
 	function syncBuildingPanel() {
@@ -746,8 +663,8 @@
 		}
 	}
 	// Wrap render so the outliner follows undo/redo, opening files, and camera changes.
-	const originalRender = render;
-	render = function () { sanitizeScene(); originalRender(); updateOutliner(); syncAssetControls(); syncSignPanel(); syncBuildingPanel(); syncFloorControls(); syncAssetDepth(); syncAssetAxis(); syncPersonControls(); syncObjectInfoActions(); syncFloorPlanSelection?.() };
+	const baseRender = render;
+	render = function () { sanitizeScene(); baseRender(); updateOutliner(); syncAssetControls(); syncSignPanel(); syncBuildingPanel(); syncFloorControls(); syncAssetDepth(); syncAssetAxis(); syncPersonControls(); syncObjectInfoActions(); syncFloorPlanSelection?.() };
 
 	// ===== 標準ビューと間取りショートカット（8=間取り横 / 9=間取り真上 / 0=元の視点） =====
 	// 標準ビューだけは透視ではなく正投影にし、真横90°・真上90°を正確に扱う。
@@ -891,7 +808,7 @@
 			// 通常編集のポインタ状態を完全に捨てる。これをしないと、
 			// 2本指タップ後もTC/ptrが残り、undo/redo結果が画面へ反映されない。
 			cancelBoxPending(); boxSelect = null; floorPlanDrag = null; snapHit = null;
-			TC.clear(); mg = null; ptr = null; ptrType = null; drag = null; cur = null; er = null; sh = null; prev = null; bd = false; ed = null;
+			TC.clear(); mg = null; ptr = null; ptrType = null; drag = null; cur = null; er = null; prev = null; bd = false; ed = null;
 			const pts = [...floorTouchIds.values()], mx = pts.reduce((a, t) => a + t.x, 0) / pts.length, my = pts.reduce((a, t) => a + t.y, 0) / pts.length;
 			if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
 			floorTouchPan = { mx0: mx, my0: my, center0: [...(window.cityFloorPlanCenter || [0, 0])] };
@@ -1257,12 +1174,6 @@
 		const next = Math.max(Number(h.min) || .01, Number(value) + side * best.gap);
 		return floorDimensionPatch(o, h.kind, next, side);
 	}
-	function floorPlanSnapDelta(o, delta) {
-		if (!$('snp')?.checked) return delta;
-		const base = L2W(o, 0, 0, 0), snap = snapSetup(o, base), q = snapShift(snap.bb, delta, [0, 2], snap.targets, snap.tau);
-		if (q.hit.size) snapHit = q.hit;
-		return q.d;
-	}
 	function rotateFloorSelected(deg) {
 		const o = floorPlanObject(); if (!o || o.k !== 1) return; HU.push(S); RD = []; setOb(o.id, { rot: angle360((Number(o.rot) || 0) + deg) }); render();
 	}
@@ -1523,8 +1434,8 @@
 	const STUDIO_PRESET_KEY = 'city-grid-studio-presets-v1';
 	const studioPresetNameInput = el('studioPresetName'), studioPresetSelect = el('studioPresetSelect');
 	// オブジェクトを除く、カメラ・グリッド・補助線・ペン・消しゴム・表示設定をまとめて保存する。
-	const presetCheckIds = ['gon', 'hzl', 'bgw', 'bin', 'zf', 'gg', 'p3', 'snp', 'pn', 'sq', 'wf'];
-	const presetSelectIds = ['snap', 'em', 'shT', 'shK'];
+	const presetCheckIds = ['gon', 'hzl', 'bgw', 'bin', 'zf', 'gg', 'p3', 'snp', 'pn'];
+	const presetSelectIds = ['snap', 'em'];
 	function readStudioPresets() { try { const a = JSON.parse(localStorage.getItem(STUDIO_PRESET_KEY) || '[]'); return Array.isArray(a) ? a : [] } catch (e) { return [] } }
 	function writeStudioPresets(a) { try { localStorage.setItem(STUDIO_PRESET_KEY, JSON.stringify(a)); return true } catch (e) { return false } }
 	function captureStudioPreset(name) {
@@ -1563,7 +1474,7 @@
 			if (d.photo) { const im = new Image(); im.onload = () => { IMG = im; IMGsrc = d.photo; render() }; im.src = d.photo }
 			else { IMG = null; IMGsrc = null }
 		}
-		orthView = d.orthView || null; tool = d.tool || tool;
+		orthView = d.orthView || null; tool = d.tool === 'shape' ? 'edit' : (d.tool || tool);
 		if (d.ui) {
 			if (Array.isArray(d.ui.details)) document.querySelectorAll('#side details').forEach((section, i) => { if (i < d.ui.details.length) section.open = !!d.ui.details[i] });
 			if (typeof d.ui.sideHidden === 'boolean') { setSide(d.ui.sideHidden); fit() }
