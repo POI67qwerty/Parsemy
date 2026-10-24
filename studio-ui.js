@@ -203,8 +203,10 @@
 		triPrism: { label: '三角柱', glyph: '△', w: 1.4, d: 1.8, h: 1.25, accent: '#ffb36f' },
 		triPyramid: { label: '三角錐', glyph: '▲', w: 1.5, d: 1.5, h: 1.45, accent: '#ff79ba' },
 		sign: { label: '看板', glyph: '▤', w: 1.0, d: .20, h: 2.15, accent: '#76d9ff' },
+		awning: { label: '店舗テント', glyph: '▱', w: 3.8, d: 1.35, h: .35, accent: '#d98b68' },
 		person: { label: '人物', glyph: '♙', w: .46, d: .30, h: 1.70, accent: '#ad9cff' },
 		stairs: { label: '階段', glyph: '▰', w: 1.45, d: 2.4, h: .78, accent: '#ffb36f' },
+		building: { label: '開口のある建物', glyph: '▣', w: 4.2, d: 3.2, h: 3.6, accent: '#8ce6c2' },
 		crosswalk: { label: '横断歩道', glyph: '▥', w: 3.2, d: 4.2, h: .02, accent: '#668cff' }
 	};
 	const assetLabel = o => o.type === 'compound' ? '結合オブジェクト' : o.type === 'asset' ? (ASSETS[o.asset]?.label || (o.asset === 'cylinder' ? '円柱' : 'アセット')) : (o.type === 'rect' ? '長方形' : o.type === 'circ' ? '円' : o.type === 'box' ? '箱' : o.type === 'cyl' ? '円柱' : '図形');
@@ -223,6 +225,21 @@
 	}
 	function ringA(o, rx, ry, z, n = 8, color = o.c || '#e7fff4') {
 		const a = []; for (let i = 0; i < n; i++) { const t = i / n * Math.PI * 2; a.push([rx * Math.cos(t), ry * Math.sin(t), z]) } return polyA(o, a, color);
+	}
+	function boxPartA(o, cx, w, d, z0, z1, color = o.c || '#e7fff4') {
+		const x = w / 2, y = d / 2, out = [], v = (xx, yy, zz) => [cx + xx, yy, zz];
+		out.push(polyA(o, [v(-x, -y, z0), v(x, -y, z0), v(x, y, z0), v(-x, y, z0)], color));
+		out.push(polyA(o, [v(-x, -y, z1), v(x, -y, z1), v(x, y, z1), v(-x, y, z1)], color));
+		[[-x, -y], [x, -y], [x, y], [-x, y]].forEach(([xx, yy]) => out.push(lineA(o, [v(xx, yy, z0), v(xx, yy, z1)], color)));
+		return out;
+	}
+	function buildingParams(o) {
+		const g = buildingGeometry(o), w = g.w, d = g.d, h = g.h, openingW = g.openingW, openingH = g.openingH;
+		return { w, d, h, openingW, openingH, backY: g.backY, sideT: Math.max(.05, (w - openingW) / 2), topT: Math.max(.05, h - openingH) };
+	}
+	function assetFaceDepth(o) {
+		const base = L2W(o, 0, 0, 0), edge = L2W(o, 0, 1, 0), axis = V.nrm(V.add(edge, base, 1, -1)), rel = V.add(camPos(), base, 1, -1), d = Math.max(.02, Math.abs(Number(o.rb) || .1));
+		return (V.dot(rel, axis) >= 0 ? 1 : -1) * (d + .018);
 	}
 	function assetLines(o) {
 		const kind = o.asset, w = o.ra * 2, d = o.rb * 2, h = o.h, c = o.c || '#222222', a = c, out = []; // アセットも線画と同じ色で描く
@@ -331,15 +348,29 @@
 			// A small measurement tick makes the current pose height reference visible.
 			const mx = .42 * h; out.push(lineA(o, [[mx, 0, 0], [mx, 0, poseTop]], a, .75)); out.push(lineA(o, [[mx - .045 * h, 0, 0], [mx + .045 * h, 0, 0]], a, .75)); out.push(lineA(o, [[mx - .045 * h, 0, poseTop], [mx + .045 * h, 0, poseTop]], a, .75));
 		} else if (kind === 'building') {
-			out.push(...boxA(o, w, d, 0, h, c));
-			// Receding roof line and facade windows.
-			out.push(lineA(o, [[-w / 2, -d / 2, h], [0, -d / 2, h + .18 * h], [w / 2, -d / 2, h]], a, 1.1));
-			const cols = 3, rows = 4, ww = w * .16, wh = h * .10, fy = -d / 2 - .008;
-			for (let r = 0; r < rows; r++)for (let j = 0; j < cols; j++) {
-				const x = -w * .31 + j * w * .31, z = .26 * h + r * .16 * h;
-				out.push(polyA(o, [[x - ww / 2, fy, z - wh / 2], [x + ww / 2, fy, z - wh / 2], [x + ww / 2, fy, z + wh / 2], [x - ww / 2, fy, z + wh / 2]], a, .75));
-			}
-			out.push(lineA(o, [[-w * .44, fy, .17 * h], [w * .44, fy, .17 * h]], a, .9));
+			// 外側は直方体の輪郭を保ちながら、正面から背面まで抜ける開口を作る。
+			// 左右の柱＋上梁として分けて描くので、開口の左右・上面・奥行きも編集対象になる。
+			const bp = buildingParams(o), ow = bp.openingW, oh = bp.openingH, backY = bp.backY, side = bp.sideT, centerX = (ow + side) / 2;
+			const outerFront = [[-w / 2, -d / 2, 0], [w / 2, -d / 2, 0], [w / 2, -d / 2, h], [-w / 2, -d / 2, h]], outerBack = [[-w / 2, d / 2, 0], [w / 2, d / 2, 0], [w / 2, d / 2, h], [-w / 2, d / 2, h]];
+			out.push(polyA(o, outerFront, c)); out.push(polyA(o, outerBack, c));
+			const innerFront = [[-ow / 2, -d / 2, 0], [-ow / 2, -d / 2, oh], [ow / 2, -d / 2, oh], [ow / 2, -d / 2, 0]], innerBack = [[-ow / 2, d / 2, 0], [-ow / 2, d / 2, oh], [ow / 2, d / 2, oh], [ow / 2, d / 2, 0]], innerPanel = [[-ow / 2, backY, 0], [-ow / 2, backY, oh], [ow / 2, backY, oh], [ow / 2, backY, 0]];
+			out.push(lineA(o, innerFront, a, 1.1)); out.push(lineA(o, innerBack, a, 1.1)); if (Math.abs(Math.abs(backY) - d / 2) > .01) out.push(lineA(o, innerPanel, a, 1.1));
+			// オレンジの奥面の下辺だけを、面から少し浮かせて線画として表示する。
+			out.push(lineA(o, [[-ow / 2, backY, .012], [ow / 2, backY, .012]], a, 1.15));
+			[[-w / 2, -d / 2, 0], [-w / 2, d / 2, 0], [w / 2, -d / 2, 0], [w / 2, d / 2, 0], [-w / 2, -d / 2, h], [-w / 2, d / 2, h], [w / 2, -d / 2, h], [w / 2, d / 2, h], [-ow / 2, -d / 2, 0], [-ow / 2, d / 2, 0], [ow / 2, -d / 2, 0], [ow / 2, d / 2, 0], [-ow / 2, -d / 2, oh], [-ow / 2, d / 2, oh], [ow / 2, -d / 2, oh], [ow / 2, d / 2, oh]].forEach((p, i, arr) => { if (i % 2 === 0) out.push(lineA(o, [p, arr[i + 1]], a, 1.0)) });
+			// 開口の内側面（左右・上）を明示して、面表示時にも空洞が見えるようにする。
+			out.push(polyA(o, [[-ow / 2, -d / 2, 0], [-ow / 2, d / 2, 0], [-ow / 2, d / 2, oh], [-ow / 2, -d / 2, oh]], a, 1.0));
+			out.push(polyA(o, [[ow / 2, -d / 2, 0], [ow / 2, -d / 2, oh], [ow / 2, d / 2, oh], [ow / 2, d / 2, 0]], a, 1.0));
+			out.push(polyA(o, [[-ow / 2, -d / 2, oh], [ow / 2, -d / 2, oh], [ow / 2, d / 2, oh], [-ow / 2, d / 2, oh]], a, 1.0));
+		} else if (kind === 'awning') {
+			// 店舗テント：初期状態は直方体。手前上辺だけを高さ・奥行き方向へ動かせる。
+			const g = awningGeometry(o), x = g.w / 2, baseY = g.baseFrontY, edgeY = g.edgeY, backY = g.d / 2, frontTop = g.edgeZ, backTop = g.h, frontBottom = g.frontBottom, backBottom = g.backBottom;
+			out.push(polyA(o, [[-x, edgeY, frontTop], [x, edgeY, frontTop], [x, backY, backTop], [-x, backY, backTop]], c, 1.1));
+			out.push(polyA(o, [[-x, baseY, frontBottom], [x, baseY, frontBottom], [x, backY, backBottom], [-x, backY, backBottom]], a, 1.0));
+			out.push(polyA(o, [[-x, baseY, frontBottom], [x, baseY, frontBottom], [x, edgeY, frontTop], [-x, edgeY, frontTop]], a, 1.0));
+			out.push(polyA(o, [[-x, backY, backBottom], [x, backY, backBottom], [x, backY, backTop], [-x, backY, backTop]], a, 1.0));
+			out.push(polyA(o, [[-x, baseY, frontBottom], [-x, backY, backBottom], [-x, backY, backTop], [-x, edgeY, frontTop]], a, 1.0));
+			out.push(polyA(o, [[x, baseY, frontBottom], [x, edgeY, frontTop], [x, backY, backTop], [x, backY, backBottom]], a, 1.0));
 		}
 		return out;
 	}
@@ -347,6 +378,14 @@
 		if (o && o.asset === 'sphere') {
 			const r = Math.max(.005, Math.min(Math.abs(Number(o.ra) || .65), Math.abs(Number(o.rb) || .65), Math.abs(Number(o.h) || 1.3) * .5));
 			return { ...o, ra: r, rb: r, h: r * 2 };
+		}
+		if (o && o.asset === 'awning') {
+			const g = awningGeometry(o); return { ...o, awningEdgeZ: g.edgeZ, awningEdgeY: g.edgeY, awningThickness: g.thickness, awningFrontBottom: g.frontBottom, awningBackBottom: g.backBottom };
+		}
+		if (o && o.asset === 'building') {
+			const w = Math.max(.1, Math.abs(Number(o.ra) || 2) * 2), d = Math.max(.05, Math.abs(Number(o.rb) || .5) * 2), h = Math.max(.1, Number(o.h) || 3), openingW = clamp(Number(o.openingW) || w * .56, .1, Math.max(.1, w - .1)), openingH = clamp(Number(o.openingH) || h * .66, .1, Math.max(.1, h - .1)), q = { ...o, openingW, openingH };
+			if (Number.isFinite(Number(o.openingBack))) q.openingBack = clamp(Number(o.openingBack), -d / 2 + .025, d / 2 - .025);
+			return q;
 		}
 		return o;
 	}
@@ -388,7 +427,7 @@
 		const base = { id: uid(), k, d, off, ca: q[iu], cb: q[iv], rot: 0, lift: 0, wf: true, c: el('pc').value || '#222222', w: MASTER_W, accent: info.accent };
 		const height = kind === 'person' ? Number(P.hm) || 1.7 : info.h;
 		if (kind === 'rect' || kind === 'circle') return { ...base, type: kind === 'circle' ? 'circ' : 'rect', asset: kind, ra: info.w / 2, rb: info.d / 2, h: 0, extrude: false };
-		return { ...base, type: 'asset', asset: kind, ra: info.w / 2, rb: info.d / 2, h: height, pose: kind === 'person' ? 'stand' : undefined, bodyScale: kind === 'person' ? 1 : undefined, shoulderScale: kind === 'person' ? 1 : undefined, headScale: kind === 'person' ? 1 : undefined, legSpread: kind === 'person' ? 1 : undefined, faceW: kind === 'sign' ? info.w * .70 : undefined, faceH: kind === 'sign' ? info.h * .34 : undefined, steps: kind === 'stairs' ? Math.round(Number(el('stairsSteps')?.value) || 6) : undefined, handrail: kind === 'stairs' ? !!el('stairsRail')?.checked : undefined, stripes: kind === 'crosswalk' ? 7 : undefined };
+		return { ...base, type: 'asset', asset: kind, ra: info.w / 2, rb: info.d / 2, h: height, pose: kind === 'person' ? 'stand' : undefined, bodyScale: kind === 'person' ? 1 : undefined, shoulderScale: kind === 'person' ? 1 : undefined, headScale: kind === 'person' ? 1 : undefined, legSpread: kind === 'person' ? 1 : undefined, faceW: kind === 'sign' ? info.w * .70 : undefined, faceH: kind === 'sign' ? info.h * .34 : undefined, openingW: kind === 'building' ? info.w * .56 : undefined, openingH: kind === 'building' ? info.h * .66 : undefined, awningEdgeZ: kind === 'awning' ? height : undefined, awningEdgeY: kind === 'awning' ? -info.d / 2 : undefined, awningThickness: kind === 'awning' ? Math.max(.05, height * .14) : undefined, awningFrontBottom: kind === 'awning' ? 0 : undefined, awningBackBottom: kind === 'awning' ? 0 : undefined, awningEdgeEdited: kind === 'awning' ? false : undefined, steps: kind === 'stairs' ? Math.round(Number(el('stairsSteps')?.value) || 6) : undefined, handrail: kind === 'stairs' ? !!el('stairsRail')?.checked : undefined, stripes: kind === 'crosswalk' ? 7 : undefined };
 	}
 	function placeAsset(kind, p) {
 		sanitizeScene(); const before = S.slice(), wasFloor = !!window.cityFloorPlanActive;
@@ -674,7 +713,17 @@
 		e.preventDefault(); e.stopImmediatePropagation(); shapeDrag = null; prev = null; render();
 	}, true);
 
-	let signEditSession = false;
+	let signEditSession = false, buildingEditSession = false;
+	function syncBuildingPanel() {
+		const panel = el('buildingP'), o = sel && obOf(sel), isBuilding = !!(o && o.type === 'asset' && o.asset === 'building'); if (!panel) return; panel.style.display = isBuilding ? '' : 'none'; if (!isBuilding) return;
+		const g = buildingGeometry(o);[['ov_openingW', g.openingW], ['ov_openingH', g.openingH]].forEach(([id, v]) => { const n = el(id); if (n && document.activeElement !== n) n.value = Number(v).toFixed(3) });
+	}
+	function applyBuildingProp(name, v) {
+		const o = sel && obOf(sel); if (!o || o.type !== 'asset' || o.asset !== 'building' || !Number.isFinite(v)) return;
+		if (!buildingEditSession) { HU.push(S); RD = []; buildingEditSession = true }
+		const g = buildingGeometry(o), max = name === 'openingW' ? g.w - .1 : g.h - .1, patch = {}; patch[name] = clamp(v, .1, Math.max(.1, max)); setOb(sel, patch); render();
+	}
+	[['ov_openingW', 'openingW'], ['ov_openingH', 'openingH']].forEach(([id, name]) => { const n = el(id); if (!n) return; n.oninput = () => applyBuildingProp(name, parseFloat(n.value)); n.onchange = () => { buildingEditSession = false } });
 	function syncSignPanel() {
 		const panel = el('signP'), o = sel && obOf(sel), isSign = !!(o && o.type === 'asset' && o.asset === 'sign'); if (!panel) return; panel.style.display = isSign ? '' : 'none';
 		const ext = el('obExtrude'); if (ext) ext.disabled = !!o && !(o.type === 'rect' || o.type === 'circ');
@@ -698,7 +747,7 @@
 	}
 	// Wrap render so the outliner follows undo/redo, opening files, and camera changes.
 	const originalRender = render;
-	render = function () { sanitizeScene(); originalRender(); updateOutliner(); syncAssetControls(); syncSignPanel(); syncFloorControls(); syncAssetDepth(); syncAssetAxis(); syncPersonControls(); syncObjectInfoActions(); syncFloorPlanSelection?.() };
+	render = function () { sanitizeScene(); originalRender(); updateOutliner(); syncAssetControls(); syncSignPanel(); syncBuildingPanel(); syncFloorControls(); syncAssetDepth(); syncAssetAxis(); syncPersonControls(); syncObjectInfoActions(); syncFloorPlanSelection?.() };
 
 	// ===== 標準ビューと間取りショートカット（8=間取り横 / 9=間取り真上 / 0=元の視点） =====
 	// 標準ビューだけは透視ではなく正投影にし、真横90°・真上90°を正確に扱う。
@@ -978,10 +1027,45 @@
 		}
 		return { o, base: centerWorld, center, handles };
 	}
+	function floorAwningEdgeHandle(o) {
+		const g = awningGeometry(o), point = L2W(o, 0, g.edgeY, g.edgeZ), s = scrW(point); if (!s.ok) return [];
+		const out = [], zMin = .05, zMax = g.h - .02, yMin = -g.d / 2 + .025, yMax = g.d / 2 - .025;
+		if (orthView === 'top') {
+			const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(g.w, g.d, .6) * orthScale() * .35));
+			out.push({ kind: 'awningEdgeZ', label: '前縁Y', s: { x: s.x, y: s.y - gap, ok: true }, dir: { x: 0, y: -1 }, scale: orthScale(), start: g.edgeZ, min: zMin, max: zMax, frontBottom: g.frontBottom, inner: true, screen: true });
+		} else {
+			const qz = scrW(L2W(o, 0, g.edgeY, g.edgeZ + .1)); if (qz.ok) { const dx = qz.x - s.x, dy = qz.y - s.y, px = Math.hypot(dx, dy); if (px > .01) out.push({ kind: 'awningEdgeZ', label: '前縁Y', s, dir: { x: dx / px, y: dy / px }, scale: px / .1, start: g.edgeZ, min: zMin, max: zMax, frontBottom: g.frontBottom, inner: true }) }
+		}
+		if (orthView === 'front') {
+			const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(g.w, g.d, .6) * orthScale() * .35)); out.push({ kind: 'awningEdgeY', label: '前後', s: { x: s.x + gap, y: s.y, ok: true }, dir: { x: 1, y: 0 }, scale: orthScale(), start: g.edgeY, min: yMin, max: yMax, inner: true, screen: true });
+		} else {
+			const qy = scrW(L2W(o, 0, g.edgeY + .1, g.edgeZ)); if (qy.ok) { const dx = qy.x - s.x, dy = qy.y - s.y, px = Math.hypot(dx, dy); if (px > .01) out.push({ kind: 'awningEdgeY', label: '前後', s: qy, dir: { x: dx / px, y: dy / px }, scale: px / .1, start: g.edgeY, min: yMin, max: yMax, inner: true }) }
+		}
+		return out;
+	}
+	function floorBuildingBackPanel(o) {
+		const g = buildingGeometry(o), panelY = g.backY;
+		return { panelY, side: panelY >= 0 ? 1 : -1, points: [scrW(L2W(o, -g.openingW / 2, panelY, 0)), scrW(L2W(o, -g.openingW / 2, panelY, g.openingH)), scrW(L2W(o, g.openingW / 2, panelY, g.openingH)), scrW(L2W(o, g.openingW / 2, panelY, 0))], center: scrW(L2W(o, 0, panelY, g.openingH * .5)) };
+	}
+	function floorBuildingInnerHandles(o) {
+		const g = buildingGeometry(o), handles = [], near = buildingFaceDepth(o), far = -near, back = floorBuildingBackPanel(o);
+		const add = (kind, label, point, probe, start, factor = 1, side = 1, minOverride = null, maxOverride = null) => { const s = scrW(point), q = scrW(probe); if (!s.ok || !q.ok) return; const dx = q.x - s.x, dy = q.y - s.y, px = Math.hypot(dx, dy); if (px < .01) return; handles.push({ kind, label, s, dir: { x: dx / px, y: dy / px }, scale: px / .1, start, min: minOverride ?? .1, max: maxOverride ?? (kind === 'buildingOpeningW' ? Math.max(.1, g.w - .1) : kind === 'buildingBackFace' ? 20 : Math.max(.1, g.h - .1)), factor, side, inner: true }) };
+		if (orthView === 'top') {
+			[near, far].forEach((yy, idx) => { add('buildingOpeningW', '開口W' + (idx ? '（奥）' : ''), L2W(o, -g.openingW / 2, yy, 0), L2W(o, -g.openingW / 2 - .1, yy, 0), g.openingW, 2); add('buildingOpeningW', '開口W＋' + (idx ? '（奥）' : ''), L2W(o, g.openingW / 2, yy, 0), L2W(o, g.openingW / 2 + .1, yy, 0), g.openingW, 2) });
+			add('buildingBackFace', '奥の面', L2W(o, 0, back.panelY, g.openingH * .5), L2W(o, 0, back.panelY + back.side * .1, g.openingH * .5), back.panelY, 1, back.side, -g.d / 2 + .025, g.d / 2 - .025);
+		} else if (orthView === 'front') {
+			add('buildingOpeningW', '開口W', L2W(o, -g.openingW / 2, near, g.openingH / 2), L2W(o, -g.openingW / 2 - .1, near, g.openingH / 2), g.openingW, 2); add('buildingOpeningW', '開口W＋', L2W(o, g.openingW / 2, near, g.openingH / 2), L2W(o, g.openingW / 2 + .1, near, g.openingH / 2), g.openingW, 2); add('buildingOpeningH', '開口H', L2W(o, 0, near, g.openingH), L2W(o, 0, near, g.openingH + .1), g.openingH);
+			if (back.center && back.center.ok) handles.push({ kind: 'buildingBackFace', label: '奥の面', s: back.center, dir: { x: 1, y: 0 }, scale: orthScale(), start: back.panelY, min: -g.d / 2 + .025, max: g.d / 2 - .025, factor: 1, side: back.side, inner: true, screen: true });
+		} else if (orthView === 'side') {
+			[near, far].forEach((yy, idx) => add('buildingOpeningH', '開口H' + (idx ? '（奥）' : ''), L2W(o, 0, yy, g.openingH), L2W(o, 0, yy, g.openingH + .1), g.openingH));
+			add('buildingBackFace', '奥の面', L2W(o, 0, back.panelY, g.openingH * .5), L2W(o, 0, back.panelY + back.side * .1, g.openingH * .5), back.panelY, 1, back.side, -g.d / 2 + .025, g.d / 2 - .025);
+		}
+		return handles;
+	}
 	function floorPlanEditHandles() {
 		const o = floorPlanObject(); if (!o || o.k !== 1) return null;
 		if (o.type === 'compound') return floorCompoundEditHandles(o);
-		const [z0, z1] = floorPlanObjectZRange(o), base = L2W(o, 0, 0, z0), zc = (z0 + z1) / 2, center = scrW(L2W(o, 0, 0, zc)), handles = [];
+		const [z0, z1] = floorPlanObjectZRange(o), base = L2W(o, 0, 0, z0), zc = (z0 + z1) / 2, center = scrW(L2W(o, 0, 0, zc)), handles = [], panel = o.type === 'asset' && o.asset === 'building' ? floorBuildingBackPanel(o) : null;
 		const add = (kind, label, point, probe, start, min = .01, side = 1) => {
 			const s = scrW(point), q = scrW(probe); if (!s.ok || !q.ok) return; const dx = q.x - s.x, dy = q.y - s.y, px = Math.hypot(dx, dy); if (px < .01) return;
 			handles.push({ kind, label, s, dir: { x: dx / px, y: dy / px }, scale: px / .1, start, min, side });
@@ -1013,16 +1097,21 @@
 			const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(Math.abs(Number(o.ra) || .5), Math.abs(Number(o.h) || .6)) * orthScale() * .65));
 			handles.push({ kind: 'd', label: '奥行き', s: { x: center.x + gap, y: center.y, ok: true }, dir: { x: 1, y: 0 }, scale: orthScale(), start: Math.abs(o.rb) * 2, min: .01, side: 1, screen: true });
 		}
-		return { o, base, center, handles };
+		if (o.type === 'asset' && o.asset === 'building') handles.push(...floorBuildingInnerHandles(o));
+		if (o.type === 'asset' && o.asset === 'awning') { const edge = floorAwningEdgeHandle(o); if (edge.length) handles.push(...edge) }
+		return { o, base, center, handles, panel };
 	}
 	function floorPlanEditHandleAt(p) {
-		const g = floorPlanEditHandles(); if (!g) return null; const lim = 20 / Z;
-		return g.handles.find(h => Math.hypot(h.s.x - p.x, h.s.y - p.y) < lim) ? { g, h: g.handles.find(h => Math.hypot(h.s.x - p.x, h.s.y - p.y) < lim) } : null;
+		const g = floorPlanEditHandles(); if (!g) return null; const lim = 20 / Z, hit = g.handles.filter(h => Math.hypot(h.s.x - p.x, h.s.y - p.y) < lim).sort((a, b) => (b.inner ? 1 : 0) - (a.inner ? 1 : 0))[0];
+		return hit ? { g, h: hit } : null;
 	}
 	function drawFloorPlanEditHandles(c) {
 		const g = floorPlanEditHandles(); if (!g) return;
 		c.save(); c.lineCap = 'round'; c.lineJoin = 'round'; c.font = `bold ${11 / Z}px system-ui`;
-		g.handles.forEach(h => { c.strokeStyle = 'rgba(102,227,200,.85)'; c.fillStyle = '#66e3c8'; c.lineWidth = 1.2 / Z; c.setLineDash([4 / Z, 3 / Z]); c.beginPath(); c.moveTo(g.center.x, g.center.y); c.lineTo(h.s.x, h.s.y); c.stroke(); c.setLineDash([]); c.fillStyle = '#fff'; c.strokeStyle = '#66e3c8'; c.beginPath(); c.rect(h.s.x - 6 / Z, h.s.y - 6 / Z, 12 / Z, 12 / Z); c.fill(); c.stroke(); c.fillStyle = '#d9fff6'; c.fillText(h.label, h.s.x + 8 / Z, h.s.y - 7 / Z) });
+		if (g.panel && g.panel.points && g.panel.points.every(q => q && q.ok)) {
+			c.fillStyle = 'rgba(255,179,111,.18)'; c.strokeStyle = '#ffb36f'; c.lineWidth = 1.7 / Z; c.beginPath(); g.panel.points.forEach((q, i) => i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)); c.closePath(); c.fill(); c.stroke();
+		}
+		g.handles.forEach(h => { const orange = h.kind === 'buildingBackFace' || h.kind === 'awningEdgeZ' || h.kind === 'awningEdgeY', col = orange ? '#ffb36f' : '#66e3c8', fill = orange ? '#ffd0a8' : '#d9fff6'; c.strokeStyle = orange ? 'rgba(255,179,111,.88)' : 'rgba(102,227,200,.85)'; c.fillStyle = col; c.lineWidth = 1.2 / Z; c.setLineDash([4 / Z, 3 / Z]); c.beginPath(); c.moveTo(g.center.x, g.center.y); c.lineTo(h.s.x, h.s.y); c.stroke(); c.setLineDash([]); c.fillStyle = '#fff'; c.strokeStyle = col; c.beginPath(); if (orange) { c.moveTo(h.s.x, h.s.y - 7 / Z); c.lineTo(h.s.x + 7 / Z, h.s.y); c.lineTo(h.s.x, h.s.y + 7 / Z); c.lineTo(h.s.x - 7 / Z, h.s.y) } else c.rect(h.s.x - 6 / Z, h.s.y - 6 / Z, 12 / Z, 12 / Z); c.closePath(); c.fill(); c.stroke(); c.fillStyle = fill; c.fillText(h.label, h.s.x + 8 / Z, h.s.y - 7 / Z) });
 		c.restore();
 	}
 	function drawFloorPlanOverlay(c) {
@@ -1072,6 +1161,12 @@
 		if (o.type === 'compound') {
 			const b = obBounds(o), axis = { w: 0, d: 2, h: 1 }[name]; if (axis === undefined) return null;
 			const oldSpan = Math.max(.005, b.hi[axis] - b.lo[axis]), pivot = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2], fixed = side < 0 ? b.hi[axis] : b.lo[axis], scale = [1, 1, 1]; pivot[axis] = fixed; scale[axis] = Math.max(.005, v) / oldSpan; return scaleCompoundDefinition(o, pivot, scale);
+		}
+		if (o.type === 'asset' && o.asset === 'building') {
+			const g = buildingGeometry(o);
+			if (name === 'w') { const delta = (v - g.w) / 2, cs = Math.cos(Number(o.rot || 0) * DG), sn = Math.sin(Number(o.rot || 0) * DG); return { ca: o.ca + side * delta * cs, cb: o.cb + side * delta * sn, ra: Math.max(.05, v / 2), openingW: clamp(g.openingW, .1, Math.max(.1, v - .1)) } }
+			if (name === 'd') { const delta = (v - g.d) / 2, cs = Math.cos(Number(o.rot || 0) * DG), sn = Math.sin(Number(o.rot || 0) * DG), patch = { ca: o.ca - side * delta * sn, cb: o.cb + side * delta * cs, rb: Math.max(.025, v / 2) }; if (Number.isFinite(Number(o.openingBack))) patch.openingBack = clamp(Number(o.openingBack), -v / 2 + .025, v / 2 - .025); return patch }
+			if (name === 'h') { const patch = { h: Math.max(.1, v), openingH: clamp(g.openingH, .1, Math.max(.1, v - .1)) }; if (side === -1) patch.lift = Number(o.lift || 0) + g.h - v; return patch }
 		}
 		if (name === 'w' || name === 'd') {
 			const oldW = Math.max(.01, Number(o.ra || 0) * 2), oldD = Math.max(.01, Number(o.rb || 0) * 2), r = Math.max(.005, v / 2), patch = {};
@@ -1127,6 +1222,10 @@
 	}
 	function floorResizeSnap(o, patch, h, value) {
 		if (o.type === 'compound') return patch;
+		if (o.type === 'asset' && o.asset === 'building' && h && ['w', 'd', 'h'].includes(h.kind)) {
+			const g = buildingGeometry(o), axis = h.kind === 'w' ? 0 : h.kind === 'd' ? 2 : 1, old = axis === 0 ? g.w : axis === 2 ? g.d : g.h, opening = h.kind === 'w' ? g.openingW : h.kind === 'h' ? g.openingH : null;
+			if (opening != null) { if (h.kind === 'w') patch.openingW = clamp(opening, .1, Math.max(.1, Number(patch.ra || o.ra) * 2 - .1)); else patch.openingH = clamp(opening, .1, Math.max(.1, Number(patch.h || o.h) - .1)); }
+		}
 		if (!$('snp')?.checked || !h || !['w', 'd', 'h'].includes(h.kind)) return patch;
 		if (h.kind === 'h') return floorHeightSnap(o, patch, h, value);
 		const q = { ...o, ...patch }, a = Number(q.rot || 0) * DG;
@@ -1297,8 +1396,8 @@
 			window.cityFloorPlanCenter = [floorPlanDrag.center0[0] - dx / sc, floorPlanDrag.center0[1] + dy / sc]; render(); return;
 		}
 		if (floorPlanDrag.kind === 'resize') {
-			const o = floorPlanDrag.o0, h = floorPlanDrag.handle, p = pos(e), amount = ((p.x - floorPlanDrag.p0.x) * h.dir.x + (p.y - floorPlanDrag.p0.y) * h.dir.y) / (h.scale || 1), value = clamp(h.start + amount, h.min, 20); snapHit = null;
-			const patch = floorResizeSnap(o, floorDimensionPatch(o, h.kind, value, h.side || 1), h, value);
+			const o = floorPlanDrag.o0, h = floorPlanDrag.handle, p = pos(e), amount = ((p.x - floorPlanDrag.p0.x) * h.dir.x + (p.y - floorPlanDrag.p0.y) * h.dir.y) / (h.scale || 1), value = clamp(h.start + (h.factor || 1) * amount, h.min, h.max ?? 20); snapHit = null;
+			const patch = h.inner ? (h.kind === 'buildingOpeningH' ? { openingH: value } : h.kind === 'buildingBackFace' ? { openingBack: value } : h.kind === 'awningEdgeZ' ? { awningEdgeZ: value, awningFrontBottom: h.frontBottom, awningEdgeEdited: true } : h.kind === 'awningEdgeY' ? { awningEdgeY: value, awningEdgeEdited: true } : { openingW: value }) : floorResizeSnap(o, floorDimensionPatch(o, h.kind, value, h.side || 1), h, value);
 			if (patch) { if (!floorPlanDrag.started) { HU.push(S); RD = []; floorPlanDrag.started = true } setOb(o.id, patch) }
 			render(); return;
 		}
@@ -1533,6 +1632,8 @@
 	// 旧版の初期値2.5pxを、今回の標準1.5pxへ一度だけ移行する。
 	let lineWidthMigrated = false; try { lineWidthMigrated = !!localStorage.getItem('city-grid-v6-line-width') } catch (e) { }
 	if (!lineWidthMigrated) { if (Math.abs(Number(P.pw) - 2.5) < 1e-6) P.pw = MASTER_W; const pwEl = el('pw'); if (pwEl) pwEl.value = P.pw; sync(); try { localStorage.setItem('city-grid-v6-line-width', '1') } catch (e) { } }
+	let lensDefaultMigrated = false; try { lensDefaultMigrated = !!localStorage.getItem('city-grid-v7-lens-50') } catch (e) { }
+	if (!lensDefaultMigrated) { if (Math.abs(Number(P.lens) - 35) < 1e-6) P.lens = 50; sync(); try { localStorage.setItem('city-grid-v7-lens-50', '1') } catch (e) { } }
 	homeView = captureHomeView();
 	if (innerWidth <= 900 && !sidePref) setSide(true);
 	updateOutliner(); render();

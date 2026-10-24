@@ -370,6 +370,26 @@ body {
 	padding-inline: 9px !important
 }
 
+.toolIconButton {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+	min-width: 36px !important;
+	padding-inline: 8px !important
+}
+
+.toolIconButton svg {
+	display: block;
+	width: 18px;
+	height: 18px;
+	stroke: currentColor;
+	fill: none;
+	stroke-width: 1.9;
+	stroke-linecap: round;
+	stroke-linejoin: round
+}
+
 .saveBtn {
 	border-color: #527966 !important;
 	color: #baffea !important
@@ -1638,24 +1658,4 @@ canvas {
 	#stage {
 		padding: 6px
 	}
-}
-
-.toolIconButton {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	gap: 5px;
-	min-width: 36px !important;
-	padding-inline: 8px !important
-}
-
-.toolIconButton svg {
-	display: block;
-	width: 18px;
-	height: 18px;
-	stroke: currentColor;
-	fill: none;
-	stroke-width: 1.9;
-	stroke-linecap: round;
-	stroke-linejoin: round
 }
