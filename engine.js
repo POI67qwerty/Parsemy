@@ -365,10 +365,27 @@ function genShape(ob) {
 }
 // ===== 図形の編集（選択・移動・回転・大きさ・浮かせる） =====
 const obOf = id => { const s = S.find(s => s.ob && s.ob.id === id); return s && s.ob };
+const objectVisible = o => !o || o.visible !== false;
+// 親オブジェクトの面に接続した子を、親の寸法・回転に追従させる。
+// attachment.verticalOnly の子は、移動時にこの接続面から離れない。
+function syncAttachedPart(o, parentOverride = null) {
+	const a = o?.attachment; if (!a?.parentId) return o;
+	const parent = parentOverride || obOf(a.parentId); if (!parent) return o;
+	const linkedFace = !!o.linkedAsset, side = linkedFace ? -1 : (Number(a.side) === -1 ? -1 : 1), px = Number(a.x) || 0, baseZ = Number.isFinite(Number(a.baseZ)) ? Number(a.baseZ) : Math.max(.1, (Number(parent.h) || 1) * .5), offsetZ = Number(a.offsetZ) || 0;
+	const parentH = Math.max(.1, Number(parent.h) || 1), z = clamp(baseZ + offsetZ, .02, Math.max(.02, parentH - .02));
+	// 看板の直方体・テントの奥側の面を、親の開口側の面へぴったり合わせる。
+	// k=1ではrbがローカルY（建物の奥行き／壁面法線方向）の半径で、hは上下の高さ。
+	const attachedNormal = Math.abs(Number(o.rb) || .1) + .008;
+	const faceY = side * (Math.abs(Number(parent.rb) || .5) + attachedNormal), p = L2W(parent, px, faceY, z), rot = Number(parent.rot || 0) + Number(a.rotOffset || 0);
+	return { ...o, attachment: linkedFace ? { ...a, side: -1 } : { ...a, side }, k: 1, d: -1, rot, ca: p[0], cb: p[2], lift: p[1] + 1, off: [0, 0, 0] };
+}
 // 選択状態は「操作対象の主役 sel」と、複数選択用の selIds を分けて持つ。
 // 旧データや既存の操作経路が sel だけを書き換えても壊れないよう、ここで同期する。
 function groupMemberIds(id) {
 	const o = obOf(id); if (!o) return [];
+	// 接続アセットは「親＋子を常に同時選択するグループ」ではない。
+	// 親建物と看板／テントを個別に選び、それぞれのギズモを使えるようにする。
+	if (o.linkedAsset || o.attachment?.parentId) return [id];
 	if (!o.groupId) return [id];
 	const ids = []; S.forEach(s => { const q = s && s.ob; if (q && q.groupId === o.groupId && !ids.includes(q.id)) ids.push(q.id) });
 	return ids.length ? ids : [id];
@@ -397,16 +414,32 @@ function clearSelection() { sel = null; selIds.clear(); }
 function selectedObjects() { normalizeSelection(); const ids = selIds.size ? selIds : (sel ? new Set([sel]) : new Set()), out = []; ids.forEach(id => { const o = obOf(id); if (o) out.push(o) }); return out }
 // 図形の定義を更新して、その図形の線だけ作り直す
 // カメラ位置が変わったら、図形の線（隠れ線の判定つき）を作り直す
-function regenObjects() { const done = new Set(), out = []; S.forEach(s => { if (!s.ob) out.push(s); else if (!done.has(s.ob.id)) { done.add(s.ob.id); out.push(...genShape(s.ob)) } }); S = out }   // 描く順番(重なり)は変えない
-function setOb(id, patch) { const o = obOf(id); if (!o) return; S = [...S.filter(s => !(s.ob && s.ob.id === id)), ...genShape({ ...o, ...patch })] }
+function regenObjects() { const done = new Set(), out = []; S.forEach(s => { if (!s.ob) out.push(s); else if (!done.has(s.ob.id)) { done.add(s.ob.id); out.push(...genShape(syncAttachedPart(s.ob))) } }); S = out }   // 描く順番(重なり)は変えない
+function setOb(id, patch) {
+	const o = obOf(id); if (!o) return;
+	let next = { ...o, ...patch };
+	// 接続子の幅・横方向の面ハンドルは、反対側の面を固定したまま編集する。
+	// syncAttachedPartで接着面へ戻す前に、移動後の中心を親ローカルXへ記録する。
+	if (o.attachment && ((patch && Object.prototype.hasOwnProperty.call(patch, 'ca')) || (patch && Object.prototype.hasOwnProperty.call(patch, 'cb')))) {
+		const parent = obOf(o.attachment.parentId); if (parent) { const pb = L2W(parent, 0, 0, 0), wx = (Number(next.ca) || 0) + (next.off?.[0] || 0), wz = (Number(next.cb) || 0) + (next.off?.[2] || 0), dx = wx - pb[0], dz = wz - pb[2], r = Number(parent.rot || 0) * DG; next.attachment = { ...next.attachment, x: dx * Math.cos(r) + dz * Math.sin(r) } }
+	}
+	if (o.attachment && patch && Object.prototype.hasOwnProperty.call(patch, 'lift')) {
+		const parent = obOf(o.attachment.parentId); if (parent) { const parentBase = L2W(parent, 0, 0, 0)[1], rawBase = (Number(next.d) || -1) - (Number(next.d) || -1) * (Number(next.lift) || 0) + (next.off?.[1] || 0), baseZ = Number(next.attachment.baseZ) || 0; next.attachment = { ...next.attachment, offsetZ: rawBase - parentBase - baseZ } }
+	}
+	const replace = def => { S = [...S.filter(s => !(s.ob && s.ob.id === def.id)), ...genShape(syncAttachedPart(def))] };
+	replace(next);
+	// 親の面を編集したときは、接続している子も同時に再配置する。
+	const childIds = [...new Set(S.filter(s => s.ob && s.ob.attachment?.parentId === id).map(s => s.ob.id))];
+	childIds.forEach(childId => { const child = obOf(childId); if (child) replace(child) });
+}
 // 近くにある図形の線を探す（24px以内）
 function pickOb(p) {
-	let best = null, bd = 24 / Z;
-	S.forEach(s => { if (!s.ob) return; for (const v of s.p) { const q = sp(s, v); if (!q.ok) continue; const dd = Math.hypot(q.x - p.x, q.y - p.y); if (dd < bd) { bd = dd; best = s.ob.id } } }); return best
+	let best = null, bd = 24 / Z, bestAttached = false;
+	S.forEach(s => { if (!s.ob || !objectVisible(s.ob)) return; for (const v of s.p) { const q = sp(s, v); if (!q.ok) continue; const dd = Math.hypot(q.x - p.x, q.y - p.y), attached = !!s.ob.attachment, childHit = attached && dd < 9 / Z; if (childHit && !bestAttached) { bd = dd; best = s.ob.id; bestAttached = true } else if ((!bestAttached && dd < bd) || (bestAttached && attached && dd < bd)) { bd = dd; best = s.ob.id } } }); return best
 }
 // 図形のローカル座標(x=幅方向,y=奥行き方向,z=高さ方向)→ワールドの3D点
 function L2W(o, x, y, z) {
-	const [iu, iv] = PL[o.k], cs = Math.cos(o.rot * DG), sn = Math.sin(o.rot * DG), v = [0, 0, 0];
+	if (o?.attachment) o = syncAttachedPart(o); const [iu, iv] = PL[o.k], cs = Math.cos(o.rot * DG), sn = Math.sin(o.rot * DG), v = [0, 0, 0];
 	v[o.k] = o.d - o.d * o.lift - o.d * z; v[iu] = o.ca + x * cs - y * sn; const f = o.off || [0, 0, 0]; v[iv] = o.cb + x * sn + y * cs; return [v[0] + f[0], v[1] + f[1], v[2] + f[2]]
 }
 // 古い保存データ（大きさ%・高さ%）を、幅・奥行き・高さの形に直す
@@ -424,6 +457,8 @@ function syncSel() {
 }
 // パネルの数値 → 図形の変更内容
 function fieldPatch(o, name, v) {
+	if (o.attachment?.verticalOnly && ['px', 'pz'].includes(name)) return {};
+	if (o.attachment?.verticalOnly && name === 'py') { const base = L2W(o, 0, 0, 0), delta = (Number(v) - 1) - base[1]; return moveBy(o, [0, delta, 0]) }
 	if (o.type === 'compound') {
 		if (['px', 'py', 'pz'].includes(name)) {
 			const j = { px: 0, py: 1, pz: 2 }[name], anchor = objectAnchorWorld(o), target = name === 'py' ? v - 1 : v, delta = [0, 0, 0]; delta[j] = target - anchor[j]; return moveBy(o, delta);
@@ -465,14 +500,20 @@ function applyOb(name, v) { const o = sel && obOf(sel); if (!o) return; if (!obS
 $('obExtrude').onclick = () => { const o = obOf(sel); if (!o || !['rect', 'circ'].includes(o.type)) return; HU.push(S); RD = []; setOb(sel, { h: Math.max(.12, Math.min(o.ra, o.rb) * .8), extrude: true }); render() };
 $('obGnd').onclick = () => {
 	const objects = selectedObjects(); if (!objects.length) return; const bb = groupBounds(objects), dy = -1 - bb.lo[1];   // 一番低い点を地面(y=-1)に合わせる
-	HU.push(S); RD = []; objects.forEach(o => setOb(o.id, moveBy(o, [0, dy, 0]))); render()
+	HU.push(S); RD = []; const ids = new Set(objects.map(o => o.id)); objects.forEach(o => setOb(o.id, moveBy(o, [0, dy, 0], !!(o.attachment?.parentId && ids.has(o.attachment.parentId))))); render()
 };
 $('obDup').onclick = () => {
 	const objects = selectedObjects(); if (!objects.length) return; const lead = objects.find(o => o.id === sel) || objects[0], newGroup = objects.length > 1 && objects.some(o => o.groupId) ? 'group-' + uid() : null, shift = Number(lead.ra || .5) * 2.4;
-	const clones = objects.map(o => { let n = { ...o, id: uid(), off: [...(o.off || [0, 0, 0])] }; if (o.type === 'compound') n = { ...n, ...moveBy(o, [shift, 0, 0]) }; else n.ca = o.ca + shift; if (newGroup) n.groupId = newGroup; return n });
+	const idMap = new Map(objects.map(o => [o.id, uid()]));
+	const clones = objects.map(o => { let n = { ...o, id: idMap.get(o.id), off: [...(o.off || [0, 0, 0])] }; if (o.attachment?.parentId && idMap.has(o.attachment.parentId)) n.attachment = { ...o.attachment, parentId: idMap.get(o.attachment.parentId) }; if (o.type === 'compound') n = { ...n, ...moveBy(o, [shift, 0, 0]) }; else if (!o.attachment?.parentId || !idMap.has(o.attachment.parentId)) n.ca = o.ca + shift; if (newGroup) n.groupId = newGroup; return n });
 	HU.push(S); S = [...S, ...clones.flatMap(n => genShape(n))]; RD = []; clearSelection(); clones.forEach(n => selIds.add(n.id)); sel = clones[0].id; normalizeSelection(); render()
 };
-$('obDel').onclick = () => { const ids = new Set(selectedObjects().map(o => o.id)); if (!ids.size) return; HU.push(S); S = S.filter(s => !(s.ob && ids.has(s.ob.id))); RD = []; clearSelection(); render() };
+$('obDel').onclick = () => {
+	const objects = selectedObjects(), ids = new Set(objects.map(o => o.id)); if (!ids.size) return;
+	// 接続アセットの親を消すときは子も、子を消すときは親も一緒に消す。
+	S.forEach(s => { const q = s && s.ob; if (!q) return; if (q.attachment?.parentId && ids.has(q.attachment.parentId)) ids.add(q.id); if ([...ids].some(id => q.id === id) && q.linkedAsset) { S.forEach(t => { const n = t && t.ob; if (n && n.linkedAsset === q.linkedAsset && n.groupId === q.groupId) ids.add(n.id) }) } });
+	HU.push(S); S = S.filter(s => !(s.ob && ids.has(s.ob.id))); RD = []; clearSelection(); render()
+};
 $('obOff').onclick = () => { clearSelection(); render() };
 // ===== ブレンダー風ギズモ：矢印(XYZ軸の移動)・白い四角(面の押し引き)・点線の輪(回転) =====
 const scr3 = p => orthView ? scr(p) : scr(V.nrm(p));
@@ -482,11 +523,16 @@ const wrap180 = a => ((a + 180) % 360 + 360) % 360 - 180;
 const segd = (p, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, l = dx * dx + dy * dy || 1e-9, t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l)); return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy) };
 // 視線rと「点Cを通る向きaの直線」の最も近い点の、直線上の位置t（軸に沿った移動量を求める）
 function lineParam(r, C, a) { const b = V.dot(r, a), dd = V.dot(r, C), e = V.dot(a, C), den = 1 - b * b; return den < 1e-6 ? null : (dd * b - e) / den }
-function moveBy(o, vec) {
-	if (o?.type === 'compound') return { tx: (Number(o.tx) || 0) + (Number(vec[0]) || 0), ty: (Number(o.ty) || 0) + (Number(vec[1]) || 0), tz: (Number(o.tz) || 0) + (Number(vec[2]) || 0) };
-	const [iu, iv] = PL[o.k]; return {
-		ca: o.ca + vec[iu], cb: o.cb + vec[iv], lift: o.lift - o.d * vec[o.k]
+function moveBy(o, vec, keepAttachedOffset = false) {
+	const v = [Number(vec?.[0]) || 0, Number(vec?.[1]) || 0, Number(vec?.[2]) || 0];
+	if (o?.type === 'compound') return { tx: (Number(o.tx) || 0) + v[0], ty: (Number(o.ty) || 0) + v[1], tz: (Number(o.tz) || 0) + v[2] };
+	if (o?.attachment?.verticalOnly) {
+		v[0] = 0; v[2] = 0;
+		const patch = { lift: (Number(o.lift) || 0) - o.d * v[1] };
+		if (!keepAttachedOffset) patch.attachment = { ...o.attachment, offsetZ: (Number(o.attachment.offsetZ) || 0) + v[1] };
+		return patch;
 	}
+	const [iu, iv] = PL[o.k]; return { ca: o.ca + v[iu], cb: o.cb + v[iv], lift: o.lift - o.d * v[o.k] };
 }
 // 間取りの回転ハンドルで、地面上の複合オブジェクトを一体回転する。
 // 子パーツの定義を壊さず、現在位置をいったんワールド座標へ展開してから戻す。
@@ -615,7 +661,9 @@ function awningGeometry(o) {
 function awningGizmo(o) {
 	if (!o || o.type !== 'asset' || o.asset !== 'awning') return null;
 	const g = awningGeometry(o), edgeY = g.edgeY, pr = (x, y, z) => scrW(L2W(o, x, y, z)), s = pr(0, edgeY, g.edgeZ), qz = pr(0, edgeY, g.edgeZ + .1), qy = pr(0, edgeY + .1, g.edgeZ), zdx = qz.x - s.x, zdy = qz.y - s.y, zpx = Math.hypot(zdx, zdy) || 1, ydx = qy.x - s.x, ydy = qy.y - s.y, ypx = Math.hypot(ydx, ydy) || 1;
-	return { o, C3: L2W(o, 0, 0, (g.edgeZ + g.h) * .5), edge: s, frame: [pr(-g.w / 2, edgeY, g.edgeZ), pr(g.w / 2, edgeY, g.edgeZ), pr(g.w / 2, g.d / 2, g.h), pr(-g.w / 2, g.d / 2, g.h)], handles: { edgeZ: { kind: 'edgeZ', s, dir: { x: zdx / zpx, y: zdy / zpx }, scale: zpx / .1 || 1, start: g.edgeZ, min: .05, max: g.h - .02, frontBottom: g.frontBottom }, edgeY: { kind: 'edgeY', s: qy, dir: { x: ydx / ypx, y: ydy / ypx }, scale: ypx / .1 || 1, start: g.edgeY, min: -g.d / 2 + .025, max: g.d / 2 - .025 } }, handle: null };
+	const handles = { edgeZ: { kind: 'edgeZ', s, dir: { x: zdx / zpx, y: zdy / zpx }, scale: zpx / .1 || 1, start: g.edgeZ, min: .05, max: g.h - .02, frontBottom: g.frontBottom } };
+	if (!o.attachment?.verticalOnly) handles.edgeY = { kind: 'edgeY', s: qy, dir: { x: ydx / ypx, y: ydy / ypx }, scale: ypx / .1 || 1, start: g.edgeY, min: -g.d / 2 + .025, max: g.d / 2 - .025 };
+	return { o, C3: L2W(o, 0, 0, (g.edgeZ + g.h) * .5), edge: s, frame: [pr(-g.w / 2, edgeY, g.edgeZ), pr(g.w / 2, edgeY, g.edgeZ), pr(g.w / 2, g.d / 2, g.h), pr(-g.w / 2, g.d / 2, g.h)], handles, handle: null };
 }
 function specialGizmo(o) { return o && o.type === 'asset' && o.asset === 'building' ? buildingGizmo(o) : o && o.type === 'asset' && o.asset === 'awning' ? awningGizmo(o) : o && o.type === 'asset' && o.asset === 'sign' ? signGizmo(o) : o && o.type === 'asset' && o.asset === 'cone' ? coneGizmo(o) : o && o.type === 'asset' && o.asset === 'sphere' ? sphereGizmo(o) : null }
 function drawSpecialGizmo(c, o) {
@@ -630,7 +678,7 @@ function drawSpecialGizmo(c, o) {
 	} else if (sg.o.asset === 'awning') {
 		const hz = sg.handles.edgeZ, hy = sg.handles.edgeY; c.setLineDash([5 / Z, 4 / Z]); c.strokeStyle = 'rgba(255,179,111,.9)'; c.lineWidth = 1.5 / Z;
 		if (sg.frame && sg.frame.every(q => q && q.ok)) { c.beginPath(); sg.frame.forEach((q, i) => i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)); c.closePath(); c.stroke() }
-		c.beginPath(); c.moveTo(hz.s.x, hz.s.y); c.lineTo(hy.s.x, hy.s.y); c.stroke(); c.setLineDash([]); sq(hz.s, '#ffb36f', true); sq(hy.s, '#ffb36f'); c.fillStyle = '#ffd0a8'; c.font = `bold ${12 / Z}px system-ui`; c.fillText('前縁Y', hz.s.x + 9 / Z, hz.s.y - 8 / Z); c.fillText('前後', hy.s.x + 9 / Z, hy.s.y - 8 / Z);
+		c.beginPath(); c.moveTo(hz.s.x, hz.s.y); if (hy) c.lineTo(hy.s.x, hy.s.y); c.stroke(); c.setLineDash([]); sq(hz.s, '#ffb36f', true); if (hy) sq(hy.s, '#ffb36f'); c.fillStyle = '#ffd0a8'; c.font = `bold ${12 / Z}px system-ui`; c.fillText('前縁Y', hz.s.x + 9 / Z, hz.s.y - 8 / Z); if (hy) c.fillText('前後', hy.s.x + 9 / Z, hy.s.y - 8 / Z);
 	} else if (sg.o.asset === 'sign') {
 		const h = sg.handles; c.setLineDash([5 / Z, 4 / Z]); c.lineWidth = 1.2 / Z;
 		if (sg.frame && sg.frame.length === 4 && sg.frame.every(q => q && q.ok)) {
@@ -698,6 +746,7 @@ function gizmo() {
 		const pu = Math.hypot(s1.x - sC.x, s1.y - sC.y) / eps; if (pu < 1e-6) return;
 		const L = Math.min((90 / Z) / pu, 3 * nC + 1), sT = scrW(V.add(C3, a, 1, L)); if (sT.ok) g.axes.push({ a, col, nm, sT })
 	});
+	if (o.attachment?.verticalOnly) g.axes = g.axes.filter(a => Math.abs(a.a[1]) > .9);
 	const en = [0, 0, 0], eu = [0, 0, 0], ev = [0, 0, 0]; en[o.k] = -o.d; eu[iu] = cs; eu[iv] = sn; ev[iu] = -sn; ev[iv] = cs;   // 高さ方向・幅方向・奥行き方向の単位ベクトル
 	const F = (id, x, y, z, n) => { const P3 = L2W(o, x, y, z), s = scrW(P3); g.faces.push({ id, n, P3, s }) }, neg = v => v.map(t => -t);
 	// 外形の6面は、開口のある建物でも編集対象にする。
@@ -761,6 +810,7 @@ function objectAnchorWorld(o) {
 }
 // 図形の外枠（ワールド軸に沿った箱）。スナップや接地に使う
 function obBounds(o) {
+	if (o?.attachment) o = syncAttachedPart(o);
 	if (o?.type === 'compound') return compoundBounds(o);
 	const sign = o.type === 'asset' && o.asset === 'sign', pts = [], solid = o.type === 'box' || o.type === 'cyl' || o.type === 'triPrism' || o.type === 'triPyramid' || ((o.type === 'rect' || o.type === 'circ') && o.extrude) || sign, hs = solid ? (sign ? outerZRange(o) : [0, o.h]) : [0];
 	if (o.type === 'rect' || o.type === 'box' || o.type === 'triPrism' || o.type === 'triPyramid' || sign) hs.forEach(z => [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([a, b]) => pts.push(L2W(o, a * o.ra, b * o.rb, z))));
@@ -768,14 +818,14 @@ function obBounds(o) {
 	const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; pts.forEach(v => { for (let j = 0; j < 3; j++) { lo[j] = Math.min(lo[j], v[j]); hi[j] = Math.max(hi[j], v[j]) } }); return { lo, hi }
 }
 // 動かしている図形以外の、くっつき先
-function targetsOf(id) { const seen = new Set(), out = []; S.forEach(s => { if (s.ob && s.ob.id !== id && !seen.has(s.ob.id)) { seen.add(s.ob.id); out.push({ id: s.ob.id, b: obBounds(s.ob) }) } }); return out }
+function targetsOf(id) { const seen = new Set(), out = []; S.forEach(s => { if (s.ob && objectVisible(s.ob) && s.ob.id !== id && !seen.has(s.ob.id)) { seen.add(s.ob.id); out.push({ id: s.ob.id, b: obBounds(s.ob) }) } }); return out }
 // 複数選択を一体として動かすときの外周と吸着先。選択中同士は吸着候補から外す。
 function groupBounds(objects) {
 	const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
 	objects.forEach(o => { const b = obBounds(o); for (let j = 0; j < 3; j++) { lo[j] = Math.min(lo[j], b.lo[j]); hi[j] = Math.max(hi[j], b.hi[j]) } });
 	return { lo, hi };
 }
-function targetsOfSet(ids) { const seen = new Set(), out = []; S.forEach(s => { if (s.ob && !ids.has(s.ob.id) && !seen.has(s.ob.id)) { seen.add(s.ob.id); out.push({ id: s.ob.id, b: obBounds(s.ob) }) } }); return out }
+function targetsOfSet(ids) { const seen = new Set(), out = []; S.forEach(s => { if (s.ob && objectVisible(s.ob) && !ids.has(s.ob.id) && !seen.has(s.ob.id)) { seen.add(s.ob.id); out.push({ id: s.ob.id, b: obBounds(s.ob) }) } }); return out }
 function snapSetupGroup(objects, C3) { const ids = new Set(objects.map(o => o.id)); return { bb: groupBounds(objects), targets: targetsOfSet(ids), tau: tauOf(C3) } }
 // 画面上の吸着距離(px)を、その図形の位置でのワールドの長さにする
 function tauOf(C3) { const rel = Math.max(.05, Math.hypot(...V.add(C3, CO()))), f = T === 'f' ? (H / 2) / (P.fov * DG / 2) : W * P.lens / 36; return (P.sn / Z) * rel / f }
@@ -835,7 +885,7 @@ function faceSnap(dl) {
 }
 
 function beginGizmo(h, p) {
-	const o = h.g.o, r = unscr(p), co = CO(), group = selectedObjects(), base = { id: o.id, o0: o.type === 'compound' ? JSON.parse(JSON.stringify(o)) : { ...o }, group: group.map(q => ({ ...q, off: [...(q.off || [0, 0, 0])] })), started: false, ...(group.length > 1 ? snapSetupGroup(group, h.g.C3) : snapSetup(o, h.g.C3)) };
+	const o = h.g.o, r = unscr(p), co = CO(), group = o.attachment?.verticalOnly ? [o] : selectedObjects(), base = { id: o.id, o0: o.type === 'compound' ? JSON.parse(JSON.stringify(o)) : { ...o }, group: group.map(q => ({ ...q, off: [...(q.off || [0, 0, 0])] })), started: false, ...(group.length > 1 ? snapSetupGroup(group, h.g.C3) : snapSetup(o, h.g.C3)) };
 	if (h.t.startsWith('sign-') || h.t.startsWith('building-') || h.t.startsWith('awning-') || h.t === 'cone-height' || h.t === 'sphere-radius') ed = { ...base, t: h.t, sign: h.sign, p0: p };
 	else if (h.t === 'axis') { const C0 = V.add(h.g.C3, co), t0 = lineParam(r, C0, h.a.a); if (t0 != null) ed = { ...base, t: 'axis', a: h.a.a, aj: h.a.a.indexOf(1), C0, t0 } }
 	else if (h.t === 'face') {
@@ -846,7 +896,7 @@ function beginGizmo(h, p) {
 	else { const dd = o.d - o.d * o.lift, P1 = hit3(r, o.k, dd, cloc(o)), [iu, iv] = PL[o.k]; if (P1) ed = { ...base, t: 'ring', dd, ang0: Math.atan2(P1[iv] - o.cb, P1[iu] - o.ca) } }
 }
 // キャンバス上のドラッグで編集（ed=いまの編集操作）。磁石スナップがONなら他の図形・地面にくっつく
-function dragEdit(p) {
+function dragEdit(p, freeRotation = false) {
 	const o = ed.o0, [iu, iv] = PL[o.k], r = unscr(p), on = $('snp').checked; let patch = null; snapHit = null;
 	const snap = (delta, axes) => { if (!on) return delta; const q = snapShift(ed.bb, delta, axes, ed.targets, ed.tau); if (q.hit.size) snapHit = q.hit; return q.d };
 	if (ed.t.startsWith('building-')) {
@@ -881,13 +931,13 @@ function dragEdit(p) {
 	else if (ed.t === 'face') { const t = lineParam(r, ed.F0, ed.n); if (t != null) { const dl = t - ed.t0; patch = o.type === 'compound' ? compoundFacePatch(o, ed.fid, dl) : o.type === 'asset' && o.asset === 'building' ? buildingOuterFacePatch(o, ed.fid, faceSnap(dl)) : facePatch(o, ed.fid, faceSnap(dl)) } }              // 白い四角＝面の押し引き
 	else if (ed.t === 'ring') {
 		if (o.type === 'compound') {
-			const delta = wrap180((Math.atan2(p.y - ed.sC.y, p.x - ed.sC.x) - ed.ang0) / DG); patch = rotateCompoundBy(ed.o0 || o, delta);
-		} else { const P1 = hit3(r, o.k, ed.dd, cloc(o)); if (P1) patch = { rot: wrap180(o.rot + (Math.atan2(P1[iv] - o.cb, P1[iu] - o.ca) - ed.ang0) / DG) } }
-	}   // 輪＝回転
+			const raw = wrap180((Math.atan2(p.y - ed.sC.y, p.x - ed.sC.x) - ed.ang0) / DG), base = Number(o.compoundRot) || 0, target = freeRotation ? base + raw : Math.round((base + raw) / 15) * 15; patch = rotateCompoundBy(ed.o0 || o, target - base);
+		} else { const P1 = hit3(r, o.k, ed.dd, cloc(o)); if (P1) { const raw = (Math.atan2(P1[iv] - o.cb, P1[iu] - o.ca) - ed.ang0) / DG, target = freeRotation ? Number(o.rot || 0) + raw : Math.round((Number(o.rot || 0) + raw) / 15) * 15; patch = { rot: wrap180(target) } } }
+	}   // 輪＝回転（通常15°吸着、Shiftで自由回転）
 	if (!patch) return; if (!ed.started) { HU.push(S); RD = []; ed.started = true }
 	if ((ed.t === 'mv' || ed.t === 'axis') && ed.group && ed.group.length > 1 && ed.moveDelta) {
 		// 初期スナップショットから再生成するので、ポインタ移動のたびに位置が累積しない。
-		ed.group.forEach(g => { const q = moveBy(g, ed.moveDelta); setOb(g.id, q) });
+		const ids = new Set(ed.group.map(g => g.id)); ed.group.forEach(g => { const q = moveBy(g, ed.moveDelta, !!(g.attachment?.parentId && ids.has(g.attachment.parentId))); setOb(g.id, q) });
 	} else setOb(ed.id, patch);
 	render()
 }
@@ -1030,7 +1080,7 @@ function exportSurfaceTriangles(o) {
 }
 function exportPoint(v, tf) { const rel = V.add(v, CO()), q = scr3(rel); if (!q.ok) return null; const depth = orthView ? dot3(rel, orthBasis().depth) : T === 'f' ? Math.hypot(rel[0], rel[1], rel[2]) : cam(rel)[2]; return { x: q.x * tf[0] + tf[4], y: q.y * tf[3] + tf[5], depth } }
 function buildExportDepth(cw, ch, tf) {
-	const depth = new Float32Array(cw * ch); depth.fill(Infinity); const tris = [], seen = new Set(); S.forEach(s => { if (s.ob && !seen.has(s.ob.id)) { seen.add(s.ob.id); tris.push(...exportSurfaceTriangles(s.ob)) } });
+	const depth = new Float32Array(cw * ch); depth.fill(Infinity); const tris = [], seen = new Set(); S.forEach(s => { if (s.ob && objectVisible(s.ob) && !seen.has(s.ob.id)) { seen.add(s.ob.id); tris.push(...exportSurfaceTriangles(s.ob)) } });
 	const putTri = tr => { const p = tr.map(v => exportPoint(v, tf)); if (p.some(q => !q || !Number.isFinite(q.depth) || q.depth < -.001)) return; const area = (p[1].x - p[0].x) * (p[2].y - p[0].y) - (p[1].y - p[0].y) * (p[2].x - p[0].x); if (Math.abs(area) < .001) return; const x0 = Math.max(0, Math.floor(Math.min(p[0].x, p[1].x, p[2].x))), x1 = Math.min(cw - 1, Math.ceil(Math.max(p[0].x, p[1].x, p[2].x))), y0 = Math.max(0, Math.floor(Math.min(p[0].y, p[1].y, p[2].y))), y1 = Math.min(ch - 1, Math.ceil(Math.max(p[0].y, p[1].y, p[2].y))); for (let y = y0; y <= y1; y++)for (let x = x0; x <= x1; x++) { const px = x + .5, py = y + .5, w0 = ((p[1].x - p[0].x) * (py - p[0].y) - (p[1].y - p[0].y) * (px - p[0].x)) / area, w1 = ((p[2].x - p[1].x) * (py - p[1].y) - (p[2].y - p[1].y) * (px - p[1].x)) / area, w2 = ((p[0].x - p[2].x) * (py - p[2].y) - (p[0].y - p[2].y) * (px - p[2].x)) / area; if ((w0 >= -1e-5 && w1 >= -1e-5 && w2 >= -1e-5) || (w0 <= 1e-5 && w1 <= 1e-5 && w2 <= 1e-5)) { const z = p[0].depth * w1 + p[1].depth * w2 + p[2].depth * w0, idx = y * cw + x; if (z < depth[idx]) depth[idx] = z } } };
 	tris.forEach(putTri); return depth;
 }
@@ -1054,7 +1104,7 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {  
 	x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, cw, ch);
 	if (tf) x.setTransform(...tf); else if (view) x.setTransform(Z, 0, 0, Z, ox, oy);                 // 画面表示用はズーム・移動つき
 	const hiddenDepth = hidden ? buildExportDepth(cw, ch, tf || [1, 0, 0, 1, 0, 0]) : null;
-	S.forEach(s => hidden ? strokeWVisible(x, s, hiddenDepth, cw, ch, tf || [1, 0, 0, 1, 0, 0]) : strokeW(x, s));
+	S.forEach(s => { if (s.ob && !objectVisible(s.ob)) return; hidden ? strokeWVisible(x, s, hiddenDepth, cw, ch, tf || [1, 0, 0, 1, 0, 0]) : strokeW(x, s) });
 	if (withCur) drawCur(x);
 	if (withCur && prev) prev.forEach(s => strokeW(x, s));
 	if ($('bin').checked) {                                   // 二値化：しきい値以上の画素だけ完全に不透明にする
@@ -1140,7 +1190,7 @@ function drawObjectSurfaces(c) {
 	if (!P.surfaceMode) return;
 	const tris = [], seen = new Set();
 	S.forEach(s => {
-		const o = s && s.ob; if (!o || seen.has(o.id)) return; seen.add(o.id);
+		const o = s && s.ob; if (!o || !objectVisible(o) || seen.has(o.id)) return; seen.add(o.id);
 		exportSurfaceTriangles(o).forEach(tr => {
 			const p = tr.map(v => exportPoint(v, [1, 0, 0, 1, 0, 0]));
 			if (p.some(q => !q || !Number.isFinite(q.x) || !Number.isFinite(q.y) || !Number.isFinite(q.depth))) return;
@@ -1168,9 +1218,9 @@ function render() {
 		// 面表示中は面を深度バッファに使い、面の裏側に隠れるエッジを表示しない。
 		c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(lineLayer(true, true, W, H, null, true), 0, 0); c.restore();
 	} else if ($('bin').checked) { c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(lineLayer(true, true), 0, 0); c.restore() }
-	else { S.forEach(s => strokeW(c, s)); drawCur(c); if (prev) prev.forEach(s => strokeW(c, s)) }
+	else { S.forEach(s => { if (!s.ob || objectVisible(s.ob)) strokeW(c, s) }); drawCur(c); if (prev) prev.forEach(s => strokeW(c, s)) }
 	// 選択中の線を橙色に塗り替えない。線画は常に設定した線色で表示し、選択状態はギズモだけで示す。
-	if (snapHit) S.forEach(s => { if (s.ob && snapHit.has(s.ob.id)) { c.save(); c.globalAlpha = .75; strokeW(c, { ...s, c: '#ff3df2', w: s.w + 3 / Z }); c.restore() } });   // くっつき先は桃色
+	if (snapHit) S.forEach(s => { if (s.ob && objectVisible(s.ob) && snapHit.has(s.ob.id)) { c.save(); c.globalAlpha = .75; strokeW(c, { ...s, c: '#ff3df2', w: s.w + 3 / Z }); c.restore() } });   // くっつき先は桃色
 	if (tool === 'edit' && selIds.size > 1) drawSelectionFeedback(c);
 	if (sel && tool === 'edit' && !window.cityFloorPlanActive) drawGizmo(c);   // 3D視点の移動の矢印・面のハンドル・回転の輪
 	if (window.cityFloorPlanOverlay && window.cityFloorPlanActive) window.cityFloorPlanOverlay(c);
@@ -1305,7 +1355,7 @@ function boxScreenBounds(o) {
 // どちらでもボックス選択から直接参照できるオブジェクト一覧を作る。
 function boxSceneObjects() {
 	const out = [], seen = new Set();
-	S.forEach(s => { const o = s && s.ob; if (o && !seen.has(o.id)) { seen.add(o.id); out.push(o) } });
+	S.forEach(s => { const o = s && s.ob; if (o && objectVisible(o) && !seen.has(o.id)) { seen.add(o.id); out.push(o) } });
 	return out;
 }
 function finishBoxSelection(end) {
@@ -1435,7 +1485,7 @@ cv.onpointerdown = e => {
 			if (multi) setSelection(id, true);
 			else if (!wasSelected || selIds.size <= 1) setSelection(id, false);
 			if (id && selIds.has(id)) {
-				const o = obOf(id), group = selectedObjects().map(q => ({ ...q, off: [...(q.off || [0, 0, 0])] }));
+				const o = obOf(id), group = o?.attachment?.verticalOnly ? [{ ...o, off: [...(o.off || [0, 0, 0])] }] : selectedObjects().map(q => ({ ...q, off: [...(q.off || [0, 0, 0])] }));
 				if (!window.cityFloorPlanActive || o.k === 1) ed = { t: 'mv', id, o0: { ...o }, group, p0: p, P0: hit3(unscr(p), o.k, o.d - o.d * o.lift, cloc(o)), started: false, ...snapSetupGroup(group, objectAnchorWorld(o)) };
 			} else armBoxPending(p, e.pointerId, 'canvas');
 		}
@@ -1472,7 +1522,7 @@ cv.onpointermove = e => {
 		}
 		sync(); render(); return
 	}
-	if (ed) { dragEdit(pos(e)); return }
+	if (ed) { dragEdit(pos(e), !!e.shiftKey); return }
 	if (bd) { const p = pos(e); CR.x1 = clamp(p.x, 0, W); CR.y1 = clamp(p.y, 0, H); render(); return }
 	if (er) { const p = pos(e); stepErase(er.last, p); er.last = p; render(); return }
 	if (!cur) return; const p = pos(e), a = cur.a;

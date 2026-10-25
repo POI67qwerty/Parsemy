@@ -58,7 +58,7 @@
       <div class="quickRow"><button id="openFloorPlan" class="primary">開く</button><button id="closeFloorPlan">3Dへ戻る</button></div>
       <div id="floorPlanSelectionStatus" class="sceneNote">未選択</div>
       <div class="quickRow floorPlanRotateRow"><button id="floorRotateLeft" disabled>↺</button><button id="floorRotateRight" disabled>↻</button><button id="floorRotate90" disabled>90°</button><button id="floorDelete" disabled>削除</button></div>
-      <div class="sceneNote">間取りでは家具のドラッグ移動、選択中の前側の丸をドラッグした回転、カメラ本体のドラッグ移動、先端の丸のドラッグで向きの変更ができます。回転は15°刻みで、Shiftを押しながらドラッグすると自由な角度です。矢印キーで移動、Q/Eで15°ずつ回転します。移動中も高さ方向（Y）は変わらず、地面に接地した状態を保ちます。壁面などY方向以外の面へ生成したオブジェクトは表示のみで、位置は変更しません。</div>
+      <div class="sceneNote">間取りでは家具のドラッグ移動、正面・上・横の移動ギズモ、選択中の前側の丸をドラッグした回転、カメラ本体のドラッグ移動、先端の丸のドラッグで向きの変更ができます。回転は15°刻みで30°・45°・90°も選べ、Shiftを押しながらドラッグすると自由な角度です。矢印キーで移動、Q/Eで15°ずつ回転します。移動中も高さ方向（Y）は専用軸で編集でき、接続テント／看板は上下方向だけに制限されます。壁面などY方向以外の面へ生成したオブジェクトは表示のみで、位置は変更しません。</div>
     </section>
 
     <section class="workspaceScreen" data-workspace-screen="perspective">
@@ -207,9 +207,11 @@
 		person: { label: '人物', glyph: '♙', w: .46, d: .30, h: 1.70, accent: '#ad9cff' },
 		stairs: { label: '階段', glyph: '▰', w: 1.45, d: 2.4, h: .78, accent: '#ffb36f' },
 		building: { label: '開口のある建物', glyph: '▣', w: 4.2, d: 3.2, h: 3.6, accent: '#8ce6c2' },
+		buildingAwning: { label: 'テント付き建物', glyph: '▣', w: 4.2, d: 3.2, h: 3.6, accent: '#d98b68' },
+		buildingSign: { label: '看板付き開口建物', glyph: '▣', w: 4.2, d: 3.2, h: 3.6, accent: '#76d9ff' },
 		crosswalk: { label: '横断歩道', glyph: '▥', w: 3.2, d: 4.2, h: .02, accent: '#668cff' }
 	};
-	const assetLabel = o => o.type === 'compound' ? '結合オブジェクト' : o.type === 'asset' ? (ASSETS[o.asset]?.label || (o.asset === 'cylinder' ? '円柱' : 'アセット')) : (o.type === 'rect' ? '長方形' : o.type === 'circ' ? '円' : o.type === 'box' ? '箱' : o.type === 'cyl' ? '円柱' : '図形');
+	const assetLabel = o => o.linkedAsset === 'buildingAwning' ? (o.linkedRole === 'parent' || o.asset === 'building' ? 'テント付き建物' : '接続テント') : o.linkedAsset === 'buildingSign' ? (o.linkedRole === 'parent' || o.asset === 'building' ? '看板付き開口建物' : '接続看板') : o.type === 'compound' ? '結合オブジェクト' : o.type === 'asset' ? (ASSETS[o.asset]?.label || (o.asset === 'cylinder' ? '円柱' : 'アセット')) : (o.type === 'rect' ? '長方形' : o.type === 'circ' ? '円' : o.type === 'box' ? '箱' : o.type === 'cyl' ? '円柱' : '図形');
 	const assetGlyph = o => o.type === 'compound' ? '◆' : o.type === 'asset' ? (ASSETS[o.asset]?.glyph || (o.asset === 'cylinder' ? '◉' : '◆')) : (o.type === 'rect' ? '□' : o.type === 'circ' ? '○' : '◇');
 
 	// Coordinate helpers. Local asset coordinates are x=width, y=depth, z=up.
@@ -364,19 +366,20 @@
 		return out;
 	}
 	function normalizedAsset(o) {
-		if (o && o.asset === 'sphere') {
-			const r = Math.max(.005, Math.min(Math.abs(Number(o.ra) || .65), Math.abs(Number(o.rb) || .65), Math.abs(Number(o.h) || 1.3) * .5));
-			return { ...o, ra: r, rb: r, h: r * 2 };
+		let q = o?.attachment ? syncAttachedPart(o) : o;
+		if (q && q.asset === 'sphere') {
+			const r = Math.max(.005, Math.min(Math.abs(Number(q.ra) || .65), Math.abs(Number(q.rb) || .65), Math.abs(Number(q.h) || 1.3) * .5));
+			return { ...q, ra: r, rb: r, h: r * 2 };
 		}
-		if (o && o.asset === 'awning') {
-			const g = awningGeometry(o); return { ...o, awningEdgeZ: g.edgeZ, awningEdgeY: g.edgeY, awningThickness: g.thickness, awningFrontBottom: g.frontBottom, awningBackBottom: g.backBottom };
+		if (q && q.asset === 'awning') {
+			const g = awningGeometry(q); return { ...q, awningEdgeZ: g.edgeZ, awningEdgeY: g.edgeY, awningThickness: g.thickness, awningFrontBottom: g.frontBottom, awningBackBottom: g.backBottom };
 		}
-		if (o && o.asset === 'building') {
-			const w = Math.max(.1, Math.abs(Number(o.ra) || 2) * 2), d = Math.max(.05, Math.abs(Number(o.rb) || .5) * 2), h = Math.max(.1, Number(o.h) || 3), openingW = clamp(Number(o.openingW) || w * .56, .1, Math.max(.1, w - .1)), openingH = clamp(Number(o.openingH) || h * .66, .1, Math.max(.1, h - .1)), q = { ...o, openingW, openingH };
-			if (Number.isFinite(Number(o.openingBack))) q.openingBack = clamp(Number(o.openingBack), -d / 2 + .025, d / 2 - .025);
-			return q;
+		if (q && q.asset === 'building') {
+			const w = Math.max(.1, Math.abs(Number(q.ra) || 2) * 2), d = Math.max(.05, Math.abs(Number(q.rb) || .5) * 2), h = Math.max(.1, Number(q.h) || 3), openingW = clamp(Number(q.openingW) || w * .56, .1, Math.max(.1, w - .1)), openingH = clamp(Number(q.openingH) || h * .66, .1, Math.max(.1, h - .1)), n = { ...q, openingW, openingH };
+			if (Number.isFinite(Number(q.openingBack))) n.openingBack = clamp(Number(q.openingBack), -d / 2 + .025, d / 2 - .025);
+			return n;
 		}
-		return o;
+		return q;
 	}
 	function genAsset(o) { const q = normalizedAsset(o); return assetLines(q).map(s => ({ ...s, ob: q, d3: true, cs: sigNow() })); }
 
@@ -386,8 +389,8 @@
 	const baseObBounds = obBounds;
 	obBounds = function (o) {
 		if (!o || o.type !== 'asset') return baseObBounds(o);
-		const pts = []; const hs = [0, o.h], xs = [-o.ra, o.ra], ys = [-o.rb, o.rb];
-		hs.forEach(z => xs.forEach(x => ys.forEach(y => pts.push(pt(o, x, y, z)))));
+		const q = syncAttachedPart(o), pts = []; const hs = [0, q.h], xs = [-q.ra, q.ra], ys = [-q.rb, q.rb];
+		hs.forEach(z => xs.forEach(x => ys.forEach(y => pts.push(pt(q, x, y, z)))));
 		const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]; pts.forEach(v => v.forEach((n, i) => { lo[i] = Math.min(lo[i], n); hi[i] = Math.max(hi[i], n) }));
 		return { lo, hi };
 	};
@@ -405,8 +408,8 @@
 		const yaw = P.yaw * DG, depth = Math.max(1, Math.min(20, Number(P.assetDepth) || 5)), f = [-Math.sin(yaw), 0, Math.cos(yaw)];
 		return [P.cx + f[0] * depth, -1, P.cz + f[2] * depth];
 	}
-	function newAsset(kind, p) {
-		const info = ASSETS[kind], isDefault = !p; p = p || { x: W * .5, y: H * .62 }; let q = isDefault ? assetGroundPoint() : groundAt(p); if (!q || !q.every(Number.isFinite)) q = assetGroundPoint();
+	function newAsset(kind, p, worldPoint = null) {
+		const info = ASSETS[kind], isDefault = !p && !worldPoint; p = p || { x: W * .5, y: H * .62 }; let q = worldPoint || (isDefault ? assetGroundPoint() : groundAt(p)); if (!q || !q.every(Number.isFinite)) q = assetGroundPoint();
 		// Repeated clicks are fanned out slightly so a new object cannot hide exactly under the previous one.
 		if (isDefault) { const n = sceneObjects().length; q = [q[0] + ((n % 4) - 1.5) * .85, q[1], q[2] + Math.floor(n / 4) * 1.05] }
 		// 生成方向は「その軸に立つ面」の法線。Y=地面、X/Z=壁面として配置する。
@@ -418,7 +421,31 @@
 		if (kind === 'rect' || kind === 'circle') return { ...base, type: kind === 'circle' ? 'circ' : 'rect', asset: kind, ra: info.w / 2, rb: info.d / 2, h: 0, extrude: false };
 		return { ...base, type: 'asset', asset: kind, ra: info.w / 2, rb: info.d / 2, h: height, pose: kind === 'person' ? 'stand' : undefined, bodyScale: kind === 'person' ? 1 : undefined, shoulderScale: kind === 'person' ? 1 : undefined, headScale: kind === 'person' ? 1 : undefined, legSpread: kind === 'person' ? 1 : undefined, faceW: kind === 'sign' ? info.w * .70 : undefined, faceH: kind === 'sign' ? info.h * .34 : undefined, openingW: kind === 'building' ? info.w * .56 : undefined, openingH: kind === 'building' ? info.h * .66 : undefined, awningEdgeZ: kind === 'awning' ? height : undefined, awningEdgeY: kind === 'awning' ? -info.d / 2 : undefined, awningThickness: kind === 'awning' ? Math.max(.05, height * .14) : undefined, awningFrontBottom: kind === 'awning' ? 0 : undefined, awningBackBottom: kind === 'awning' ? 0 : undefined, awningEdgeEdited: kind === 'awning' ? false : undefined, steps: kind === 'stairs' ? Math.round(Number(el('stairsSteps')?.value) || 6) : undefined, handrail: kind === 'stairs' ? !!el('stairsRail')?.checked : undefined, stripes: kind === 'crosswalk' ? 7 : undefined };
 	}
+	function placeLinkedAsset(kind, p) {
+		const childKind = kind === 'buildingAwning' ? 'awning' : 'rect', q = p ? groundAt(p) : assetGroundPoint(), parent = newAsset(kind === 'buildingAwning' ? 'rect' : 'building', null, q), child = newAsset(childKind, null, q), groupId = 'linked-' + uid();
+		if (kind === 'buildingAwning') { parent.ra = ASSETS.building.w / 2; parent.rb = ASSETS.building.d / 2; parent.h = ASSETS.building.h; parent.extrude = true; parent.accent = '#d98b68' }
+		parent.groupId = child.groupId = groupId; parent.linkedAsset = child.linkedAsset = kind; parent.linkedRole = 'parent'; child.linkedRole = 'child';
+		// 開口側（建物のローカルYマイナス面）へ接着する。
+		// 反対側へ回り込まないよう、親の回転に追従するローカル面として保持する。
+		child.attachment = { parentId: parent.id, side: -1, x: 0, baseZ: kind === 'buildingAwning' ? parent.h * .52 : parent.h * .56, offsetZ: 0, rotOffset: 0, verticalOnly: true };
+		if (kind === 'buildingSign') { child.ra = parent.ra * .72; child.rb = Math.max(.12, parent.rb * .16); child.h = Math.max(.35, parent.h * .23); child.extrude = true; child.accent = '#66e3c8' }
+		else { child.ra = parent.ra * .46; child.rb = Math.max(.18, parent.rb * .30); child.h = Math.max(.28, parent.h * .20); child.awningEdgeZ = child.h; child.awningEdgeY = -child.rb; child.awningThickness = Math.max(.04, child.h * .14); child.awningFrontBottom = 0; child.awningBackBottom = 0; child.awningEdgeEdited = false }
+		const attached = syncAttachedPart(child, parent); return { parent, child: attached };
+	}
+	function placeLinkedAssetInstance(kind, p) {
+		sanitizeScene(); const before = S.slice(), wasFloor = !!window.cityFloorPlanActive;
+		try {
+			const bundle = placeLinkedAsset(kind, p), lines = [...genShape(bundle.parent), ...genShape(bundle.child)];
+			if (!lines.length || lines.some(s => !validStroke(s))) throw new Error('linked asset geometry is empty or malformed');
+			HU.push(S); RD = []; S = [...S, ...lines];
+			// 接続アセットは、配置直後から看板／テントの編集ハンドルを表示する。
+			setSelection(bundle.child.id, false); tool = 'edit'; setMode('draw');
+			if (wasFloor) { fitFloorPlan(); setMode('draw') } else if (kind === 'buildingSign') setStudioWorkspace('perspective');
+			syncSel(); render();
+		} catch (err) { S = before; prev = null; clearSelection(); console.error('City Grid linked asset error', err); try { render() } catch (e) { } alert('接続アセットを配置できませんでした。もう一度クリックしてください。') }
+	}
 	function placeAsset(kind, p) {
+		if (kind === 'buildingAwning' || kind === 'buildingSign') return placeLinkedAssetInstance(kind, p);
 		sanitizeScene(); const before = S.slice(), wasFloor = !!window.cityFloorPlanActive;
 		try {
 			const o = newAsset(kind, p), lines = genShape(o); if (!lines.length || lines.some(s => !validStroke(s))) throw new Error('asset geometry is empty or malformed'); HU.push(S); RD = []; S = [...S, ...lines]; setSelection(o.id, false); tool = 'edit'; setMode('draw');
@@ -441,34 +468,56 @@
 		if (!objectClipboard.length) return false;
 		sanitizeScene(); const before = S.slice(), added = [];
 		try {
-			const lines = [], groupMap = new Map();
+			const lines = [], groupMap = new Map(), idMap = new Map(objectClipboard.map(source => [source.id, uid()]));
 			objectClipboard.forEach((source, i) => {
-				const n = JSON.parse(JSON.stringify(source)); n.id = uid(); n.off = [...(n.off || [0, 0, 0])];
+				const n = JSON.parse(JSON.stringify(source)); n.id = idMap.get(source.id); n.off = [...(n.off || [0, 0, 0])];
+				if (source.attachment?.parentId && idMap.has(source.attachment.parentId)) n.attachment = { ...source.attachment, parentId: idMap.get(source.attachment.parentId) };
 				if (source.groupId) { if (!groupMap.has(source.groupId)) groupMap.set(source.groupId, 'group-' + uid()); n.groupId = groupMap.get(source.groupId) }
 				// 元の場所を保ちつつ、貼り付け先が見つけやすいようにca方向へ少しずらす。
 				const shift = Math.max(.35, Math.abs(Number(n.ra) || .25) * 2.4) + i * .18;
-				if (n.type === 'compound') Object.assign(n, moveBy(n, [shift, 0, 0])); else { n.ca = Number(n.ca) || 0; n.ca += shift }
+				if (n.type === 'compound') Object.assign(n, moveBy(n, [shift, 0, 0])); else if (!n.attachment?.parentId) { n.ca = Number(n.ca) || 0; n.ca += shift }
 				const made = genShape(n); if (!made.length || made.some(s => !validStroke(s))) throw new Error('pasted object geometry is empty or malformed');
 				lines.push(...made); added.push(n.id);
 			});
-			HU.push(S); RD = []; S = [...S, ...lines]; setSelection(added[0], false); added.slice(1).forEach(id => setSelection(id, true)); tool = 'edit'; setMode('draw');
+			HU.push(S); RD = []; S = [...S, ...lines]; regenObjects(); setSelection(added[0], false); added.slice(1).forEach(id => setSelection(id, true)); tool = 'edit'; setMode('draw');
 			if (window.cityFloorPlanActive) { fitFloorPlan(); setMode('draw') }
 			render(); return true;
 		} catch (err) { S = before; console.error('City Grid object paste error', err); render(); return false }
 	}
 
+	function linkedDefsFromImportedCompound(source) {
+		if (source?.type !== 'compound' || !Array.isArray(source.parts)) return null;
+		const shift = [Number(source.tx) || 0, Number(source.ty) || 0, Number(source.tz) || 0], parts = source.parts.map(part => translateDefinition(fixOb(part), shift));
+		const awning = parts.find(part => part.asset === 'awning'), building = parts.find(part => part.asset === 'building'), rects = parts.filter(part => part.type === 'rect' && part.asset === 'rect');
+		const child = awning || ((building && rects.length) ? rects[0] : null), parent = awning ? (parts.find(part => part !== awning && (part.type === 'rect' || part.asset === 'building')) || parts[0]) : building;
+		if (!parent || !child) return null;
+		const kind = awning ? 'buildingAwning' : 'buildingSign', groupId = 'linked-' + uid(), p = { ...parent, id: uid(), groupId, linkedAsset: kind, linkedRole: 'parent' }, q = { ...child, id: uid(), groupId, linkedAsset: kind, linkedRole: 'child' };
+		const pb = L2W(p, 0, 0, 0), cb = L2W(q, 0, 0, 0), dx = cb[0] - pb[0], dz = cb[2] - pb[2], r = Number(p.rot || 0) * DG;
+		// 添付データの現在位置ではなく、開口側のローカルYマイナス面へ補正する。
+		q.attachment = { parentId: p.id, side: -1, x: dx * Math.cos(r) + dz * Math.sin(r), baseZ: cb[1] - pb[1], offsetZ: 0, rotOffset: 0, verticalOnly: true };
+		return [p, syncAttachedPart(q, p)];
+	}
+	function importObjectPayload(data) {
+		const sources = Array.isArray(data?.objects) ? data.objects : (data?.type === 'compound' ? [data] : []); if (!sources.length) throw new Error('objects are missing');
+		const defs = []; sources.forEach(source => { const linked = linkedDefsFromImportedCompound(source); if (linked) defs.push(...linked); else if (source.type === 'compound') defs.push({ ...source, id: uid(), parts: (source.parts || []).map(part => ({ ...fixOb(part), id: uid() })) }); else defs.push({ ...fixOb(source), id: uid() }) });
+		sanitizeScene(); const lines = defs.flatMap(def => genShape(def)); if (!lines.length || lines.some(s => !validStroke(s))) throw new Error('imported geometry is empty or malformed');
+		HU.push(S); RD = []; S = [...S, ...lines]; clearSelection(); defs.forEach(def => selIds.add(def.id)); sel = (defs.find(def => def.linkedRole === 'child') || defs[0])?.id || null; normalizeSelection(); tool = 'edit'; setMode('draw'); if (window.cityFloorPlanActive) fitFloorPlan(); syncSel(); render();
+	}
+
 	// Rectangle/circle and the other primitives are created from the asset shelf.
 	// ===== Asset shelf on the canvas =====
 	const tray = document.createElement('div'); tray.id = 'assetTray';
-	tray.innerHTML = '<div class="assetTrayInner"><div class="assetTrayTitle">シーンに追加</div><div class="assetTrayTools"><label>生成面<select id="assetAxisTray"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select></label></div><div class="assetClipboardTools"><button type="button" id="objectCopy">コピー</button><button type="button" id="objectPaste" disabled>貼り付け</button></div>' + Object.entries(ASSETS).map(([k, v]) => `<button class="assetCard" data-asset="${k}" title="${v.label}を追加"><span class="assetGlyph">${v.glyph}</span><span>${v.label}</span></button>`).join('') + '</div>';
+	tray.innerHTML = '<div class="assetTrayInner"><div class="assetTrayTitle">シーンに追加</div><div class="assetTrayTools"><label>生成面<select id="assetAxisTray"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select></label></div><div class="assetClipboardTools"><button type="button" id="objectCopy">コピー</button><button type="button" id="objectPaste" disabled>貼り付け</button><button type="button" id="objectImportButton">JSON読込</button><input id="objectImportFile" type="file" accept="application/json,.json" hidden></div>' + Object.entries(ASSETS).map(([k, v]) => `<button class="assetCard" data-asset="${k}" title="${v.label}を追加"><span class="assetGlyph">${v.glyph}</span><span>${v.label}</span></button>`).join('') + '</div>';
 	stage.appendChild(tray);
 	assetAxisTrayInput = el('assetAxisTray');
 	assetAxisTrayInput.onchange = () => setAssetAxis(assetAxisTrayInput.value);
 	syncAssetAxis();
 	tray.addEventListener('click', e => { const b = e.target.closest('[data-asset]'); if (b) placeAsset(b.dataset.asset) });
-	const objectCopyButton = el('objectCopy'), objectPasteButton = el('objectPaste');
+	const objectCopyButton = el('objectCopy'), objectPasteButton = el('objectPaste'), objectImportButton = el('objectImportButton'), objectImportFile = el('objectImportFile');
 	objectCopyButton.onclick = () => { if (!copySelectedObjects()) return; objectPasteButton.disabled = false; const label = objectCopyButton.textContent; objectCopyButton.textContent = 'コピー済み'; setTimeout(() => objectCopyButton.textContent = label, 900) };
 	objectPasteButton.onclick = () => { if (pasteObjectClipboard()) { objectPasteButton.disabled = false; const label = objectPasteButton.textContent; objectPasteButton.textContent = '貼り付け済み'; setTimeout(() => objectPasteButton.textContent = label, 900) } };
+	objectImportButton.onclick = () => objectImportFile?.click();
+	objectImportFile.onchange = e => { const f = e.target.files[0]; if (!f) return; f.text().then(text => { const data = JSON.parse(text); if (data.app === 'perspective-ruler-grid') unpack(data); else importObjectPayload(data) }).catch(err => { console.error('City Grid object import error', err); alert('オブジェクトJSONを読み込めませんでした') }); e.target.value = '' };
 	// 選択中オブジェクトを、後から線画化できるテキストJSONとして取り出す。
 	// 線そのものではなく定義を保存するので、寸法・向き・ポーズ・アセット固有値を保てる。
 	const objectInfoCopyButton = el('objectInfoCopy'), objectInfoSaveButton = el('objectInfoSave');
@@ -551,13 +600,25 @@
 		if (combine) combine.disabled = objects.length < 2;
 		if (separate) separate.disabled = !objects.some(o => o.type === 'compound');
 	}
+	function linkedMemberIds(id) {
+		const o = obOf(id); if (!o) return [];
+		if (!o.linkedAsset) return groupMemberIds(id);
+		const members = sceneObjects().filter(q => q.linkedAsset === o.linkedAsset && q.groupId === o.groupId).map(q => q.id);
+		return members.length ? members : [id];
+	}
+	function setObjectVisibility(id, visible) {
+		const o = obOf(id); if (!o) return;
+		const ids = linkedMemberIds(id); HU.push(S); RD = []; ids.forEach(member => setOb(member, { visible: !!visible }));
+		if (!visible) { ids.forEach(member => selIds.delete(member)); if (ids.includes(sel)) sel = [...selIds].pop() || null; normalizeSelection() }
+		render();
+	}
 	function updateOutliner() {
 		if (!list) return; normalizeSelection(); const objects = sceneObjects();
-		list.innerHTML = objects.length ? objects.map((o, i) => { const group = o.type === 'compound' ? `<span class="compoundMark">結合</span>` : o.groupId ? `<span class="groupMark">グループ</span>` : ''; const detail = o.type === 'compound' ? `${Array.isArray(o.parts) ? o.parts.length : 0}パーツ・複合オブジェクト` : o.type === 'asset' && o.asset === 'person' ? Number(o.h).toFixed(2) + ' m' : (o.type === 'asset' ? 'low-poly asset' : 'vector shape'); return `<div class="objectRow ${selIds.has(o.id) ? 'selected' : ''}" data-object="${o.id}"><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? 'checked' : ''} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1} ${group}<small>${detail}</small></span></div>` }).join('') : '<div class="emptyList">まだオブジェクトがありません</div>';
+		list.innerHTML = objects.length ? objects.map((o, i) => { const group = o.type === 'compound' ? `<span class="compoundMark">結合</span>` : o.groupId ? `<span class="groupMark">グループ</span>` : ''; const detail = o.type === 'compound' ? `${Array.isArray(o.parts) ? o.parts.length : 0}パーツ・複合オブジェクト` : o.type === 'asset' && o.asset === 'person' ? Number(o.h).toFixed(2) + ' m' : (o.type === 'asset' ? 'low-poly asset' : 'vector shape'); const visible = objectVisible(o); return `<div class="objectRow ${selIds.has(o.id) ? 'selected' : ''} ${sel === o.id ? 'activeObject' : ''} ${visible ? '' : 'hiddenObject'}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? 'オブジェクトを非表示' : 'オブジェクトを表示'}" aria-label="${visible ? '非表示' : '表示'}">${visible ? '◉' : '○'}</button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? 'checked' : ''} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1} ${group}<small>${detail}</small></span></div>` }).join('') : '<div class="emptyList">まだオブジェクトがありません</div>';
 		syncGroupActions();
 	}
 	function deleteSelectedScene() {
-		const ids = new Set(selectedObjects().map(o => o.id)); if (!ids.size) return;
+		const ids = new Set(); selectedObjects().forEach(o => linkedMemberIds(o.id).forEach(member => ids.add(member))); if (!ids.size) return;
 		HU.push(S); S = S.filter(s => !(s.ob && ids.has(s.ob.id))); RD = []; clearSelection(); render();
 	}
 	function alignSelectedScene() {
@@ -568,11 +629,13 @@
 		const axis = +$('alignAxis').value, kind = $('alignMode').value;
 		const target = kind === 'min' ? Math.min(...units.map(x => x.b.lo[axis])) : kind === 'max' ? Math.max(...units.map(x => x.b.hi[axis])) : (Math.min(...units.map(x => x.b.lo[axis])) + Math.max(...units.map(x => x.b.hi[axis]))) / 2;
 		HU.push(S); RD = [];
-		units.forEach(({ objects, b }) => { const current = kind === 'min' ? b.lo[axis] : kind === 'max' ? b.hi[axis] : (b.lo[axis] + b.hi[axis]) / 2, delta = [0, 0, 0]; delta[axis] = target - current; if (Math.abs(delta[axis]) > 1e-7) objects.forEach(o => setOb(o.id, moveBy(o, delta))) });
+		units.forEach(({ objects, b }) => { const current = kind === 'min' ? b.lo[axis] : kind === 'max' ? b.hi[axis] : (b.lo[axis] + b.hi[axis]) / 2, delta = [0, 0, 0]; delta[axis] = target - current; if (Math.abs(delta[axis]) > 1e-7) { const ids = new Set(objects.map(o => o.id)); objects.forEach(o => setOb(o.id, moveBy(o, delta, !!(o.attachment?.parentId && ids.has(o.attachment.parentId))))) } });
 		render();
 	}
 	list.addEventListener('click', e => {
 		const b = e.target.closest('[data-object]'); if (!b) return; const id = b.dataset.object, chosen = obOf(id);
+		if (e.target.closest('[data-object-visibility]')) { e.preventDefault(); setObjectVisibility(id, !objectVisible(chosen)); return }
+		if (chosen && !objectVisible(chosen)) { e.preventDefault(); syncSel(); render(); return }
 		if (chosen && chosen.type === 'asset' && chosen.asset === 'person') setStudioWorkspace('character');
 		if (e.target.matches('[data-object-check]')) {
 			if (e.target.checked) setSelection(id, true);
@@ -581,7 +644,7 @@
 		}
 		setSelection(id, e.shiftKey || e.metaKey || e.ctrlKey); tool = 'edit'; setMode('draw'); syncSel(); render();
 	});
-	el('sceneSelectAll').onclick = () => { selIds.clear(); sceneObjects().forEach(o => selIds.add(o.id)); sel = [...selIds].pop() || null; normalizeSelection(); tool = 'edit'; setMode('draw'); syncSel(); render() };
+	el('sceneSelectAll').onclick = () => { selIds.clear(); sceneObjects().filter(objectVisible).forEach(o => selIds.add(o.id)); sel = [...selIds].pop() || null; normalizeSelection(); tool = 'edit'; setMode('draw'); syncSel(); render() };
 	el('sceneClearSel').onclick = () => { clearSelection(); render() };
 	el('sceneDeleteSel').onclick = deleteSelectedScene;
 	el('sceneDeleteButton').onclick = deleteSelectedScene;
@@ -592,7 +655,7 @@
 	el('alignApply').onclick = alignSelectedScene;
 	// iPadの3本指スワイプ：指先にあるオブジェクトを選び、何もなければ選択対象を順番に切り替える。
 	window.cityThreeFingerSelect = (dx, dy, clientX, clientY) => {
-		const objects = sceneObjects(); if (!objects.length) return;
+		const objects = sceneObjects().filter(objectVisible); if (!objects.length) return;
 		let hit = null; try { hit = pickOb(pos({ clientX, clientY })) } catch (e) { }
 		if (hit) setSelection(hit, false);
 		else {
@@ -725,7 +788,7 @@
 		standardApplying = false; sync(); setMode('view'); render();
 	}
 	function fitFloorPlan() {
-		const objects = sceneObjects(), bounds = [];
+		const objects = sceneObjects().filter(objectVisible), bounds = [];
 		objects.forEach(o => { try { const b = obBounds(o); if (b && b.lo && b.hi && Number.isFinite(b.lo[0]) && Number.isFinite(b.hi[0]) && Number.isFinite(b.lo[1]) && Number.isFinite(b.hi[1]) && Number.isFinite(b.lo[2]) && Number.isFinite(b.hi[2])) bounds.push(b) } catch (e) { } });
 		const fyaw = Number(P.yaw || 0) * DG, fpitch = Number(P.pitch || 0) * DG, fhoriz = Math.cos(fpitch), tx = P.cx - Math.sin(fyaw) * FLOOR_CAMERA_RAY * fhoriz, tz = P.cz + Math.cos(fyaw) * FLOOR_CAMERA_RAY * fhoriz, ty = P.ch - 1 + Math.sin(fpitch) * FLOOR_CAMERA_RAY;
 		if (orthView === 'side') {
@@ -838,7 +901,7 @@
 	// 次の指操作を古い本数として扱わない。
 	const resetFloorTouch = () => { floorTouchIds.clear(); floorTouchMax = 0; floorTouchMoved = false; floorTouchT0 = 0; floorTouchPan = null };
 	addEventListener('blur', resetFloorTouch); document.addEventListener('visibilitychange', () => { if (document.hidden) resetFloorTouch() });
-	const floorPlanDock = document.createElement('div'); floorPlanDock.id = 'floorPlanDock'; floorPlanDock.innerHTML = '<div class="floorPlanDockInner"><div class="floorPlanDockHeader"><div id="floorPlanDockStatus" class="floorPlanDockStatus">オブジェクトを選択すると、移動・回転・サイズ変更ができます。<small>カメラ本体：位置　／　先端の丸：向き</small></div><div class="floorHistoryButtons"><button type="button" id="floorUndo" class="floorHistoryButton" title="間取りの操作を元に戻す">↶ 元に戻す</button><button type="button" id="floorRedo" class="floorHistoryButton" title="間取りの操作をやり直す">↷ やり直す</button></div><button type="button" class="dockCollapse" data-floor-dock-action="collapse" title="操作バーを折りたたむ">−</button></div><button type="button" data-floor-dock-action="left">↺ 15°</button><button type="button" data-floor-dock-action="right">↻ 15°</button><button type="button" data-floor-dock-action="90">90°回す</button><label class="floorLensTools">レンズ <input id="floorLensInput" type="number" min="14" max="200" step="1"> mm</label><div class="floorPlanPanTools"><span>表示移動</span><button type="button" data-floor-dock-action="pan-up" title="表示を上へ">↑</button><button type="button" data-floor-dock-action="pan-down" title="表示を下へ">↓</button><button type="button" data-floor-dock-action="pan-left" title="表示を左へ">←</button><button type="button" data-floor-dock-action="pan-right" title="表示を右へ">→</button></div><button type="button" data-floor-dock-action="assets">＋アセット</button><button type="button" data-floor-dock-action="delete">片付ける</button><span class="dockHint">中／右ドラッグ：表示移動　・　表示移動ボタン／Alt＋矢印／WASD：キャンバス移動　・　磁石ON：家具移動と幅／奥行の面編集をエッジへ吸着　・　2本指タップ：元に戻す／3本指タップ：やり直す</span></div>'; stage.appendChild(floorPlanDock);
+	const floorPlanDock = document.createElement('div'); floorPlanDock.id = 'floorPlanDock'; floorPlanDock.innerHTML = '<div class="floorPlanDockInner"><div class="floorPlanDockHeader"><div id="floorPlanDockStatus" class="floorPlanDockStatus">オブジェクトを選択すると、移動・回転・サイズ変更ができます。<small>カメラ本体：位置　／　先端の丸：向き</small></div><div class="floorHistoryButtons"><button type="button" id="floorUndo" class="floorHistoryButton" title="間取りの操作を元に戻す">↶ 元に戻す</button><button type="button" id="floorRedo" class="floorHistoryButton" title="間取りの操作をやり直す">↷ やり直す</button></div><button type="button" class="dockCollapse" data-floor-dock-action="collapse" title="操作バーを折りたたむ">−</button></div><button type="button" data-floor-dock-action="left">↺ 15°</button><button type="button" data-floor-dock-action="right">↻ 15°</button><button type="button" data-floor-dock-action="rot30">30°</button><button type="button" data-floor-dock-action="rot45">45°</button><button type="button" data-floor-dock-action="90">90°回す</button><label class="floorLensTools">レンズ <input id="floorLensInput" type="number" min="14" max="200" step="1"> mm</label><div class="floorPlanPanTools"><span>表示移動</span><button type="button" data-floor-dock-action="pan-up" title="表示を上へ">↑</button><button type="button" data-floor-dock-action="pan-down" title="表示を下へ">↓</button><button type="button" data-floor-dock-action="pan-left" title="表示を左へ">←</button><button type="button" data-floor-dock-action="pan-right" title="表示を右へ">→</button></div><button type="button" data-floor-dock-action="assets">＋アセット</button><button type="button" data-floor-dock-action="delete">片付ける</button><span class="dockHint">中／右ドラッグ：表示移動　・　表示移動ボタン／Alt＋矢印／WASD：キャンバス移動　・　磁石ON：家具移動と幅／奥行の面編集をエッジへ吸着　・　2本指タップ：元に戻す／3本指タップ：やり直す</span></div>'; stage.appendChild(floorPlanDock);
 	// アセット棚を開いたときは、間取り操作バーを棚の上へ逃がす。棚と操作バーを重ねないためのレイアウト調整。
 	function syncFloorPlanDockLayout() {
 		const tray = el('assetTray'); if (!tray) return;
@@ -896,7 +959,7 @@
 	function floorPlanItemAt(w) {
 		if (!w) return null;
 		return sceneObjects().slice().reverse().find(o => {
-			if (!o || o.k !== 1) return false;
+			if (!o || !objectVisible(o) || o.k !== 1) return false;
 			if (o.type === 'compound') { const b = obBounds(o); return w.x >= b.lo[0] - .08 && w.x <= b.hi[0] + .08 && w.z >= b.lo[2] - .08 && w.z <= b.hi[2] + .08 }
 			const base = L2W(o, 0, 0, 0), dx = w.x - base[0], dz = w.z - base[2], a = (Number(o.rot) || 0) * DG, cx = dx * Math.cos(a) + dz * Math.sin(a), cz = -dx * Math.sin(a) + dz * Math.cos(a);
 			return Math.abs(cx) <= Math.abs(Number(o.ra) || .25) + .08 && Math.abs(cz) <= Math.abs(Number(o.rb) || .25) + .08;
@@ -905,7 +968,7 @@
 	function floorPlanItemAtSide(p) {
 		if (!p) return null;
 		return sceneObjects().slice().reverse().find(o => {
-			if (!o || o.k !== 1) return false;
+			if (!o || !objectVisible(o) || o.k !== 1) return false;
 			const b = obBounds(o), pts = [];
 			for (const x of [b.lo[0], b.hi[0]]) for (const y of [b.lo[1], b.hi[1]]) for (const z of [b.lo[2], b.hi[2]]) { const q = scrW([x, y, z]); if (q.ok) pts.push(q) }
 			if (!pts.length) return false;
@@ -918,7 +981,7 @@
 	function floorPlanAnchorAtSide(p) {
 		if (!p) return null;
 		return sceneObjects().slice().reverse().find(o => {
-			if (!o || o.k !== 1) return false; const q = scrW(objectAnchorWorld(o));
+			if (!o || !objectVisible(o) || o.k !== 1) return false; const q = scrW(objectAnchorWorld(o));
 			return q.ok && Math.hypot(q.x - p.x, q.y - p.y) <= 28 / Z;
 		}) || null;
 	}
@@ -953,10 +1016,12 @@
 		} else {
 			const qz = scrW(L2W(o, 0, g.edgeY, g.edgeZ + .1)); if (qz.ok) { const dx = qz.x - s.x, dy = qz.y - s.y, px = Math.hypot(dx, dy); if (px > .01) out.push({ kind: 'awningEdgeZ', label: '前縁Y', s, dir: { x: dx / px, y: dy / px }, scale: px / .1, start: g.edgeZ, min: zMin, max: zMax, frontBottom: g.frontBottom, inner: true }) }
 		}
-		if (orthView === 'front') {
-			const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(g.w, g.d, .6) * orthScale() * .35)); out.push({ kind: 'awningEdgeY', label: '前後', s: { x: s.x + gap, y: s.y, ok: true }, dir: { x: 1, y: 0 }, scale: orthScale(), start: g.edgeY, min: yMin, max: yMax, inner: true, screen: true });
-		} else {
-			const qy = scrW(L2W(o, 0, g.edgeY + .1, g.edgeZ)); if (qy.ok) { const dx = qy.x - s.x, dy = qy.y - s.y, px = Math.hypot(dx, dy); if (px > .01) out.push({ kind: 'awningEdgeY', label: '前後', s: qy, dir: { x: dx / px, y: dy / px }, scale: px / .1, start: g.edgeY, min: yMin, max: yMax, inner: true }) }
+		if (!o.attachment?.verticalOnly) {
+			if (orthView === 'front') {
+				const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(g.w, g.d, .6) * orthScale() * .35)); out.push({ kind: 'awningEdgeY', label: '前後', s: { x: s.x + gap, y: s.y, ok: true }, dir: { x: 1, y: 0 }, scale: orthScale(), start: g.edgeY, min: yMin, max: yMax, inner: true, screen: true });
+			} else {
+				const qy = scrW(L2W(o, 0, g.edgeY + .1, g.edgeZ)); if (qy.ok) { const dx = qy.x - s.x, dy = qy.y - s.y, px = Math.hypot(dx, dy); if (px > .01) out.push({ kind: 'awningEdgeY', label: '前後', s: qy, dir: { x: dx / px, y: dy / px }, scale: px / .1, start: g.edgeY, min: yMin, max: yMax, inner: true }) }
+			}
 		}
 		return out;
 	}
@@ -1018,9 +1083,23 @@
 		if (o.type === 'asset' && o.asset === 'awning') { const edge = floorAwningEdgeHandle(o); if (edge.length) handles.push(...edge) }
 		return { o, base, center, handles, panel };
 	}
-	function floorPlanEditHandleAt(p) {
-		const g = floorPlanEditHandles(); if (!g) return null; const lim = 20 / Z, hit = g.handles.filter(h => Math.hypot(h.s.x - p.x, h.s.y - p.y) < lim).sort((a, b) => (b.inner ? 1 : 0) - (a.inner ? 1 : 0))[0];
-		return hit ? { g, h: hit } : null;
+	function floorMoveGizmo(o) {
+		if (!o || o.k !== 1) return null;
+		const b = obBounds(o), centerWorld = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2], center = scrW(centerWorld), screenLen = 64 / Z, worldLen = Math.max(.45, Math.min(2.4, screenLen / Math.max(1, Number(orthScale()) || 1)));
+		const defs = orthView === 'top' ? [{ vec: [1, 0, 0], name: 'X', col: '#e8743d' }, { vec: [0, 0, 1], name: 'Z', col: '#2fb5a5' }, { vec: [0, 1, 0], name: 'Y', col: '#4a7be8', screenDir: { x: 0, y: -1 } }] : orthView === 'side' ? [{ vec: [0, 0, 1], name: 'Z', col: '#2fb5a5' }, { vec: [0, 1, 0], name: 'Y', col: '#4a7be8' }, { vec: [1, 0, 0], name: 'X', col: '#e8743d', screenDir: { x: 1, y: 0 } }] : [{ vec: [1, 0, 0], name: 'X', col: '#e8743d' }, { vec: [0, 1, 0], name: 'Y', col: '#4a7be8' }, { vec: [0, 0, 1], name: 'Z', col: '#2fb5a5', screenDir: { x: 1, y: 0 } }];
+		const axes = defs.map(d => { const q = scrW(V.add(centerWorld, d.vec, 1, worldLen)), dx = q.x - center.x, dy = q.y - center.y, px = Math.hypot(dx, dy); if (d.screenDir) return { ...d, sT: { x: center.x + d.screenDir.x * screenLen, y: center.y + d.screenDir.y * screenLen, ok: true }, screen: true, scale: Math.max(1, Number(orthScale()) || 1) }; if (!q.ok || px < 4) return null; return { ...d, sT: q, screen: false, scale: px / worldLen || 1 } }).filter(Boolean);
+		return { centerWorld, center, axes };
+	}
+	function floorMoveHandleAt(p) {
+		const o = floorPlanObject(), g = floorMoveGizmo(o); if (!g) return null; const lim = 18 / Z;
+		for (const a of g.axes) if (segd(p, g.center, a.sT) < lim) return { g, a };
+		return null;
+	}
+	function drawFloorMoveGizmo(c, o) {
+		const g = floorMoveGizmo(o); if (!g) return;
+		const h = 8 / Z; c.save(); c.lineCap = 'round'; c.lineJoin = 'round'; c.font = `bold ${12 / Z}px system-ui`;
+		g.axes.forEach(a => { const dx = a.sT.x - g.center.x, dy = a.sT.y - g.center.y, l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l; c.strokeStyle = a.col; c.fillStyle = a.col; c.lineWidth = 3 / Z; c.beginPath(); c.moveTo(g.center.x, g.center.y); c.lineTo(a.sT.x, a.sT.y); c.stroke(); c.beginPath(); c.moveTo(a.sT.x + ux * h, a.sT.y + uy * h); c.lineTo(a.sT.x - ux * h - uy * h * .65, a.sT.y - uy * h + ux * h * .65); c.lineTo(a.sT.x - ux * h + uy * h * .65, a.sT.y - uy * h - ux * h * .65); c.closePath(); c.fill(); c.fillText(a.name, a.sT.x + ux * h + 4 / Z, a.sT.y + uy * h + 4 / Z) });
+		c.fillStyle = '#fff'; c.strokeStyle = '#102027'; c.lineWidth = 1.3 / Z; c.beginPath(); c.arc(g.center.x, g.center.y, 5 / Z, 0, Math.PI * 2); c.fill(); c.stroke(); c.restore();
 	}
 	function drawFloorPlanEditHandles(c) {
 		const g = floorPlanEditHandles(); if (!g) return;
@@ -1050,6 +1129,7 @@
 			c.strokeStyle = '#ff9f68'; c.lineWidth = 1.5 / Z; c.beginPath(); c.moveTo(h.object.center.x, h.object.center.y); c.lineTo(h.object.s.x, h.object.s.y); c.stroke();
 			c.fillStyle = '#fff'; c.strokeStyle = '#ff9f68'; c.lineWidth = 2 / Z; c.beginPath(); c.arc(h.object.s.x, h.object.s.y, r, 0, Math.PI * 2); c.fill(); c.stroke();
 			c.beginPath(); c.arc(h.object.s.x, h.object.s.y, r * .52, -Math.PI * .15, Math.PI * 1.3); c.stroke();
+			drawFloorMoveGizmo(c, h.object.o);
 			drawFloorPlanEditHandles(c);
 		}
 		// カメラ：本体をドラッグして位置、先端の丸をドラッグして向き
@@ -1068,7 +1148,7 @@
 		const status = el('floorPlanSelectionStatus'); if (status) status.textContent = text;
 		const dockStatus = el('floorPlanDockStatus'); if (dockStatus) { const cameraHint = orthView === 'side' ? '真横：カメラ本体＝位置・高さ　／　先端の丸＝上下の傾き' : orthView === 'front' ? '正面：カメラ本体＝X位置・高さ　／　先端の丸＝上下の傾き' : 'カメラ本体：位置　／　先端の丸＝向き'; dockStatus.innerHTML = `${text}<small>幅・奥行ハンドルは反対側の面を固定　／　${cameraHint}</small>`; }
 		[['floorRotateLeft', ground], ['floorRotateRight', ground], ['floorRotate90', ground], ['floorDelete', !!o]].forEach(([id, on]) => { const b = el(id); if (b) b.disabled = !on });
-		floorPlanDock.querySelectorAll('[data-floor-dock-action]').forEach(b => { const a = b.dataset.floorDockAction; b.disabled = a === 'delete' ? !o : ['left', 'right', '90'].includes(a) ? !ground : false });
+		floorPlanDock.querySelectorAll('[data-floor-dock-action]').forEach(b => { const a = b.dataset.floorDockAction; b.disabled = a === 'delete' ? !o : ['left', 'right', 'rot30', 'rot45', '90'].includes(a) ? !ground : false });
 		const undoButton = el('floorUndo'), redoButton = el('floorRedo'); if (undoButton) undoButton.disabled = !HU.length; if (redoButton) redoButton.disabled = !RD.length;
 		const lensInput = el('floorLensInput'); if (lensInput && document.activeElement !== lensInput) lensInput.value = Number(P.lens || 35).toFixed(0);
 	}
@@ -1178,7 +1258,7 @@
 		const o = floorPlanObject(); if (!o || o.k !== 1) return; HU.push(S); RD = []; setOb(o.id, { rot: angle360((Number(o.rot) || 0) + deg) }); render();
 	}
 	function moveFloorSelected(dx, dz) {
-		const objects = selectedObjects().filter(o => o.k === 1), o = objects.find(q => q.id === sel) || objects[0]; if (!o || !objects.length) return; HU.push(S); RD = []; snapHit = null;
+		const selected = selectedObjects().filter(o => o.k === 1), o = selected.find(q => q.id === sel) || selected[0], objects = o?.attachment?.verticalOnly ? [o] : selected; if (!o || !objects.length) return; HU.push(S); RD = []; snapHit = null;
 		let delta, axes;
 		if (orthView === 'side') { delta = [0, dz, dx]; axes = [1, 2] }
 		else if (orthView === 'front') { delta = [dx, dz, 0]; axes = [0, 1] }
@@ -1186,7 +1266,7 @@
 		const setup = snapSetupGroup(objects, objectAnchorWorld(o)), q = $('snp')?.checked ? snapShift(setup.bb, delta, axes, setup.targets, setup.tau) : { d: delta, hit: new Set() };
 		snapHit = q.hit.size ? q.hit : null;
 		/* 上はX/Z、横はZ/Y、前はX/Yの表示面内を移動する。 */
-		objects.forEach(g => setOb(g.id, moveBy(g, q.d))); render();
+		const ids = new Set(objects.map(g => g.id)); objects.forEach(g => setOb(g.id, moveBy(g, q.d, !!(g.attachment?.parentId && ids.has(g.attachment.parentId))))); render();
 	}
 	// カメラではなく、間取りキャンバスの表示中心だけを移動する。
 	// dx/dyは画面上の移動量(px)。オブジェクトやP.cx/P.czは変更しない。
@@ -1211,6 +1291,8 @@
 	el('floorDelete').onclick = () => el('obDel').click();
 	floorPlanDock.querySelector('[data-floor-dock-action="left"]').onclick = () => rotateFloorSelected(15);
 	floorPlanDock.querySelector('[data-floor-dock-action="right"]').onclick = () => rotateFloorSelected(-15);
+	floorPlanDock.querySelector('[data-floor-dock-action="rot30"]').onclick = () => rotateFloorSelected(30);
+	floorPlanDock.querySelector('[data-floor-dock-action="rot45"]').onclick = () => rotateFloorSelected(45);
 	floorPlanDock.querySelector('[data-floor-dock-action="90"]').onclick = () => rotateFloorSelected(90);
 	floorPlanDock.querySelector('[data-floor-dock-action="assets"]').onclick = () => { const tray = el('assetTray'); if (!tray) return; tray.classList.add('floorAssetTray'); if (getComputedStyle(tray).display !== 'block') el('assetToggle')?.click(); requestAnimationFrame(syncFloorPlanDockLayout) };
 	floorPlanDock.querySelector('[data-floor-dock-action="delete"]').onclick = () => el('obDel').click();
@@ -1244,6 +1326,11 @@
 		// 7 前も9 上・8 横と同じ面編集ハンドルを先に受け取る。
 		// ここから漏れると、ハンドルを押してもオブジェクト移動として処理される。
 		if (resize && (orthView === 'top' || orthView === 'side' || orthView === 'front')) { e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'resize', pointerId: e.pointerId, id: resize.g.o.id, o0: { ...resize.g.o, off: [...(resize.g.o.off || [0, 0, 0])] }, handle: resize.h, p0: p, started: false }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return }
+		const moveHandle = floorMoveHandleAt(p), moveObject = floorPlanObject();
+		if (moveHandle && moveObject && moveObject.k === 1 && (orthView === 'top' || orthView === 'side' || orthView === 'front')) {
+			const base = objectAnchorWorld(moveObject), group = moveObject.attachment?.verticalOnly ? [moveObject] : selectedObjects().filter(o => o.k === 1), snap = snapSetupGroup(group, base);
+			e.preventDefault(); e.stopImmediatePropagation(); floorPlanDrag = { kind: 'moveGizmo', pointerId: e.pointerId, id: moveObject.id, o0: { ...moveObject, off: [...(moveObject.off || [0, 0, 0])] }, group, base0: base, bb: snap.bb, targets: snap.targets, tau: snap.tau, axis: moveHandle.a, p0: p, started: false }; try { cv.setPointerCapture(e.pointerId) } catch (err) { } return;
+		}
 		if (orthView === 'side' || orthView === 'front') {
 			const verticalHandles = floorPlanHandles(), verticalLim = 22 / Z, verticalAxis = orthView === 'side' ? 'side' : 'front';
 			if (verticalHandles.camera && Math.hypot(verticalHandles.camera.sTarget.x - p.x, verticalHandles.camera.sTarget.y - p.y) < verticalLim) {
@@ -1261,7 +1348,7 @@
 				if (multi) setSelection(hit.id, true);
 				else if (!wasSelected || selIds.size <= 1) setSelection(hit.id, false);
 				if (!selIds.has(hit.id)) { syncSel(); render(); return }
-				const w = floorPlanVerticalWorldAt(p), base = objectAnchorWorld(hit), group = selectedObjects().filter(o => o.k === 1), snap = snapSetupGroup(group, base);
+				const w = floorPlanVerticalWorldAt(p), base = objectAnchorWorld(hit), group = hit.attachment?.verticalOnly ? [hit] : selectedObjects().filter(o => o.k === 1), snap = snapSetupGroup(group, base);
 				if (!w) { syncSel(); render(); return }
 				e.preventDefault(); e.stopImmediatePropagation();
 				floorPlanDrag = { kind: 'itemVertical', axis: orthView === 'side' ? 'side' : 'front', pointerId: e.pointerId, id: hit.id, o0: { ...hit, off: [...(hit.off || [0, 0, 0])] }, group, base0: base, bb: snap.bb, targets: snap.targets, tau: snap.tau, dx: orthView === 'front' ? base[0] - w.x : 0, dz: orthView === 'side' ? base[2] - w.z : 0, dy: base[1] - w.y, started: false };
@@ -1288,7 +1375,7 @@
 			if (multi) setSelection(hit.id, true);
 			else if (!wasSelected || selIds.size <= 1) setSelection(hit.id, false);
 			if (!selIds.has(hit.id)) { floorPlanDrag = null; syncSel(); render(); return }
-			const base = objectAnchorWorld(hit), group = selectedObjects().filter(o => o.k === 1), snap = snapSetupGroup(group, base);
+			const base = objectAnchorWorld(hit), group = hit.attachment?.verticalOnly ? [hit] : selectedObjects().filter(o => o.k === 1), snap = snapSetupGroup(group, base);
 			// 選択済みオブジェクトをドラッグした場合は、選択中の地面オブジェクトを同じ量だけ動かす。
 			floorPlanDrag = { kind: 'item', pointerId: e.pointerId, id: hit.id, o0: { ...hit, off: [...(hit.off || [0, 0, 0])] }, group, base0: base, bb: snap.bb, targets: snap.targets, tau: snap.tau, dx: base[0] - w.x, dz: base[2] - w.z, started: false };
 			try { cv.setPointerCapture(e.pointerId) } catch (err) { } syncSel(); render()
@@ -1310,6 +1397,14 @@
 			const o = floorPlanDrag.o0, h = floorPlanDrag.handle, p = pos(e), amount = ((p.x - floorPlanDrag.p0.x) * h.dir.x + (p.y - floorPlanDrag.p0.y) * h.dir.y) / (h.scale || 1), value = clamp(h.start + (h.factor || 1) * amount, h.min, h.max ?? 20); snapHit = null;
 			const patch = h.inner ? (h.kind === 'buildingOpeningH' ? { openingH: value } : h.kind === 'buildingBackFace' ? { openingBack: value } : h.kind === 'awningEdgeZ' ? { awningEdgeZ: value, awningFrontBottom: h.frontBottom, awningEdgeEdited: true } : h.kind === 'awningEdgeY' ? { awningEdgeY: value, awningEdgeEdited: true } : { openingW: value }) : floorResizeSnap(o, floorDimensionPatch(o, h.kind, value, h.side || 1), h, value);
 			if (patch) { if (!floorPlanDrag.started) { HU.push(S); RD = []; floorPlanDrag.started = true } setOb(o.id, patch) }
+			render(); return;
+		}
+		if (floorPlanDrag.kind === 'moveGizmo') {
+			const a = floorPlanDrag.axis, p = pos(e), dx = p.x - floorPlanDrag.p0.x, dy = p.y - floorPlanDrag.p0.y, al = Math.hypot(a.sT.x - floorMoveGizmo(floorPlanDrag.o0).center.x, a.sT.y - floorMoveGizmo(floorPlanDrag.o0).center.y) || 1, ux = (a.sT.x - floorMoveGizmo(floorPlanDrag.o0).center.x) / al, uy = (a.sT.y - floorMoveGizmo(floorPlanDrag.o0).center.y) / al, amount = (dx * ux + dy * uy) / (a.scale || 1), delta = [a.vec[0] * amount, a.vec[1] * amount, a.vec[2] * amount];
+			if (!floorPlanDrag.started) { HU.push(S); RD = []; floorPlanDrag.started = true }
+			const axes = a.vec.map((v, i) => Math.abs(v) > .5 ? i : -1).filter(i => i >= 0), q = $('snp')?.checked ? snapShift(floorPlanDrag.bb, delta, axes, floorPlanDrag.targets, floorPlanDrag.tau) : { d: delta, hit: new Set() }; snapHit = q.hit.size ? q.hit : null;
+			const ids = new Set((floorPlanDrag.group || []).map(o => o.id));
+			(floorPlanDrag.group || [floorPlanDrag.o0]).forEach(g => { const keep = !!(g.attachment?.parentId && ids.has(g.attachment.parentId)); setOb(g.id, moveBy(g, q.d, keep)) });
 			render(); return;
 		}
 		if (floorPlanDrag.kind === 'lens') {
@@ -1343,7 +1438,7 @@
 				const axes = floorPlanDrag.axis === 'front' ? [0, 1] : [1, 2];
 				const q = $('snp')?.checked ? snapShift(floorPlanDrag.bb, delta, axes, floorPlanDrag.targets, floorPlanDrag.tau) : { d: delta, hit: new Set() };
 				snapHit = q.hit.size ? q.hit : null;
-				(floorPlanDrag.group || [o]).forEach(g => setOb(g.id, moveBy(g, q.d)));
+				const ids = new Set((floorPlanDrag.group || [o]).map(g => g.id)); (floorPlanDrag.group || [o]).forEach(g => setOb(g.id, moveBy(g, q.d, !!(g.attachment?.parentId && ids.has(g.attachment.parentId)))));
 			}
 			render(); return;
 		}
@@ -1368,7 +1463,7 @@
 				const delta = [w.x + floorPlanDrag.dx - floorPlanDrag.base0[0], 0, w.z + floorPlanDrag.dz - floorPlanDrag.base0[2]];
 				const q = $('snp')?.checked ? snapShift(floorPlanDrag.bb, delta, [0, 2], floorPlanDrag.targets, floorPlanDrag.tau) : { d: delta, hit: new Set() };
 				snapHit = q.hit.size ? q.hit : null;
-				(floorPlanDrag.group || [o]).forEach(g => setOb(g.id, moveBy(g, q.d)));
+				const ids = new Set((floorPlanDrag.group || [o]).map(g => g.id)); (floorPlanDrag.group || [o]).forEach(g => setOb(g.id, moveBy(g, q.d, !!(g.attachment?.parentId && ids.has(g.attachment.parentId)))));
 			}
 		} else if (floorPlanDrag.kind === 'camera') {
 			P.cx = +(w.x + floorPlanDrag.dx).toFixed(3); P.cz = +(w.z + floorPlanDrag.dz).toFixed(3); sync();
