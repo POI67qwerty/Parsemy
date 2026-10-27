@@ -2,6 +2,12 @@
    Shared state, math, projection, primitive shapes, and basic object editing. */
 /* City Grid Studio engine: camera, projection, drawing, selection and core input. */
 const $ = (id) => document.getElementById(id);
+function isStackedBuildingAsset(o) {
+    return o?.type === "asset" && ["stackedBuilding", "beveledStackedBuilding"].includes(o.asset);
+}
+function isBeveledStackedBuildingAsset(o) {
+    return o?.type === "asset" && o.asset === "beveledStackedBuilding";
+}
 const cv = $("cv"),
     ctx = cv.getContext("2d");
 let W = 1600,
@@ -143,10 +149,20 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label class=full><span>パス点（x,y,z）</span><textarea id=pathPipePoints rows=4 placeholder="-2,0,1.1; 0,0,1.1; 0,2.2,1.1"></textarea></label>
 <div class="note">キャンバス上の各パス点にあるX／Y／Zハンドルをドラッグすると経路を編集できます。オレンジの「半径」ハンドルで太さを変更できます。曲がり半径を0にすると角が直線になります。</div>
 </div>
-<div id=stackedP style="display:none"><h3>縁付き階層建物</h3>
+<div id=beveledBoxP style="display:none"><h3>ベベル直方体</h3>
+<label><span>ベベルオフセット</span><input type=number class=nv id=beveledBoxOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>ベベルセグメント数</span><input type=number class=nv id=beveledBoxSegments min=1 max=4 step=1 style="width:100px"><span class=un>分割</span></label>
+<div class="note">四つの縦角を面取りします。オフセットは面取り幅、セグメント数は角の丸みを分割する数です。1は一枚面、4は4分割です。オフセットはキャンバス上のオレンジのベベルハンドルからも変更できます。幅・奥行き・高さは共通の面ハンドルまたは上の数値欄で編集できます。初期状態は面で、上面を押し出すと高さができます。</div>
+</div>
+<div id=stackedP style="display:none"><h3 id=stackedPanelTitle>縁付き階層建物</h3>
 <label><span>階数</span><input type=number class=nv id=stackFloorCount min=1 max=30 step=1 style="width:100px"></label>
 <label><input type=checkbox id=stackIndividualEdit> 各階を個別編集（チェック時のみ）</label>
 <label><span>階間</span><input type=number class=nv id=stackFloorGap min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<div id=stackBevelControls style="display:none">
+<label><span>ベベルオフセット</span><input type=number class=nv id=stackBevelOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>ベベルセグメント数</span><input type=number class=nv id=stackBevelSegments min=1 max=4 step=1 style="width:100px"><span class=un>分割</span></label>
+<div class="note">通常モードでは1Fのベベル設定を全階へ連動します。個別編集を有効にすると、選択中の階だけを変更できます。</div>
+</div>
 <label><button id=stackAlign class="primary">上方向へ整列</button><button id=stackCopyFirst>1F寸法をコピー</button></label>
 <div class="note">通常は1Fのハンドルと数値だけを編集し、幅・奥行・高さ・縁が全階へ自動連動します。チェックを入れると、選択した階を個別に編集できます。</div>
 <div id=stackFloorRows></div>
@@ -843,7 +859,7 @@ function syncAttachedPart(o, parentOverride = null) {
         px = Number(a.x) || 0;
     // 積層建物はgeometryがcustomPt（階ごとのx/y/z）で保持されるため、
     // 標準建物のL2Wとは別に、指定階の壁面へベランダを同期する。
-    if (parent.asset === "stackedBuilding" && a.stackedFloor) {
+    if (isStackedBuildingAsset(parent) && a.stackedFloor) {
         const floors = Array.isArray(parent.floors) ? parent.floors : [],
             index = clamp(Math.round(Number(a.floorIndex) || 0), 0, Math.max(0, floors.length - 1)),
             f = floors[index];
@@ -1170,7 +1186,7 @@ function fieldPatch(o, name, v) {
             const r = Math.max(0.005, v / 2);
             return { ra: r, rb: r, h: r * 2 };
         }
-        return o.type === "rect" || o.type === "circ"
+        return o.type === "rect" || o.type === "circ" || (o.type === "asset" && o.asset === "beveledBox")
             ? { h: Math.max(0, v), extrude: v > 0 }
             : { h: Math.max(0.005, v) };
     }
@@ -1218,7 +1234,7 @@ function applyOb(name, v) {
 });
 $("obExtrude").onclick = () => {
     const o = obOf(sel);
-    if (!o || !["rect", "circ"].includes(o.type)) return;
+    if (!o || !(o.type === "rect" || o.type === "circ" || (o.type === "asset" && o.asset === "beveledBox"))) return;
     HU.push(S);
     RD = [];
     setOb(sel, { h: Math.max(0.12, Math.min(o.ra, o.rb) * 0.8), extrude: true });
@@ -1288,6 +1304,7 @@ $("obOff").onclick = () => {
     clearSelection();
     render();
 };
+
 /* City Grid Studio engine tools.
    Gizmos, drawing tools, export, persistence, and startup wiring. */
 // ===== ブレンダー風ギズモ：矢印(XYZ軸の移動)・白い四角(面の押し引き)・点線の輪(回転) =====
@@ -1789,8 +1806,58 @@ function stackedIndividualEdit(o) {
     // 新形式はindividualEditを優先し、旧JSONのsyncFirst=falseも個別編集として読む。
     return o?.individualEdit === true || (o?.individualEdit == null && o?.syncFirst === false);
 }
+function stackedBevelHandle(o, f, index) {
+    if (!isBeveledStackedBuildingAsset(o) || !f) return null;
+    const w = Math.max(0.08, Math.abs(Number(f.w) || 4)),
+        d = Math.max(0.08, Math.abs(Number(f.d) || 3)),
+        h = Math.max(0.08, Math.abs(Number(f.h) || 2.2)),
+        x = Number(f.x) || 0,
+        y = Number(f.y) || 0,
+        z = Number(f.z) || 0,
+        max = Math.max(0, Math.min(w, d) * 0.5 - 0.001),
+        start = clamp(
+            Number.isFinite(Number(f.bevelOffset)) ? Number(f.bevelOffset) : Number(o.bevelOffset) || 0.28,
+            0,
+            max,
+        ),
+        pr = (px, py, pz) => scrW(customPt(o, px, py, pz)),
+        anchor = pr(x + w * 0.5, y + d * 0.5, z + h),
+        step = Math.max(0.05, Math.min(max || 0.25, Math.min(w, d) * 0.08)),
+        sample = (b) => pr(x + w * 0.5 - b * 0.5, y + d * 0.5 - b * 0.5, z + h),
+        raw = sample(start),
+        probe = sample(Math.min(max, start + step)),
+        dx = (probe?.x || 0) - (raw?.x || 0),
+        dy = (probe?.y || 0) - (raw?.y || 0),
+        length = Math.hypot(dx, dy),
+        projected = !!raw?.ok && !!probe?.ok && Number.isFinite(length),
+        hidden = projected && length <= 0.5 / Z,
+        fallback = orthView === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 };
+    return {
+        kind: "stacked-bevel-offset",
+        s: !raw?.ok
+            ? raw
+            : hidden
+              ? {
+                    x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
+                    y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
+                    ok: true,
+                }
+              : raw,
+        anchor,
+        dir: projected && length > 0.0001 ? { x: dx / length, y: dy / length } : fallback,
+        scale:
+            projected && length > 0.0001
+                ? length / Math.max(0.0001, Math.min(step, max - start || step))
+                : Math.max(24, orthView ? orthScale() : 24),
+        start,
+        min: 0,
+        max,
+        floorIndex: index,
+        label: "ベベル",
+    };
+}
 function stackedBuildingGizmo(o) {
-    if (!o || o.type !== "asset" || o.asset !== "stackedBuilding") return null;
+    if (!isStackedBuildingAsset(o)) return null;
     const floors = Array.isArray(o.floors) && o.floors.length ? o.floors : [];
     if (!floors.length) return null;
     const index = stackedIndividualEdit(o) ? clamp(Math.round(Number(o.activeFloor) || 0), 0, floors.length - 1) : 0,
@@ -1841,8 +1908,9 @@ function stackedBuildingGizmo(o) {
             depthRight: make("stacked-depth", x, y + d * 0.5, z + h * 0.5, "d", 1, "奥行"),
             height: make("stacked-height", x, y, z + h, "h", 1, "高さ"),
         },
-        frame = [pr(x - w / 2, y, z), pr(x - w / 2, y, z + h), pr(x + w / 2, y, z + h), pr(x + w / 2, y, z)];
-    return { o, C3: p3(x, y, z + h * 0.5), center, frame, handles, floorIndex: index };
+        frame = [pr(x - w / 2, y, z), pr(x - w / 2, y, z + h), pr(x + w / 2, y, z + h), pr(x + w / 2, y, z)],
+        bevelHandle = stackedBevelHandle(o, f, index);
+    return { o, C3: p3(x, y, z + h * 0.5), center, frame, handles, bevelHandle, floorIndex: index };
 }
 function pathPipeGizmo(o) {
     if (
@@ -1952,22 +2020,65 @@ function pathPipeGizmo(o) {
         },
     };
 }
+function beveledBoxGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "beveledBox" || typeof beveledBoxParams !== "function") return null;
+    const q = beveledBoxParams(o),
+        z = Math.max(0, Number(o.h) || 0),
+        x = q.w * 0.5,
+        y = q.d * 0.5,
+        pr = (px, py, pz) => scrW(pt(o, px, py, pz)),
+        anchor = pr(x, y, z),
+        step = Math.max(0.05, Math.min(q.max || 0.25, Math.min(q.w, q.d) * 0.08)),
+        sample = (b) => pr(x - b * 0.5, y - b * 0.5, z),
+        raw = sample(q.bevelOffset),
+        probe = sample(Math.min(q.max, q.bevelOffset + step)),
+        dx = (probe?.x || 0) - (raw?.x || 0),
+        dy = (probe?.y || 0) - (raw?.y || 0),
+        length = Math.hypot(dx, dy),
+        projected = !!raw?.ok && !!probe?.ok && Number.isFinite(length),
+        hidden = projected && length <= 0.5 / Z,
+        fallback = orthView === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 },
+        handle = {
+            kind: "beveled-offset",
+            s: !raw?.ok
+                ? raw
+                : hidden
+                  ? {
+                        x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
+                        y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
+                        ok: true,
+                    }
+                  : raw,
+            anchor,
+            dir: hidden ? fallback : { x: dx / length, y: dy / length },
+            scale: hidden
+                ? Math.max(24, orthView ? orthScale() : 24)
+                : length / Math.max(0.0001, Math.min(step, q.max - q.bevelOffset || step)),
+            start: q.bevelOffset,
+            min: 0,
+            max: q.max,
+            label: "ベベル",
+        };
+    return { o, C3: L2W(o, 0, 0, z * 0.5), center: scrW(L2W(o, 0, 0, z * 0.5)), handle };
+}
 function specialGizmo(o) {
-    return o && o.type === "asset" && o.asset === "pathPipe"
-        ? pathPipeGizmo(o)
-        : o && o.type === "asset" && o.asset === "stackedBuilding"
-          ? stackedBuildingGizmo(o)
-          : o && o.type === "asset" && o.asset === "building"
-            ? buildingGizmo(o)
-            : o && o.type === "asset" && o.asset === "awning"
-              ? awningGizmo(o)
-              : o && o.type === "asset" && o.asset === "sign"
-                ? signGizmo(o)
-                : o && o.type === "asset" && o.asset === "cone"
-                  ? coneGizmo(o)
-                  : o && o.type === "asset" && o.asset === "sphere"
-                    ? sphereGizmo(o)
-                    : null;
+    return o && o.type === "asset" && o.asset === "beveledBox"
+        ? beveledBoxGizmo(o)
+        : o && o.type === "asset" && o.asset === "pathPipe"
+          ? pathPipeGizmo(o)
+          : isStackedBuildingAsset(o)
+            ? stackedBuildingGizmo(o)
+            : o && o.type === "asset" && o.asset === "building"
+              ? buildingGizmo(o)
+              : o && o.type === "asset" && o.asset === "awning"
+                ? awningGizmo(o)
+                : o && o.type === "asset" && o.asset === "sign"
+                  ? signGizmo(o)
+                  : o && o.type === "asset" && o.asset === "cone"
+                    ? coneGizmo(o)
+                    : o && o.type === "asset" && o.asset === "sphere"
+                      ? sphereGizmo(o)
+                      : null;
 }
 function drawSpecialGizmo(c, o) {
     const sg = specialGizmo(o);
@@ -1991,7 +2102,23 @@ function drawSpecialGizmo(c, o) {
         c.fill();
         c.stroke();
     };
-    if (sg.o.asset === "pathPipe") {
+    if (sg.o.asset === "beveledBox") {
+        const h = sg.handle;
+        if (h?.s?.ok && h?.anchor?.ok) {
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.strokeStyle = "rgba(255,159,104,.95)";
+            c.lineWidth = 1.5 / Z;
+            c.beginPath();
+            c.moveTo(h.anchor.x, h.anchor.y);
+            c.lineTo(h.s.x, h.s.y);
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, "#ff9f68", true);
+            c.fillStyle = "#ffd0a8";
+            c.font = `bold ${12 / Z}px system-ui`;
+            c.fillText(`ベベル ${Number(h.start || 0).toFixed(2)}`, h.s.x + 9 / Z, h.s.y - 8 / Z);
+        }
+    } else if (sg.o.asset === "pathPipe") {
         const h = sg.radiusHandle;
         c.setLineDash([5 / Z, 4 / Z]);
         c.strokeStyle = "rgba(255,159,104,.9)";
@@ -2034,7 +2161,7 @@ function drawSpecialGizmo(c, o) {
             c.font = `bold ${12 / Z}px system-ui`;
             c.fillText("半径", h.s.x + 9 / Z, h.s.y - 8 / Z);
         }
-    } else if (sg.o.asset === "stackedBuilding") {
+    } else if (isStackedBuildingAsset(sg.o)) {
         const h = sg.handles,
             usable = Object.values(h).filter((handle) => Math.hypot(handle.dir.x, handle.dir.y) > 0.15);
         c.setLineDash([5 / Z, 4 / Z]);
@@ -2057,6 +2184,19 @@ function drawSpecialGizmo(c, o) {
         c.fillStyle = "#ffd0a8";
         c.font = `bold ${12 / Z}px system-ui`;
         c.fillText(`${sg.floorIndex + 1}F 幅/奥行/高さ`, sg.center.x + 8 / Z, sg.center.y - 8 / Z);
+        if (sg.bevelHandle?.s?.ok && sg.bevelHandle?.anchor?.ok) {
+            const bh = sg.bevelHandle;
+            c.setLineDash([4 / Z, 3 / Z]);
+            c.strokeStyle = "#ff9f68";
+            c.beginPath();
+            c.moveTo(bh.anchor.x, bh.anchor.y);
+            c.lineTo(bh.s.x, bh.s.y);
+            c.stroke();
+            c.setLineDash([]);
+            sq(bh.s, "#ff9f68", true);
+            c.fillStyle = "#ffd0a8";
+            c.fillText(`ベベル ${Number(bh.start || 0).toFixed(2)}`, bh.s.x + 9 / Z, bh.s.y - 8 / Z);
+        }
     } else if (sg.o.asset === "building") {
         const h = sg.handles,
             front = ["frontOpeningWLeft", "frontOpeningWRight", "frontOpeningH"],
@@ -2286,7 +2426,7 @@ function gizmo() {
     if (o.type === "compound") return compoundGizmo(o);
     // 積層建物も3Dの移動・回転ギズモは表示する。ただし、
     // ra/rb/hへ書き込む汎用の面ハンドルは使わず、寸法編集は階別ギズモへ渡す。
-    const stacked = o.type === "asset" && o.asset === "stackedBuilding",
+    const stacked = isStackedBuildingAsset(o),
         [iu, iv] = PL[o.k],
         cs = Math.cos(o.rot * DG),
         sn = Math.sin(o.rot * DG),
@@ -2306,7 +2446,8 @@ function gizmo() {
                     o.asset === "awning" ||
                     o.asset === "balcony" ||
                     o.asset === "pathPipe" ||
-                    o.asset === "stackedBuilding")),
+                    o.asset === "beveledBox" ||
+                    isStackedBuildingAsset(o))),
         [z0, z1] = outerZRange(o),
         zc = solid ? (z0 + z1) / 2 : 0;
     const C3 = L2W(o, 0, 0, zc),
@@ -2457,7 +2598,7 @@ function stackedFloorScreen(o, index) {
     return { f, center, top, corners, index };
 }
 function stackedFloorHit(o, p) {
-    if (!o || o.asset !== "stackedBuilding" || !Array.isArray(o.floors)) return null;
+    if (!isStackedBuildingAsset(o) || !Array.isArray(o.floors)) return null;
     let best = null;
     o.floors.forEach((f, index) => {
         const q = stackedFloorScreen(o, index),
@@ -2495,6 +2636,11 @@ function hitGizmo(p) {
         special = active && specialGizmo(active),
         R = 20 / Z;
     if (special) {
+        if (active.asset === "beveledBox") {
+            const h = special.handle;
+            if (h?.s?.ok && Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
+                return { t: "beveled-offset", sign: h, g: { o: active, C3: special.C3 } };
+        }
         if (active.asset === "pathPipe") {
             // 扇状に分けた隣接点のハンドルが許容半径へ少し重なることがある。
             // 配列の先頭ではなく、押した位置に最も近いハンドルを返して
@@ -2514,7 +2660,12 @@ function hitGizmo(p) {
                 return { t: q.t, sign: q.h, g: { o: active, C3: special.C3 } };
             }
         }
-        if (active.asset === "stackedBuilding") {
+        if (isStackedBuildingAsset(active)) {
+            if (
+                special.bevelHandle?.s?.ok &&
+                Math.hypot(special.bevelHandle.s.x - p.x, special.bevelHandle.s.y - p.y) < R
+            )
+                return { t: "stacked-bevel-offset", sign: special.bevelHandle, g: { o: active, C3: special.C3 } };
             for (const h of Object.values(special.handles))
                 if (Math.hypot(h.dir.x, h.dir.y) > 0.15 && Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
                     return { t: h.kind, sign: h, g: { o: active, C3: special.C3 } };
@@ -2594,9 +2745,50 @@ function objectAnchorWorld(o) {
     return L2W(o, 0, 0, 0);
 }
 // 図形の外枠（ワールド軸に沿った箱）。スナップや接地に使う
+function stackedObjectCorners(o) {
+    if (!isStackedBuildingAsset(o)) return [];
+    const floors =
+        Array.isArray(o.floors) && o.floors.length
+            ? o.floors
+            : [{ x: 0, y: 0, z: 0, w: Number(o.ra || 4) * 2, d: Number(o.rb || 3) * 2, h: Number(o.h || 2.2) }];
+    const out = [];
+    floors.forEach((f) => {
+        const w = Math.max(0.05, Math.abs(Number(f.w) || 4)),
+            d = Math.max(0.05, Math.abs(Number(f.d) || 3)),
+            z = Number(f.z) || 0,
+            h = Math.max(0.05, Math.abs(Number(f.h) || 2.2)),
+            x = Number(f.x) || 0,
+            y = Number(f.y) || 0,
+            rimH = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, h),
+            over = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18));
+        const addBox = (fw, fd, z0, z1) => {
+            for (const xx of [-fw / 2, fw / 2])
+                for (const yy of [-fd / 2, fd / 2]) {
+                    out.push(L2W(o, x + xx, y + yy, z0));
+                    out.push(L2W(o, x + xx, y + yy, z1));
+                }
+        };
+        addBox(w, d, z, z + h);
+        // 上側の縁だけを外形へ含める。下側の縁は生成しない仕様と一致させる。
+        addBox(w + over * 2, d + over * 2, z + h - rimH, z + h);
+    });
+    return out;
+}
 function obBounds(o) {
     if (o?.attachment) o = syncAttachedPart(o);
     if (o?.type === "compound") return compoundBounds(o);
+    if (isStackedBuildingAsset(o)) {
+        const pts = stackedObjectCorners(o),
+            lo = [1e9, 1e9, 1e9],
+            hi = [-1e9, -1e9, -1e9];
+        pts.forEach((p) =>
+            p.forEach((v, j) => {
+                lo[j] = Math.min(lo[j], v);
+                hi[j] = Math.max(hi[j], v);
+            }),
+        );
+        return { lo, hi };
+    }
     const sign = o.type === "asset" && o.asset === "sign",
         pts = [],
         solid =
@@ -2673,6 +2865,9 @@ function snapSetupGroup(objects, C3) {
 }
 // 画面上の吸着距離(px)を、その図形の位置でのワールドの長さにする
 function tauOf(C3) {
+    // 正投影ではカメラ距離を使うと吸着幅が極端に小さくなる。
+    // orthScaleはpx／worldなので、表示上の磁石距離をそのままワールドへ直す。
+    if (orthView) return Math.max(1, Number(P.sn) || 14) / Z / Math.max(1, Number(orthScale()) || 1);
     const rel = Math.max(0.05, Math.hypot(...V.add(C3, CO()))),
         f = T === "f" ? H / 2 / ((P.fov * DG) / 2) : (W * P.lens) / 36;
     return ((P.sn / Z) * rel) / f;
@@ -2708,6 +2903,7 @@ function snapShift(bb, delta, axes, targets, tau) {
 function snapObjectCorners(o) {
     if (!o) return [];
     if (o.type === "compound") return compoundPartsAt(o).flatMap((part) => snapObjectCorners(part));
+    if (isStackedBuildingAsset(o)) return stackedObjectCorners(o);
     const sign = o.type === "asset" && o.asset === "sign",
         solid =
             o.type === "box" ||
@@ -2830,8 +3026,10 @@ function beginGizmo(h, p) {
         h.t.startsWith("building-") ||
         h.t.startsWith("awning-") ||
         h.t.startsWith("stacked-") ||
+        h.t === "stacked-bevel-offset" ||
         h.t.startsWith("path-point-") ||
         h.t === "path-radius" ||
+        h.t === "beveled-offset" ||
         h.t === "cone-height" ||
         h.t === "sphere-radius"
     )
@@ -2902,6 +3100,12 @@ function dragEdit(p, freeRotation = false) {
             deltaY = p.y - ed.p0.y,
             radius = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
         patch = { pipeRadius: radius };
+    } else if (ed.t === "beveled-offset") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            offset = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { bevelOffset: offset };
     } else if (ed.t.startsWith("building-")) {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -2929,27 +3133,68 @@ function dragEdit(p, freeRotation = false) {
             my = (dx * h.by.x + dy * h.by.y) / (n * n);
         }
         const floors = Array.isArray(o.floors) ? o.floors.map((f) => ({ ...f })) : [],
-            floor = floors[ed.floorIndex];
+            floor = floors[ed.floorIndex],
+            individual = stackedIndividualEdit(o);
         if (floor) {
-            const nextX = h.x + mx,
+            let nextX = h.x + mx,
                 nextY = h.y + my;
-            if (stackedIndividualEdit(o)) {
+            if (!individual && $("snp")?.checked) {
+                // ローカル階座標をワールドX/Zの移動量へ変換してから吸着する。
+                // そのまま画面量だけを補正すると、回転した建物では別方向へずれる。
+                const a = Number(o.rot || 0) * DG,
+                    cs = Math.cos(a),
+                    sn = Math.sin(a),
+                    raw = [
+                        (nextX - (Number(floor.x) || 0)) * cs - (nextY - (Number(floor.y) || 0)) * sn,
+                        0,
+                        (nextX - (Number(floor.x) || 0)) * sn + (nextY - (Number(floor.y) || 0)) * cs,
+                    ],
+                    q = snapShift(ed.bb, raw, [0, 2], ed.targets, ed.tau);
+                snapHit = q.hit.size ? q.hit : null;
+                nextX = (Number(floor.x) || 0) + q.d[0] * cs + q.d[2] * sn;
+                nextY = (Number(floor.y) || 0) - q.d[0] * sn + q.d[2] * cs;
+            }
+            if (individual) {
                 floor.x = nextX;
                 floor.y = nextY;
+                patch = {
+                    floors,
+                    activeFloor: ed.floorIndex,
+                    h: (Number(floors[floors.length - 1]?.z) || 0) + (Number(floors[floors.length - 1]?.h) || 0),
+                };
             } else {
-                // 通常モードの階移動は1Fの移動量を建物全体へ加える。
-                // 1Fだけを書き換えると、見た目の階層がばらけてしまう。
+                // 通常モードの1F移動は階のx/yではなく建物本体を移動する。
+                // これで全階が同じ量だけ動き、3Dの回転リングも移動後の
+                // 建物中心へ追従する。
                 const dx = nextX - (Number(floor.x) || 0),
-                    dy = nextY - (Number(floor.y) || 0);
-                floors.forEach((f) => {
-                    f.x = (Number(f.x) || 0) + dx;
-                    f.y = (Number(f.y) || 0) + dy;
-                });
+                    dy = nextY - (Number(floor.y) || 0),
+                    a = Number(o.rot || 0) * DG,
+                    cs = Math.cos(a),
+                    sn = Math.sin(a);
+                patch = {
+                    ca: (Number(o.ca) || 0) + dx * cs - dy * sn,
+                    cb: (Number(o.cb) || 0) + dx * sn + dy * cs,
+                    activeFloor: 0,
+                    h: (Number(floors[floors.length - 1]?.z) || 0) + (Number(floors[floors.length - 1]?.h) || 0),
+                };
             }
+        }
+    } else if (ed.t === "stacked-bevel-offset") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            floors = Array.isArray(o.floors) ? o.floors.map((f) => ({ ...f })) : [],
+            floor = floors[h.floorIndex],
+            offset = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        if (floor) {
+            floor.bevelOffset = offset;
+            if (!stackedIndividualEdit(o) && h.floorIndex === 0) floors.forEach((f) => (f.bevelOffset = offset));
+            const last = floors[floors.length - 1];
             patch = {
                 floors,
-                activeFloor: stackedIndividualEdit(o) ? ed.floorIndex : 0,
-                h: (Number(floors[floors.length - 1]?.z) || 0) + (Number(floors[floors.length - 1]?.h) || 0),
+                bevelOffset: offset,
+                floorCount: floors.length,
+                h: (Number(last?.z) || 0) + (Number(last?.h) || 0),
             };
         }
     } else if (ed.t.startsWith("stacked-")) {
@@ -3283,6 +3528,21 @@ function exportSurfaceTriangles(o) {
             ];
         f.forEach((q) => quad(v[q[0]], v[q[1]], v[q[2]], v[q[3]]));
     };
+    const beveledAt = (cx, cy, bw, bd, z0, z1, offset, segments) => {
+        const footprint = beveledBoxFootprint(bw, bd, offset, segments),
+            center0 = [cx, cy, z0],
+            center1 = [cx, cy, z1];
+        for (let i = 0; i < footprint.length; i++) {
+            const j = (i + 1) % footprint.length,
+                a = [cx + footprint[i][0], cy + footprint[i][1], z0],
+                b = [cx + footprint[j][0], cy + footprint[j][1], z0],
+                c = [cx + footprint[j][0], cy + footprint[j][1], z1],
+                d0 = [cx + footprint[i][0], cy + footprint[i][1], z1];
+            tri(center0, b, a);
+            tri(center1, d0, c);
+            quad(a, b, c, d0);
+        }
+    };
     const ellipsoid = (cx, cy, cz, rx, ry, rz, lat = 8, lon = 12) => {
         for (let j = 0; j < lat; j++) {
             const p0 = -Math.PI / 2 + (j * Math.PI) / lat,
@@ -3334,12 +3594,32 @@ function exportSurfaceTriangles(o) {
         }
     };
     const kind = o.asset || o.type;
+    if (kind === "beveledBox" && typeof beveledBoxFootprint === "function") {
+        const q = beveledBoxParams(o),
+            footprint = beveledBoxFootprint(q.w, q.d, q.bevelOffset, q.bevelSegments),
+            z0 = 0,
+            z1 = Math.max(0.01, Number(o.h) || 0.01),
+            center0 = [0, 0, z0],
+            center1 = [0, 0, z1];
+        // 面取りした凸多角形を上下面のファンと側面の四角形へ分解する。
+        for (let i = 0; i < footprint.length; i++) {
+            const j = (i + 1) % footprint.length,
+                a = [footprint[i][0], footprint[i][1], z0],
+                b = [footprint[j][0], footprint[j][1], z0],
+                c = [footprint[j][0], footprint[j][1], z1],
+                d0 = [footprint[i][0], footprint[i][1], z1];
+            tri(center0, b, a);
+            tri(center1, d0, c);
+            quad(a, b, c, d0);
+        }
+        return out;
+    }
     if (kind === "pathPipe" && typeof pathPipeMesh === "function") {
         const mesh = pathPipeMesh(o);
         mesh.triangles.forEach((triangle) => out.push(triangle.map((v) => L(...v))));
         return out;
     }
-    if (kind === "stackedBuilding") {
+    if (kind === "stackedBuilding" || kind === "beveledStackedBuilding") {
         const floors =
             Array.isArray(o.floors) && o.floors.length
                 ? o.floors
@@ -3352,10 +3632,24 @@ function exportSurfaceTriangles(o) {
                 fx = Number(f.x) || 0,
                 fy = Number(f.y) || 0,
                 rh = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, fh),
-                ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18));
-            boxAt(fx, fy, fw, fd, fz, fz + fh);
-            // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
-            boxAt(fx, fy, fw + ro * 2, fd + ro * 2, fz + fh - rh, fz + fh);
+                ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18)),
+                bevelOffset = Number.isFinite(Number(f.bevelOffset))
+                    ? Number(f.bevelOffset)
+                    : Number(o.bevelOffset) || 0.28,
+                bevelSegments = beveledBoxSegments(
+                    f.bevelSegments,
+                    f.bevelEdges,
+                    beveledBoxSegments(o.bevelSegments, o.bevelEdges),
+                );
+            if (kind === "beveledStackedBuilding") {
+                beveledAt(fx, fy, fw, fd, fz, fz + fh, bevelOffset, bevelSegments);
+                // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
+                beveledAt(fx, fy, fw + ro * 2, fd + ro * 2, fz + fh - rh, fz + fh, bevelOffset, bevelSegments);
+            } else {
+                boxAt(fx, fy, fw, fd, fz, fz + fh);
+                // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
+                boxAt(fx, fy, fw + ro * 2, fd + ro * 2, fz + fh - rh, fz + fh);
+            }
         });
         return out;
     }
@@ -5249,6 +5543,7 @@ try {
     const t = localStorage.getItem(AK);
     if (t) unpack(JSON.parse(t));
 } catch (e) {} // 前回の自動保存があれば復元
+
 /* City Grid Studio asset module.
    Asset catalog, low-poly geometry generation and asset-specific normalization live here.
    The UI/controller layer stays in studio-ui.js. */
@@ -5258,6 +5553,16 @@ try {
 // 円柱は円の押し出しで作れるため、アセット棚からは外している。
 const ASSETS = {
     rect: { label: "長方形", glyph: "□", w: 1.5, d: 1.0, h: 0, accent: "#66e3c8" },
+    beveledBox: {
+        label: "ベベル直方体",
+        glyph: "⬡",
+        w: 3.2,
+        d: 2.4,
+        h: 0,
+        bevelOffset: 0.28,
+        bevelSegments: 4,
+        accent: "#ff9f68",
+    },
     circle: { label: "円", glyph: "○", w: 1.25, d: 1.25, h: 0, accent: "#ad9cff" },
     cone: { label: "円錐", glyph: "△", w: 1.25, d: 1.25, h: 1.45, accent: "#ffb36f" },
     sphere: { label: "球体", glyph: "●", w: 1.3, d: 1.3, h: 1.3, accent: "#ad9cff" },
@@ -5273,6 +5578,16 @@ const ASSETS = {
     buildingAwning: { label: "テント付き建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#d98b68" },
     buildingSign: { label: "看板付き開口建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#76d9ff" },
     stackedBuilding: { label: "縁付き階層建物", glyph: "▥", w: 4, d: 3, h: 8.98, accent: "#8ce6c2" },
+    beveledStackedBuilding: {
+        label: "ベベル直方体の縁付き階層建物",
+        glyph: "▥",
+        w: 4,
+        d: 3,
+        h: 8.98,
+        bevelOffset: 0.28,
+        bevelSegments: 4,
+        accent: "#ff9f68",
+    },
     crosswalk: { label: "横断歩道", glyph: "▥", w: 3.2, d: 4.2, h: 0.02, accent: "#668cff" },
 };
 const assetLabel = (o) =>
@@ -5390,6 +5705,46 @@ function boxA(o, w, d, z0, z1, color = o.c || "#e7fff4") {
         ),
     );
     return out;
+}
+// ベベル直方体の平面輪郭。四つの縦角を、オフセットを半径とする
+// 1〜4分割の円弧で面取りする。segments=1なら一枚の平面面取り、
+// segments=4なら各角を4枚の小面へ分割した丸みのあるベベルになる。
+function beveledBoxSegments(value, legacyValue, fallback = 4) {
+    const direct = Number(value),
+        legacy = Number(legacyValue),
+        n = Number.isFinite(direct) ? direct : Number.isFinite(legacy) ? legacy : fallback;
+    return clamp(Math.round(n), 1, 4);
+}
+function beveledBoxFootprint(width, depth, offset, segmentCount) {
+    const w = Math.max(0.01, Math.abs(Number(width) || 0.01)),
+        d = Math.max(0.01, Math.abs(Number(depth) || 0.01)),
+        hw = w * 0.5,
+        hd = d * 0.5,
+        b = clamp(Number(offset) || 0, 0, Math.max(0, Math.min(hw, hd) - 0.001)),
+        segments = beveledBoxSegments(segmentCount),
+        corners = [
+            [-hw + b, -hd + b, Math.PI],
+            [hw - b, -hd + b, (Math.PI * 3) / 2],
+            [hw - b, hd - b, 0],
+            [-hw + b, hd - b, Math.PI / 2],
+        ],
+        out = [];
+    if (b <= 0.000001) return corners.map(([x, y]) => [x, y]);
+    corners.forEach(([cx, cy, start]) => {
+        for (let i = 0; i <= segments; i++) {
+            const angle = start + (i / segments) * (Math.PI / 2);
+            out.push([cx + b * Math.cos(angle), cy + b * Math.sin(angle)]);
+        }
+    });
+    return out;
+}
+function beveledBoxParams(o) {
+    const w = Math.max(0.01, Math.abs(Number(o?.ra) || 0.01) * 2),
+        d = Math.max(0.01, Math.abs(Number(o?.rb) || 0.01) * 2),
+        max = Math.max(0, Math.min(w, d) * 0.5 - 0.001),
+        bevelOffset = clamp(Number(o?.bevelOffset) || 0, 0, max),
+        bevelSegments = beveledBoxSegments(o?.bevelSegments, o?.bevelEdges);
+    return { w, d, max, bevelOffset, bevelSegments };
 }
 function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
     const x = w / 2,
@@ -5637,6 +5992,41 @@ function assetLines(o) {
                     Number(style.width) || width,
                 );
         });
+    } else if (kind === "beveledBox") {
+        const q = beveledBoxParams(o),
+            footprint = beveledBoxFootprint(q.w, q.d, q.bevelOffset, q.bevelSegments),
+            z0 = 0,
+            z1 = Math.max(0, Number(h) || 0);
+        // 初期状態は長方形と同じく一枚の面。押し出し後は面取りした
+        // 底面・上面と、各頂点をつなぐ縦辺を線画にする。
+        out.push(
+            polyA(
+                o,
+                footprint.map(([x, y]) => [x, y, z0]),
+                c,
+            ),
+        );
+        if (z1 > 0.000001) {
+            out.push(
+                polyA(
+                    o,
+                    footprint.map(([x, y]) => [x, y, z1]),
+                    c,
+                ),
+            );
+            footprint.forEach(([x, y]) =>
+                out.push(
+                    lineA(
+                        o,
+                        [
+                            [x, y, z0],
+                            [x, y, z1],
+                        ],
+                        c,
+                    ),
+                ),
+            );
+        }
     } else if (kind === "pathPipe") {
         const mesh = pathPipeMesh(o);
         mesh.rings.forEach((ring) => out.push(polyA(o, ring, c, 0.95)));
@@ -5649,7 +6039,7 @@ function assetLines(o) {
                     0.85,
                 ),
             );
-    } else if (kind === "stackedBuilding") {
+    } else if (kind === "stackedBuilding" || kind === "beveledStackedBuilding") {
         const floors =
             Array.isArray(o.floors) && o.floors.length
                 ? o.floors
@@ -5700,17 +6090,63 @@ function assetLines(o) {
                 ),
             );
         };
+        const addBeveledBox = (
+            f,
+            w,
+            d,
+            z,
+            h,
+            bevelOffset,
+            bevelSegments,
+            color = c,
+            caps = { bottom: true, top: true },
+        ) => {
+            const footprint = beveledBoxFootprint(w, d, bevelOffset, bevelSegments),
+                ox = Number(f.x || 0),
+                oy = Number(f.y || 0),
+                oz = Number(f.z || 0),
+                bottom = footprint.map(([x, y]) => [x + ox, y + oy, z + oz]),
+                top = footprint.map(([x, y]) => [x + ox, y + oy, z + h + oz]);
+            if (caps.bottom) out.push(customLineA(o, [...bottom, bottom[0]], color));
+            if (caps.top) out.push(customLineA(o, [...top, top[0]], color));
+            footprint.forEach(([x, y]) =>
+                out.push(
+                    customLineA(
+                        o,
+                        [
+                            [x + ox, y + oy, z + oz],
+                            [x + ox, y + oy, z + h + oz],
+                        ],
+                        color,
+                    ),
+                ),
+            );
+        };
         floors.forEach((f, i) => {
             const w = Math.max(0.05, Math.abs(Number(f.w) || Number(o.ra || 2) * 2)),
                 d = Math.max(0.05, Math.abs(Number(f.d) || Number(o.rb || 1.5) * 2)),
                 h = Math.max(0.05, Math.abs(Number(f.h) || 2.2)),
                 rh = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, h),
-                ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18));
+                ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18)),
+                bevelOffset = Number.isFinite(Number(f.bevelOffset))
+                    ? Number(f.bevelOffset)
+                    : Number(o.bevelOffset) || 0.28,
+                bevelSegments = beveledBoxSegments(
+                    f.bevelSegments,
+                    f.bevelEdges,
+                    beveledBoxSegments(o.bevelSegments, o.bevelEdges),
+                );
             // 本体の上辺は上側の縁に隠れるため描かず、下側の縁は全階で作らない。
             // 1階だけは床側の本体辺を残す。
-            addBox(f, w, d, 0, h, f.c || c, { bottom: i === 0, top: false });
-            // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
-            addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
+            if (kind === "beveledStackedBuilding") {
+                addBeveledBox(f, w, d, 0, h, bevelOffset, bevelSegments, f.c || c, { bottom: i === 0, top: false });
+                // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
+                addBeveledBox(f, w + ro * 2, d + ro * 2, h - rh, rh, bevelOffset, bevelSegments, f.rimColor || a);
+            } else {
+                addBox(f, w, d, 0, h, f.c || c, { bottom: i === 0, top: false });
+                // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
+                addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
+            }
         });
     } else if (kind === "balcony") {
         // 壁側（+Y）を建物外壁へ合わせ、床を外側（-Y）へ張り出すU字型のベランダ。
@@ -6468,6 +6904,34 @@ function assetLines(o) {
 }
 function normalizedAsset(o) {
     let q = o?.attachment ? syncAttachedPart(o) : o;
+    if (q && q.asset === "beveledBox") {
+        const width = Math.max(0.01, Math.abs(Number(q.ra) || 0.01) * 2),
+            depth = Math.max(0.01, Math.abs(Number(q.rb) || 0.01) * 2),
+            max = Math.max(0, Math.min(width, depth) * 0.5 - 0.001),
+            bevelOffset = clamp(Number(q.bevelOffset) || 0, 0, max),
+            bevelSegments = beveledBoxSegments(q.bevelSegments, q.bevelEdges);
+        return { ...q, bevelOffset, bevelSegments, h: Math.max(0, Number(q.h) || 0) };
+    }
+    if (q && q.asset === "beveledStackedBuilding") {
+        const source = Array.isArray(q.floors) && q.floors.length ? q.floors : [],
+            baseOffset = Number.isFinite(Number(q.bevelOffset)) ? Number(q.bevelOffset) : 0.28,
+            baseSegments = beveledBoxSegments(q.bevelSegments, q.bevelEdges),
+            floors = source.map((f) => {
+                const w = Math.max(0.01, Math.abs(Number(f.w) || Number(q.ra) * 2 || 4)),
+                    d = Math.max(0.01, Math.abs(Number(f.d) || Number(q.rb) * 2 || 3)),
+                    max = Math.max(0, Math.min(w, d) * 0.5 - 0.001),
+                    offset = clamp(Number.isFinite(Number(f.bevelOffset)) ? Number(f.bevelOffset) : baseOffset, 0, max),
+                    segments = beveledBoxSegments(f.bevelSegments, f.bevelEdges, baseSegments);
+                return { ...f, bevelOffset: offset, bevelSegments: segments };
+            });
+        return {
+            ...q,
+            bevelOffset: baseOffset,
+            bevelSegments: baseSegments,
+            floors,
+            h: floors.reduce((max, f) => Math.max(max, (Number(f.z) || 0) + (Number(f.h) || 0)), 0),
+        };
+    }
     if (q && q.asset === "pathPipe") {
         const path = pathPipeControlPoints(q),
             radius = clamp(Number.isFinite(Number(q.pipeRadius)) ? Math.abs(Number(q.pipeRadius)) : 0.18, 0.02, 20),
@@ -6567,7 +7031,7 @@ obBounds = function (o) {
         mesh.rings.forEach((ring) =>
             ring.forEach((v) => pts.push(pt(q, Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0))),
         );
-    } else if (q.asset === "stackedBuilding") {
+    } else if (isStackedBuildingAsset(q)) {
         const floors =
             Array.isArray(q.floors) && q.floors.length
                 ? q.floors
@@ -6608,6 +7072,7 @@ obBounds = function (o) {
 };
 // 既に自動保存されているオブジェクトも、今回の円柱・球・看板の新しい線画へ更新する。
 regenObjects();
+
 /* City Grid Studio asset controller.
    This file wires the asset generator to the shelf, JSON import, clipboard,
    and primitive quick menu. The geometry itself lives in asset.js. */
@@ -6670,8 +7135,9 @@ window.cityGridInstallAssetUI = function (bridge) {
             accent: info.accent,
         };
         const height = kind === "person" ? Number(P.hm) || 1.7 : info.h;
-        if (kind === "stackedBuilding") {
-            const floorHeight = 2.2,
+        if (kind === "stackedBuilding" || kind === "beveledStackedBuilding") {
+            const beveled = kind === "beveledStackedBuilding",
+                floorHeight = 2.2,
                 floorGap = 0.06,
                 floors = Array.from({ length: 4 }, (_, i) => ({
                     name: `${i + 1}F`,
@@ -6683,12 +7149,14 @@ window.cityGridInstallAssetUI = function (bridge) {
                     h: floorHeight,
                     rimHeight: 0.16,
                     rimOverhang: 0.18,
+                    bevelOffset: beveled ? info.bevelOffset : undefined,
+                    bevelSegments: beveled ? info.bevelSegments : undefined,
                 }));
             return {
                 ...base,
                 type: "asset",
                 asset: kind,
-                assetId: "stacked-building",
+                assetId: beveled ? "beveled-stacked-building" : "stacked-building",
                 assetName: info.label,
                 k: 1,
                 d: -1,
@@ -6703,6 +7171,8 @@ window.cityGridInstallAssetUI = function (bridge) {
                 floorGap,
                 rimHeight: 0.16,
                 rimOverhang: 0.18,
+                bevelOffset: beveled ? info.bevelOffset : undefined,
+                bevelSegments: beveled ? info.bevelSegments : undefined,
                 // 既定は1F編集を全階へ連動。旧JSONのsyncFirstは互換用に残す。
                 syncFirst: true,
                 individualEdit: false,
@@ -6719,6 +7189,20 @@ window.cityGridInstallAssetUI = function (bridge) {
                 rb: info.d / 2,
                 h: 0,
                 extrude: false,
+            };
+        if (kind === "beveledBox")
+            return {
+                ...base,
+                type: "asset",
+                asset: kind,
+                assetId: "beveled-box",
+                assetName: info.label,
+                ra: info.w / 2,
+                rb: info.d / 2,
+                h: 0,
+                extrude: false,
+                bevelOffset: info.bevelOffset,
+                bevelSegments: info.bevelSegments,
             };
         return {
             ...base,
@@ -6845,13 +7329,13 @@ window.cityGridInstallAssetUI = function (bridge) {
         // 既存の建物接着と同じ親子同期経路を使うため、親の移動・寸法変更にも追従する。
         return parent &&
             parent.type === "asset" &&
-            ["building", "stackedBuilding"].includes(parent.asset) &&
+            ["building", "stackedBuilding", "beveledStackedBuilding"].includes(parent.asset) &&
             parent.k === 1
             ? parent
             : null;
     }
     function newAttachedBalcony(parent) {
-        const isStacked = parent.asset === "stackedBuilding",
+        const isStacked = isStackedBuildingAsset(parent),
             floors = Array.isArray(parent.floors) ? parent.floors : [],
             floorIndex = isStacked
                 ? clamp(Math.round(Number(parent.activeFloor) || 1), 0, Math.max(0, floors.length - 1))
@@ -7271,6 +7755,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         if (!e.target.closest("#primitiveQuickMenu") && !e.target.closest("#cv")) closePrimitiveMenu();
     });
 };
+
 /* City Grid Studio studio layer — UI, gestures, floor tools and asset library.
    The perspective engine stays underneath so old projects remain compatible. */
 (function () {
@@ -8004,15 +8489,17 @@ window.cityGridInstallAssetUI = function (bridge) {
     function rebuildStackFloorRows(o) {
         const rows = el("stackFloorRows");
         if (!rows) return;
-        const floors = Array.isArray(o?.floors) ? o.floors : [];
-        if (rows.dataset.count !== String(floors.length)) {
+        const floors = Array.isArray(o?.floors) ? o.floors : [],
+            rowKind = isBeveledStackedBuildingAsset(o) ? "beveled" : "normal";
+        if (rows.dataset.count !== String(floors.length) || rows.dataset.kind !== rowKind) {
             rows.innerHTML = floors
                 .map(
                     (f, i) =>
-                        `<div class="stackFloorRow" data-floor-row="${i}"><button type="button" data-stack-floor-select="${i}" class="stackFloorSelect">${i + 1}F</button><label>幅<input data-stack-floor="${i}" data-stack-key="w" type="number" step="0.05"></label><label>奥行<input data-stack-floor="${i}" data-stack-key="d" type="number" step="0.05"></label><label>高さ<input data-stack-floor="${i}" data-stack-key="h" type="number" step="0.05"></label><label>X<input data-stack-floor="${i}" data-stack-key="x" type="number" step="0.05"></label><label>Y<input data-stack-floor="${i}" data-stack-key="y" type="number" step="0.05"></label><label>Z<input data-stack-floor="${i}" data-stack-key="z" type="number" step="0.05"></label><label>縁出<input data-stack-floor="${i}" data-stack-key="rimOverhang" type="number" step="0.01"></label><label>縁高<input data-stack-floor="${i}" data-stack-key="rimHeight" type="number" step="0.01"></label></div>`,
+                        `<div class="stackFloorRow" data-floor-row="${i}"><button type="button" data-stack-floor-select="${i}" class="stackFloorSelect">${i + 1}F</button><label>幅<input data-stack-floor="${i}" data-stack-key="w" type="number" step="0.05"></label><label>奥行<input data-stack-floor="${i}" data-stack-key="d" type="number" step="0.05"></label><label>高さ<input data-stack-floor="${i}" data-stack-key="h" type="number" step="0.05"></label><label>X<input data-stack-floor="${i}" data-stack-key="x" type="number" step="0.05"></label><label>Y<input data-stack-floor="${i}" data-stack-key="y" type="number" step="0.05"></label><label>Z<input data-stack-floor="${i}" data-stack-key="z" type="number" step="0.05"></label><label>縁出<input data-stack-floor="${i}" data-stack-key="rimOverhang" type="number" step="0.01"></label><label>縁高<input data-stack-floor="${i}" data-stack-key="rimHeight" type="number" step="0.01"></label>${rowKind === "beveled" ? `<label>ベベル出<input data-stack-floor="${i}" data-stack-key="bevelOffset" type="number" min="0" step="0.01"></label><label>セグメント<input data-stack-floor="${i}" data-stack-key="bevelSegments" type="number" min="1" max="4" step="1"></label>` : ""}</div>`,
                 )
                 .join("");
             rows.dataset.count = String(floors.length);
+            rows.dataset.kind = rowKind;
             rows.querySelectorAll("[data-stack-floor]").forEach((n) => {
                 n.oninput = () => {
                     const current = sel && obOf(sel),
@@ -8029,7 +8516,11 @@ window.cityGridInstallAssetUI = function (bridge) {
                     }
                     const nextFloors = current.floors.map((f) => ({ ...f }));
                     nextFloors[index][key] = Number(n.value) || 0;
-                    if (!individualEdit && index === 0 && ["w", "d", "h", "rimOverhang", "rimHeight"].includes(key))
+                    if (
+                        !individualEdit &&
+                        index === 0 &&
+                        ["w", "d", "h", "rimOverhang", "rimHeight", "bevelOffset", "bevelSegments"].includes(key)
+                    )
                         nextFloors.forEach((f) => (f[key] = nextFloors[0][key]));
                     if (!individualEdit && index === 0 && ["x", "y", "z"].includes(key)) {
                         const delta = (Number(nextFloors[0][key]) || 0) - (Number(current.floors[0][key]) || 0);
@@ -8071,7 +8562,8 @@ window.cityGridInstallAssetUI = function (bridge) {
     function syncStackedPanel() {
         const panel = el("stackedP"),
             o = sel && obOf(sel),
-            active = !!(o && o.type === "asset" && o.asset === "stackedBuilding");
+            active = isStackedBuildingAsset(o),
+            beveled = isBeveledStackedBuildingAsset(o);
         if (!panel) return;
         panel.style.display = active ? "" : "none";
         if (!active) {
@@ -8084,11 +8576,31 @@ window.cityGridInstallAssetUI = function (bridge) {
         if (count && document.activeElement !== count) count.value = o.floorCount || o.floors?.length || 1;
         if (individualEdit) individualEdit.checked = stackedIndividualEdit(o);
         if (gap && document.activeElement !== gap) gap.value = Number(o.floorGap || 0).toFixed(3);
+        const title = el("stackedPanelTitle"),
+            bevelControls = el("stackBevelControls");
+        if (title) title.textContent = beveled ? "ベベル直方体の縁付き階層建物" : "縁付き階層建物";
+        if (bevelControls) bevelControls.style.display = beveled ? "" : "none";
+        if (beveled) {
+            const floors = Array.isArray(o.floors) ? o.floors : [],
+                index = stackedIndividualEdit(o)
+                    ? clamp(Math.round(Number(o.activeFloor) || 0), 0, Math.max(0, floors.length - 1))
+                    : 0,
+                f = floors[index] || {},
+                width = Math.max(0.01, Math.abs(Number(f.w) || Number(o.ra) * 2 || 4)),
+                depth = Math.max(0.01, Math.abs(Number(f.d) || Number(o.rb) * 2 || 3)),
+                max = Math.max(0, Math.min(width, depth) * 0.5 - 0.001),
+                offset = el("stackBevelOffset"),
+                segments = el("stackBevelSegments");
+            if (offset && document.activeElement !== offset)
+                offset.value = clamp(Number(f.bevelOffset ?? o.bevelOffset) || 0, 0, max).toFixed(3);
+            if (segments && document.activeElement !== segments)
+                segments.value = beveledBoxSegments(f.bevelSegments ?? o.bevelSegments, f.bevelEdges ?? o.bevelEdges);
+        }
         rebuildStackFloorRows(o);
     }
     function applyStackMeta(key, value) {
         const o = sel && obOf(sel);
-        if (!o || o.asset !== "stackedBuilding") return;
+        if (!o || !isStackedBuildingAsset(o)) return;
         if (!stackedEditSession) {
             HU.push(S);
             RD = [];
@@ -8106,6 +8618,9 @@ window.cityGridInstallAssetUI = function (bridge) {
                     h: first.h,
                     rimHeight: first.rimHeight,
                     rimOverhang: first.rimOverhang,
+                    ...(isBeveledStackedBuildingAsset(o)
+                        ? { bevelOffset: first.bevelOffset, bevelSegments: first.bevelSegments }
+                        : {}),
                 }));
                 patch.h = stackFloorHeight(patch);
                 patch.activeFloor = 0;
@@ -8147,9 +8662,41 @@ window.cityGridInstallAssetUI = function (bridge) {
         });
         render();
     }
+    function applyStackBevelProp(name, value) {
+        const o = sel && obOf(sel);
+        if (!isBeveledStackedBuildingAsset(o) || !Number.isFinite(value) || !o.floors?.length) return;
+        if (!stackedEditSession) {
+            HU.push(S);
+            RD = [];
+            stackedEditSession = true;
+        }
+        const individual = stackedIndividualEdit(o),
+            index = individual ? clamp(Math.round(Number(o.activeFloor) || 0), 0, o.floors.length - 1) : 0,
+            floors = o.floors.map((f) => ({ ...f })),
+            floor = floors[index],
+            width = Math.max(0.01, Math.abs(Number(floor.w) || Number(o.ra) * 2 || 4)),
+            depth = Math.max(0.01, Math.abs(Number(floor.d) || Number(o.rb) * 2 || 3)),
+            max = Math.max(0, Math.min(width, depth) * 0.5 - 0.001),
+            next = name === "bevelOffset" ? clamp(value, 0, max) : clamp(Math.round(value), 1, 4);
+        floor[name] = next;
+        if (!individual && index === 0) floors.forEach((f) => (f[name] = next));
+        setOb(o.id, { [name]: next, floors, h: stackFloorHeight({ floors }) });
+        render();
+    }
+    [
+        ["stackBevelOffset", "bevelOffset"],
+        ["stackBevelSegments", "bevelSegments"],
+    ].forEach(([id, name]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => applyStackBevelProp(name, parseFloat(input.value));
+        input.onchange = () => {
+            stackedEditSession = false;
+        };
+    });
     function alignStackedObject() {
         const o = sel && obOf(sel);
-        if (!o || o.asset !== "stackedBuilding" || !o.floors?.length) return;
+        if (!o || !isStackedBuildingAsset(o) || !o.floors?.length) return;
         HU.push(S);
         RD = [];
         const floors = o.floors.map((f) => ({ ...f })),
@@ -8169,7 +8716,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     }
     function copyFirstFloorToAll() {
         const o = sel && obOf(sel);
-        if (!o || o.asset !== "stackedBuilding" || !o.floors?.length) return;
+        if (!o || !isStackedBuildingAsset(o) || !o.floors?.length) return;
         HU.push(S);
         RD = [];
         const first = o.floors[0],
@@ -8180,6 +8727,9 @@ window.cityGridInstallAssetUI = function (bridge) {
                 h: first.h,
                 rimHeight: first.rimHeight,
                 rimOverhang: first.rimOverhang,
+                ...(isBeveledStackedBuildingAsset(o)
+                    ? { bevelOffset: first.bevelOffset, bevelSegments: first.bevelSegments }
+                    : {}),
             }));
         setOb(o.id, { floors, h: stackFloorHeight({ floors }) });
         render();
@@ -8413,6 +8963,55 @@ window.cityGridInstallAssetUI = function (bridge) {
             pathPipeEditSession = false;
         };
     }
+    let beveledBoxEditSession = false;
+    function syncBeveledBoxPanel() {
+        const panel = el("beveledBoxP"),
+            o = sel && obOf(sel),
+            isBeveled = !!(o && o.type === "asset" && o.asset === "beveledBox");
+        if (!panel) return;
+        panel.style.display = isBeveled ? "" : "none";
+        if (!isBeveled) return;
+        const offset = el("beveledBoxOffset"),
+            segments = el("beveledBoxSegments"),
+            width = Math.max(0.01, Math.abs(Number(o.ra) || 0.01) * 2),
+            depth = Math.max(0.01, Math.abs(Number(o.rb) || 0.01) * 2),
+            max = Math.max(0, Math.min(width, depth) * 0.5 - 0.001);
+        if (offset && document.activeElement !== offset)
+            offset.value = clamp(Number(o.bevelOffset) || 0, 0, max).toFixed(3);
+        const segmentValue = Number(o.bevelSegments ?? o.bevelEdges);
+        if (segments && document.activeElement !== segments)
+            segments.value = clamp(Math.round(Number.isFinite(segmentValue) ? segmentValue : 4), 1, 4);
+    }
+    function applyBeveledBoxProp(name, value) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || o.asset !== "beveledBox") return;
+        if (!beveledBoxEditSession) {
+            HU.push(S);
+            RD = [];
+            beveledBoxEditSession = true;
+        }
+        const width = Math.max(0.01, Math.abs(Number(o.ra) || 0.01) * 2),
+            depth = Math.max(0.01, Math.abs(Number(o.rb) || 0.01) * 2),
+            max = Math.max(0, Math.min(width, depth) * 0.5 - 0.001),
+            patch = {};
+        if (name === "bevelOffset" && Number.isFinite(value)) patch.bevelOffset = clamp(value, 0, max);
+        else if (name === "bevelSegments" && Number.isFinite(value))
+            patch.bevelSegments = clamp(Math.round(value), 1, 4);
+        if (!Object.keys(patch).length) return;
+        setOb(sel, patch);
+        render();
+    }
+    [
+        ["beveledBoxOffset", "bevelOffset"],
+        ["beveledBoxSegments", "bevelSegments"],
+    ].forEach(([id, name]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => applyBeveledBoxProp(name, parseFloat(input.value));
+        input.onchange = () => {
+            beveledBoxEditSession = false;
+        };
+    });
     function syncAssetControls() {
         const o = sel && obOf(sel);
         if (o && o.type === "asset" && o.asset === "stairs") {
@@ -8431,6 +9030,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         syncBuildingPanel();
         syncBalconyPanel();
         syncPathPipePanel();
+        syncBeveledBoxPanel();
         syncStackedPanel();
         syncFloorControls();
         syncAssetDepth();
@@ -9353,7 +9953,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             // 積層建物とパスパイプは、単一のra/rb/hではなく floors/path[] を
             // 持つため、間取り用の汎用ハンドルを出すと別の古い寸法を編集してしまう。
             // 専用ギズモを同じ座標へ描き、pointerdownも通常のギズモ経路へ渡す。
-            customEdit = o.type === "asset" && (o.asset === "stackedBuilding" || o.asset === "pathPipe");
+            customEdit = o.type === "asset" && (isStackedBuildingAsset(o) || o.asset === "pathPipe");
         if (customEdit) return { o, base, center, handles, panel: null, special: true };
         const add = (kind, label, point, probe, start, min = 0.01, side = 1) => {
             const s = scrW(point),
@@ -10138,7 +10738,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 const special = hitGizmo(p),
                     customAsset = special?.g?.o?.asset,
                     customFloorGizmo =
-                        customAsset === "stackedBuilding" ||
+                        ["stackedBuilding", "beveledStackedBuilding"].includes(customAsset) ||
                         customAsset === "pathPipe" ||
                         special?.t?.startsWith("sign-") ||
                         (special?.t === "face" && customAsset === "sign");

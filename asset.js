@@ -7,6 +7,16 @@
 // 円柱は円の押し出しで作れるため、アセット棚からは外している。
 const ASSETS = {
     rect: { label: "長方形", glyph: "□", w: 1.5, d: 1.0, h: 0, accent: "#66e3c8" },
+    beveledBox: {
+        label: "ベベル直方体",
+        glyph: "⬡",
+        w: 3.2,
+        d: 2.4,
+        h: 0,
+        bevelOffset: 0.28,
+        bevelSegments: 4,
+        accent: "#ff9f68",
+    },
     circle: { label: "円", glyph: "○", w: 1.25, d: 1.25, h: 0, accent: "#ad9cff" },
     cone: { label: "円錐", glyph: "△", w: 1.25, d: 1.25, h: 1.45, accent: "#ffb36f" },
     sphere: { label: "球体", glyph: "●", w: 1.3, d: 1.3, h: 1.3, accent: "#ad9cff" },
@@ -22,6 +32,16 @@ const ASSETS = {
     buildingAwning: { label: "テント付き建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#d98b68" },
     buildingSign: { label: "看板付き開口建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#76d9ff" },
     stackedBuilding: { label: "縁付き階層建物", glyph: "▥", w: 4, d: 3, h: 8.98, accent: "#8ce6c2" },
+    beveledStackedBuilding: {
+        label: "ベベル直方体の縁付き階層建物",
+        glyph: "▥",
+        w: 4,
+        d: 3,
+        h: 8.98,
+        bevelOffset: 0.28,
+        bevelSegments: 4,
+        accent: "#ff9f68",
+    },
     crosswalk: { label: "横断歩道", glyph: "▥", w: 3.2, d: 4.2, h: 0.02, accent: "#668cff" },
 };
 const assetLabel = (o) =>
@@ -30,32 +50,32 @@ const assetLabel = (o) =>
             ? "テント付き建物"
             : "接続テント"
         : o.linkedAsset === "buildingSign"
-            ? o.linkedRole === "parent" || o.asset === "building"
-                ? "看板付き開口建物"
-                : "接続看板"
-            : o.type === "compound"
-                ? "結合オブジェクト"
-                : o.type === "asset"
-                    ? o.assetName || ASSETS[o.asset]?.label || (o.asset === "cylinder" ? "円柱" : "アセット")
-                    : o.type === "rect"
-                        ? "長方形"
-                        : o.type === "circ"
-                            ? "円"
-                            : o.type === "box"
-                                ? "箱"
-                                : o.type === "cyl"
-                                    ? "円柱"
-                                    : "図形";
+          ? o.linkedRole === "parent" || o.asset === "building"
+              ? "看板付き開口建物"
+              : "接続看板"
+          : o.type === "compound"
+            ? "結合オブジェクト"
+            : o.type === "asset"
+              ? o.assetName || ASSETS[o.asset]?.label || (o.asset === "cylinder" ? "円柱" : "アセット")
+              : o.type === "rect"
+                ? "長方形"
+                : o.type === "circ"
+                  ? "円"
+                  : o.type === "box"
+                    ? "箱"
+                    : o.type === "cyl"
+                      ? "円柱"
+                      : "図形";
 const assetGlyph = (o) =>
     o.type === "compound"
         ? "◆"
         : o.type === "asset"
-            ? ASSETS[o.asset]?.glyph || (o.asset === "custom" ? "⬡" : o.asset === "cylinder" ? "◉" : "◆")
-            : o.type === "rect"
-                ? "□"
-                : o.type === "circ"
-                    ? "○"
-                    : "◇";
+          ? ASSETS[o.asset]?.glyph || (o.asset === "custom" ? "⬡" : o.asset === "cylinder" ? "◉" : "◆")
+          : o.type === "rect"
+            ? "□"
+            : o.type === "circ"
+              ? "○"
+              : "◇";
 
 // Coordinate helpers. Local asset coordinates are x=width, y=depth, z=up.
 const pt = (o, x, y, z) => L2W(o, x, y, z);
@@ -139,6 +159,46 @@ function boxA(o, w, d, z0, z1, color = o.c || "#e7fff4") {
         ),
     );
     return out;
+}
+// ベベル直方体の平面輪郭。四つの縦角を、オフセットを半径とする
+// 1〜4分割の円弧で面取りする。segments=1なら一枚の平面面取り、
+// segments=4なら各角を4枚の小面へ分割した丸みのあるベベルになる。
+function beveledBoxSegments(value, legacyValue, fallback = 4) {
+    const direct = Number(value),
+        legacy = Number(legacyValue),
+        n = Number.isFinite(direct) ? direct : Number.isFinite(legacy) ? legacy : fallback;
+    return clamp(Math.round(n), 1, 4);
+}
+function beveledBoxFootprint(width, depth, offset, segmentCount) {
+    const w = Math.max(0.01, Math.abs(Number(width) || 0.01)),
+        d = Math.max(0.01, Math.abs(Number(depth) || 0.01)),
+        hw = w * 0.5,
+        hd = d * 0.5,
+        b = clamp(Number(offset) || 0, 0, Math.max(0, Math.min(hw, hd) - 0.001)),
+        segments = beveledBoxSegments(segmentCount),
+        corners = [
+            [-hw + b, -hd + b, Math.PI],
+            [hw - b, -hd + b, (Math.PI * 3) / 2],
+            [hw - b, hd - b, 0],
+            [-hw + b, hd - b, Math.PI / 2],
+        ],
+        out = [];
+    if (b <= 0.000001) return corners.map(([x, y]) => [x, y]);
+    corners.forEach(([cx, cy, start]) => {
+        for (let i = 0; i <= segments; i++) {
+            const angle = start + (i / segments) * (Math.PI / 2);
+            out.push([cx + b * Math.cos(angle), cy + b * Math.sin(angle)]);
+        }
+    });
+    return out;
+}
+function beveledBoxParams(o) {
+    const w = Math.max(0.01, Math.abs(Number(o?.ra) || 0.01) * 2),
+        d = Math.max(0.01, Math.abs(Number(o?.rb) || 0.01) * 2),
+        max = Math.max(0, Math.min(w, d) * 0.5 - 0.001),
+        bevelOffset = clamp(Number(o?.bevelOffset) || 0, 0, max),
+        bevelSegments = beveledBoxSegments(o?.bevelSegments, o?.bevelEdges);
+    return { w, d, max, bevelOffset, bevelSegments };
 }
 function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
     const x = w / 2,
@@ -353,14 +413,14 @@ function assetLines(o) {
             loopStyles = Array.isArray(g.loopStyles) ? g.loopStyles : [],
             width = Number(o.w) || MASTER_W;
         const customLine = (points, color = c, lineWidth = width) =>
-            out.push({
-                c: color,
-                w: lineWidth,
-                ob: o,
-                d3: true,
-                cs: sigNow(),
-                p: dens3(points.map((q) => customPt(o, q[0], q[1], q[2]))),
-            }),
+                out.push({
+                    c: color,
+                    w: lineWidth,
+                    ob: o,
+                    d3: true,
+                    cs: sigNow(),
+                    p: dens3(points.map((q) => customPt(o, q[0], q[1], q[2]))),
+                }),
             addEdge = (ia, ib, color = c, lineWidth = width) => {
                 const u = vertices[ia],
                     v = vertices[ib];
@@ -386,6 +446,41 @@ function assetLines(o) {
                     Number(style.width) || width,
                 );
         });
+    } else if (kind === "beveledBox") {
+        const q = beveledBoxParams(o),
+            footprint = beveledBoxFootprint(q.w, q.d, q.bevelOffset, q.bevelSegments),
+            z0 = 0,
+            z1 = Math.max(0, Number(h) || 0);
+        // 初期状態は長方形と同じく一枚の面。押し出し後は面取りした
+        // 底面・上面と、各頂点をつなぐ縦辺を線画にする。
+        out.push(
+            polyA(
+                o,
+                footprint.map(([x, y]) => [x, y, z0]),
+                c,
+            ),
+        );
+        if (z1 > 0.000001) {
+            out.push(
+                polyA(
+                    o,
+                    footprint.map(([x, y]) => [x, y, z1]),
+                    c,
+                ),
+            );
+            footprint.forEach(([x, y]) =>
+                out.push(
+                    lineA(
+                        o,
+                        [
+                            [x, y, z0],
+                            [x, y, z1],
+                        ],
+                        c,
+                    ),
+                ),
+            );
+        }
     } else if (kind === "pathPipe") {
         const mesh = pathPipeMesh(o);
         mesh.rings.forEach((ring) => out.push(polyA(o, ring, c, 0.95)));
@@ -398,22 +493,22 @@ function assetLines(o) {
                     0.85,
                 ),
             );
-    } else if (kind === "stackedBuilding") {
+    } else if (kind === "stackedBuilding" || kind === "beveledStackedBuilding") {
         const floors =
             Array.isArray(o.floors) && o.floors.length
                 ? o.floors
                 : [
-                    {
-                        x: 0,
-                        y: 0,
-                        z: 0,
-                        w: o.ra * 2 || 4,
-                        d: o.rb * 2 || 3,
-                        h: o.h || 2.2,
-                        rimHeight: 0.16,
-                        rimOverhang: 0.18,
-                    },
-                ];
+                      {
+                          x: 0,
+                          y: 0,
+                          z: 0,
+                          w: o.ra * 2 || 4,
+                          d: o.rb * 2 || 3,
+                          h: o.h || 2.2,
+                          rimHeight: 0.16,
+                          rimOverhang: 0.18,
+                      },
+                  ];
         const addBox = (f, w, d, z, h, color = c, caps = { bottom: true, top: true }) => {
             const x = w / 2,
                 y = d / 2,
@@ -449,17 +544,63 @@ function assetLines(o) {
                 ),
             );
         };
+        const addBeveledBox = (
+            f,
+            w,
+            d,
+            z,
+            h,
+            bevelOffset,
+            bevelSegments,
+            color = c,
+            caps = { bottom: true, top: true },
+        ) => {
+            const footprint = beveledBoxFootprint(w, d, bevelOffset, bevelSegments),
+                ox = Number(f.x || 0),
+                oy = Number(f.y || 0),
+                oz = Number(f.z || 0),
+                bottom = footprint.map(([x, y]) => [x + ox, y + oy, z + oz]),
+                top = footprint.map(([x, y]) => [x + ox, y + oy, z + h + oz]);
+            if (caps.bottom) out.push(customLineA(o, [...bottom, bottom[0]], color));
+            if (caps.top) out.push(customLineA(o, [...top, top[0]], color));
+            footprint.forEach(([x, y]) =>
+                out.push(
+                    customLineA(
+                        o,
+                        [
+                            [x + ox, y + oy, z + oz],
+                            [x + ox, y + oy, z + h + oz],
+                        ],
+                        color,
+                    ),
+                ),
+            );
+        };
         floors.forEach((f, i) => {
             const w = Math.max(0.05, Math.abs(Number(f.w) || Number(o.ra || 2) * 2)),
                 d = Math.max(0.05, Math.abs(Number(f.d) || Number(o.rb || 1.5) * 2)),
                 h = Math.max(0.05, Math.abs(Number(f.h) || 2.2)),
                 rh = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, h),
-                ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18));
+                ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18)),
+                bevelOffset = Number.isFinite(Number(f.bevelOffset))
+                    ? Number(f.bevelOffset)
+                    : Number(o.bevelOffset) || 0.28,
+                bevelSegments = beveledBoxSegments(
+                    f.bevelSegments,
+                    f.bevelEdges,
+                    beveledBoxSegments(o.bevelSegments, o.bevelEdges),
+                );
             // 本体の上辺は上側の縁に隠れるため描かず、下側の縁は全階で作らない。
             // 1階だけは床側の本体辺を残す。
-            addBox(f, w, d, 0, h, f.c || c, { bottom: i === 0, top: false });
-            // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
-            addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
+            if (kind === "beveledStackedBuilding") {
+                addBeveledBox(f, w, d, 0, h, bevelOffset, bevelSegments, f.c || c, { bottom: i === 0, top: false });
+                // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
+                addBeveledBox(f, w + ro * 2, d + ro * 2, h - rh, rh, bevelOffset, bevelSegments, f.rimColor || a);
+            } else {
+                addBox(f, w, d, 0, h, f.c || c, { bottom: i === 0, top: false });
+                // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
+                addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
+            }
         });
     } else if (kind === "balcony") {
         // 壁側（+Y）を建物外壁へ合わせ、床を外側（-Y）へ張り出すU字型のベランダ。
@@ -1017,11 +1158,11 @@ function assetLines(o) {
             side = bp.sideT,
             centerX = (ow + side) / 2;
         const outerFront = [
-            [-w / 2, -d / 2, 0],
-            [w / 2, -d / 2, 0],
-            [w / 2, -d / 2, h],
-            [-w / 2, -d / 2, h],
-        ],
+                [-w / 2, -d / 2, 0],
+                [w / 2, -d / 2, 0],
+                [w / 2, -d / 2, h],
+                [-w / 2, -d / 2, h],
+            ],
             outerBack = [
                 [-w / 2, d / 2, 0],
                 [w / 2, d / 2, 0],
@@ -1031,11 +1172,11 @@ function assetLines(o) {
         out.push(polyA(o, outerFront, c));
         out.push(polyA(o, outerBack, c));
         const innerFront = [
-            [-ow / 2, -d / 2, 0],
-            [-ow / 2, -d / 2, oh],
-            [ow / 2, -d / 2, oh],
-            [ow / 2, -d / 2, 0],
-        ],
+                [-ow / 2, -d / 2, 0],
+                [-ow / 2, -d / 2, oh],
+                [ow / 2, -d / 2, oh],
+                [ow / 2, -d / 2, 0],
+            ],
             innerBack = [
                 [-ow / 2, d / 2, 0],
                 [-ow / 2, d / 2, oh],
@@ -1217,6 +1358,34 @@ function assetLines(o) {
 }
 function normalizedAsset(o) {
     let q = o?.attachment ? syncAttachedPart(o) : o;
+    if (q && q.asset === "beveledBox") {
+        const width = Math.max(0.01, Math.abs(Number(q.ra) || 0.01) * 2),
+            depth = Math.max(0.01, Math.abs(Number(q.rb) || 0.01) * 2),
+            max = Math.max(0, Math.min(width, depth) * 0.5 - 0.001),
+            bevelOffset = clamp(Number(q.bevelOffset) || 0, 0, max),
+            bevelSegments = beveledBoxSegments(q.bevelSegments, q.bevelEdges);
+        return { ...q, bevelOffset, bevelSegments, h: Math.max(0, Number(q.h) || 0) };
+    }
+    if (q && q.asset === "beveledStackedBuilding") {
+        const source = Array.isArray(q.floors) && q.floors.length ? q.floors : [],
+            baseOffset = Number.isFinite(Number(q.bevelOffset)) ? Number(q.bevelOffset) : 0.28,
+            baseSegments = beveledBoxSegments(q.bevelSegments, q.bevelEdges),
+            floors = source.map((f) => {
+                const w = Math.max(0.01, Math.abs(Number(f.w) || Number(q.ra) * 2 || 4)),
+                    d = Math.max(0.01, Math.abs(Number(f.d) || Number(q.rb) * 2 || 3)),
+                    max = Math.max(0, Math.min(w, d) * 0.5 - 0.001),
+                    offset = clamp(Number.isFinite(Number(f.bevelOffset)) ? Number(f.bevelOffset) : baseOffset, 0, max),
+                    segments = beveledBoxSegments(f.bevelSegments, f.bevelEdges, baseSegments);
+                return { ...f, bevelOffset: offset, bevelSegments: segments };
+            });
+        return {
+            ...q,
+            bevelOffset: baseOffset,
+            bevelSegments: baseSegments,
+            floors,
+            h: floors.reduce((max, f) => Math.max(max, (Number(f.z) || 0) + (Number(f.h) || 0)), 0),
+        };
+    }
     if (q && q.asset === "pathPipe") {
         const path = pathPipeControlPoints(q),
             radius = clamp(Number.isFinite(Number(q.pipeRadius)) ? Math.abs(Number(q.pipeRadius)) : 0.18, 0.02, 20),
@@ -1316,7 +1485,7 @@ obBounds = function (o) {
         mesh.rings.forEach((ring) =>
             ring.forEach((v) => pts.push(pt(q, Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0))),
         );
-    } else if (q.asset === "stackedBuilding") {
+    } else if (isStackedBuildingAsset(q)) {
         const floors =
             Array.isArray(q.floors) && q.floors.length
                 ? q.floors

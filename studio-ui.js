@@ -731,15 +731,17 @@
     function rebuildStackFloorRows(o) {
         const rows = el("stackFloorRows");
         if (!rows) return;
-        const floors = Array.isArray(o?.floors) ? o.floors : [];
-        if (rows.dataset.count !== String(floors.length)) {
+        const floors = Array.isArray(o?.floors) ? o.floors : [],
+            rowKind = isBeveledStackedBuildingAsset(o) ? "beveled" : "normal";
+        if (rows.dataset.count !== String(floors.length) || rows.dataset.kind !== rowKind) {
             rows.innerHTML = floors
                 .map(
                     (f, i) =>
-                        `<div class="stackFloorRow" data-floor-row="${i}"><button type="button" data-stack-floor-select="${i}" class="stackFloorSelect">${i + 1}F</button><label>幅<input data-stack-floor="${i}" data-stack-key="w" type="number" step="0.05"></label><label>奥行<input data-stack-floor="${i}" data-stack-key="d" type="number" step="0.05"></label><label>高さ<input data-stack-floor="${i}" data-stack-key="h" type="number" step="0.05"></label><label>X<input data-stack-floor="${i}" data-stack-key="x" type="number" step="0.05"></label><label>Y<input data-stack-floor="${i}" data-stack-key="y" type="number" step="0.05"></label><label>Z<input data-stack-floor="${i}" data-stack-key="z" type="number" step="0.05"></label><label>縁出<input data-stack-floor="${i}" data-stack-key="rimOverhang" type="number" step="0.01"></label><label>縁高<input data-stack-floor="${i}" data-stack-key="rimHeight" type="number" step="0.01"></label></div>`,
+                        `<div class="stackFloorRow" data-floor-row="${i}"><button type="button" data-stack-floor-select="${i}" class="stackFloorSelect">${i + 1}F</button><label>幅<input data-stack-floor="${i}" data-stack-key="w" type="number" step="0.05"></label><label>奥行<input data-stack-floor="${i}" data-stack-key="d" type="number" step="0.05"></label><label>高さ<input data-stack-floor="${i}" data-stack-key="h" type="number" step="0.05"></label><label>X<input data-stack-floor="${i}" data-stack-key="x" type="number" step="0.05"></label><label>Y<input data-stack-floor="${i}" data-stack-key="y" type="number" step="0.05"></label><label>Z<input data-stack-floor="${i}" data-stack-key="z" type="number" step="0.05"></label><label>縁出<input data-stack-floor="${i}" data-stack-key="rimOverhang" type="number" step="0.01"></label><label>縁高<input data-stack-floor="${i}" data-stack-key="rimHeight" type="number" step="0.01"></label>${rowKind === "beveled" ? `<label>ベベル出<input data-stack-floor="${i}" data-stack-key="bevelOffset" type="number" min="0" step="0.01"></label><label>セグメント<input data-stack-floor="${i}" data-stack-key="bevelSegments" type="number" min="1" max="4" step="1"></label>` : ""}</div>`,
                 )
                 .join("");
             rows.dataset.count = String(floors.length);
+            rows.dataset.kind = rowKind;
             rows.querySelectorAll("[data-stack-floor]").forEach((n) => {
                 n.oninput = () => {
                     const current = sel && obOf(sel),
@@ -756,7 +758,11 @@
                     }
                     const nextFloors = current.floors.map((f) => ({ ...f }));
                     nextFloors[index][key] = Number(n.value) || 0;
-                    if (!individualEdit && index === 0 && ["w", "d", "h", "rimOverhang", "rimHeight"].includes(key))
+                    if (
+                        !individualEdit &&
+                        index === 0 &&
+                        ["w", "d", "h", "rimOverhang", "rimHeight", "bevelOffset", "bevelSegments"].includes(key)
+                    )
                         nextFloors.forEach((f) => (f[key] = nextFloors[0][key]));
                     if (!individualEdit && index === 0 && ["x", "y", "z"].includes(key)) {
                         const delta = (Number(nextFloors[0][key]) || 0) - (Number(current.floors[0][key]) || 0);
@@ -798,7 +804,8 @@
     function syncStackedPanel() {
         const panel = el("stackedP"),
             o = sel && obOf(sel),
-            active = !!(o && o.type === "asset" && o.asset === "stackedBuilding");
+            active = isStackedBuildingAsset(o),
+            beveled = isBeveledStackedBuildingAsset(o);
         if (!panel) return;
         panel.style.display = active ? "" : "none";
         if (!active) {
@@ -811,11 +818,31 @@
         if (count && document.activeElement !== count) count.value = o.floorCount || o.floors?.length || 1;
         if (individualEdit) individualEdit.checked = stackedIndividualEdit(o);
         if (gap && document.activeElement !== gap) gap.value = Number(o.floorGap || 0).toFixed(3);
+        const title = el("stackedPanelTitle"),
+            bevelControls = el("stackBevelControls");
+        if (title) title.textContent = beveled ? "ベベル直方体の縁付き階層建物" : "縁付き階層建物";
+        if (bevelControls) bevelControls.style.display = beveled ? "" : "none";
+        if (beveled) {
+            const floors = Array.isArray(o.floors) ? o.floors : [],
+                index = stackedIndividualEdit(o)
+                    ? clamp(Math.round(Number(o.activeFloor) || 0), 0, Math.max(0, floors.length - 1))
+                    : 0,
+                f = floors[index] || {},
+                width = Math.max(0.01, Math.abs(Number(f.w) || Number(o.ra) * 2 || 4)),
+                depth = Math.max(0.01, Math.abs(Number(f.d) || Number(o.rb) * 2 || 3)),
+                max = Math.max(0, Math.min(width, depth) * 0.5 - 0.001),
+                offset = el("stackBevelOffset"),
+                segments = el("stackBevelSegments");
+            if (offset && document.activeElement !== offset)
+                offset.value = clamp(Number(f.bevelOffset ?? o.bevelOffset) || 0, 0, max).toFixed(3);
+            if (segments && document.activeElement !== segments)
+                segments.value = beveledBoxSegments(f.bevelSegments ?? o.bevelSegments, f.bevelEdges ?? o.bevelEdges);
+        }
         rebuildStackFloorRows(o);
     }
     function applyStackMeta(key, value) {
         const o = sel && obOf(sel);
-        if (!o || o.asset !== "stackedBuilding") return;
+        if (!o || !isStackedBuildingAsset(o)) return;
         if (!stackedEditSession) {
             HU.push(S);
             RD = [];
@@ -833,6 +860,9 @@
                     h: first.h,
                     rimHeight: first.rimHeight,
                     rimOverhang: first.rimOverhang,
+                    ...(isBeveledStackedBuildingAsset(o)
+                        ? { bevelOffset: first.bevelOffset, bevelSegments: first.bevelSegments }
+                        : {}),
                 }));
                 patch.h = stackFloorHeight(patch);
                 patch.activeFloor = 0;
@@ -874,9 +904,41 @@
         });
         render();
     }
+    function applyStackBevelProp(name, value) {
+        const o = sel && obOf(sel);
+        if (!isBeveledStackedBuildingAsset(o) || !Number.isFinite(value) || !o.floors?.length) return;
+        if (!stackedEditSession) {
+            HU.push(S);
+            RD = [];
+            stackedEditSession = true;
+        }
+        const individual = stackedIndividualEdit(o),
+            index = individual ? clamp(Math.round(Number(o.activeFloor) || 0), 0, o.floors.length - 1) : 0,
+            floors = o.floors.map((f) => ({ ...f })),
+            floor = floors[index],
+            width = Math.max(0.01, Math.abs(Number(floor.w) || Number(o.ra) * 2 || 4)),
+            depth = Math.max(0.01, Math.abs(Number(floor.d) || Number(o.rb) * 2 || 3)),
+            max = Math.max(0, Math.min(width, depth) * 0.5 - 0.001),
+            next = name === "bevelOffset" ? clamp(value, 0, max) : clamp(Math.round(value), 1, 4);
+        floor[name] = next;
+        if (!individual && index === 0) floors.forEach((f) => (f[name] = next));
+        setOb(o.id, { [name]: next, floors, h: stackFloorHeight({ floors }) });
+        render();
+    }
+    [
+        ["stackBevelOffset", "bevelOffset"],
+        ["stackBevelSegments", "bevelSegments"],
+    ].forEach(([id, name]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => applyStackBevelProp(name, parseFloat(input.value));
+        input.onchange = () => {
+            stackedEditSession = false;
+        };
+    });
     function alignStackedObject() {
         const o = sel && obOf(sel);
-        if (!o || o.asset !== "stackedBuilding" || !o.floors?.length) return;
+        if (!o || !isStackedBuildingAsset(o) || !o.floors?.length) return;
         HU.push(S);
         RD = [];
         const floors = o.floors.map((f) => ({ ...f })),
@@ -896,7 +958,7 @@
     }
     function copyFirstFloorToAll() {
         const o = sel && obOf(sel);
-        if (!o || o.asset !== "stackedBuilding" || !o.floors?.length) return;
+        if (!o || !isStackedBuildingAsset(o) || !o.floors?.length) return;
         HU.push(S);
         RD = [];
         const first = o.floors[0],
@@ -907,6 +969,9 @@
                 h: first.h,
                 rimHeight: first.rimHeight,
                 rimOverhang: first.rimOverhang,
+                ...(isBeveledStackedBuildingAsset(o)
+                    ? { bevelOffset: first.bevelOffset, bevelSegments: first.bevelSegments }
+                    : {}),
             }));
         setOb(o.id, { floors, h: stackFloorHeight({ floors }) });
         render();
@@ -1140,6 +1205,55 @@
             pathPipeEditSession = false;
         };
     }
+    let beveledBoxEditSession = false;
+    function syncBeveledBoxPanel() {
+        const panel = el("beveledBoxP"),
+            o = sel && obOf(sel),
+            isBeveled = !!(o && o.type === "asset" && o.asset === "beveledBox");
+        if (!panel) return;
+        panel.style.display = isBeveled ? "" : "none";
+        if (!isBeveled) return;
+        const offset = el("beveledBoxOffset"),
+            segments = el("beveledBoxSegments"),
+            width = Math.max(0.01, Math.abs(Number(o.ra) || 0.01) * 2),
+            depth = Math.max(0.01, Math.abs(Number(o.rb) || 0.01) * 2),
+            max = Math.max(0, Math.min(width, depth) * 0.5 - 0.001);
+        if (offset && document.activeElement !== offset)
+            offset.value = clamp(Number(o.bevelOffset) || 0, 0, max).toFixed(3);
+        const segmentValue = Number(o.bevelSegments ?? o.bevelEdges);
+        if (segments && document.activeElement !== segments)
+            segments.value = clamp(Math.round(Number.isFinite(segmentValue) ? segmentValue : 4), 1, 4);
+    }
+    function applyBeveledBoxProp(name, value) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || o.asset !== "beveledBox") return;
+        if (!beveledBoxEditSession) {
+            HU.push(S);
+            RD = [];
+            beveledBoxEditSession = true;
+        }
+        const width = Math.max(0.01, Math.abs(Number(o.ra) || 0.01) * 2),
+            depth = Math.max(0.01, Math.abs(Number(o.rb) || 0.01) * 2),
+            max = Math.max(0, Math.min(width, depth) * 0.5 - 0.001),
+            patch = {};
+        if (name === "bevelOffset" && Number.isFinite(value)) patch.bevelOffset = clamp(value, 0, max);
+        else if (name === "bevelSegments" && Number.isFinite(value))
+            patch.bevelSegments = clamp(Math.round(value), 1, 4);
+        if (!Object.keys(patch).length) return;
+        setOb(sel, patch);
+        render();
+    }
+    [
+        ["beveledBoxOffset", "bevelOffset"],
+        ["beveledBoxSegments", "bevelSegments"],
+    ].forEach(([id, name]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => applyBeveledBoxProp(name, parseFloat(input.value));
+        input.onchange = () => {
+            beveledBoxEditSession = false;
+        };
+    });
     function syncAssetControls() {
         const o = sel && obOf(sel);
         if (o && o.type === "asset" && o.asset === "stairs") {
@@ -1158,6 +1272,7 @@
         syncBuildingPanel();
         syncBalconyPanel();
         syncPathPipePanel();
+        syncBeveledBoxPanel();
         syncStackedPanel();
         syncFloorControls();
         syncAssetDepth();
@@ -2080,7 +2195,7 @@
             // 積層建物とパスパイプは、単一のra/rb/hではなく floors/path[] を
             // 持つため、間取り用の汎用ハンドルを出すと別の古い寸法を編集してしまう。
             // 専用ギズモを同じ座標へ描き、pointerdownも通常のギズモ経路へ渡す。
-            customEdit = o.type === "asset" && (o.asset === "stackedBuilding" || o.asset === "pathPipe");
+            customEdit = o.type === "asset" && (isStackedBuildingAsset(o) || o.asset === "pathPipe");
         if (customEdit) return { o, base, center, handles, panel: null, special: true };
         const add = (kind, label, point, probe, start, min = 0.01, side = 1) => {
             const s = scrW(point),
@@ -2865,7 +2980,7 @@
                 const special = hitGizmo(p),
                     customAsset = special?.g?.o?.asset,
                     customFloorGizmo =
-                        customAsset === "stackedBuilding" ||
+                        ["stackedBuilding", "beveledStackedBuilding"].includes(customAsset) ||
                         customAsset === "pathPipe" ||
                         special?.t?.startsWith("sign-") ||
                         (special?.t === "face" && customAsset === "sign");

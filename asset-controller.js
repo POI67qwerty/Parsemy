@@ -60,8 +60,9 @@ window.cityGridInstallAssetUI = function (bridge) {
             accent: info.accent,
         };
         const height = kind === "person" ? Number(P.hm) || 1.7 : info.h;
-        if (kind === "stackedBuilding") {
-            const floorHeight = 2.2,
+        if (kind === "stackedBuilding" || kind === "beveledStackedBuilding") {
+            const beveled = kind === "beveledStackedBuilding",
+                floorHeight = 2.2,
                 floorGap = 0.06,
                 floors = Array.from({ length: 4 }, (_, i) => ({
                     name: `${i + 1}F`,
@@ -73,12 +74,14 @@ window.cityGridInstallAssetUI = function (bridge) {
                     h: floorHeight,
                     rimHeight: 0.16,
                     rimOverhang: 0.18,
+                    bevelOffset: beveled ? info.bevelOffset : undefined,
+                    bevelSegments: beveled ? info.bevelSegments : undefined,
                 }));
             return {
                 ...base,
                 type: "asset",
                 asset: kind,
-                assetId: "stacked-building",
+                assetId: beveled ? "beveled-stacked-building" : "stacked-building",
                 assetName: info.label,
                 k: 1,
                 d: -1,
@@ -93,7 +96,11 @@ window.cityGridInstallAssetUI = function (bridge) {
                 floorGap,
                 rimHeight: 0.16,
                 rimOverhang: 0.18,
+                bevelOffset: beveled ? info.bevelOffset : undefined,
+                bevelSegments: beveled ? info.bevelSegments : undefined,
+                // 既定は1F編集を全階へ連動。旧JSONのsyncFirstは互換用に残す。
                 syncFirst: true,
+                individualEdit: false,
                 activeFloor: 0,
                 floors,
             };
@@ -107,6 +114,20 @@ window.cityGridInstallAssetUI = function (bridge) {
                 rb: info.d / 2,
                 h: 0,
                 extrude: false,
+            };
+        if (kind === "beveledBox")
+            return {
+                ...base,
+                type: "asset",
+                asset: kind,
+                assetId: "beveled-box",
+                assetName: info.label,
+                ra: info.w / 2,
+                rb: info.d / 2,
+                h: 0,
+                extrude: false,
+                bevelOffset: info.bevelOffset,
+                bevelSegments: info.bevelSegments,
             };
         return {
             ...base,
@@ -233,13 +254,13 @@ window.cityGridInstallAssetUI = function (bridge) {
         // 既存の建物接着と同じ親子同期経路を使うため、親の移動・寸法変更にも追従する。
         return parent &&
             parent.type === "asset" &&
-            ["building", "stackedBuilding"].includes(parent.asset) &&
+            ["building", "stackedBuilding", "beveledStackedBuilding"].includes(parent.asset) &&
             parent.k === 1
             ? parent
             : null;
     }
     function newAttachedBalcony(parent) {
-        const isStacked = parent.asset === "stackedBuilding",
+        const isStacked = isStackedBuildingAsset(parent),
             floors = Array.isArray(parent.floors) ? parent.floors : [],
             floorIndex = isStacked
                 ? clamp(Math.round(Number(parent.activeFloor) || 1), 0, Math.max(0, floors.length - 1))

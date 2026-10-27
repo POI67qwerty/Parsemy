@@ -2,6 +2,12 @@
    Shared state, math, projection, primitive shapes, and basic object editing. */
 /* City Grid Studio engine: camera, projection, drawing, selection and core input. */
 const $ = (id) => document.getElementById(id);
+function isStackedBuildingAsset(o) {
+    return o?.type === "asset" && ["stackedBuilding", "beveledStackedBuilding"].includes(o.asset);
+}
+function isBeveledStackedBuildingAsset(o) {
+    return o?.type === "asset" && o.asset === "beveledStackedBuilding";
+}
 const cv = $("cv"),
     ctx = cv.getContext("2d");
 let W = 1600,
@@ -143,10 +149,20 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label class=full><span>パス点（x,y,z）</span><textarea id=pathPipePoints rows=4 placeholder="-2,0,1.1; 0,0,1.1; 0,2.2,1.1"></textarea></label>
 <div class="note">キャンバス上の各パス点にあるX／Y／Zハンドルをドラッグすると経路を編集できます。オレンジの「半径」ハンドルで太さを変更できます。曲がり半径を0にすると角が直線になります。</div>
 </div>
-<div id=stackedP style="display:none"><h3>縁付き階層建物</h3>
+<div id=beveledBoxP style="display:none"><h3>ベベル直方体</h3>
+<label><span>ベベルオフセット</span><input type=number class=nv id=beveledBoxOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>ベベルセグメント数</span><input type=number class=nv id=beveledBoxSegments min=1 max=4 step=1 style="width:100px"><span class=un>分割</span></label>
+<div class="note">四つの縦角を面取りします。オフセットは面取り幅、セグメント数は角の丸みを分割する数です。1は一枚面、4は4分割です。オフセットはキャンバス上のオレンジのベベルハンドルからも変更できます。幅・奥行き・高さは共通の面ハンドルまたは上の数値欄で編集できます。初期状態は面で、上面を押し出すと高さができます。</div>
+</div>
+<div id=stackedP style="display:none"><h3 id=stackedPanelTitle>縁付き階層建物</h3>
 <label><span>階数</span><input type=number class=nv id=stackFloorCount min=1 max=30 step=1 style="width:100px"></label>
 <label><input type=checkbox id=stackIndividualEdit> 各階を個別編集（チェック時のみ）</label>
 <label><span>階間</span><input type=number class=nv id=stackFloorGap min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<div id=stackBevelControls style="display:none">
+<label><span>ベベルオフセット</span><input type=number class=nv id=stackBevelOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>ベベルセグメント数</span><input type=number class=nv id=stackBevelSegments min=1 max=4 step=1 style="width:100px"><span class=un>分割</span></label>
+<div class="note">通常モードでは1Fのベベル設定を全階へ連動します。個別編集を有効にすると、選択中の階だけを変更できます。</div>
+</div>
 <label><button id=stackAlign class="primary">上方向へ整列</button><button id=stackCopyFirst>1F寸法をコピー</button></label>
 <div class="note">通常は1Fのハンドルと数値だけを編集し、幅・奥行・高さ・縁が全階へ自動連動します。チェックを入れると、選択した階を個別に編集できます。</div>
 <div id=stackFloorRows></div>
@@ -843,7 +859,7 @@ function syncAttachedPart(o, parentOverride = null) {
         px = Number(a.x) || 0;
     // 積層建物はgeometryがcustomPt（階ごとのx/y/z）で保持されるため、
     // 標準建物のL2Wとは別に、指定階の壁面へベランダを同期する。
-    if (parent.asset === "stackedBuilding" && a.stackedFloor) {
+    if (isStackedBuildingAsset(parent) && a.stackedFloor) {
         const floors = Array.isArray(parent.floors) ? parent.floors : [],
             index = clamp(Math.round(Number(a.floorIndex) || 0), 0, Math.max(0, floors.length - 1)),
             f = floors[index];
@@ -1170,7 +1186,7 @@ function fieldPatch(o, name, v) {
             const r = Math.max(0.005, v / 2);
             return { ra: r, rb: r, h: r * 2 };
         }
-        return o.type === "rect" || o.type === "circ"
+        return o.type === "rect" || o.type === "circ" || (o.type === "asset" && o.asset === "beveledBox")
             ? { h: Math.max(0, v), extrude: v > 0 }
             : { h: Math.max(0.005, v) };
     }
@@ -1218,7 +1234,7 @@ function applyOb(name, v) {
 });
 $("obExtrude").onclick = () => {
     const o = obOf(sel);
-    if (!o || !["rect", "circ"].includes(o.type)) return;
+    if (!o || !(o.type === "rect" || o.type === "circ" || (o.type === "asset" && o.asset === "beveledBox"))) return;
     HU.push(S);
     RD = [];
     setOb(sel, { h: Math.max(0.12, Math.min(o.ra, o.rb) * 0.8), extrude: true });
