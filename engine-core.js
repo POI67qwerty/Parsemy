@@ -174,7 +174,7 @@ ${R("pa", "写真の濃さ", 0, 1, 0.05)}
             localStorage.setItem("city-grid-ui-compact-v1", "1");
         }
         st = JSON.parse(localStorage.getItem("pgrid-sec") || "{}");
-    } catch (e) { }
+    } catch (e) {}
     side.innerHTML =
         '<div class="secbar"><button id=secC>すべて閉じる</button><button id=secO>すべて開く</button></div>';
     kids.forEach((k) => {
@@ -190,7 +190,7 @@ ${R("pa", "写真の濃さ", 0, 1, 0.05)}
                 st[name] = d.open;
                 try {
                     localStorage.setItem("pgrid-sec", JSON.stringify(st));
-                } catch (e) { }
+                } catch (e) {}
             };
             det = d;
         } else if (det) det.appendChild(k);
@@ -264,10 +264,10 @@ for (const k in P) {
 }
 document.querySelectorAll("[data-i]").forEach(
     (el) =>
-    (el.onchange = () => {
-        show[el.dataset.i] = el.checked;
-        render();
-    }),
+        (el.onchange = () => {
+            show[el.dataset.i] = el.checked;
+            render();
+        }),
 );
 ["gon", "hzl", "bgw", "snap", "bin", "gg"].forEach((k) => ($(k).onchange = render));
 $("ar").onchange = () => {
@@ -1029,23 +1029,23 @@ function syncSel() {
         P3 = compound ? [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2] : L2W(o, 0, 0, 0);
     const values = compound
         ? [
-            ["rot", Number(o.compoundRot) || 0],
-            ["w", b.hi[0] - b.lo[0]],
-            ["dp", b.hi[2] - b.lo[2]],
-            ["h", b.hi[1] - b.lo[1]],
-            ["px", P3[0]],
-            ["py", P3[1] + 1],
-            ["pz", P3[2]],
-        ]
+              ["rot", Number(o.compoundRot) || 0],
+              ["w", b.hi[0] - b.lo[0]],
+              ["dp", b.hi[2] - b.lo[2]],
+              ["h", b.hi[1] - b.lo[1]],
+              ["px", P3[0]],
+              ["py", P3[1] + 1],
+              ["pz", P3[2]],
+          ]
         : [
-            ["rot", o.rot],
-            ["w", 2 * o.ra],
-            ["dp", 2 * o.rb],
-            ["h", o.h],
-            ["px", P3[0]],
-            ["py", P3[1] + 1],
-            ["pz", P3[2]],
-        ];
+              ["rot", o.rot],
+              ["w", 2 * o.ra],
+              ["dp", 2 * o.rb],
+              ["h", o.h],
+              ["px", P3[0]],
+              ["py", P3[1] + 1],
+              ["pz", P3[2]],
+          ];
     values.forEach(([k, v]) => {
         const n = $("ov_" + k),
             r = $("or_" + k);

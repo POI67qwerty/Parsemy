@@ -20,6 +20,30 @@ function lineParam(r, C, a) {
         den = 1 - b * b;
     return den < 1e-6 ? null : (dd * b - e) / den;
 }
+// 面ハンドルは、3Dの最近接計算だけでなく「画面上で見えている向き」も使う。
+// 面の法線が視線に近いと、最近接計算は分母が小さくなり、少しのドラッグで
+// 反対方向へ跳ねることがあるため、表示されたハンドルの向きに投影して量を求める。
+function faceScreenGuide(face) {
+    if (!face?.P3 || !face?.n) return null;
+    const base = scrW(face.P3);
+    if (!base?.ok) return null;
+    // 遠景でも十分な画面差が得られるよう、短いサンプルを段階的に試す。
+    for (const step of [0.05, 0.1, 0.2, 0.4, 0.8]) {
+        const probe = scrW(V.add(face.P3, face.n, 1, step));
+        if (!probe?.ok) continue;
+        const dx = probe.x - base.x,
+            dy = probe.y - base.y,
+            px = Math.hypot(dx, dy);
+        if (px >= 0.35)
+            return {
+                dir: { x: dx / px, y: dy / px },
+                scale: px / step,
+            };
+    }
+    // 真正面の奥行き面など、画面上で法線方向が完全につぶれる場合は、
+    // 不定な拡縮を起こさず「このビューでは動かない」として扱う。
+    return { hidden: true, dir: { x: 0, y: 0 }, scale: Infinity };
+}
 function moveBy(o, vec, keepAttachedOffset = false) {
     const v = [Number(vec?.[0]) || 0, Number(vec?.[1]) || 0, Number(vec?.[2]) || 0];
     if (o?.type === "compound")
@@ -475,14 +499,14 @@ function specialGizmo(o) {
     return o && o.type === "asset" && o.asset === "building"
         ? buildingGizmo(o)
         : o && o.type === "asset" && o.asset === "awning"
-            ? awningGizmo(o)
-            : o && o.type === "asset" && o.asset === "sign"
-                ? signGizmo(o)
-                : o && o.type === "asset" && o.asset === "cone"
-                    ? coneGizmo(o)
-                    : o && o.type === "asset" && o.asset === "sphere"
-                        ? sphereGizmo(o)
-                        : null;
+          ? awningGizmo(o)
+          : o && o.type === "asset" && o.asset === "sign"
+            ? signGizmo(o)
+            : o && o.type === "asset" && o.asset === "cone"
+              ? coneGizmo(o)
+              : o && o.type === "asset" && o.asset === "sphere"
+                ? sphereGizmo(o)
+                : null;
 }
 function drawSpecialGizmo(c, o) {
     const sg = specialGizmo(o);
@@ -681,7 +705,9 @@ function compoundFacePatch(o, fid, dl) {
         span = Math.max(0.005, b.hi[axis] - b.lo[axis]),
         pivot = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2],
         fixed = side > 0 ? b.lo[axis] : b.hi[axis],
-        edge = side > 0 ? b.hi[axis] + dl : b.lo[axis] + dl,
+        // マイナス側の面の法線は−方向。法線へ正に動かしたときは、
+        // 下限をさらに小さくして同じ面から外へ広げる。
+        edge = side > 0 ? b.hi[axis] + dl : b.lo[axis] - dl,
         newSpan = Math.max(0.005, side > 0 ? edge - b.lo[axis] : b.hi[axis] - edge),
         scale = [1, 1, 1];
     pivot[axis] = fixed;
@@ -781,10 +807,10 @@ function gizmo() {
     ev[iu] = -sn;
     ev[iv] = cs; // 高さ方向・幅方向・奥行き方向の単位ベクトル
     const F = (id, x, y, z, n) => {
-        const P3 = L2W(o, x, y, z),
-            s = scrW(P3);
-        g.faces.push({ id, n, P3, s });
-    },
+            const P3 = L2W(o, x, y, z),
+                s = scrW(P3);
+            g.faces.push({ id, n, P3, s });
+        },
         neg = (v) => v.map((t) => -t);
     // 外形の6面は、開口のある建物でも編集対象にする。
     // 特殊ハンドル（開口W/H・奥の面）とは別に、白い四角で外側の幅・奥行・高さを編集できる。
@@ -914,8 +940,22 @@ function hitGizmo(p) {
     }
     const g = gizmo();
     if (!g) return null;
-    const Rg = 20 / Z;
-    for (const f of g.faces) if (f.s.ok && Math.hypot(f.s.x - p.x, f.s.y - p.y) < Rg) return { t: "face", f, g };
+    const Rg = 20 / Z,
+        faceHits = g.faces
+            .filter((f) => f.s.ok)
+            .map((f) => ({ f, d: Math.hypot(f.s.x - p.x, f.s.y - p.y) }))
+            .filter((q) => q.d < Rg);
+    if (faceHits.length) {
+        // 表裏の面ハンドルが重なるときは、画面に近い面を優先する。
+        // 配列の先頭順だけで選ぶと、裏面の法線を拾ってドラッグ方向が反転する。
+        faceHits.sort((a, b) => {
+            if (Math.abs(a.d - b.d) > 0.5 / Z) return a.d - b.d;
+            const da = Math.hypot(...V.add(a.f.P3, camPos(), 1, -1)),
+                db = Math.hypot(...V.add(b.f.P3, camPos(), 1, -1));
+            return da - db;
+        });
+        return { t: "face", f: faceHits[0].f, g };
+    }
     if (Math.hypot(g.sC.x - p.x, g.sC.y - p.y) > R * 0.8)
         for (const a of g.axes) if (segd(p, g.sC, a.sT) < R * 0.7) return { t: "axis", a, g };
     for (let i = 1; i < g.ring.length; i++) {
@@ -1094,8 +1134,8 @@ function faceSnap(dl) {
     const halves = isU
         ? [Math.abs(o.rb), outerH / 2]
         : isV
-            ? [Math.abs(o.ra), outerH / 2]
-            : [Math.abs(o.ra), Math.abs(o.rb)];
+          ? [Math.abs(o.ra), outerH / 2]
+          : [Math.abs(o.ra), Math.abs(o.rb)];
     const faceN0 = dot3(ed.Fa, n),
         faceN = faceN0 + dl,
         faceT = tangents.map((t) => dot3(ed.Fa, t)),
@@ -1153,14 +1193,28 @@ function beginGizmo(h, p) {
         ed = { ...base, t: h.t, sign: h.sign, p0: p };
     else if (h.t === "axis") {
         const C0 = V.add(h.g.C3, co),
-            t0 = lineParam(r, C0, h.a.a);
-        if (t0 != null) ed = { ...base, t: "axis", a: h.a.a, aj: h.a.a.indexOf(1), C0, t0 };
+            t0 = lineParam(r, C0, h.a.a),
+            axisGuide = faceScreenGuide({ P3: h.g.C3, n: h.a.a });
+        if (t0 != null || axisGuide) ed = { ...base, t: "axis", a: h.a.a, aj: h.a.a.indexOf(1), C0, t0, axisGuide };
     } else if (h.t === "face") {
         const F0 = V.add(h.f.P3, co),
-            t0 = lineParam(r, F0, h.f.n);
-        if (t0 != null) {
+            t0 = lineParam(r, F0, h.f.n),
+            faceGuide = faceScreenGuide(h.f);
+        // 画面方向を基準にすると、ドラッグした側と反対へ拡大する跳ね返りを防げる。
+        // guideがつぶれるビューでは、t0だけで不安定に動かさない。
+        if (t0 != null || faceGuide) {
             const fj = [0, 1, 2].find((j) => Math.abs(h.f.n[j]) > 0.999);
-            ed = { ...base, t: "face", fid: h.f.id, n: h.f.n, F0, Fa: h.f.P3, fj: fj === undefined ? -1 : fj, t0 };
+            ed = {
+                ...base,
+                t: "face",
+                fid: h.f.id,
+                n: h.f.n,
+                F0,
+                Fa: h.f.P3,
+                fj: fj === undefined ? -1 : fj,
+                t0,
+                faceGuide,
+            };
         }
     } else if (o.type === "compound")
         ed = { ...base, t: "ring", sC: h.g.sC, ang0: Math.atan2(p.y - h.g.sC.y, p.x - h.g.sC.x) };
@@ -1249,25 +1303,43 @@ function dragEdit(p, freeRotation = false) {
             } else patch = moveBy(o, q); /* 間取りではca/cbだけを変え、Y方向のliftとoffは保持する。 */
         }
     } else if (ed.t === "axis") {
-        const t = lineParam(r, ed.C0, ed.a);
-        if (t != null) {
+        let amount = null;
+        if (ed.axisGuide?.hidden) amount = 0;
+        else if (ed.axisGuide) {
+            const dx = p.x - ed.p0.x,
+                dy = p.y - ed.p0.y;
+            amount = (dx * ed.axisGuide.dir.x + dy * ed.axisGuide.dir.y) / (ed.axisGuide.scale || 1);
+        } else {
+            const t = lineParam(r, ed.C0, ed.a);
+            if (t != null && ed.t0 != null) amount = t - ed.t0;
+        }
+        if (amount != null) {
             ed.moveDelta = snap(
-                ed.a.map((x) => x * (t - ed.t0)),
+                ed.a.map((x) => x * amount),
                 [ed.aj],
             );
             patch = moveBy(o, ed.moveDelta);
         }
     } // 矢印＝その軸に沿って移動
     else if (ed.t === "face") {
-        const t = lineParam(r, ed.F0, ed.n);
-        if (t != null) {
-            const dl = t - ed.t0;
+        let dl = null;
+        if (ed.faceGuide?.hidden) dl = 0;
+        else if (ed.faceGuide) {
+            const dx = p.x - ed.p0.x,
+                dy = p.y - ed.p0.y;
+            dl = (dx * ed.faceGuide.dir.x + dy * ed.faceGuide.dir.y) / (ed.faceGuide.scale || 1);
+        } else {
+            const t = lineParam(r, ed.F0, ed.n);
+            if (t != null && ed.t0 != null) dl = t - ed.t0;
+        }
+        if (dl != null) {
+            const moved = o.type === "compound" ? dl : faceSnap(dl);
             patch =
                 o.type === "compound"
-                    ? compoundFacePatch(o, ed.fid, dl)
+                    ? compoundFacePatch(o, ed.fid, moved)
                     : o.type === "asset" && o.asset === "building"
-                        ? buildingOuterFacePatch(o, ed.fid, faceSnap(dl))
-                        : facePatch(o, ed.fid, faceSnap(dl));
+                      ? buildingOuterFacePatch(o, ed.fid, moved)
+                      : facePatch(o, ed.fid, moved);
         }
     } // 白い四角＝面の押し引き
     else if (ed.t === "ring") {
@@ -1391,7 +1463,7 @@ function setSide(h) {
     edge.style.left = h ? "env(safe-area-inset-left,0px)" : sd.getBoundingClientRect().right + "px";
     try {
         localStorage.setItem("pgrid-side", h ? "1" : "0");
-    } catch (e) { }
+    } catch (e) {}
 }
 $("tg").onclick = () => {
     setSide(!$("side").classList.contains("hide"));
@@ -1747,8 +1819,8 @@ function exportPoint(v, tf) {
     const depth = orthView
         ? dot3(rel, orthBasis().depth)
         : T === "f"
-            ? Math.hypot(rel[0], rel[1], rel[2])
-            : cam(rel)[2];
+          ? Math.hypot(rel[0], rel[1], rel[2])
+          : cam(rel)[2];
     return { x: q.x * tf[0] + tf[4], y: q.y * tf[3] + tf[5], depth };
 }
 function buildExportDepth(cw, ch, tf) {
@@ -2559,7 +2631,7 @@ function endBoxPointer(e, commit) {
     if (e?.pointerType === "pen") lastPen = Date.now();
     try {
         if (cv.hasPointerCapture?.(pointerId)) cv.releasePointerCapture(pointerId);
-    } catch (err) { }
+    } catch (err) {}
     if (!commit) render();
     return true;
 }
@@ -2694,12 +2766,12 @@ cv.onpointerdown = (e) => {
             nav || (!selectGesture && mod)
                 ? "view"
                 : editPointer
+                  ? "draw"
+                  : pn && e.pointerType === "pen" && mode === "draw"
                     ? "draw"
-                    : pn && e.pointerType === "pen" && mode === "draw"
-                        ? "draw"
-                        : touchTool
-                            ? "view"
-                            : mode; // 視点モードでは、残っている編集ツールよりもカメラ操作を優先する。
+                    : touchTool
+                      ? "view"
+                      : mode; // 視点モードでは、残っている編集ツールよりもカメラ操作を優先する。
     if (act === "view") {
         const pan = e.shiftKey || e.altKey || e.button === 2;
         drag = {
@@ -2981,12 +3053,12 @@ function setMode(m) {
 $("mV").onclick = () => setMode("view");
 $("mD").onclick = () => setTool("pen");
 const undo = () => {
-    if (HU.length) {
-        RD.push(S);
-        S = HU.pop();
-        render();
-    }
-},
+        if (HU.length) {
+            RD.push(S);
+            S = HU.pop();
+            render();
+        }
+    },
     redo = () => {
         if (RD.length) {
             HU.push(S);
@@ -3374,13 +3446,13 @@ setInterval(() => {
     dirty = false;
     try {
         localStorage.setItem(AK, JSON.stringify(pack(false)));
-    } catch (e) { }
+    } catch (e) {}
 }, 3000);
 $("rst").onclick = () => {
     if (confirm("自動保存を消して初期化します。よろしいですか？")) {
         try {
             localStorage.removeItem(AK);
-        } catch (e) { }
+        } catch (e) {}
         location.reload();
     }
 };
@@ -3414,4 +3486,4 @@ fit();
 try {
     const t = localStorage.getItem(AK);
     if (t) unpack(JSON.parse(t));
-} catch (e) { } // 前回の自動保存があれば復元
+} catch (e) {} // 前回の自動保存があれば復元

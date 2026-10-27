@@ -174,7 +174,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             console.error("City Grid linked asset error", err);
             try {
                 render();
-            } catch (e) { }
+            } catch (e) {}
             alert("接続アセットを配置できませんでした。もう一度クリックしてください。");
         }
     }
@@ -208,7 +208,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             console.error("City Grid asset error", err);
             try {
                 render();
-            } catch (e) { }
+            } catch (e) {}
             alert("アセットを配置できませんでした。壊れた線は取り除きました。もう一度クリックしてください。");
         }
     }
@@ -286,7 +286,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         const child = awning || (building && rects.length ? rects[0] : null),
             parent = awning
                 ? parts.find((part) => part !== awning && (part.type === "rect" || part.asset === "building")) ||
-                parts[0]
+                  parts[0]
                 : building;
         if (!parent || !child) return null;
         const kind = awning ? "buildingAwning" : "buildingSign",

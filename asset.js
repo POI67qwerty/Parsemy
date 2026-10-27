@@ -27,32 +27,32 @@ const assetLabel = (o) =>
             ? "テント付き建物"
             : "接続テント"
         : o.linkedAsset === "buildingSign"
-            ? o.linkedRole === "parent" || o.asset === "building"
-                ? "看板付き開口建物"
-                : "接続看板"
-            : o.type === "compound"
-                ? "結合オブジェクト"
-                : o.type === "asset"
-                    ? ASSETS[o.asset]?.label || (o.asset === "cylinder" ? "円柱" : "アセット")
-                    : o.type === "rect"
-                        ? "長方形"
-                        : o.type === "circ"
-                            ? "円"
-                            : o.type === "box"
-                                ? "箱"
-                                : o.type === "cyl"
-                                    ? "円柱"
-                                    : "図形";
+          ? o.linkedRole === "parent" || o.asset === "building"
+              ? "看板付き開口建物"
+              : "接続看板"
+          : o.type === "compound"
+            ? "結合オブジェクト"
+            : o.type === "asset"
+              ? ASSETS[o.asset]?.label || (o.asset === "cylinder" ? "円柱" : "アセット")
+              : o.type === "rect"
+                ? "長方形"
+                : o.type === "circ"
+                  ? "円"
+                  : o.type === "box"
+                    ? "箱"
+                    : o.type === "cyl"
+                      ? "円柱"
+                      : "図形";
 const assetGlyph = (o) =>
     o.type === "compound"
         ? "◆"
         : o.type === "asset"
-            ? ASSETS[o.asset]?.glyph || (o.asset === "cylinder" ? "◉" : "◆")
-            : o.type === "rect"
-                ? "□"
-                : o.type === "circ"
-                    ? "○"
-                    : "◇";
+          ? ASSETS[o.asset]?.glyph || (o.asset === "cylinder" ? "◉" : "◆")
+          : o.type === "rect"
+            ? "□"
+            : o.type === "circ"
+              ? "○"
+              : "◇";
 
 // Coordinate helpers. Local asset coordinates are x=width, y=depth, z=up.
 const pt = (o, x, y, z) => L2W(o, x, y, z);
@@ -671,11 +671,11 @@ function assetLines(o) {
             side = bp.sideT,
             centerX = (ow + side) / 2;
         const outerFront = [
-            [-w / 2, -d / 2, 0],
-            [w / 2, -d / 2, 0],
-            [w / 2, -d / 2, h],
-            [-w / 2, -d / 2, h],
-        ],
+                [-w / 2, -d / 2, 0],
+                [w / 2, -d / 2, 0],
+                [w / 2, -d / 2, h],
+                [-w / 2, -d / 2, h],
+            ],
             outerBack = [
                 [-w / 2, d / 2, 0],
                 [w / 2, d / 2, 0],
@@ -685,11 +685,11 @@ function assetLines(o) {
         out.push(polyA(o, outerFront, c));
         out.push(polyA(o, outerBack, c));
         const innerFront = [
-            [-ow / 2, -d / 2, 0],
-            [-ow / 2, -d / 2, oh],
-            [ow / 2, -d / 2, oh],
-            [ow / 2, -d / 2, 0],
-        ],
+                [-ow / 2, -d / 2, 0],
+                [-ow / 2, -d / 2, oh],
+                [ow / 2, -d / 2, oh],
+                [ow / 2, -d / 2, 0],
+            ],
             innerBack = [
                 [-ow / 2, d / 2, 0],
                 [-ow / 2, d / 2, oh],
