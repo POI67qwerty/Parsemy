@@ -848,7 +848,9 @@
         }
         standardApplying = false;
         sync();
-        setMode("view");
+        // 0=3Dは視点プリセットだけを切り替える。編集ツールを選択中なら、
+        // そのまま3Dギズモを使えるように描画／編集モードを維持する。
+        setMode(tool === "edit" ? "draw" : "view");
         render();
     }
     window.cityStandardView = (kind) => applyStandardView(kind);
@@ -902,7 +904,8 @@
         });
         standardApplying = false;
         sync();
-        setMode("view");
+        // 間取りを閉じても、編集ツールを選択していたら3D編集を続けられるようにする。
+        setMode(tool === "edit" ? "draw" : "view");
         render();
     }
     function fitFloorPlan() {
@@ -1045,6 +1048,13 @@
     window.cityFloorPlanEnter = enterFloorPlan;
     window.cityFloorPlanExit = exitFloorPlan;
     window.cityFloorPlanView = showFloorPlan;
+    // engine-tools.jsは別スクリプト／別スコープで読み込まれるため、
+    // ボックス選択から間取りのドラッグ状態を操作するときはこの橋を使う。
+    window.cityFloorPlanGetDrag = () => floorPlanDrag;
+    window.cityFloorPlanSetDrag = (value) => {
+        floorPlanDrag = value;
+    };
+    window.cityFloorPlanFit = fitFloorPlan;
     el("openFloorPlan").onclick = () => setStudioWorkspace("floorplan");
     el("closeFloorPlan").onclick = () => setStudioWorkspace("perspective");
 

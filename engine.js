@@ -269,7 +269,7 @@ document.querySelectorAll("[data-i]").forEach(
             render();
         }),
 );
-["gon", "hzl", "bgw", "snap", "bin", "gg"].forEach((k) => ($(k).onchange = render));
+["gon", "hzl", "bgw", "snap", "bin", "gg"].forEach((k) => ($(k).onchange = () => render()));
 $("ar").onchange = () => {
     H = Math.round(W / +$("ar").value);
     cv.width = W;
@@ -3674,6 +3674,11 @@ function stepErase(a, b) {
     for (let i = 1; i <= n; i++) eraseAt({ x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n });
 }
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// 間取りのドラッグ状態はstudio-ui.jsのIIFE内で管理する。
+// 分割読み込みでは別スコープになるため、window経由の小さな橋を使う。
+const getCityFloorPlanDrag = () => window.cityFloorPlanGetDrag?.() || null;
+const setCityFloorPlanDrag = (value) => window.cityFloorPlanSetDrag?.(value);
+const fitCityFloorPlan = () => window.cityFloorPlanFit?.();
 // 長押し＋ドラッグのボックス選択。空白から始めたときだけ起動し、
 // 通常のオブジェクトドラッグやiPadの視点操作とは競合しないようにする。
 let boxSelect = null,
@@ -3696,7 +3701,7 @@ function armBoxPending(start, pointerId, source = "canvas", meta = {}) {
         if (boxPending !== pending) return;
         boxPending = null;
         boxTimer = null;
-        if (source === "floor") floorPlanDrag = null;
+        if (source === "floor") setCityFloorPlanDrag(null);
         boxSelect = { pointerId, start: { ...pending.start }, end: { ...pending.start }, source };
         clearSelection();
         render();
@@ -3709,15 +3714,15 @@ function updateBoxPending(p, pointerId) {
     if (Math.hypot(p.x - pending.start.x, p.y - pending.start.y) <= 8) return "pending";
     cancelBoxPending();
     if (pending.source === "floor") {
-        if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
-        floorPlanDrag = {
+        if (!Array.isArray(window.cityFloorPlanCenter)) fitCityFloorPlan();
+        setCityFloorPlanDrag({
             kind: "pan",
             pointerId,
             p0: { ...pending.start },
             center0: [...(pending.center0 || window.cityFloorPlanCenter || [0, 0])],
             tapClear: true,
             moved: true,
-        };
+        });
         return "floorPan";
     }
     return "cancel";
@@ -3851,7 +3856,8 @@ function endBoxPointer(e, commit) {
         const p = cancelBoxPending();
         if (p?.tapClear) setSelection(null, false);
     } else cancelBoxPending();
-    if (floorPlanDrag && floorPlanDrag.pointerId === pointerId) floorPlanDrag = null;
+    const floorDrag = getCityFloorPlanDrag();
+    if (floorDrag && floorDrag.pointerId === pointerId) setCityFloorPlanDrag(null);
     if (ptr === pointerId) {
         ptr = null;
         ptrType = null;
