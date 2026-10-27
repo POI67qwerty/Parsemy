@@ -1,0 +1,3417 @@
+/* City Grid Studio engine tools.
+   Gizmos, drawing tools, export, persistence, and startup wiring. */
+// ===== ブレンダー風ギズモ：矢印(XYZ軸の移動)・白い四角(面の押し引き)・点線の輪(回転) =====
+const scr3 = (p) => (orthView ? scr(p) : scr(V.nrm(p)));
+const scrW = (p) => scr3(V.add(p, CO())); // ワールド座標の点の画面位置
+const cloc = (o) => V.add(camPos(), o.off || [0, 0, 0], 1, -1); // 図形の座標系で見たカメラ位置
+const wrap180 = (a) => ((((a + 180) % 360) + 360) % 360) - 180;
+const segd = (p, a, b) => {
+    const dx = b.x - a.x,
+        dy = b.y - a.y,
+        l = dx * dx + dy * dy || 1e-9,
+        t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l));
+    return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+};
+// 視線rと「点Cを通る向きaの直線」の最も近い点の、直線上の位置t（軸に沿った移動量を求める）
+function lineParam(r, C, a) {
+    const b = V.dot(r, a),
+        dd = V.dot(r, C),
+        e = V.dot(a, C),
+        den = 1 - b * b;
+    return den < 1e-6 ? null : (dd * b - e) / den;
+}
+function moveBy(o, vec, keepAttachedOffset = false) {
+    const v = [Number(vec?.[0]) || 0, Number(vec?.[1]) || 0, Number(vec?.[2]) || 0];
+    if (o?.type === "compound")
+        return { tx: (Number(o.tx) || 0) + v[0], ty: (Number(o.ty) || 0) + v[1], tz: (Number(o.tz) || 0) + v[2] };
+    if (o?.attachment?.verticalOnly) {
+        v[0] = 0;
+        v[2] = 0;
+        const patch = { lift: (Number(o.lift) || 0) - o.d * v[1] };
+        if (!keepAttachedOffset)
+            patch.attachment = { ...o.attachment, offsetZ: (Number(o.attachment.offsetZ) || 0) + v[1] };
+        return patch;
+    }
+    const [iu, iv] = PL[o.k];
+    return { ca: o.ca + v[iu], cb: o.cb + v[iv], lift: o.lift - o.d * v[o.k] };
+}
+// 間取りの回転ハンドルで、地面上の複合オブジェクトを一体回転する。
+// 子パーツの定義を壊さず、現在位置をいったんワールド座標へ展開してから戻す。
+function rotateCompoundBy(o, deg) {
+    if (o?.type !== "compound") return { rot: wrap180((Number(o?.rot) || 0) + deg) };
+    const pivot = objectAnchorWorld(o),
+        a = Number(deg || 0) * DG,
+        cs = Math.cos(a),
+        sn = Math.sin(a),
+        parts = compoundPartsAt(o).map((part) => {
+            const q = { ...part, off: [...(part.off || [0, 0, 0])] };
+            if (q.k === 1) {
+                const base = L2W(q, 0, 0, 0),
+                    dx = base[0] - pivot[0],
+                    dz = base[2] - pivot[2],
+                    rx = pivot[0] + dx * cs + dz * sn,
+                    rz = pivot[2] - dx * sn + dz * cs;
+                q.ca = rx - q.off[0];
+                q.cb = rz - q.off[2];
+                q.rot = wrap180((Number(q.rot) || 0) + Number(deg || 0));
+            }
+            return q;
+        });
+    return {
+        parts,
+        tx: 0,
+        ty: 0,
+        tz: 0,
+        rot: 0,
+        compoundRot: (Number(o.compoundRot) || 0) + Number(deg || 0),
+        ca: pivot[0],
+        cb: pivot[2],
+    };
+}
+// 面を動かしたときの変更内容（反対側の面は動かさない）
+function facePatch(o, fid, dl) {
+    const cs = Math.cos(o.rot * DG),
+        sn = Math.sin(o.rot * DG),
+        m = 0.005;
+    if (fid === "top") {
+        if (o.type === "asset" && o.asset === "sign") {
+            // 看板の実外周は0.08h〜0.82h。上端を動かすと下端を固定する。
+            const dh = dl / 0.74,
+                h = Math.max(m, o.h + dh);
+            return { h, extrude: true, lift: o.lift - 0.08 * (h - o.h) };
+        }
+        return { h: Math.max(m, o.h + dl), extrude: true };
+    }
+    if (fid === "base") {
+        if (o.type === "asset" && o.asset === "sign") {
+            // 下端を動かすと上端を固定する。dlは下向き面の移動量。
+            const dh = dl / 0.74,
+                h = Math.max(m, o.h + dh);
+            return { h, extrude: true, lift: o.lift - 0.82 * (h - o.h) };
+        }
+        const h = Math.max(m, o.h + dl);
+        return { h, extrude: true, lift: o.lift - (h - o.h) };
+    }
+    const sg = fid[1] === "+" ? 1 : -1,
+        isU = fid[0] === "u",
+        r0 = isU ? o.ra : o.rb,
+        r1 = Math.max(m, r0 + dl / 2),
+        dr = r1 - r0,
+        ex = isU ? [cs, sn] : [-sn, cs];
+    const q = { ca: o.ca + sg * dr * ex[0], cb: o.cb + sg * dr * ex[1] };
+    if (o.type === "cyl") {
+        q.ra = r1;
+        q.rb = r1;
+    } else if (o.type === "asset" && o.asset === "sphere") {
+        q.ra = r1;
+        q.rb = r1;
+        q.h = r1 * 2;
+    } else q[isU ? "ra" : "rb"] = r1;
+    return q;
+}
+function buildingOuterFacePatch(o, fid, dl) {
+    const q = facePatch(o, fid, dl),
+        w = Math.max(0.1, Math.abs(Number(q.ra ?? o.ra) || 1) * 2),
+        d = Math.max(0.05, Math.abs(Number(q.rb ?? o.rb) || 0.5) * 2),
+        h = Math.max(0.1, Number(q.h ?? o.h) || 1),
+        openingW = clamp(Number(o.openingW) || w * 0.56, 0.1, Math.max(0.1, w - 0.1)),
+        openingH = clamp(Number(o.openingH) || h * 0.66, 0.1, Math.max(0.1, h - 0.1)),
+        patch = {
+            ...q,
+            openingW: Math.min(openingW, Math.max(0.1, w - 0.1)),
+            openingH: Math.min(openingH, Math.max(0.1, h - 0.1)),
+        };
+    if (Number.isFinite(Number(o.openingBack)))
+        patch.openingBack = clamp(Number(o.openingBack), -d / 2 + 0.025, d / 2 - 0.025);
+    return patch;
+}
+// 看板の黒い外枠を構成する実高さ。全高の上下余白は外形ハンドルの対象にしない。
+function outerZRange(o) {
+    const h = Math.max(0, Number(o?.h) || 0);
+    return o?.type === "asset" && o?.asset === "sign" ? [h * 0.08, h * 0.82] : [0, h];
+}
+// 看板の絵枠は常にカメラ側の面へ出す。反対側へ回り込んだ3D視点でも、
+// 編集ハンドルが看板の裏へ隠れず、実際に見えている面を編集できるようにする。
+function signFaceDepth(o, gap = 0.018) {
+    const [iu, iv] = PL[o.k],
+        cs = Math.cos(Number(o.rot || 0) * DG),
+        sn = Math.sin(Number(o.rot || 0) * DG),
+        ev = [0, 0, 0];
+    ev[iu] = -sn;
+    ev[iv] = cs;
+    const base = L2W(o, 0, 0, 0),
+        rel = V.add(camPos(), base, 1, -1),
+        side = V.dot(rel, ev) >= 0 ? 1 : -1,
+        depth = Math.max(0.02, Math.abs(Number(o.rb) || 0.1));
+    return side * (depth + gap);
+}
+// 看板専用のビュー内ハンドル。内側の絵枠の幅・高さを、
+// 左の数値欄だけでなくキャンバス上のハンドルをドラッグして編集できる。
+function signGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "sign") return null;
+    const w = Math.max(0.08, o.ra * 2),
+        d = Math.max(0.04, o.rb * 2),
+        h = Math.max(0.08, o.h || 1),
+        fy = signFaceDepth(o);
+    const board0 = 0.08 * h,
+        board1 = 0.82 * h;
+    const maxW = w * 0.9,
+        maxH = (board1 - board0) * 0.84;
+    const faceW = clamp(Number(o.faceW) || w * 0.7, 0.08, maxW),
+        faceH = clamp(Number(o.faceH) || h * 0.34, 0.08, maxH);
+    const pr = (x, y, z) => scrW(L2W(o, x, y, z));
+    const iz0 = (board0 + board1 - faceH) / 2,
+        iz1 = iz0 + faceH,
+        zm = (iz0 + iz1) / 2;
+    const center = pr(0, fy, zm),
+        right = pr(faceW / 2, fy, zm),
+        top = pr(0, fy, iz1),
+        frame = [pr(-faceW / 2, fy, iz0), pr(faceW / 2, fy, iz0), pr(faceW / 2, fy, iz1), pr(-faceW / 2, fy, iz1)];
+    const make = (kind, anchor, probe, base, min, max, fallbackAxis = null) => {
+        const dx = probe.x - anchor.x,
+            dy = probe.y - anchor.y,
+            step = Math.max(0.0001, Number(probe._step) || 0.05),
+            px = Math.hypot(dx, dy);
+        // 真横では絵枠の幅(X)が投影上つぶれ、真上では高さ(Y)がつぶれる。
+        // 投影が縮退しても、緑の四角は絵枠の実際の辺から離さない。
+        // ドラッグ方向だけを画面軸へ固定し、見た目のアンカーは常に元の点に置く。
+        if (fallbackAxis && (!anchor?.ok || !probe?.ok || px < 6 / Z)) {
+            const dir = fallbackAxis === "x" ? { x: 1, y: 0 } : { x: 0, y: -1 };
+            return {
+                kind,
+                s: anchor,
+                dir,
+                scale: orthView ? Math.max(1, orthScale()) : Math.max(24, px / step || 1),
+                start: base,
+                min,
+                max,
+                fallback: true,
+            };
+        }
+        return {
+            kind,
+            s: anchor,
+            dir: { x: dx / (px || 1), y: dy / (px || 1) },
+            scale: px / step || 1,
+            start: base,
+            min,
+            max,
+        };
+    };
+    // _step is kept on the temporary projected point so the screen scale can be measured.
+    const pw = Math.max(0.05, w * 0.12),
+        ph = Math.max(0.05, h * 0.1);
+    const rw = pr(faceW / 2 + pw, fy, zm);
+    rw._step = pw;
+    const ht = pr(0, fy, iz1 + ph);
+    ht._step = ph;
+    const handles = {
+        faceW: make("faceW", right, rw, faceW, 0.08, maxW, "x"),
+        faceH: make("faceH", top, ht, faceH, 0.08, maxH, "y"),
+    };
+    return { o, C3: L2W(o, 0, 0, (board0 + board1) / 2), center, frame, handles };
+}
+function coneGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "cone") return null;
+    const h = Math.max(0.02, o.h || 1),
+        base = L2W(o, 0, 0, 0),
+        apex = L2W(o, 0, 0, h),
+        bp = scrW(base),
+        ap = scrW(apex),
+        step = Math.max(0.08, h * 0.12),
+        probe = scrW(L2W(o, 0, 0, h + step));
+    const dx = probe.x - ap.x,
+        dy = probe.y - ap.y,
+        sc = Math.hypot(dx, dy) / step;
+    return {
+        o,
+        C3: L2W(o, 0, 0, h / 2),
+        base: bp,
+        apex: ap,
+        handle: {
+            kind: "height",
+            s: ap,
+            dir: { x: dx / (Math.hypot(dx, dy) || 1), y: dy / (Math.hypot(dx, dy) || 1) },
+            scale: sc || 1,
+            start: h,
+            min: 0.02,
+            max: 20,
+        },
+    };
+}
+function sphereGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "sphere") return null;
+    const r = Math.min(2 * o.ra, 2 * o.rb, o.h) * 0.5,
+        center = L2W(o, 0, 0, o.h * 0.5),
+        right = V.nrm(wld([1, 0, 0])),
+        cp = scrW(center),
+        edge = scrW(V.add(center, right, r)),
+        probe = scrW(V.add(center, right, r + 0.1));
+    const dx = probe.x - edge.x,
+        dy = probe.y - edge.y,
+        sc = Math.hypot(dx, dy) / 0.1;
+    return {
+        o,
+        C3: center,
+        center: cp,
+        edge,
+        handle: {
+            kind: "radius",
+            s: edge,
+            dir: { x: dx / (Math.hypot(dx, dy) || 1), y: dy / (Math.hypot(dx, dy) || 1) },
+            scale: sc || 1,
+            start: r,
+            min: 0.02,
+            max: 20,
+        },
+    };
+}
+function buildingBackY(o, d) {
+    const half = Math.max(0.025, d * 0.5),
+        stored = Number(o?.openingBack);
+    if (Number.isFinite(stored)) return clamp(stored, -half + 0.025, half - 0.025);
+    const far = -buildingFaceDepth(o);
+    return far >= 0 ? half - 0.025 : -half + 0.025;
+}
+function buildingGeometry(o) {
+    const w = Math.max(0.1, Math.abs(Number(o.ra) || 1) * 2),
+        d = Math.max(0.05, Math.abs(Number(o.rb) || 0.5) * 2),
+        h = Math.max(0.1, Number(o.h) || 1),
+        openingW = clamp(Number(o.openingW) || w * 0.56, 0.1, Math.max(0.1, w - 0.1)),
+        openingH = clamp(Number(o.openingH) || h * 0.66, 0.1, Math.max(0.1, h - 0.1)),
+        backY = buildingBackY(o, d);
+    return { w, d, h, openingW, openingH, backY };
+}
+function buildingFaceDepth(o) {
+    const base = L2W(o, 0, 0, 0),
+        edge = L2W(o, 0, 1, 0),
+        axis = V.nrm(V.add(edge, base, 1, -1)),
+        rel = V.add(camPos(), base, 1, -1),
+        half = Math.abs(Number(o.rb) || 0.1);
+    return (V.dot(rel, axis) >= 0 ? 1 : -1) * (half + 0.025);
+}
+function buildingGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "building") return null;
+    const g = buildingGeometry(o),
+        half = Math.abs(Number(o.rb) || 0.1),
+        near = buildingFaceDepth(o) >= 0 ? half : -half,
+        far = -near,
+        pr = (x, y, z) => scrW(L2W(o, x, y, z)),
+        stepW = Math.max(0.05, g.w * 0.06),
+        stepH = Math.max(0.05, g.h * 0.06),
+        mk = (kind, s, q, start, min, max, factor = 1) => {
+            const dx = q.x - s.x,
+                dy = q.y - s.y,
+                px = Math.hypot(dx, dy) || 1;
+            return {
+                kind,
+                s,
+                dir: { x: dx / px, y: dy / px },
+                scale: px / (kind.includes("openingH") ? stepH : stepW) || 1,
+                start,
+                min,
+                max,
+                factor,
+            };
+        };
+    const makeFace = (prefix, y) => {
+        const center = pr(0, y, g.openingH * 0.5),
+            left = pr(-g.openingW * 0.5, y, g.openingH * 0.5),
+            right = pr(g.openingW * 0.5, y, g.openingH * 0.5),
+            top = pr(0, y, g.openingH),
+            lw = pr(-g.openingW * 0.5 - stepW, y, g.openingH * 0.5),
+            rw = pr(g.openingW * 0.5 + stepW, y, g.openingH * 0.5),
+            th = pr(0, y, g.openingH + stepH),
+            tag = prefix === "front" ? "" : "Back";
+        return {
+            center,
+            frame: [
+                pr(-g.openingW * 0.5, y, 0),
+                pr(-g.openingW * 0.5, y, g.openingH),
+                pr(g.openingW * 0.5, y, g.openingH),
+                pr(g.openingW * 0.5, y, 0),
+            ],
+            handles: {
+                [prefix + "OpeningWLeft"]: mk(
+                    prefix + "OpeningWLeft",
+                    left,
+                    lw,
+                    g.openingW,
+                    0.1,
+                    Math.max(0.1, g.w - 0.1),
+                    2,
+                ),
+                [prefix + "OpeningWRight"]: mk(
+                    prefix + "OpeningWRight",
+                    right,
+                    rw,
+                    g.openingW,
+                    0.1,
+                    Math.max(0.1, g.w - 0.1),
+                    2,
+                ),
+                [prefix + "OpeningH"]: mk(prefix + "OpeningH", top, th, g.openingH, 0.1, Math.max(0.1, g.h - 0.1)),
+            },
+            tag,
+        };
+    };
+    const front = makeFace("front", near),
+        back = makeFace("back", far),
+        panelY = g.backY,
+        panelFrame = [
+            pr(-g.openingW * 0.5, panelY, 0),
+            pr(-g.openingW * 0.5, panelY, g.openingH),
+            pr(g.openingW * 0.5, panelY, g.openingH),
+            pr(g.openingW * 0.5, panelY, 0),
+        ],
+        panelCenter = pr(0, panelY, g.openingH * 0.5),
+        panelProbe = pr(0, panelY + (panelY >= 0 ? 0.1 : -0.1), g.openingH * 0.5),
+        pdx = panelProbe.x - panelCenter.x,
+        pdy = panelProbe.y - panelCenter.y,
+        ppx = Math.hypot(pdx, pdy),
+        backFace = {
+            kind: "backFace",
+            s: panelCenter,
+            dir: { x: pdx / (ppx || 1), y: pdy / (ppx || 1) },
+            scale: ppx / 0.1 || 1,
+            start: panelY,
+            min: -half + 0.025,
+            max: half - 0.025,
+            factor: 1,
+            side: panelY >= 0 ? 1 : -1,
+            face: true,
+        };
+    return {
+        o,
+        C3: L2W(o, 0, 0, g.h * 0.5),
+        center: front.center,
+        backCenter: back.center,
+        frame: front.frame,
+        backFrame: back.frame,
+        panelFrame,
+        panelCenter,
+        handles: { ...front.handles, ...back.handles, backFace },
+    };
+}
+function awningGeometry(o) {
+    const w = Math.max(0.1, Math.abs(Number(o.ra) || 1) * 2),
+        d = Math.max(0.05, Math.abs(Number(o.rb) || 0.5) * 2),
+        h = Math.max(0.1, Number(o.h) || 1),
+        half = d / 2,
+        edgeY = clamp(
+            Number.isFinite(Number(o.awningEdgeY)) ? Number(o.awningEdgeY) : -half,
+            -half + 0.025,
+            half - 0.025,
+        ),
+        edgeZ = clamp(
+            Number.isFinite(Number(o.awningEdgeZ)) ? Number(o.awningEdgeZ) : h,
+            0.05,
+            Math.max(0.05, h - 0.02),
+        ),
+        thickness = clamp(Number(o.awningThickness) || Math.max(0.05, h * 0.14), 0.03, Math.max(0.03, h * 0.45)),
+        frontBottom = clamp(
+            Number.isFinite(Number(o.awningFrontBottom)) ? Number(o.awningFrontBottom) : 0,
+            0,
+            Math.max(0, edgeZ - 0.03),
+        ),
+        backBottom = clamp(
+            Number.isFinite(Number(o.awningBackBottom)) ? Number(o.awningBackBottom) : 0,
+            0,
+            Math.max(0, h - 0.03),
+        );
+    return { w, d, h, half, baseFrontY: -half, edgeY, edgeZ, thickness, frontBottom, backBottom };
+}
+function awningGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "awning") return null;
+    const g = awningGeometry(o),
+        edgeY = g.edgeY,
+        pr = (x, y, z) => scrW(L2W(o, x, y, z)),
+        s = pr(0, edgeY, g.edgeZ),
+        qz = pr(0, edgeY, g.edgeZ + 0.1),
+        qy = pr(0, edgeY + 0.1, g.edgeZ),
+        zdx = qz.x - s.x,
+        zdy = qz.y - s.y,
+        zpx = Math.hypot(zdx, zdy) || 1,
+        ydx = qy.x - s.x,
+        ydy = qy.y - s.y,
+        ypx = Math.hypot(ydx, ydy) || 1;
+    const handles = {
+        edgeZ: {
+            kind: "edgeZ",
+            s,
+            dir: { x: zdx / zpx, y: zdy / zpx },
+            scale: zpx / 0.1 || 1,
+            start: g.edgeZ,
+            min: 0.05,
+            max: g.h - 0.02,
+            frontBottom: g.frontBottom,
+        },
+    };
+    if (!o.attachment?.verticalOnly)
+        handles.edgeY = {
+            kind: "edgeY",
+            s: qy,
+            dir: { x: ydx / ypx, y: ydy / ypx },
+            scale: ypx / 0.1 || 1,
+            start: g.edgeY,
+            min: -g.d / 2 + 0.025,
+            max: g.d / 2 - 0.025,
+        };
+    return {
+        o,
+        C3: L2W(o, 0, 0, (g.edgeZ + g.h) * 0.5),
+        edge: s,
+        frame: [
+            pr(-g.w / 2, edgeY, g.edgeZ),
+            pr(g.w / 2, edgeY, g.edgeZ),
+            pr(g.w / 2, g.d / 2, g.h),
+            pr(-g.w / 2, g.d / 2, g.h),
+        ],
+        handles,
+        handle: null,
+    };
+}
+function specialGizmo(o) {
+    return o && o.type === "asset" && o.asset === "building"
+        ? buildingGizmo(o)
+        : o && o.type === "asset" && o.asset === "awning"
+            ? awningGizmo(o)
+            : o && o.type === "asset" && o.asset === "sign"
+                ? signGizmo(o)
+                : o && o.type === "asset" && o.asset === "cone"
+                    ? coneGizmo(o)
+                    : o && o.type === "asset" && o.asset === "sphere"
+                        ? sphereGizmo(o)
+                        : null;
+}
+function drawSpecialGizmo(c, o) {
+    const sg = specialGizmo(o);
+    if (!sg) return;
+    c.save();
+    c.lineCap = "round";
+    c.lineJoin = "round";
+    const sq = (q, col, diamond = false) => {
+        if (!q || !q.ok) return;
+        c.fillStyle = col;
+        c.strokeStyle = "#102027";
+        c.lineWidth = 1.4 / Z;
+        c.beginPath();
+        if (diamond) {
+            c.moveTo(q.x, q.y - 7 / Z);
+            c.lineTo(q.x + 7 / Z, q.y);
+            c.lineTo(q.x, q.y + 7 / Z);
+            c.lineTo(q.x - 7 / Z, q.y);
+        } else c.rect(q.x - 6 / Z, q.y - 6 / Z, 12 / Z, 12 / Z);
+        c.closePath();
+        c.fill();
+        c.stroke();
+    };
+    if (sg.o.asset === "building") {
+        const h = sg.handles,
+            front = ["frontOpeningWLeft", "frontOpeningWRight", "frontOpeningH"],
+            back = ["backOpeningWLeft", "backOpeningWRight", "backOpeningH"];
+        c.setLineDash([5 / Z, 4 / Z]);
+        c.lineWidth = 1.2 / Z;
+        [
+            ["front", front, sg.frame, sg.center, "#8ce6c2"],
+            ["back", back, sg.backFrame, sg.backCenter, "#ffd37a"],
+        ].forEach(([label, keys, frame, center, col]) => {
+            if (frame && frame.every((q) => q && q.ok)) {
+                c.strokeStyle = col;
+                c.beginPath();
+                frame.forEach((q, i) => (i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)));
+                c.stroke();
+            }
+            c.strokeStyle = col;
+            c.beginPath();
+            keys.forEach((k) => {
+                c.moveTo(center.x, center.y);
+                c.lineTo(h[k].s.x, h[k].s.y);
+            });
+            c.stroke();
+            keys.forEach((k) => sq(h[k].s, col));
+            c.fillStyle = col;
+            c.font = `bold ${12 / Z}px system-ui`;
+            c.fillText(label === "front" ? "開口W/H" : "奥の開口", h[keys[1]].s.x + 8 / Z, h[keys[1]].s.y - 7 / Z);
+        });
+        if (sg.panelFrame && sg.panelFrame.every((q) => q && q.ok)) {
+            c.fillStyle = "rgba(255,179,111,.18)";
+            c.strokeStyle = "#ffb36f";
+            c.lineWidth = 1.8 / Z;
+            c.beginPath();
+            sg.panelFrame.forEach((q, i) => (i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)));
+            c.closePath();
+            c.fill();
+            c.stroke();
+            c.strokeStyle = "rgba(255,179,111,.82)";
+            c.setLineDash([3 / Z, 3 / Z]);
+            c.beginPath();
+            c.moveTo(sg.panelCenter.x, sg.panelCenter.y);
+            c.lineTo(h.backFace.s.x, h.backFace.s.y);
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.backFace.s, "#ffb36f", true);
+            c.fillStyle = "#ffd0a8";
+            c.font = `bold ${12 / Z}px system-ui`;
+            c.fillText("奥の面", h.backFace.s.x + 9 / Z, h.backFace.s.y - 8 / Z);
+        }
+        c.setLineDash([]);
+    } else if (sg.o.asset === "awning") {
+        const hz = sg.handles.edgeZ,
+            hy = sg.handles.edgeY;
+        c.setLineDash([5 / Z, 4 / Z]);
+        c.strokeStyle = "rgba(255,179,111,.9)";
+        c.lineWidth = 1.5 / Z;
+        if (sg.frame && sg.frame.every((q) => q && q.ok)) {
+            c.beginPath();
+            sg.frame.forEach((q, i) => (i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)));
+            c.closePath();
+            c.stroke();
+        }
+        c.beginPath();
+        c.moveTo(hz.s.x, hz.s.y);
+        if (hy) c.lineTo(hy.s.x, hy.s.y);
+        c.stroke();
+        c.setLineDash([]);
+        sq(hz.s, "#ffb36f", true);
+        if (hy) sq(hy.s, "#ffb36f");
+        c.fillStyle = "#ffd0a8";
+        c.font = `bold ${12 / Z}px system-ui`;
+        c.fillText("前縁Y", hz.s.x + 9 / Z, hz.s.y - 8 / Z);
+        if (hy) c.fillText("前後", hy.s.x + 9 / Z, hy.s.y - 8 / Z);
+    } else if (sg.o.asset === "sign") {
+        const h = sg.handles;
+        c.setLineDash([5 / Z, 4 / Z]);
+        c.lineWidth = 1.2 / Z;
+        if (sg.frame && sg.frame.length === 4 && sg.frame.every((q) => q && q.ok)) {
+            c.strokeStyle = "rgba(102,227,200,.58)";
+            c.beginPath();
+            sg.frame.forEach((q, i) => (i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)));
+            c.closePath();
+            c.stroke();
+        }
+        c.strokeStyle = "rgba(102,227,200,.9)";
+        c.beginPath();
+        c.moveTo(sg.center.x, sg.center.y);
+        c.lineTo(h.faceW.s.x, h.faceW.s.y);
+        c.moveTo(sg.center.x, sg.center.y);
+        c.lineTo(h.faceH.s.x, h.faceH.s.y);
+        c.stroke();
+        c.setLineDash([]);
+        sq(h.faceW.s, "#66e3c8");
+        sq(h.faceH.s, "#66e3c8");
+        c.fillStyle = "#66e3c8";
+        c.font = `bold ${12 / Z}px system-ui`;
+        c.fillText("絵枠W", h.faceW.s.x + 8 / Z, h.faceW.s.y - 7 / Z);
+        c.fillText("絵枠H", h.faceH.s.x + 8 / Z, h.faceH.s.y - 7 / Z);
+    } else if (sg.o.asset === "cone") {
+        c.strokeStyle = "rgba(255,179,111,.95)";
+        c.lineWidth = 1.5 / Z;
+        c.beginPath();
+        c.moveTo(sg.base.x, sg.base.y);
+        c.lineTo(sg.apex.x, sg.apex.y);
+        c.stroke();
+        sq(sg.handle.s, "#ffb36f");
+        c.fillStyle = "#ffcf9f";
+        c.font = `bold ${12 / Z}px system-ui`;
+        c.fillText("高さ", sg.handle.s.x + 9 / Z, sg.handle.s.y - 8 / Z);
+    } else {
+        c.strokeStyle = "rgba(173,156,255,.95)";
+        c.lineWidth = 1.4 / Z;
+        c.setLineDash([5 / Z, 4 / Z]);
+        c.beginPath();
+        c.moveTo(sg.center.x, sg.center.y);
+        c.lineTo(sg.handle.s.x, sg.handle.s.y);
+        c.stroke();
+        c.setLineDash([]);
+        sq(sg.handle.s, "#ad9cff");
+        c.fillStyle = "#d5ccff";
+        c.font = `bold ${12 / Z}px system-ui`;
+        c.fillText("半径", sg.handle.s.x + 9 / Z, sg.handle.s.y - 8 / Z);
+    }
+    c.restore();
+}
+
+// 複合オブジェクトをワールド軸方向へ拡縮する。子パーツの相対配置と定義を
+// 保持したまま、各パーツを同じアフィン変換で作り直す。
+function scaleCompoundPart(part, pivot, scale) {
+    const q = { ...part, off: [...(part.off || [0, 0, 0])] };
+    if (!PL[q.k]) return q;
+    const base = L2W(q, 0, 0, 0),
+        nb = base.map((v, j) => pivot[j] + (v - pivot[j]) * (Number(scale[j]) || 1)),
+        [iu, iv] = PL[q.k],
+        d = Number(q.d) || 1;
+    q.ca = nb[iu] - q.off[iu];
+    q.cb = nb[iv] - q.off[iv];
+    q.lift = (d + q.off[q.k] - nb[q.k]) / d;
+    const rot = Number(q.rot) || 0,
+        cs = Math.cos(rot * DG),
+        sn = Math.sin(rot * DG),
+        su = Math.hypot(scale[iu] * cs, scale[iv] * sn),
+        sv = Math.hypot(scale[iu] * sn, scale[iv] * cs);
+    q.ra = Math.max(0.002, Math.abs(Number(q.ra) || 0.002) * Math.max(0.002, su));
+    q.rb = Math.max(0.002, Math.abs(Number(q.rb) || 0.002) * Math.max(0.002, sv));
+    if (su > 0.0001) q.rot = wrap180(Math.atan2(scale[iv] * sn, scale[iu] * cs) / DG);
+    if (Number(q.h) > 0) q.h = Math.max(0.002, Number(q.h) * Math.abs(Number(scale[q.k]) || 1));
+    return q;
+}
+function scaleCompoundDefinition(o, pivot, scale) {
+    const parts = compoundPartsAt(o).map((part) => scaleCompoundPart(part, pivot, scale)),
+        b = groupBounds(parts),
+        center = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2];
+    return {
+        parts,
+        tx: 0,
+        ty: 0,
+        tz: 0,
+        ca: center[0],
+        cb: center[2],
+        ra: Math.max(0.005, (b.hi[0] - b.lo[0]) / 2),
+        rb: Math.max(0.005, (b.hi[2] - b.lo[2]) / 2),
+        h: Math.max(0, b.hi[1] - b.lo[1]),
+    };
+}
+function compoundFacePatch(o, fid, dl) {
+    const b = obBounds(o),
+        map = { "x+": [0, 1], "x-": [0, -1], "y+": [1, 1], "y-": [1, -1], "z+": [2, 1], "z-": [2, -1] },
+        spec = map[fid];
+    if (!spec) return {};
+    const axis = spec[0],
+        side = spec[1],
+        span = Math.max(0.005, b.hi[axis] - b.lo[axis]),
+        pivot = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2],
+        fixed = side > 0 ? b.lo[axis] : b.hi[axis],
+        edge = side > 0 ? b.hi[axis] + dl : b.lo[axis] + dl,
+        newSpan = Math.max(0.005, side > 0 ? edge - b.lo[axis] : b.hi[axis] - edge),
+        scale = [1, 1, 1];
+    pivot[axis] = fixed;
+    scale[axis] = newSpan / span;
+    return scaleCompoundDefinition(o, pivot, scale);
+}
+function compoundGizmo(o) {
+    const b = obBounds(o),
+        C3 = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2],
+        sC = scrW(C3);
+    if (!sC.ok) return null;
+    const g = { o, C3, sC, axes: [], faces: [], ring: [], compound: true, bounds: b },
+        nC = Math.hypot(...V.add(C3, CO()));
+    [
+        [1, 0, 0, "#e8743d", "X"],
+        [0, 1, 0, "#4a7be8", "Y"],
+        [0, 0, 1, "#2fb5a5", "Z"],
+    ].forEach(([x, y, z, col, nm]) => {
+        const a = [x, y, z],
+            eps = 0.01 * Math.max(0.1, nC),
+            s1 = scrW(V.add(C3, a, 1, eps));
+        if (!s1.ok) return;
+        const pu = Math.hypot(s1.x - sC.x, s1.y - sC.y) / eps;
+        if (pu < 1e-6) return;
+        const L = Math.min(90 / Z / pu, 3 * nC + 1),
+            sT = scrW(V.add(C3, a, 1, L));
+        if (sT.ok) g.axes.push({ a, col, nm, sT });
+    });
+    const center = [...C3],
+        neg = (v) => v.map((t) => -t),
+        face = (id, p, n) => g.faces.push({ id, n, P3: p, s: scrW(p) });
+    face("x+", [b.hi[0], center[1], center[2]], [1, 0, 0]);
+    face("x-", [b.lo[0], center[1], center[2]], [-1, 0, 0]);
+    face("y+", [center[0], b.hi[1], center[2]], [0, 1, 0]);
+    face("y-", [center[0], b.lo[1], center[2]], [0, -1, 0]);
+    face("z+", [center[0], center[1], b.hi[2]], [0, 0, 1]);
+    face("z-", [center[0], center[1], b.lo[2]], [0, 0, -1]);
+    const R = Math.max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], 0.25) * 0.7;
+    for (let i = 0; i <= 72; i++) {
+        const t = (i / 72) * 2 * Math.PI;
+        g.ring.push(scrW([C3[0] + R * Math.cos(t), C3[1], C3[2] + R * Math.sin(t)]));
+    }
+    return g;
+}
+// 選択中の図形のギズモの位置（画面座標つき）
+function gizmo() {
+    const o = sel && obOf(sel);
+    if (!o) return null;
+    if (o.type === "compound") return compoundGizmo(o);
+    const [iu, iv] = PL[o.k],
+        cs = Math.cos(o.rot * DG),
+        sn = Math.sin(o.rot * DG),
+        solid =
+            o.type === "box" ||
+            o.type === "cyl" ||
+            o.type === "rect" ||
+            o.type === "circ" ||
+            o.type === "triPrism" ||
+            o.type === "triPyramid" ||
+            (o.type === "asset" &&
+                (o.asset === "triPrism" ||
+                    o.asset === "triPyramid" ||
+                    o.asset === "sign" ||
+                    o.asset === "stairs" ||
+                    o.asset === "building" ||
+                    o.asset === "awning")),
+        [z0, z1] = outerZRange(o),
+        zc = solid ? (z0 + z1) / 2 : 0;
+    const C3 = L2W(o, 0, 0, zc),
+        sC = scrW(C3);
+    if (!sC.ok) return null;
+    const g = { o, C3, sC, axes: [], faces: [], ring: [] },
+        nC = Math.hypot(...V.add(C3, CO()));
+    [
+        [1, 0, 0, "#e8743d", "X"],
+        [0, 1, 0, "#4a7be8", "Y"],
+        [0, 0, 1, "#2fb5a5", "Z"],
+    ].forEach(([x, y, z, col, nm]) => {
+        // 画面で約90pxになる長さの矢印
+        const a = [x, y, z],
+            eps = 0.01 * Math.max(0.1, nC),
+            s1 = scrW(V.add(C3, a, 1, eps));
+        if (!s1.ok) return;
+        const pu = Math.hypot(s1.x - sC.x, s1.y - sC.y) / eps;
+        if (pu < 1e-6) return;
+        const L = Math.min(90 / Z / pu, 3 * nC + 1),
+            sT = scrW(V.add(C3, a, 1, L));
+        if (sT.ok) g.axes.push({ a, col, nm, sT });
+    });
+    if (o.attachment?.verticalOnly) g.axes = g.axes.filter((a) => Math.abs(a.a[1]) > 0.9);
+    const en = [0, 0, 0],
+        eu = [0, 0, 0],
+        ev = [0, 0, 0];
+    en[o.k] = -o.d;
+    eu[iu] = cs;
+    eu[iv] = sn;
+    ev[iu] = -sn;
+    ev[iv] = cs; // 高さ方向・幅方向・奥行き方向の単位ベクトル
+    const F = (id, x, y, z, n) => {
+        const P3 = L2W(o, x, y, z),
+            s = scrW(P3);
+        g.faces.push({ id, n, P3, s });
+    },
+        neg = (v) => v.map((t) => -t);
+    // 外形の6面は、開口のある建物でも編集対象にする。
+    // 特殊ハンドル（開口W/H・奥の面）とは別に、白い四角で外側の幅・奥行・高さを編集できる。
+    F("u+", o.ra, 0, zc, eu);
+    F("u-", -o.ra, 0, zc, neg(eu));
+    F("v+", 0, o.rb, zc, ev);
+    F("v-", 0, -o.rb, zc, neg(ev));
+    if (solid) {
+        F("top", 0, 0, z1, en);
+        F("base", 0, 0, z0, neg(en));
+    }
+    const R = Math.max(o.ra, o.rb) * 1.4;
+    for (let i = 0; i <= 72; i++) {
+        const t = (i / 72) * 2 * Math.PI;
+        g.ring.push(scrW(L2W(o, R * Math.cos(t), R * Math.sin(t), solid ? z0 : 0)));
+    }
+    return g;
+}
+function drawGizmo(c) {
+    const g = gizmo();
+    if (!g) {
+        const o = sel && obOf(sel);
+        if (o) drawSpecialGizmo(c, o);
+        return;
+    }
+    c.save();
+    c.lineCap = "round";
+    c.lineJoin = "round";
+    c.strokeStyle = "rgba(255,170,0,.85)";
+    c.lineWidth = 1.6 / Z;
+    c.setLineDash([7 / Z, 5 / Z]);
+    c.beginPath();
+    let on = false; // 回転の輪
+    g.ring.forEach((q) => {
+        if (!q.ok) {
+            on = false;
+            return;
+        }
+        on ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y);
+        on = true;
+    });
+    c.stroke();
+    c.setLineDash([]);
+    g.axes.forEach((a) => {
+        const dx = a.sT.x - g.sC.x,
+            dy = a.sT.y - g.sC.y,
+            l = Math.hypot(dx, dy) || 1,
+            ux = dx / l,
+            uy = dy / l,
+            h = 11 / Z; // 軸の矢印
+        c.strokeStyle = a.col;
+        c.fillStyle = a.col;
+        c.lineWidth = 3.2 / Z;
+        c.beginPath();
+        c.moveTo(g.sC.x, g.sC.y);
+        c.lineTo(a.sT.x, a.sT.y);
+        c.stroke();
+        c.beginPath();
+        c.moveTo(a.sT.x + ux * h, a.sT.y + uy * h);
+        c.lineTo(a.sT.x - ux * h * 0.2 - uy * h * 0.6, a.sT.y - uy * h * 0.2 + ux * h * 0.6);
+        c.lineTo(a.sT.x - ux * h * 0.2 + uy * h * 0.6, a.sT.y - uy * h * 0.2 - ux * h * 0.6);
+        c.fill();
+        c.font = `bold ${15 / Z}px system-ui`;
+        c.fillText(a.nm, a.sT.x + ux * h + 4 / Z, a.sT.y + uy * h + 4 / Z);
+    });
+    c.fillStyle = "#fff";
+    c.strokeStyle = "#222";
+    c.lineWidth = 1.4 / Z; // 面のハンドル（白い四角）
+    g.faces.forEach((f) => {
+        if (!f.s.ok) return;
+        const r = 6.5 / Z;
+        c.beginPath();
+        c.rect(f.s.x - r, f.s.y - r, 2 * r, 2 * r);
+        c.fill();
+        c.stroke();
+    });
+    c.beginPath();
+    c.arc(g.sC.x, g.sC.y, 5 / Z, 0, 7);
+    c.fill();
+    c.stroke();
+    drawSpecialGizmo(c, g.o);
+    c.restore();
+}
+function insidePoly2D(p, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const a = poly[i],
+            b = poly[j],
+            cross = a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y || 1e-9) + a.x;
+        if (cross) inside = !inside;
+    }
+    return inside;
+}
+// タッチした位置にあるハンドルを調べる（アセット専用→面→軸の矢印→回転の輪）
+function hitGizmo(p) {
+    const active = sel && obOf(sel),
+        special = active && specialGizmo(active),
+        R = 20 / Z;
+    if (special) {
+        if (active.asset === "building") {
+            for (const h of Object.values(special.handles))
+                if (Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
+                    return { t: "building-" + h.kind, sign: h, g: { o: active, C3: special.C3 } };
+            if (special.panelFrame && special.panelFrame.every((q) => q && q.ok) && insidePoly2D(p, special.panelFrame))
+                return { t: "building-backFace", sign: special.handles.backFace, g: { o: active, C3: special.C3 } };
+        }
+        if (active.asset === "awning") {
+            for (const h of Object.values(special.handles))
+                if (Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
+                    return { t: "awning-" + h.kind, sign: h, g: { o: active, C3: special.C3 } };
+            if (
+                special.frame &&
+                special.frame[0]?.ok &&
+                special.frame[1]?.ok &&
+                segd(p, special.frame[0], special.frame[1]) < R * 0.8
+            )
+                return { t: "awning-edgeZ", sign: special.handles.edgeZ, g: { o: active, C3: special.C3 } };
+        }
+        if (active.asset === "sign")
+            for (const h of Object.values(special.handles))
+                if (Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
+                    return { t: "sign-" + h.kind, sign: h, g: { o: active, C3: special.C3 } };
+        if (active.asset === "cone" && Math.hypot(special.handle.s.x - p.x, special.handle.s.y - p.y) < R)
+            return { t: "cone-height", sign: special.handle, g: { o: active, C3: special.C3 } };
+        if (active.asset === "sphere" && Math.hypot(special.handle.s.x - p.x, special.handle.s.y - p.y) < R)
+            return { t: "sphere-radius", sign: special.handle, g: { o: active, C3: special.C3 } };
+    }
+    const g = gizmo();
+    if (!g) return null;
+    const Rg = 20 / Z;
+    for (const f of g.faces) if (f.s.ok && Math.hypot(f.s.x - p.x, f.s.y - p.y) < Rg) return { t: "face", f, g };
+    if (Math.hypot(g.sC.x - p.x, g.sC.y - p.y) > R * 0.8)
+        for (const a of g.axes) if (segd(p, g.sC, a.sT) < R * 0.7) return { t: "axis", a, g };
+    for (let i = 1; i < g.ring.length; i++) {
+        const a = g.ring[i - 1],
+            b = g.ring[i];
+        if (a.ok && b.ok && segd(p, a, b) < R * 0.7) return { t: "ring", g };
+    }
+    return null;
+}
+function compoundBounds(o) {
+    const parts = compoundPartsAt(o);
+    if (!parts.length) return { lo: [0, 0, 0], hi: [0, 0, 0] };
+    return groupBounds(parts);
+}
+function objectAnchorWorld(o) {
+    if (o?.type === "compound") {
+        const b = compoundBounds(o);
+        return [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2];
+    }
+    return L2W(o, 0, 0, 0);
+}
+// 図形の外枠（ワールド軸に沿った箱）。スナップや接地に使う
+function obBounds(o) {
+    if (o?.attachment) o = syncAttachedPart(o);
+    if (o?.type === "compound") return compoundBounds(o);
+    const sign = o.type === "asset" && o.asset === "sign",
+        pts = [],
+        solid =
+            o.type === "box" ||
+            o.type === "cyl" ||
+            o.type === "triPrism" ||
+            o.type === "triPyramid" ||
+            ((o.type === "rect" || o.type === "circ") && o.extrude) ||
+            sign,
+        hs = solid ? (sign ? outerZRange(o) : [0, o.h]) : [0];
+    if (o.type === "rect" || o.type === "box" || o.type === "triPrism" || o.type === "triPyramid" || sign)
+        hs.forEach((z) =>
+            [
+                [-1, -1],
+                [1, -1],
+                [1, 1],
+                [-1, 1],
+            ].forEach(([a, b]) => pts.push(L2W(o, a * o.ra, b * o.rb, z))),
+        );
+    else
+        for (let i = 0; i < 48; i++) {
+            const t = (i / 48) * Math.PI * 2;
+            hs.forEach((z) => pts.push(L2W(o, o.ra * Math.cos(t), o.rb * Math.sin(t), z)));
+        }
+    const lo = [1e9, 1e9, 1e9],
+        hi = [-1e9, -1e9, -1e9];
+    pts.forEach((v) => {
+        for (let j = 0; j < 3; j++) {
+            lo[j] = Math.min(lo[j], v[j]);
+            hi[j] = Math.max(hi[j], v[j]);
+        }
+    });
+    return { lo, hi };
+}
+// 動かしている図形以外の、くっつき先
+function targetsOf(id) {
+    const seen = new Set(),
+        out = [];
+    S.forEach((s) => {
+        if (s.ob && objectVisible(s.ob) && s.ob.id !== id && !seen.has(s.ob.id)) {
+            seen.add(s.ob.id);
+            out.push({ id: s.ob.id, b: obBounds(s.ob) });
+        }
+    });
+    return out;
+}
+// 複数選択を一体として動かすときの外周と吸着先。選択中同士は吸着候補から外す。
+function groupBounds(objects) {
+    const lo = [1e9, 1e9, 1e9],
+        hi = [-1e9, -1e9, -1e9];
+    objects.forEach((o) => {
+        const b = obBounds(o);
+        for (let j = 0; j < 3; j++) {
+            lo[j] = Math.min(lo[j], b.lo[j]);
+            hi[j] = Math.max(hi[j], b.hi[j]);
+        }
+    });
+    return { lo, hi };
+}
+function targetsOfSet(ids) {
+    const seen = new Set(),
+        out = [];
+    S.forEach((s) => {
+        if (s.ob && objectVisible(s.ob) && !ids.has(s.ob.id) && !seen.has(s.ob.id)) {
+            seen.add(s.ob.id);
+            out.push({ id: s.ob.id, b: obBounds(s.ob) });
+        }
+    });
+    return out;
+}
+function snapSetupGroup(objects, C3) {
+    const ids = new Set(objects.map((o) => o.id));
+    return { bb: groupBounds(objects), targets: targetsOfSet(ids), tau: tauOf(C3) };
+}
+// 画面上の吸着距離(px)を、その図形の位置でのワールドの長さにする
+function tauOf(C3) {
+    const rel = Math.max(0.05, Math.hypot(...V.add(C3, CO()))),
+        f = T === "f" ? H / 2 / ((P.fov * DG) / 2) : (W * P.lens) / 36;
+    return ((P.sn / Z) * rel) / f;
+}
+const snapSetup = (o, C3) => ({ bb: obBounds(o), targets: targetsOf(o.id), tau: tauOf(C3) });
+// 移動量deltaを、他の図形の面や地面に近ければぴったりくっつくよう補正（軸ごと）
+function snapShift(bb, delta, axes, targets, tau) {
+    const d = [...delta],
+        hit = new Set();
+    axes.forEach((j) => {
+        let best = null;
+        const lo = bb.lo[j] + d[j],
+            hi = bb.hi[j] + d[j],
+            cand = [];
+        targets.forEach((t) => {
+            cand.push([t.b.lo[j], t.id, 1], [t.b.hi[j], t.id, 1]);
+        });
+        if (j === 1) cand.push([-1, "ground", 0]); // 地面(y=-1)には底だけ
+        cand.forEach(([v, id, both]) =>
+            (both ? [v - lo, v - hi] : [v - lo]).forEach((sft) => {
+                if (Math.abs(sft) <= tau && (!best || Math.abs(sft) < Math.abs(best.s))) best = { s: sft, id };
+            }),
+        );
+        if (best) {
+            d[j] += best.s;
+            hit.add(best.id);
+        }
+    });
+    return { d, hit };
+}
+// オブジェクトの実際の外周を、面スナップ用の投影点として返す。
+// 軸に平行なobBoundsだけに頼らないので、回転した図形でも辺を拾える。
+function snapObjectCorners(o) {
+    if (!o) return [];
+    if (o.type === "compound") return compoundPartsAt(o).flatMap((part) => snapObjectCorners(part));
+    const sign = o.type === "asset" && o.asset === "sign",
+        solid =
+            o.type === "box" ||
+            o.type === "cyl" ||
+            o.type === "triPrism" ||
+            o.type === "triPyramid" ||
+            ((o.type === "rect" || o.type === "circ") && o.extrude) ||
+            o.type === "asset";
+    const hs = solid ? (sign ? outerZRange(o) : [0, Math.max(0, Number(o.h) || 0)]) : [0],
+        out = [];
+    for (const x of [-Math.abs(Number(o.ra) || 0), Math.abs(Number(o.ra) || 0)])
+        for (const y of [-Math.abs(Number(o.rb) || 0), Math.abs(Number(o.rb) || 0)])
+            for (const z of hs) out.push(L2W(o, x, y, z));
+    return out;
+}
+// 面の押し引きのスナップ。編集面の法線方向と、面内の辺の重なりを確認し、
+// 隣接している対象の外周だけへ吸着する。ed.nはワールド単位ベクトルなので、
+// 斜めに回転した図形にも同じ処理を適用できる。
+function faceSnap(dl) {
+    if (!$("snp")?.checked || !ed?.o0 || !ed?.n || !ed?.Fa) return dl;
+    const o = ed.o0,
+        n = V.nrm(ed.n),
+        [iu, iv] = PL[o.k],
+        cs = Math.cos(Number(o.rot || 0) * DG),
+        sn = Math.sin(Number(o.rot || 0) * DG),
+        eu = [0, 0, 0],
+        ev = [0, 0, 0],
+        en = [0, 0, 0];
+    eu[iu] = cs;
+    eu[iv] = sn;
+    ev[iu] = -sn;
+    ev[iv] = cs;
+    en[o.k] = -o.d;
+    const fid = String(ed.fid || ""),
+        isU = fid[0] === "u",
+        isV = fid[0] === "v",
+        plus = fid === "top" || fid.endsWith("+");
+    const tangents = isU ? [ev, en] : isV ? [eu, en] : [eu, ev],
+        outerH = outerZRange(o)[1] - outerZRange(o)[0];
+    const halves = isU
+        ? [Math.abs(o.rb), outerH / 2]
+        : isV
+            ? [Math.abs(o.ra), outerH / 2]
+            : [Math.abs(o.ra), Math.abs(o.rb)];
+    const faceN0 = dot3(ed.Fa, n),
+        faceN = faceN0 + dl,
+        faceT = tangents.map((t) => dot3(ed.Fa, t)),
+        tau = Math.max(0.04, Number(ed.tau) || 0.04),
+        tol = Math.max(0.01, tau * 0.25);
+    let best = null;
+    ed.targets.forEach((t) => {
+        const to = obOf(t.id),
+            pts = snapObjectCorners(to);
+        if (pts.length < 2) return;
+        const proj = pts.map((p) => ({ n: dot3(p, n), t: tangents.map((a) => dot3(p, a)) }));
+        const nMin = Math.min(...proj.map((p) => p.n)),
+            nMax = Math.max(...proj.map((p) => p.n));
+        for (let k = 0; k < 2; k++) {
+            const tMin = Math.min(...proj.map((p) => p.t[k])),
+                tMax = Math.max(...proj.map((p) => p.t[k])),
+                fMin = faceT[k] - halves[k],
+                fMax = faceT[k] + halves[k];
+            if (Math.min(fMax, tMax) - Math.max(fMin, tMin) < -tol) return;
+        }
+        // 対象の下端・上端の両方を候補にする。面の接線方向が重なり、
+        // かつ吸着距離内にある辺だけを通すので、遠い対象へは飛ばない。
+        const candidates = [nMin, nMax];
+        candidates.forEach((targetN) => {
+            const gap = targetN - faceN;
+            if (Math.abs(gap) <= tau && (!best || Math.abs(gap) < Math.abs(best.gap)))
+                best = { gap, id: t.id, targetN };
+        });
+    });
+    if (!best) return dl;
+    snapHit = new Set([best.id]);
+    // dlは編集面そのものの移動量なので、対象面との差を加えるだけでよい。
+    return dl + (best.targetN - faceN);
+}
+
+function beginGizmo(h, p) {
+    const o = h.g.o,
+        r = unscr(p),
+        co = CO(),
+        group = o.attachment?.verticalOnly ? [o] : selectedObjects(),
+        base = {
+            id: o.id,
+            o0: o.type === "compound" ? JSON.parse(JSON.stringify(o)) : { ...o },
+            group: group.map((q) => ({ ...q, off: [...(q.off || [0, 0, 0])] })),
+            started: false,
+            ...(group.length > 1 ? snapSetupGroup(group, h.g.C3) : snapSetup(o, h.g.C3)),
+        };
+    if (
+        h.t.startsWith("sign-") ||
+        h.t.startsWith("building-") ||
+        h.t.startsWith("awning-") ||
+        h.t === "cone-height" ||
+        h.t === "sphere-radius"
+    )
+        ed = { ...base, t: h.t, sign: h.sign, p0: p };
+    else if (h.t === "axis") {
+        const C0 = V.add(h.g.C3, co),
+            t0 = lineParam(r, C0, h.a.a);
+        if (t0 != null) ed = { ...base, t: "axis", a: h.a.a, aj: h.a.a.indexOf(1), C0, t0 };
+    } else if (h.t === "face") {
+        const F0 = V.add(h.f.P3, co),
+            t0 = lineParam(r, F0, h.f.n);
+        if (t0 != null) {
+            const fj = [0, 1, 2].find((j) => Math.abs(h.f.n[j]) > 0.999);
+            ed = { ...base, t: "face", fid: h.f.id, n: h.f.n, F0, Fa: h.f.P3, fj: fj === undefined ? -1 : fj, t0 };
+        }
+    } else if (o.type === "compound")
+        ed = { ...base, t: "ring", sC: h.g.sC, ang0: Math.atan2(p.y - h.g.sC.y, p.x - h.g.sC.x) };
+    else {
+        const dd = o.d - o.d * o.lift,
+            P1 = hit3(r, o.k, dd, cloc(o)),
+            [iu, iv] = PL[o.k];
+        if (P1) ed = { ...base, t: "ring", dd, ang0: Math.atan2(P1[iv] - o.cb, P1[iu] - o.ca) };
+    }
+}
+// キャンバス上のドラッグで編集（ed=いまの編集操作）。磁石スナップがONなら他の図形・地面にくっつく
+function dragEdit(p, freeRotation = false) {
+    const o = ed.o0,
+        [iu, iv] = PL[o.k],
+        r = unscr(p),
+        on = $("snp").checked;
+    let patch = null;
+    snapHit = null;
+    const snap = (delta, axes) => {
+        if (!on) return delta;
+        const q = snapShift(ed.bb, delta, axes, ed.targets, ed.tau);
+        if (q.hit.size) snapHit = q.hit;
+        return q.d;
+    };
+    if (ed.t.startsWith("building-")) {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1);
+        if (ed.t === "building-backFace")
+            patch = { openingBack: clamp(h.start + (h.factor || 1) * amount, h.min, h.max) };
+        else if (ed.t.includes("OpeningH")) patch = { openingH: clamp(h.start + amount, h.min, h.max) };
+        else patch = { openingW: clamp(h.start + (h.factor || 1) * amount, h.min, h.max) };
+    } else if (ed.t === "awning-edgeZ") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1);
+        patch = {
+            awningEdgeZ: clamp(h.start + amount, h.min, h.max),
+            awningFrontBottom: h.frontBottom,
+            awningEdgeEdited: true,
+        };
+    } else if (ed.t === "awning-edgeY") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1);
+        patch = { awningEdgeY: clamp(h.start + amount, h.min, h.max), awningEdgeEdited: true };
+    } else if (ed.t === "sign-faceW" || ed.t === "sign-faceH") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1);
+        const min = h.min,
+            max = h.max,
+            v = clamp(h.start + amount, min, max);
+        patch = { [ed.t === "sign-faceW" ? "faceW" : "faceH"]: v };
+    } else if (ed.t === "cone-height") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            v = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { h: v };
+    } else if (ed.t === "sphere-radius") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            radius = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { ra: radius, rb: radius, h: radius * 2 };
+    } else if (ed.t === "mv") {
+        // 間取りモードは地面(Y=-1)のX/Zだけを移動させる。高さ・接地状態は変えない。
+        if (window.cityFloorPlanActive && o.k !== 1) return;
+        const floorMove = !!window.cityFloorPlanActive && o.k === 1,
+            plane = floorMove ? -1 : o.d - o.d * o.lift;
+        const P1 = hit3(r, o.k, plane, cloc(o)); // 線をドラッグ＝面の上で移動
+        if (P1 && ed.P0) {
+            const dl = [0, 0, 0];
+            dl[iu] = P1[iu] - ed.P0[iu];
+            dl[iv] = P1[iv] - ed.P0[iv];
+            const q = snap(dl, [iu, iv]);
+            // 複数選択時は主役のドラッグ量をワールド移動量として全員へ同じように適用する。
+            if (ed.group && ed.group.length > 1) {
+                ed.moveDelta = [q[0], q[1], q[2]];
+                patch = moveBy(o, ed.moveDelta);
+            } else patch = moveBy(o, q); /* 間取りではca/cbだけを変え、Y方向のliftとoffは保持する。 */
+        }
+    } else if (ed.t === "axis") {
+        const t = lineParam(r, ed.C0, ed.a);
+        if (t != null) {
+            ed.moveDelta = snap(
+                ed.a.map((x) => x * (t - ed.t0)),
+                [ed.aj],
+            );
+            patch = moveBy(o, ed.moveDelta);
+        }
+    } // 矢印＝その軸に沿って移動
+    else if (ed.t === "face") {
+        const t = lineParam(r, ed.F0, ed.n);
+        if (t != null) {
+            const dl = t - ed.t0;
+            patch =
+                o.type === "compound"
+                    ? compoundFacePatch(o, ed.fid, dl)
+                    : o.type === "asset" && o.asset === "building"
+                        ? buildingOuterFacePatch(o, ed.fid, faceSnap(dl))
+                        : facePatch(o, ed.fid, faceSnap(dl));
+        }
+    } // 白い四角＝面の押し引き
+    else if (ed.t === "ring") {
+        if (o.type === "compound") {
+            const raw = wrap180((Math.atan2(p.y - ed.sC.y, p.x - ed.sC.x) - ed.ang0) / DG),
+                base = Number(o.compoundRot) || 0,
+                target = freeRotation ? base + raw : Math.round((base + raw) / 15) * 15;
+            patch = rotateCompoundBy(ed.o0 || o, target - base);
+        } else {
+            const P1 = hit3(r, o.k, ed.dd, cloc(o));
+            if (P1) {
+                const raw = (Math.atan2(P1[iv] - o.cb, P1[iu] - o.ca) - ed.ang0) / DG,
+                    target = freeRotation ? Number(o.rot || 0) + raw : Math.round((Number(o.rot || 0) + raw) / 15) * 15;
+                patch = { rot: wrap180(target) };
+            }
+        }
+    } // 輪＝回転（通常15°吸着、Shiftで自由回転）
+    if (!patch) return;
+    if (!ed.started) {
+        HU.push(S);
+        RD = [];
+        ed.started = true;
+    }
+    if ((ed.t === "mv" || ed.t === "axis") && ed.group && ed.group.length > 1 && ed.moveDelta) {
+        // 初期スナップショットから再生成するので、ポインタ移動のたびに位置が累積しない。
+        const ids = new Set(ed.group.map((g) => g.id));
+        ed.group.forEach((g) => {
+            const q = moveBy(g, ed.moveDelta, !!(g.attachment?.parentId && ids.has(g.attachment.parentId)));
+            setOb(g.id, q);
+        });
+    } else setOb(ed.id, patch);
+    render();
+}
+
+// ===== 書き出し範囲（ブレンダーのレンダー範囲のような枠） =====
+function crect() {
+    return {
+        x: Math.min(CR.x0, CR.x1),
+        y: Math.min(CR.y0, CR.y1),
+        w: Math.abs(CR.x1 - CR.x0),
+        h: Math.abs(CR.y1 - CR.y0),
+    };
+}
+function overlay(c) {
+    // 範囲の外を暗くして枠を表示（画面だけ。書き出しには入らない）
+    if (!CR) return;
+    const r = crect();
+    c.save();
+    c.fillStyle = "rgba(0,0,0,.45)";
+    c.beginPath();
+    c.rect(0, 0, W, H);
+    c.rect(r.x, r.y, r.w, r.h);
+    c.fill("evenodd");
+    c.strokeStyle = "#ffd34d";
+    c.lineWidth = 2 / Z;
+    c.strokeRect(r.x, r.y, r.w, r.h);
+    c.fillStyle = "#ffd34d";
+    c.font = `${16 / Z}px system-ui`;
+    c.fillText(Math.round(r.w) + "×" + Math.round(r.h), r.x + 4 / Z, r.y > 24 / Z ? r.y - 6 / Z : r.y + 18 / Z);
+    c.restore();
+}
+$("crC").onclick = () => {
+    CR = null;
+    render();
+};
+$("crF").onclick = () => {
+    let x0 = 1e9,
+        y0 = 1e9,
+        x1 = -1e9,
+        y1 = -1e9; // 描いた線がちょうど入る範囲にする
+    S.forEach((s) =>
+        s.p.forEach((v) => {
+            const q = sp(s, v);
+            if (!q.ok) return;
+            x0 = Math.min(x0, q.x);
+            x1 = Math.max(x1, q.x);
+            y0 = Math.min(y0, q.y);
+            y1 = Math.max(y1, q.y);
+        }),
+    );
+    if (x0 > x1) return;
+    const m = 20;
+    CR = { x0: clamp(x0 - m, 0, W), y0: clamp(y0 - m, 0, H), x1: clamp(x1 + m, 0, W), y1: clamp(y1 + m, 0, H) };
+    render();
+};
+
+// ===== ツール切り替え（消しゴム・図形・範囲）と設定パネルの開閉 =====
+function syncInteractionButtons() {
+    // 視点／鉛筆と、編集／消しゴム／図形／範囲を同じ「ON」表示にしない。
+    // 視点中はツールボタンをすべてOFF、描画中は選択した1ツールだけをONにする。
+    $("mV").classList.toggle("on", mode === "view");
+    $("mD").classList.toggle("on", mode === "draw" && tool === "pen");
+    [
+        ["tE", "erase"],
+        ["tB", "border"],
+        ["tM", "edit"],
+    ].forEach(([id, n]) => $(id).classList.toggle("on", mode === "draw" && tool === n));
+}
+function setTool(t) {
+    tool = t;
+    setMode("draw");
+    const HT = {
+        border: "書き出し範囲：ドラッグで枠を指定。範囲指定はPNG保存・コピーに反映されます",
+        erase: "消しゴム：なぞったところを消します",
+        edit: "図形編集：線にさわって選択。空白を長押ししてドラッグするとボックス選択。Shift/Ctrl/⌘クリックでも複数選択でき、選択済みの線をドラッグするとまとめて移動。iPadは指またはApple Pencilで長押しドラッグ。矢印＝軸に沿って移動／白い四角＝面を押し引き／点線の輪＝回転／線をドラッグ＝面の上で移動。看板は絵枠W・絵枠Hと外形の面ハンドル、建物は開口W/H・奥面と外側面、円錐は高さ、球体は半径ハンドルをドラッグできます",
+    };
+    if (HT[tool]) $("hint").textContent = HT[tool] + " ／ ⌘(Ctrl)+ドラッグ＝視点移動";
+}
+$("tE").onclick = () => setTool("erase");
+$("tB").onclick = () => setTool("border");
+$("tM").onclick = () => setTool("edit");
+const edge = document.createElement("button");
+edge.id = "edgeTab";
+edge.title = "設定パネルを開閉";
+document.body.appendChild(edge); // パネルの端にいつも出るタブ
+function setSide(h) {
+    const sd = $("side");
+    sd.classList.toggle("hide", h);
+    $("tg").textContent = h ? "設定を開く" : "設定を隠す";
+    edge.textContent = h ? "▶" : "◀";
+    edge.style.left = h ? "env(safe-area-inset-left,0px)" : sd.getBoundingClientRect().right + "px";
+    try {
+        localStorage.setItem("pgrid-side", h ? "1" : "0");
+    } catch (e) { }
+}
+$("tg").onclick = () => {
+    setSide(!$("side").classList.contains("hide"));
+    fit();
+};
+edge.onclick = $("tg").onclick;
+addEventListener("resize", () => setSide($("side").classList.contains("hide")));
+
+// ===== 書き出し用の隠れ線除去 =====
+// オブジェクトの面を簡易Zバッファへ rasterize し、ビューから遮られる線分だけを切る。
+// 通常表示は従来どおり全線を描き、PNGの「背面線除去」項目だけでこの処理を使う。
+function addExportBoxFaces(out, o, w, d, z0, z1) {
+    const x = w / 2,
+        y = d / 2,
+        v = [
+            [-x, -y, z0],
+            [x, -y, z0],
+            [x, y, z0],
+            [-x, y, z0],
+            [-x, -y, z1],
+            [x, -y, z1],
+            [x, y, z1],
+            [-x, y, z1],
+        ];
+    const f = [
+        [0, 1, 2, 3],
+        [4, 7, 6, 5],
+        [0, 4, 5, 1],
+        [1, 5, 6, 2],
+        [2, 6, 7, 3],
+        [3, 7, 4, 0],
+    ];
+    f.forEach((q) => {
+        const a = q.map((i) => L2W(o, ...v[i]));
+        out.push([a[0], a[1], a[2]], [a[0], a[2], a[3]]);
+    });
+}
+function exportSurfaceTriangles(o) {
+    const out = [];
+    if (o?.type === "compound") {
+        compoundPartsAt(o).forEach((part) => out.push(...exportSurfaceTriangles(part)));
+        return out;
+    }
+    const w = Math.abs(2 * Number(o.ra) || 1),
+        d = Math.abs(2 * Number(o.rb) || 1),
+        h = Math.max(0.01, Math.abs(Number(o.h) || 0.01));
+    const L = (x, y, z) => L2W(o, x, y, z),
+        tri = (a, b, c) => out.push([L(...a), L(...b), L(...c)]),
+        quad = (a, b, c, d) => {
+            tri(a, b, c);
+            tri(a, c, d);
+        };
+    const disk = (z, n = 24) => {
+        const c = [0, 0, z];
+        for (let i = 0; i < n; i++) {
+            const a = (i / n) * Math.PI * 2,
+                b = ((i + 1) / n) * Math.PI * 2;
+            tri(
+                c,
+                [(w / 2) * Math.cos(a), (d / 2) * Math.sin(a), z],
+                [(w / 2) * Math.cos(b), (d / 2) * Math.sin(b), z],
+            );
+        }
+    };
+    const cylinder = (z0, z1, n = 24) => {
+        disk(z0, n);
+        disk(z1, n);
+        for (let i = 0; i < n; i++) {
+            const a = (i / n) * Math.PI * 2,
+                b = ((i + 1) / n) * Math.PI * 2,
+                A = [(w / 2) * Math.cos(a), (d / 2) * Math.sin(a), z0],
+                B = [(w / 2) * Math.cos(b), (d / 2) * Math.sin(b), z0],
+                C = [(w / 2) * Math.cos(b), (d / 2) * Math.sin(b), z1],
+                D = [(w / 2) * Math.cos(a), (d / 2) * Math.sin(a), z1];
+            quad(A, B, C, D);
+        }
+    };
+    const boxAt = (cx, cy, bw, bd, z0, z1) => {
+        const x = bw / 2,
+            y = bd / 2,
+            v = [
+                [cx - x, cy - y, z0],
+                [cx + x, cy - y, z0],
+                [cx + x, cy + y, z0],
+                [cx - x, cy + y, z0],
+                [cx - x, cy - y, z1],
+                [cx + x, cy - y, z1],
+                [cx + x, cy + y, z1],
+                [cx - x, cy + y, z1],
+            ],
+            f = [
+                [0, 1, 2, 3],
+                [4, 7, 6, 5],
+                [0, 4, 5, 1],
+                [1, 5, 6, 2],
+                [2, 6, 7, 3],
+                [3, 7, 4, 0],
+            ];
+        f.forEach((q) => quad(v[q[0]], v[q[1]], v[q[2]], v[q[3]]));
+    };
+    const ellipsoid = (cx, cy, cz, rx, ry, rz, lat = 8, lon = 12) => {
+        for (let j = 0; j < lat; j++) {
+            const p0 = -Math.PI / 2 + (j * Math.PI) / lat,
+                p1 = -Math.PI / 2 + ((j + 1) * Math.PI) / lat;
+            for (let i = 0; i < lon; i++) {
+                const a = (i * 2 * Math.PI) / lon,
+                    b = ((i + 1) * 2 * Math.PI) / lon,
+                    q = (p, t) => [
+                        cx + rx * Math.cos(p) * Math.cos(t),
+                        cy + ry * Math.cos(p) * Math.sin(t),
+                        cz + rz * Math.sin(p),
+                    ],
+                    A = q(p0, a),
+                    B = q(p0, b),
+                    C = q(p1, b),
+                    D = q(p1, a);
+                tri(A, B, C);
+                tri(A, C, D);
+            }
+        }
+    };
+    const segment = (a, b, r, n = 6) => {
+        const sub = (u, v) => u.map((x, i) => x - v[i]),
+            add = (u, v) => u.map((x, i) => x + v[i]),
+            mul = (u, s) => u.map((x) => x * s),
+            dotL = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2],
+            crossL = (u, v) => [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]],
+            unit = (u) => {
+                const q = Math.hypot(...u) || 1;
+                return u.map((x) => x / q);
+            },
+            axis = unit(sub(b, a)),
+            ref = Math.abs(axis[2]) < 0.85 ? [0, 0, 1] : [0, 1, 0],
+            u = unit(crossL(axis, ref)),
+            v = unit(crossL(axis, u)),
+            ra = [],
+            rb = [];
+        for (let i = 0; i < n; i++) {
+            const t = (i / n) * Math.PI * 2,
+                off = add(mul(u, Math.cos(t) * r), mul(v, Math.sin(t) * r));
+            ra.push(add(a, off));
+            rb.push(add(b, off));
+        }
+        for (let i = 0; i < n; i++) {
+            const j = (i + 1) % n;
+            quad(ra[i], ra[j], rb[j], rb[i]);
+            tri(a, ra[j], ra[i]);
+            tri(b, rb[i], rb[j]);
+        }
+    };
+    const kind = o.asset || o.type;
+    if (kind === "awning") {
+        const g = awningGeometry(o),
+            x = g.w / 2,
+            baseY = g.baseFrontY,
+            edgeY = g.edgeY,
+            backY = g.d / 2;
+        quad([-x, edgeY, g.edgeZ], [x, edgeY, g.edgeZ], [x, backY, g.h], [-x, backY, g.h]);
+        quad(
+            [-x, baseY, g.frontBottom],
+            [x, baseY, g.frontBottom],
+            [x, backY, g.backBottom],
+            [-x, backY, g.backBottom],
+        );
+        quad([-x, baseY, g.frontBottom], [x, baseY, g.frontBottom], [x, edgeY, g.edgeZ], [-x, edgeY, g.edgeZ]);
+        quad([-x, backY, g.backBottom], [x, backY, g.backBottom], [x, backY, g.h], [-x, backY, g.h]);
+        quad([-x, baseY, g.frontBottom], [-x, backY, g.backBottom], [-x, backY, g.h], [-x, edgeY, g.edgeZ]);
+        quad([x, baseY, g.frontBottom], [x, edgeY, g.edgeZ], [x, backY, g.h], [x, backY, g.backBottom]);
+        return out;
+    }
+    if (kind === "building") {
+        const g = buildingGeometry(o),
+            side = Math.max(0.05, (g.w - g.openingW) / 2),
+            cx = (g.openingW + side) / 2,
+            panelY = g.backY;
+        boxAt(-cx, 0, side, g.d, 0, g.h);
+        boxAt(cx, 0, side, g.d, 0, g.h);
+        boxAt(0, 0, g.w, g.d, g.openingH, g.h);
+        // 開口はトンネルではなく、奥側に閉じた内壁を持つ。外側の奥行きと同じ位置へ置く。
+        quad(
+            [-g.openingW / 2, panelY, 0],
+            [g.openingW / 2, panelY, 0],
+            [g.openingW / 2, panelY, g.openingH],
+            [-g.openingW / 2, panelY, g.openingH],
+        );
+        return out;
+    }
+    if ((o.type === "rect" || kind === "rect") && !o.extrude) {
+        quad([-w / 2, -d / 2, 0], [w / 2, -d / 2, 0], [w / 2, d / 2, 0], [-w / 2, d / 2, 0]);
+        return out;
+    }
+    if (o.type === "rect" || kind === "box" || kind === "sign") {
+        addExportBoxFaces(out, o, w, d, kind === "sign" ? h * 0.08 : 0, kind === "sign" ? h * 0.82 : h);
+        return out;
+    }
+    if (o.type === "circ" || kind === "cylinder" || kind === "lantern") {
+        cylinder(kind === "lantern" ? h * 0.22 : 0, kind === "lantern" ? h * 0.7 : h, kind === "lantern" ? 12 : 32);
+        return out;
+    }
+    if (kind === "crosswalk") {
+        quad([-w / 2, -d / 2, 0.01], [w / 2, -d / 2, 0.01], [w / 2, d / 2, 0.01], [-w / 2, d / 2, 0.01]);
+        return out;
+    }
+    if (kind === "cone") {
+        // 底面は中心からの三角形、側面は隣り合う外周頂点と頂点の一枚だけ。
+        // 各区間を二重に登録しないので、面ONでも重複・交差する三角面にならない。
+        disk(0, 32);
+        const apex = [0, 0, h],
+            n = 32;
+        for (let i = 0; i < n; i++) {
+            const a = (i / n) * Math.PI * 2,
+                b = ((i + 1) / n) * Math.PI * 2;
+            tri(
+                [(w / 2) * Math.cos(a), (d / 2) * Math.sin(a), 0],
+                [(w / 2) * Math.cos(b), (d / 2) * Math.sin(b), 0],
+                apex,
+            );
+        }
+        return out;
+    }
+    if (kind === "triPrism") {
+        const x = w / 2,
+            y = d / 2,
+            A = [
+                [-x, -y, 0],
+                [x, -y, 0],
+                [0, -y, h],
+            ],
+            B = [
+                [-x, y, 0],
+                [x, y, 0],
+                [0, y, h],
+            ];
+        quad(A[0], A[1], A[2], A[2]);
+        quad(B[2], B[1], B[0], B[0]);
+        for (let i = 0; i < 3; i++) quad(A[i], B[i], B[(i + 1) % 3], A[(i + 1) % 3]);
+        return out;
+    }
+    if (kind === "triPyramid") {
+        const x = w / 2,
+            y = d / 2,
+            A = [
+                [-x, -y, 0],
+                [x, -y, 0],
+                [0, y, 0],
+            ],
+            ap = [0, 0, h];
+        quad(A[0], A[1], A[2], A[2]);
+        for (let i = 0; i < 3; i++) tri(A[i], A[(i + 1) % 3], ap);
+        return out;
+    }
+    if (kind === "sphere") {
+        const lat = 12,
+            lon = 24;
+        for (let j = 0; j < lat; j++) {
+            const p0 = -Math.PI / 2 + (j * Math.PI) / lat,
+                p1 = -Math.PI / 2 + ((j + 1) * Math.PI) / lat;
+            for (let i = 0; i < lon; i++) {
+                const a = (i * 2 * Math.PI) / lon,
+                    b = ((i + 1) * 2 * Math.PI) / lon;
+                const q = (p, t) => [
+                    (w / 2) * Math.cos(p) * Math.cos(t),
+                    (d / 2) * Math.cos(p) * Math.sin(t),
+                    h / 2 + (h / 2) * Math.sin(p),
+                ];
+                const A = q(p0, a),
+                    B = q(p0, b),
+                    C = q(p1, b),
+                    D = q(p1, a);
+                tri(A, B, C);
+                tri(A, C, D);
+            }
+        }
+        return out;
+    }
+    if (kind === "person") {
+        // 人物は包絡箱ではなく、線画と同じ胴体・脚・頭の形へ面を付ける。
+        // これで面ON時に人物全体が大きな直方体で塗りつぶされない。
+        const bodyScale = clamp(Number(o.bodyScale) || 1, 0.6, 1.8),
+            shoulderScale = clamp(Number(o.shoulderScale) || 1, 0.6, 1.6),
+            headScale = clamp(Number(o.headScale) || 1, 0.7, 1.5),
+            legSpread = clamp(Number(o.legSpread) || 1, 0.6, 1.8),
+            pose = o.pose || "stand";
+        const defaults = { stand: [0, 0, 0], walk: [0.22, 0, 0], crouch: [0.04, 0.65, 0], sit: [0.1, 0.35, 0] },
+            def = defaults[pose] || defaults.stand;
+        const stride = clamp(Number.isFinite(Number(o.poseStride)) ? Number(o.poseStride) : def[0], 0, 0.5),
+            crouch = clamp(Number.isFinite(Number(o.poseCrouch)) ? Number(o.poseCrouch) : def[1], 0, 1),
+            lean = clamp(Number.isFinite(Number(o.poseLean)) ? Number(o.poseLean) : def[2], -0.35, 0.35),
+            headTilt = clamp(Number(o.headTilt) || 0, -25, 25);
+        const bw = 0.28 * h * bodyScale * shoulderScale,
+            bd = 0.16 * h * bodyScale,
+            leg = 0.055 * h * bodyScale,
+            headR = 0.095 * h * headScale;
+        const legTop = (0.47 - 0.16 * crouch) * h,
+            torso0 = (0.44 - 0.16 * crouch) * h,
+            torso1 = (0.78 - 0.18 * crouch) * h,
+            head0 = (0.84 - 0.18 * crouch) * h,
+            head1 = (0.99 - 0.18 * crouch) * h,
+            footY = [-stride, stride],
+            kneeY = [-0.02 * h, 0.02 * h],
+            kneeX = [-0.09 * h * legSpread, 0.09 * h * legSpread],
+            bodyY = lean * 0.18,
+            headY = lean * 0.42,
+            headTopX = Math.sin(headTilt * DG) * 0.06 * h;
+        const torsoR = Math.max(0.012, Math.min(leg * 0.72, bd * 0.22));
+        boxAt(0, 0, leg * 1.5, bd * 0.85, 0, 0.08 * h);
+        if (pose === "sit") {
+            segment([-0.09 * h * legSpread, bodyY, 0.32 * h], [kneeX[0], kneeY[0], 0.3 * h], torsoR);
+            segment([kneeX[0], kneeY[0], 0.3 * h], [kneeX[0], footY[0], 0], torsoR);
+            segment([0.09 * h * legSpread, bodyY, 0.32 * h], [kneeX[1], kneeY[1], 0.3 * h], torsoR);
+            segment([kneeX[1], kneeY[1], 0.3 * h], [kneeX[1], footY[1], 0], torsoR);
+        } else {
+            segment([kneeX[0], footY[0], 0], [kneeX[0], kneeY[0], legTop], torsoR);
+            segment([kneeX[1], footY[1], 0], [kneeX[1], kneeY[1], legTop], torsoR);
+        }
+        boxAt(0, 0, bw, bd, torso0, torso1);
+        ellipsoid(headTopX / 2, headY + 0.01 * h, (head0 + head1) / 2, headR, headR * 0.9, (head1 - head0) / 2, 8, 12);
+        return out;
+    }
+    if (kind === "stairs") {
+        // 階段は段板・蹴上げ・左右側面・底面・最奥面で閉じた実形状にする。
+        // 各段の側面を区間ごとの長方形に分けることで、重複面や斜めの包絡箱を作らない。
+        const n = Math.max(2, Math.min(24, Math.round(o.steps || 6))),
+            sd = d / n,
+            sh = h / n,
+            x = w / 2;
+        for (let i = 0; i < n; i++) {
+            const y0 = -d / 2 + i * sd,
+                y1 = y0 + sd,
+                z = (i + 1) * sh,
+                z0 = i * sh;
+            // 段板（水平）
+            quad([-x, y0, z], [x, y0, z], [x, y1, z], [-x, y1, z]);
+            // 蹴上げ（垂直）
+            quad([-x, y0, z0], [x, y0, z0], [x, y0, z], [-x, y0, z]);
+            // 左右の側面。各区間の下面から段板までを一枚で閉じる。
+            quad([-x, y0, 0], [-x, y1, 0], [-x, y1, z], [-x, y0, z]);
+            quad([x, y1, 0], [x, y0, 0], [x, y0, z], [x, y1, z]);
+        }
+        // 底面と最奥の立ち上がり面。
+        quad([-x, -d / 2, 0], [x, -d / 2, 0], [x, d / 2, 0], [-x, d / 2, 0]);
+        quad([-x, d / 2, 0], [x, d / 2, 0], [x, d / 2, h], [-x, d / 2, h]);
+        return out;
+    }
+    // 人物以外の細分化された線画は、全体の包絡箱で背面線を落とす安全側の近似。
+    addExportBoxFaces(out, o, w, d, h * 0.02, h);
+    return out;
+}
+function exportPoint(v, tf) {
+    const rel = V.add(v, CO()),
+        q = scr3(rel);
+    if (!q.ok) return null;
+    const depth = orthView
+        ? dot3(rel, orthBasis().depth)
+        : T === "f"
+            ? Math.hypot(rel[0], rel[1], rel[2])
+            : cam(rel)[2];
+    return { x: q.x * tf[0] + tf[4], y: q.y * tf[3] + tf[5], depth };
+}
+function buildExportDepth(cw, ch, tf) {
+    const depth = new Float32Array(cw * ch);
+    depth.fill(Infinity);
+    const tris = [],
+        seen = new Set();
+    S.forEach((s) => {
+        if (s.ob && objectVisible(s.ob) && !seen.has(s.ob.id)) {
+            seen.add(s.ob.id);
+            tris.push(...exportSurfaceTriangles(s.ob));
+        }
+    });
+    const putTri = (tr) => {
+        const p = tr.map((v) => exportPoint(v, tf));
+        if (p.some((q) => !q || !Number.isFinite(q.depth) || q.depth < -0.001)) return;
+        const area = (p[1].x - p[0].x) * (p[2].y - p[0].y) - (p[1].y - p[0].y) * (p[2].x - p[0].x);
+        if (Math.abs(area) < 0.001) return;
+        const x0 = Math.max(0, Math.floor(Math.min(p[0].x, p[1].x, p[2].x))),
+            x1 = Math.min(cw - 1, Math.ceil(Math.max(p[0].x, p[1].x, p[2].x))),
+            y0 = Math.max(0, Math.floor(Math.min(p[0].y, p[1].y, p[2].y))),
+            y1 = Math.min(ch - 1, Math.ceil(Math.max(p[0].y, p[1].y, p[2].y)));
+        for (let y = y0; y <= y1; y++)
+            for (let x = x0; x <= x1; x++) {
+                const px = x + 0.5,
+                    py = y + 0.5,
+                    w0 = ((p[1].x - p[0].x) * (py - p[0].y) - (p[1].y - p[0].y) * (px - p[0].x)) / area,
+                    w1 = ((p[2].x - p[1].x) * (py - p[1].y) - (p[2].y - p[1].y) * (px - p[1].x)) / area,
+                    w2 = ((p[0].x - p[2].x) * (py - p[2].y) - (p[0].y - p[2].y) * (px - p[2].x)) / area;
+                if ((w0 >= -1e-5 && w1 >= -1e-5 && w2 >= -1e-5) || (w0 <= 1e-5 && w1 <= 1e-5 && w2 <= 1e-5)) {
+                    const z = p[0].depth * w1 + p[1].depth * w2 + p[2].depth * w0,
+                        idx = y * cw + x;
+                    if (z < depth[idx]) depth[idx] = z;
+                }
+            }
+    };
+    tris.forEach(putTri);
+    return depth;
+}
+function strokeWVisible(c, s, depth, cw, ch, tf) {
+    if (!s.ob || !s.d3) {
+        strokeW(c, s);
+        return;
+    }
+    c.strokeStyle = s.c;
+    c.lineWidth = effectiveLineWidth(s);
+    c.lineCap = c.lineJoin = "round";
+    c.beginPath();
+    let on = false;
+    const put = (v) => {
+        const rel = V.add(v, CO()),
+            q = scr3(rel),
+            e = exportPoint(v, tf);
+        if (!e || !q.ok) {
+            on = false;
+            return;
+        }
+        const x = Math.round(e.x),
+            y = Math.round(e.y);
+        if (x < 0 || x >= cw || y < 0 || y >= ch) {
+            on = false;
+            return;
+        }
+        const z = depth[y * cw + x],
+            eps = Math.max(0.025, Math.abs(e.depth) * 0.00015);
+        if (e.depth > z + eps) {
+            on = false;
+            return;
+        }
+        on ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y);
+        on = true;
+    };
+    s.p.forEach((v, i) => {
+        if (i) {
+            const a = s.p[i - 1],
+                n = Math.max(1, Math.ceil(Math.hypot(v[0] - a[0], v[1] - a[1], v[2] - a[2]) * 10));
+            for (let j = 1; j < n; j++) put(V.add(a, v, 1 - j / n, j / n));
+        }
+        put(v);
+    });
+    c.stroke();
+}
+
+// ===== 線画レイヤー：線だけ別キャンバスに描き、アンチエイリアスを消して二値化する =====
+let LC = null;
+function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
+    // tf=書き出し用の変換 [拡大,0,0,拡大,ずれx,ずれy]
+    if (!LC || LC.width !== cw || LC.height !== ch) {
+        LC = document.createElement("canvas");
+        LC.width = cw;
+        LC.height = ch;
+    }
+    const x = LC.getContext("2d", { willReadFrequently: true });
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    x.clearRect(0, 0, cw, ch);
+    if (tf) x.setTransform(...tf);
+    else if (view) x.setTransform(Z, 0, 0, Z, ox, oy); // 画面表示用はズーム・移動つき
+    const hiddenDepth = hidden ? buildExportDepth(cw, ch, tf || [1, 0, 0, 1, 0, 0]) : null;
+    S.forEach((s) => {
+        if (s.ob && !objectVisible(s.ob)) return;
+        hidden ? strokeWVisible(x, s, hiddenDepth, cw, ch, tf || [1, 0, 0, 1, 0, 0]) : strokeW(x, s);
+    });
+    if (withCur) drawCur(x);
+    if (withCur && prev) prev.forEach((s) => strokeW(x, s));
+    if ($("bin").checked) {
+        // 二値化：しきい値以上の画素だけ完全に不透明にする
+        x.setTransform(1, 0, 0, 1, 0, 0);
+        const im = x.getImageData(0, 0, cw, ch),
+            d = im.data,
+            t = P.bt;
+        for (let i = 3; i < d.length; i += 4) d[i] = d[i] < t ? 0 : 255;
+        x.putImageData(im, 0, 0);
+    }
+    return LC;
+}
+
+// ===== 地面のグリッド：床(y=-1)の格子。カメラの高さ・位置・向きを変えるとちゃんと見え方が変わる =====
+function floorGrid(c) {
+    const n = Math.round(P.gn),
+        cell = P.gs,
+        ext = n * cell,
+        co = CO(),
+        steps = Math.min(400, n * 8);
+    c.save();
+    c.lineJoin = "round";
+    const line = (a, b) => {
+        let on = false; // 線を細かく区切って投影する（魚眼でも曲がって見える）
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps,
+                q = scr3(V.add([a[0] + (b[0] - a[0]) * t, -1, a[2] + (b[2] - a[2]) * t], co));
+            if (!q.ok) {
+                on = false;
+                continue;
+            }
+            on ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y);
+            on = true;
+        }
+    };
+    const pass = (sel, col, alpha, w) => {
+        c.strokeStyle = col;
+        c.globalAlpha = alpha;
+        c.lineWidth = w;
+        c.beginPath();
+        for (let k = -n; k <= n; k++)
+            if (sel(k)) {
+                line([k * cell, -1, -ext], [k * cell, -1, ext]);
+                line([-ext, -1, k * cell], [ext, -1, k * cell]);
+            }
+        c.stroke();
+    };
+    pass((k) => k % 5 !== 0, "#7d8279", P.ga * 0.55, P.gw); // ふつうの線
+    pass((k) => k % 5 === 0 && k !== 0, "#7d8279", Math.min(1, P.ga * 1.1), P.gw * 1.6); // 5マスごとの太い線
+    c.lineWidth = P.gw * 2.4;
+    c.globalAlpha = Math.min(1, P.ga * 1.3); // 原点を通る線（X=橙・Z=緑）
+    c.strokeStyle = "#e8743d";
+    c.beginPath();
+    line([-ext, -1, 0], [ext, -1, 0]);
+    c.stroke();
+    c.strokeStyle = "#2fb5a5";
+    c.beginPath();
+    line([0, -1, -ext], [0, -1, ext]);
+    c.stroke();
+    c.restore();
+}
+
+// 正投影ビューの補助線。消失点はなく、軸に沿った水平・垂直線として表示する。
+function orthGuides(c) {
+    const sc = orthScale(),
+        col = ["#e8743d", "#2fb5a5", "#4a7be8"];
+    c.save();
+    c.globalAlpha = P.ga;
+    c.lineWidth = P.gw;
+    c.setLineDash([]);
+    const draw = (x0, y0, x1, y1, color) => {
+        c.strokeStyle = color;
+        c.beginPath();
+        c.moveTo(x0, y0);
+        c.lineTo(x1, y1);
+        c.stroke();
+    };
+    const b = orthBasis();
+    if (orthView === "top") {
+        for (let i = -20; i <= 20; i++) {
+            const x = W / 2 + i * sc;
+            draw(x, 0, x, H, col[0]);
+            const y = H / 2 + i * sc;
+            draw(0, y, W, y, col[2]);
+        }
+    } else {
+        for (let i = -20; i <= 20; i++) {
+            const x = W / 2 + i * sc;
+            draw(x, 0, x, H, col[orthView === "front" ? 0 : 1]);
+            const y = H / 2 + i * sc;
+            draw(0, y, W, y, col[2]);
+        }
+    }
+    c.restore();
+}
+
+// ===== 補助線（キャンバスに入る角度範囲にだけ本数を割り振る＝密に出来る） =====
+function guides(c) {
+    const col = ["#e8743d", "#2fb5a5", "#4a7be8"],
+        diag = Math.hypot(W, H),
+        n = P.n;
+    AX.forEach((A, i) => {
+        if (!show[i]) return;
+        c.strokeStyle = col[i];
+        c.globalAlpha = P.ga;
+        c.lineWidth = P.gw;
+        c.beginPath();
+        if (A.vp) {
+            const { x, y } = A.vp,
+                inside = x >= 0 && x <= W && y >= 0 && y <= H,
+                L = Math.hypot(x - W / 2, y - H / 2) + diag;
+            let base = 0,
+                lo = 0,
+                hi = 0;
+            if (!inside) {
+                // 4隅への角度の最小〜最大を求める
+                base = Math.atan2(H / 2 - y, W / 2 - x);
+                lo = 1e9;
+                hi = -1e9;
+                for (const [px, py] of [
+                    [0, 0],
+                    [W, 0],
+                    [0, H],
+                    [W, H],
+                ]) {
+                    let d = Math.atan2(py - y, px - x) - base;
+                    d = Math.atan2(Math.sin(d), Math.cos(d));
+                    lo = Math.min(lo, d);
+                    hi = Math.max(hi, d);
+                }
+            }
+            for (let k = 0; k < n; k++) {
+                const t = inside ? (2 * Math.PI * k) / n : base + lo + ((hi - lo) * k) / (n - 1);
+                c.moveTo(x, y);
+                c.lineTo(x + L * Math.cos(t), y + L * Math.sin(t));
+            }
+        } else {
+            // 平行線（水平・垂直）
+            const u = A.dir,
+                nx = -u.y,
+                ny = u.x;
+            let lo = 1e9,
+                hi = -1e9;
+            for (const [px, py] of [
+                [0, 0],
+                [W, 0],
+                [0, H],
+                [W, H],
+            ]) {
+                const s = px * nx + py * ny;
+                lo = Math.min(lo, s);
+                hi = Math.max(hi, s);
+            }
+            for (let k = 0; k < n; k++) {
+                const s = lo + ((hi - lo) * k) / (n - 1),
+                    px = nx * s,
+                    py = ny * s;
+                c.moveTo(px - u.x * 2 * diag, py - u.y * 2 * diag);
+                c.lineTo(px + u.x * 2 * diag, py + u.y * 2 * diag);
+            }
+        }
+        c.stroke();
+    });
+    c.globalAlpha = 1;
+}
+
+// ===== 描画 =====
+function stroke(c, s) {
+    c.strokeStyle = s.c;
+    c.lineWidth = effectiveLineWidth(s);
+    c.lineCap = c.lineJoin = "round";
+    c.beginPath();
+    c.moveTo(s.p[0].x, s.p[0].y);
+    for (let i = 1; i < s.p.length; i++) c.lineTo(s.p[i].x, s.p[i].y);
+    c.stroke();
+}
+// 画像全体の面表示。surfaceMode=trueのとき、すべてのオブジェクトを半透明で塗る。
+// 面の三角形は既存の背面線除去用メッシュ定義を共有するので、線画と形状がずれない。
+function surfaceColor(o) {
+    return o.surfaceColor || o.accent || "#66e3c8";
+}
+function surfaceAlpha(o) {
+    const v = Number(o.surfaceAlpha);
+    return Number.isFinite(v) ? clamp(v, 0.04, 0.9) : 0.22;
+}
+function drawObjectSurfaces(c) {
+    if (!P.surfaceMode) return;
+    const tris = [],
+        seen = new Set();
+    S.forEach((s) => {
+        const o = s && s.ob;
+        if (!o || !objectVisible(o) || seen.has(o.id)) return;
+        seen.add(o.id);
+        exportSurfaceTriangles(o).forEach((tr) => {
+            const p = tr.map((v) => exportPoint(v, [1, 0, 0, 1, 0, 0]));
+            if (p.some((q) => !q || !Number.isFinite(q.x) || !Number.isFinite(q.y) || !Number.isFinite(q.depth)))
+                return;
+            const area = (p[1].x - p[0].x) * (p[2].y - p[0].y) - (p[1].y - p[0].y) * (p[2].x - p[0].x);
+            if (Math.abs(area) < 0.001) return;
+            tris.push({ o, p, depth: (p[0].depth + p[1].depth + p[2].depth) / 3 });
+        });
+    });
+    // 遠い面から描く簡易ペインター法。半透明の面でもオブジェクト同士の重なりが自然になる。
+    tris.sort((a, b) => b.depth - a.depth);
+    c.save();
+    c.lineJoin = "round";
+    tris.forEach(({ o, p }) => {
+        c.globalAlpha = surfaceAlpha(o);
+        c.fillStyle = surfaceColor(o);
+        c.beginPath();
+        c.moveTo(p[0].x, p[0].y);
+        c.lineTo(p[1].x, p[1].y);
+        c.lineTo(p[2].x, p[2].y);
+        c.closePath();
+        c.fill();
+    });
+    c.restore();
+}
+function render() {
+    dirty = true;
+    if (S.some((s) => s.ob && s.cs !== sigNow())) regenObjects();
+    syncSel();
+    T === "f" ? calcF() : calc();
+    const c = ctx;
+    c.clearRect(0, 0, W, H);
+    c.fillStyle = $("bgw").checked ? "#fff" : "#23251f";
+    c.fillRect(0, 0, W, H);
+    c.save();
+    c.setTransform(Z, 0, 0, Z, ox, oy); // 以降はズーム/移動つき
+    if (IMG) {
+        const s = Math.min(W / IMG.width, H / IMG.height),
+            w = IMG.width * s,
+            h = IMG.height * s;
+        c.globalAlpha = P.pa;
+        c.drawImage(IMG, (W - w) / 2, (H - h) / 2, w, h);
+        c.globalAlpha = 1;
+    }
+    if (window.cityFloorTint && $("floorTint")?.checked) window.cityFloorTint(c);
+    if ($("gg").checked) floorGrid(c);
+    drawObjectSurfaces(c);
+    if ($("gon").checked) {
+        if (orthView) orthGuides(c);
+        else T === "f" ? guidesF(c) : guides(c);
+    }
+    if ($("hzl").checked && !orthView) {
+        c.strokeStyle = "#e8a33d";
+        c.lineWidth = 1.2;
+        c.setLineDash([10, 8]);
+        c.beginPath();
+        if (T === "f") circ(c, AXC[0], AXC[1]);
+        else {
+            c.moveTo(0, AX.hy);
+            c.lineTo(W, AX.hy);
+        }
+        c.stroke();
+        c.setLineDash([]);
+    }
+    if (P.surfaceMode) {
+        // 面表示中は面を深度バッファに使い、面の裏側に隠れるエッジを表示しない。
+        c.save();
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        c.drawImage(lineLayer(true, true, W, H, null, true), 0, 0);
+        c.restore();
+    } else if ($("bin").checked) {
+        c.save();
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        c.drawImage(lineLayer(true, true), 0, 0);
+        c.restore();
+    } else {
+        S.forEach((s) => {
+            if (!s.ob || objectVisible(s.ob)) strokeW(c, s);
+        });
+        drawCur(c);
+        if (prev) prev.forEach((s) => strokeW(c, s));
+    }
+    // 選択中の線を橙色に塗り替えない。線画は常に設定した線色で表示し、選択状態はギズモだけで示す。
+    if (snapHit)
+        S.forEach((s) => {
+            if (s.ob && objectVisible(s.ob) && snapHit.has(s.ob.id)) {
+                c.save();
+                c.globalAlpha = 0.75;
+                strokeW(c, { ...s, c: "#ff3df2", w: s.w + 3 / Z });
+                c.restore();
+            }
+        }); // くっつき先は桃色
+    if (tool === "edit" && selIds.size > 1) drawSelectionFeedback(c);
+    if (sel && tool === "edit" && !window.cityFloorPlanActive) drawGizmo(c); // 3D視点の移動の矢印・面のハンドル・回転の輪
+    if (window.cityFloorPlanOverlay && window.cityFloorPlanActive) window.cityFloorPlanOverlay(c);
+    if (boxSelect) drawBoxSelection(c);
+    if (er) {
+        c.strokeStyle = "#e84a4a";
+        c.lineWidth = 1.5 / Z;
+        c.beginPath();
+        c.arc(er.last.x, er.last.y, P.ew, 0, 7);
+        c.stroke();
+    }
+    if (T === "f") {
+        markF(c);
+        overlay(c);
+        c.restore();
+        return;
+    }
+    // VPの目印（画面外なら端に寄せて表示）
+    ["VP1", "VP2", "VP3"].forEach((nm, i) => {
+        const A = AX[i];
+        if (!A.vp || !show[i]) return;
+        let dx = A.vp.x - W / 2,
+            dy = A.vp.y - H / 2;
+        const t = Math.min(1, (W / 2 - 14) / (Math.abs(dx) || 1e-9), (H / 2 - 14) / (Math.abs(dy) || 1e-9));
+        const px = W / 2 + dx * t,
+            py = H / 2 + dy * t;
+        c.fillStyle = ["#e8743d", "#2fb5a5", "#4a7be8"][i];
+        c.beginPath();
+        c.arc(px, py, 7, 0, 7);
+        c.fill();
+        c.font = "bold 18px system-ui";
+        c.fillText(nm + (t < 1 ? " →" : ""), Math.min(px + 10, W - 70), Math.max(py - 10, 20));
+    });
+    overlay(c);
+    c.restore();
+    const q = (v) => (v ? `(${((v.x / W) * 100).toFixed(0)}%, ${((v.y / H) * 100).toFixed(0)}%)` : "無限遠(平行)");
+    $("info").innerHTML =
+        `画角 ${((2 * Math.atan(18 / P.lens) * 180) / Math.PI).toFixed(1)}°<br>VP1 ${q(AX[0].vp)}<br>VP2 ${q(AX[1].vp)}<br>垂直 ${AX[2].vp ? "VP3 " + q(AX[2].vp) : "平行（垂直）"}<br>地平線 ${((AX.hy / H) * 100).toFixed(1)}%`;
+}
+
+// ===== マウス/タッチ操作 =====
+let ptr = null,
+    lastPen = 0; // 操作中のポインタID／最後にペンを離した時刻（手のひら誤タッチ対策）
+const rawOf = (cx, cy) => {
+    const r = cv.getBoundingClientRect();
+    return { x: ((cx - r.left) * W) / r.width, y: ((cy - r.top) * H) / r.height };
+}; // 画面→キャンバス(ズーム前)
+const pos = (e) => {
+    const r = rawOf(e.clientX, e.clientY);
+    return { x: (r.x - ox) / Z, y: (r.y - oy) / Z };
+}; // ズーム・移動を戻した描画座標
+const TC = new Map(); // いま触れている指(touch)
+function clampView() {
+    Z = clamp(Z, 1, 10);
+    ox = clamp(ox, W - W * Z, 0);
+    oy = clamp(oy, H - H * Z, 0);
+}
+function updZ() {
+    $("zr").textContent = Math.round(Z * 100) + "%";
+}
+$("zr").onclick = () => {
+    Z = 1;
+    ox = oy = 0;
+    updZ();
+    render();
+};
+cv.addEventListener(
+    "wheel",
+    (e) => {
+        e.preventDefault();
+        if (mode === "view") {
+            P.lens = clamp(P.lens * Math.exp(-e.deltaY * 0.0012), 14, 200);
+            sync();
+            render();
+            return;
+        }
+        const r = rawOf(e.clientX, e.clientY),
+            q = { x: (r.x - ox) / Z, y: (r.y - oy) / Z };
+        Z = clamp(Z * Math.exp(-e.deltaY * 0.0015), 1, 10);
+        ox = r.x - q.x * Z;
+        oy = r.y - q.y * Z;
+        clampView();
+        updZ();
+        render();
+    },
+    { passive: false },
+); // ビューではレンズ、描画ではキャンバスズーム
+
+// ===== 二本指/三本指：ピンチでズーム・移動、タップで元に戻す/やり直し =====
+function multiStart() {
+    cancelBoxPending();
+    boxSelect = null;
+    if (drag) {
+        setP("yaw", drag.yaw);
+        setP("pitch", drag.pitch);
+        setP("cx", drag.cx);
+        setP("cz", drag.cz);
+        setP("ch", drag.ch);
+        sync();
+    } // 1本目で動いた分は戻す
+    drag = null;
+    cur = null;
+    er = null;
+    prev = null;
+    bd = false;
+    ed = null;
+    ptr = null;
+    ptrType = null;
+    if (!mg) mg = { t0: Date.now(), n: 0, moved: false, x0: null, y0: null, x1: null, y1: null };
+    const pts = [...TC.values()];
+    mg.n = Math.max(mg.n, pts.length);
+    mg.view = mode === "view";
+    const cx = pts.reduce((a, t) => a + t.x, 0) / Math.max(1, pts.length),
+        cy = pts.reduce((a, t) => a + t.y, 0) / Math.max(1, pts.length);
+    if (mg.x0 == null) {
+        mg.x0 = cx;
+        mg.y0 = cy;
+    }
+    mg.x1 = cx;
+    mg.y1 = cy;
+    pts.forEach((t) => {
+        t.sx = t.x;
+        t.sy = t.y;
+    });
+    if (pts.length === 2) {
+        const rc = rawOf((pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2);
+        mg.d0 = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        mg.z0 = Z;
+        mg.q0 = { x: (rc.x - ox) / Z, y: (rc.y - oy) / Z };
+        mg.cx0 = P.cx;
+        mg.cz0 = P.cz;
+        mg.ch0 = P.ch;
+        mg.lens0 = P.lens;
+        mg.mx0 = (pts[0].x + pts[1].x) / 2;
+        mg.my0 = (pts[0].y + pts[1].y) / 2;
+    } // 指の中心を基準にする
+}
+function multiMove(tc) {
+    if (Math.hypot(tc.x - tc.sx, tc.y - tc.sy) > 14) mg.moved = true; // 14px以上動いたらタップではない
+    const pts = [...TC.values()];
+    if (pts.length) {
+        mg.x1 = pts.reduce((a, t) => a + t.x, 0) / pts.length;
+        mg.y1 = pts.reduce((a, t) => a + t.y, 0) / pts.length;
+    }
+    if (mg.moved && pts.length === 2 && mg.d0 > 0) {
+        const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
+            mx = (pts[0].x + pts[1].x) / 2,
+            my = (pts[0].y + pts[1].y) / 2;
+        if (mg.view) {
+            const k = W / cv.getBoundingClientRect().width,
+                worldPerPx = ((Math.max(0.15, P.ch) * 2) / H) * k,
+                dx = mx - mg.mx0,
+                dy = my - mg.my0,
+                th = P.yaw * DG;
+            setP("cx", mg.cx0 - dx * worldPerPx * Math.cos(th));
+            setP("cz", mg.cz0 - dx * worldPerPx * Math.sin(th));
+            setP("ch", clamp(mg.ch0 + dy * worldPerPx, 0.05, 30));
+            P.lens = clamp((mg.lens0 * d) / mg.d0, 14, 200);
+            sync();
+            render();
+        } else {
+            const rc = rawOf(mx, my);
+            Z = clamp((mg.z0 * d) / mg.d0, 1, 10);
+            ox = rc.x - mg.q0.x * Z;
+            oy = rc.y - mg.q0.y * Z;
+            clampView();
+            updZ();
+            render();
+        }
+    }
+}
+
+// ===== 消しゴム（線は向きの点列で持っているので、点を消して線を分割する） =====
+// 点列を細かくする（部分消しの精度のため）
+function dens(a) {
+    const o = [a[0]];
+    for (let i = 1; i < a.length; i++) {
+        const u = a[i - 1],
+            v = a[i],
+            n = Math.ceil(Math.acos(Math.max(-1, Math.min(1, V.dot(u, v)))) / 0.004);
+        for (let j = 1; j <= n; j++) o.push(j === n ? v : V.nrm(V.add(u, v, 1 - j / n, j / n)));
+    }
+    return o;
+}
+function dens3(a) {
+    const o = [a[0]],
+        co = CO();
+    for (let i = 1; i < a.length; i++) {
+        const u = a[i - 1],
+            v = a[i],
+            n = Math.ceil(
+                Math.acos(Math.max(-1, Math.min(1, V.dot(V.nrm(V.add(u, co)), V.nrm(V.add(v, co)))))) / 0.004,
+            );
+        for (let j = 1; j <= n; j++) o.push(j === n ? v : V.add(u, v, 1 - j / n, j / n));
+    }
+    return o;
+}
+function eraseAt(p) {
+    const r2 = P.ew * P.ew,
+        all = $("em").value === "all",
+        res = [],
+        det = new Set();
+    let ch = false;
+    for (const s of S) {
+        const hit = s.p.map((v) => {
+            const q = sp(s, v);
+            return q.ok && (q.x - p.x) ** 2 + (q.y - p.y) ** 2 <= r2;
+        });
+        if (!hit.some(Boolean)) {
+            res.push(s);
+            continue;
+        }
+        ch = true;
+        if (s.ob) det.add(s.ob.id);
+        if (all) continue; // 線ごと消す
+        let seg = [];
+        s.p.forEach((v, i) => {
+            if (hit[i]) {
+                if (seg.length > 1) res.push({ c: s.c, w: s.w, d3: s.d3, p: seg });
+                seg = [];
+            } else seg.push(v);
+        });
+        if (seg.length > 1) res.push({ c: s.c, w: s.w, d3: s.d3, p: seg });
+    }
+    if (ch) {
+        S = det.size ? res.map((s) => (s.ob && det.has(s.ob.id) ? { ...s, ob: undefined } : s)) : res;
+        if (sel && det.has(sel)) clearSelection();
+    }
+}
+// aからbまでなぞった間も取りこぼさず消す
+function stepErase(a, b) {
+    const d = Math.hypot(b.x - a.x, b.y - a.y),
+        n = Math.max(1, Math.ceil(d / (P.ew / 2)));
+    for (let i = 1; i <= n; i++) eraseAt({ x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n });
+}
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// 長押し＋ドラッグのボックス選択。空白から始めたときだけ起動し、
+// 通常のオブジェクトドラッグやiPadの視点操作とは競合しないようにする。
+let boxSelect = null,
+    boxPending = null,
+    boxTimer = null;
+function cancelBoxPending() {
+    if (boxTimer) {
+        clearTimeout(boxTimer);
+        boxTimer = null;
+    }
+    const p = boxPending;
+    boxPending = null;
+    return p;
+}
+function armBoxPending(start, pointerId, source = "canvas", meta = {}) {
+    cancelBoxPending();
+    const pending = { start: { ...start }, pointerId, source, ...meta };
+    boxPending = pending;
+    boxTimer = setTimeout(() => {
+        if (boxPending !== pending) return;
+        boxPending = null;
+        boxTimer = null;
+        if (source === "floor") floorPlanDrag = null;
+        boxSelect = { pointerId, start: { ...pending.start }, end: { ...pending.start }, source };
+        clearSelection();
+        render();
+    }, 360);
+}
+// 戻り値: pending / cancel / floorPan。floorPanのときだけ従来の表示パンへ引き継ぐ。
+function updateBoxPending(p, pointerId) {
+    const pending = boxPending;
+    if (!pending || pending.pointerId !== pointerId) return null;
+    if (Math.hypot(p.x - pending.start.x, p.y - pending.start.y) <= 8) return "pending";
+    cancelBoxPending();
+    if (pending.source === "floor") {
+        if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
+        floorPlanDrag = {
+            kind: "pan",
+            pointerId,
+            p0: { ...pending.start },
+            center0: [...(pending.center0 || window.cityFloorPlanCenter || [0, 0])],
+            tapClear: true,
+            moved: true,
+        };
+        return "floorPan";
+    }
+    return "cancel";
+}
+function boxScreenBounds(o) {
+    const b = obBounds(o),
+        pts = [];
+    for (const x of [b.lo[0], b.hi[0]])
+        for (const y of [b.lo[1], b.hi[1]])
+            for (const z of [b.lo[2], b.hi[2]]) {
+                const q = scrW([x, y, z]);
+                if (q && q.ok && Number.isFinite(q.x) && Number.isFinite(q.y)) pts.push(q);
+            }
+    if (!pts.length) return null;
+    return {
+        x0: Math.min(...pts.map((q) => q.x)),
+        y0: Math.min(...pts.map((q) => q.y)),
+        x1: Math.max(...pts.map((q) => q.x)),
+        y1: Math.max(...pts.map((q) => q.y)),
+    };
+}
+// アセット側のIIFE内にあるsceneObjects()へ依存せず、単一版・分割版の
+// どちらでもボックス選択から直接参照できるオブジェクト一覧を作る。
+function boxSceneObjects() {
+    const out = [],
+        seen = new Set();
+    S.forEach((s) => {
+        const o = s && s.ob;
+        if (o && objectVisible(o) && !seen.has(o.id)) {
+            seen.add(o.id);
+            out.push(o);
+        }
+    });
+    return out;
+}
+function finishBoxSelection(end) {
+    if (!boxSelect) return;
+    const a = boxSelect.start,
+        b = end || boxSelect.end,
+        x0 = Math.min(a.x, b.x),
+        x1 = Math.max(a.x, b.x),
+        y0 = Math.min(a.y, b.y),
+        y1 = Math.max(a.y, b.y),
+        chosen = [];
+    boxSceneObjects()
+        .filter((o) => !window.cityFloorPlanActive || o.k === 1)
+        .forEach((o) => {
+            const q = boxScreenBounds(o);
+            if (!q) return;
+            const cx = (q.x0 + q.x1) / 2,
+                cy = (q.y0 + q.y1) / 2;
+            if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) chosen.push(o);
+        });
+    clearSelection();
+    chosen.forEach((o) => selIds.add(o.id));
+    sel = chosen.length ? chosen[chosen.length - 1].id : null;
+    normalizeSelection();
+    boxSelect = null;
+    tool = "edit";
+    setMode("draw");
+    syncSel();
+    render();
+}
+function drawBoxSelection(c) {
+    if (!boxSelect) return;
+    const a = boxSelect.start,
+        b = boxSelect.end,
+        x = Math.min(a.x, b.x),
+        y = Math.min(a.y, b.y),
+        w = Math.abs(b.x - a.x),
+        h = Math.abs(b.y - a.y);
+    c.save();
+    c.fillStyle = "rgba(102,227,200,.12)";
+    c.strokeStyle = "#66e3c8";
+    c.lineWidth = 1.5 / Z;
+    c.setLineDash([7 / Z, 4 / Z]);
+    c.fillRect(x, y, w, h);
+    c.strokeRect(x, y, w, h);
+    c.restore();
+}
+// 複数選択時は主役のギズモだけでなく、選択中の全オブジェクトを枠で示す。
+// 線色そのものは変えず、通常の編集表示を壊さないよう補助枠だけを描く。
+function drawSelectionFeedback(c) {
+    const chosen = boxSceneObjects().filter((o) => selIds.has(o.id));
+    if (!chosen.length) return;
+    c.save();
+    c.lineWidth = 1.6 / Z;
+    c.setLineDash([6 / Z, 4 / Z]);
+    c.globalAlpha = 0.92;
+    chosen.forEach((o) => {
+        const q = boxScreenBounds(o);
+        if (!q) return;
+        const pad = 5 / Z;
+        c.strokeStyle = o.id === sel ? "#ffd34d" : "#66e3c8";
+        c.fillStyle = o.id === sel ? "#ffd34d" : "#66e3c8";
+        c.strokeRect(q.x0 - pad, q.y0 - pad, Math.max(1, q.x1 - q.x0 + pad * 2), Math.max(1, q.y1 - q.y0 + pad * 2));
+        c.setLineDash([]);
+        c.beginPath();
+        c.arc((q.x0 + q.x1) / 2, (q.y0 + q.y1) / 2, 3.5 / Z, 0, Math.PI * 2);
+        c.fill();
+        c.setLineDash([6 / Z, 4 / Z]);
+    });
+    c.restore();
+}
+// ポインタがキャンバスから黒いUIへ移動しても、ボックス選択を必ず解放する。
+// キャンバスのPointer Captureだけに依存せず、windowのcaptureフェーズでも監視する。
+function boxPointerIsActive(pointerId) {
+    return !!((boxSelect && boxSelect.pointerId === pointerId) || (boxPending && boxPending.pointerId === pointerId));
+}
+function boxPoint(e) {
+    const p = pos(e);
+    return { x: clamp(p.x, 0, W), y: clamp(p.y, 0, H) };
+}
+function boxPointInsideCanvas(e) {
+    const r = cv.getBoundingClientRect();
+    if (!(e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom)) return false;
+    // キャンバス上に重なった黒いツールバー／ドックも「キャンバス外」として扱う。
+    const top = document.elementFromPoint(e.clientX, e.clientY);
+    return top === cv;
+}
+function endBoxPointer(e, commit) {
+    const pointerId = e && e.pointerId;
+    if (pointerId == null || !boxPointerIsActive(pointerId)) return false;
+    const pending = boxPending && boxPending.pointerId === pointerId;
+    const selecting = boxSelect && boxSelect.pointerId === pointerId;
+    if (selecting) {
+        if (commit) finishBoxSelection(e && Number.isFinite(e.clientX) ? boxPoint(e) : boxSelect.end);
+        else boxSelect = null;
+    }
+    if (pending) {
+        const p = cancelBoxPending();
+        if (p?.tapClear) setSelection(null, false);
+    } else cancelBoxPending();
+    if (floorPlanDrag && floorPlanDrag.pointerId === pointerId) floorPlanDrag = null;
+    if (ptr === pointerId) {
+        ptr = null;
+        ptrType = null;
+    }
+    if (typeof TC !== "undefined") TC.delete(pointerId);
+    if (e?.pointerType === "pen") lastPen = Date.now();
+    try {
+        if (cv.hasPointerCapture?.(pointerId)) cv.releasePointerCapture(pointerId);
+    } catch (err) { }
+    if (!commit) render();
+    return true;
+}
+function abortAllBoxPointers() {
+    const ids = new Set();
+    if (boxSelect) ids.add(boxSelect.pointerId);
+    if (boxPending) ids.add(boxPending.pointerId);
+    ids.forEach((pointerId) => endBoxPointer({ pointerId }, false));
+}
+// 押したままキャンバス外へ出た時点で確定して終了する。これにより、
+// サイドパネル／上部バー上でpointerupを受け損なうブラウザでも残像を残さない。
+addEventListener(
+    "pointermove",
+    (e) => {
+        if (!boxPointerIsActive(e.pointerId)) return;
+        const released = e.pointerType !== "touch" && e.buttons === 0;
+        if (!released && !boxPointInsideCanvas(e)) {
+            e.preventDefault();
+            e.stopPropagation();
+            endBoxPointer(e, !!(boxSelect && boxSelect.pointerId === e.pointerId));
+        } else if (released) {
+            e.preventDefault();
+            e.stopPropagation();
+            endBoxPointer(e, true);
+        }
+    },
+    true,
+);
+addEventListener(
+    "pointerup",
+    (e) => {
+        if (!boxPointerIsActive(e.pointerId)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        endBoxPointer(e, true);
+    },
+    true,
+);
+addEventListener(
+    "pointercancel",
+    (e) => {
+        if (!boxPointerIsActive(e.pointerId)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        endBoxPointer(e, false);
+    },
+    true,
+);
+// Pointer Captureが途中で失われた場合も、矩形を残さずキャンセルする。
+cv.addEventListener(
+    "lostpointercapture",
+    (e) => {
+        if (boxPointerIsActive(e.pointerId)) endBoxPointer(e, false);
+    },
+    true,
+);
+// UIへフォーカスが移った／画面が隠れた場合の最後の保険。
+addEventListener("blur", abortAllBoxPointers);
+document.addEventListener("visibilitychange", () => {
+    if (document.hidden) abortAllBoxPointers();
+});
+addEventListener("pagehide", abortAllBoxPointers);
+// 最初の数pxの向きから、一番近い軸を選ぶ
+function pick(a, p) {
+    const l = Math.hypot(p.x - a.x, p.y - a.y),
+        m = { x: (p.x - a.x) / l, y: (p.y - a.y) / l };
+    let b = 0,
+        bs = 9;
+    [0, 1, 2].forEach((i) => {
+        const u = dirAt(a, i),
+            s = Math.abs(m.x * u.y - m.y * u.x);
+        if (s < bs) {
+            bs = s;
+            b = i;
+        }
+    });
+    return b;
+}
+cv.onpointerdown = (e) => {
+    const touch = e.pointerType === "touch";
+    if (touch && ptrType === "pen") return; // ペンで描いている間の手のひらは無視
+    if (touch) {
+        // 指の本数を数える（2本以上→ピンチ/タップ判定）
+        TC.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
+        cv.setPointerCapture(e.pointerId);
+        if (TC.size >= 2) {
+            multiStart();
+            return;
+        }
+        if (mg || Date.now() - lastPen < 600) return; // ペン直後の1本指(手のひら)は視点を動かさない。2本以上のジェスチャーは受け付ける
+    } else if (e.pointerType === "pen" && ptrType !== "pen") {
+        drag = null;
+        cur = null;
+        er = null;
+        prev = null;
+        bd = false;
+        ed = null;
+        ptr = null;
+        mg = null;
+        TC.clear();
+    } // ペンは指より優先
+    // iPadでpointerupを取りこぼした古いポインタが残っても、次の編集操作を止めない。
+    if (ptr != null && ptr !== e.pointerId && e.pointerType !== "mouse" && !TC.has(ptr)) {
+        ptr = null;
+        ptrType = null;
+        ed = null;
+        drag = null;
+        cur = null;
+        mg = null;
+    }
+    // 「視点」ボタンで3Dを操作中は、編集ツールが残っていてもタッチ／ペンを
+    // 自動的に描画へ切り替えない。編集はmode='draw'のときだけ受け取る。
+    if (ptr != null) return;
+    ptr = e.pointerId;
+    ptrType = e.pointerType;
+    cv.setPointerCapture(e.pointerId);
+    const p = pos(e);
+    const pn = $("pn").checked,
+        mod = e.pointerType === "mouse" && (e.metaKey || e.ctrlKey),
+        selectGesture =
+            tool === "edit" &&
+            mode === "draw" &&
+            e.pointerType === "mouse" &&
+            e.button === 0 &&
+            (e.shiftKey || e.metaKey || e.ctrlKey),
+        nav =
+            e.pointerType === "mouse" &&
+            (e.button === 1 || e.button === 2 || e.altKey || ((e.shiftKey || mod) && !selectGesture)),
+        touchTool = pn && e.pointerType === "touch" && tool !== "edit" && tool !== "erase",
+        editPointer = tool === "edit" && mode === "draw" && (e.pointerType === "touch" || e.pointerType === "pen"),
+        act =
+            nav || (!selectGesture && mod)
+                ? "view"
+                : editPointer
+                    ? "draw"
+                    : pn && e.pointerType === "pen" && mode === "draw"
+                        ? "draw"
+                        : touchTool
+                            ? "view"
+                            : mode; // 視点モードでは、残っている編集ツールよりもカメラ操作を優先する。
+    if (act === "view") {
+        const pan = e.shiftKey || e.altKey || e.button === 2;
+        drag = {
+            kind: pan ? "pan" : "orbit",
+            x: e.clientX,
+            y: e.clientY,
+            yaw: P.yaw,
+            hz: P.hz,
+            pitch: P.pitch,
+            cx: P.cx,
+            cz: P.cz,
+            ch: P.ch,
+        };
+        return;
+    }
+    if (act === "draw" && tool === "edit") {
+        const hg = sel ? hitGizmo(p) : null;
+        if (hg)
+            beginGizmo(hg, p); // 矢印・白い四角・輪をつかんだ
+        else {
+            const id = pickOb(p),
+                multi = e.shiftKey || e.metaKey || e.ctrlKey,
+                wasSelected = !!(id && selIds.has(id));
+            // Shift/Ctrl/⌘クリックで追加・解除。選択済みのオブジェクトをそのままドラッグしたときは、選択中全体を動かす。
+            if (multi) setSelection(id, true);
+            else if (!wasSelected || selIds.size <= 1) setSelection(id, false);
+            if (id && selIds.has(id)) {
+                const o = obOf(id),
+                    group = o?.attachment?.verticalOnly
+                        ? [{ ...o, off: [...(o.off || [0, 0, 0])] }]
+                        : selectedObjects().map((q) => ({ ...q, off: [...(q.off || [0, 0, 0])] }));
+                if (!window.cityFloorPlanActive || o.k === 1)
+                    ed = {
+                        t: "mv",
+                        id,
+                        o0: { ...o },
+                        group,
+                        p0: p,
+                        P0: hit3(unscr(p), o.k, o.d - o.d * o.lift, cloc(o)),
+                        started: false,
+                        ...snapSetupGroup(group, objectAnchorWorld(o)),
+                    };
+            } else armBoxPending(p, e.pointerId, "canvas");
+        }
+        syncSel();
+        render();
+        return;
+    }
+    if (act === "draw" && tool === "border") {
+        bd = true;
+        CR = { x0: clamp(p.x, 0, W), y0: clamp(p.y, 0, H), x1: clamp(p.x, 0, W), y1: clamp(p.y, 0, H) };
+        render();
+        return;
+    }
+    if (act === "draw" && tool === "erase") {
+        er = { base: S, last: p };
+        stepErase(p, p);
+        render();
+        return;
+    } // 消しゴム
+    const sn = $("snap").value;
+    cur = { a: p, p: [p], ax: sn === "free" ? -2 : sn === "auto" ? -1 : +sn, c: $("pc").value, w: MASTER_W, al: null };
+    if (true) {
+        const r0 = unscr(p);
+        let t0 = r0[1] < -1e-4 ? -P.ch / r0[1] : Infinity;
+        if (!(t0 < 500)) t0 = P.dp; // 床に当たれば床の位置、当たらなければ奥行き(空)
+        cur.D = t0;
+        cur.P0 = V.add(camPos(), r0, 1, t0);
+        cur.pv = { c: cur.c, w: cur.w, d3: true, p: [cur.P0] };
+    }
+};
+cv.onpointermove = (e) => {
+    const tc = TC.get(e.pointerId);
+    if (tc) {
+        tc.x = e.clientX;
+        tc.y = e.clientY;
+        if (mg) {
+            multiMove(tc);
+            return;
+        }
+    }
+    const boxPendingState = updateBoxPending(pos(e), e.pointerId);
+    if (boxSelect && boxSelect.pointerId === e.pointerId) {
+        boxSelect.end = pos(e);
+        render();
+        return;
+    }
+    if (boxPendingState === "pending" || boxPendingState === "cancel") return;
+    if (e.pointerId !== ptr) return;
+    const k = W / cv.getBoundingClientRect().width;
+    if (drag) {
+        const dx = e.clientX - drag.x,
+            dy = e.clientY - drag.y;
+        if (drag.kind === "pan") {
+            const worldPerPx = ((Math.max(0.15, P.ch) * 2) / H) * k;
+            const th = P.yaw * DG;
+            setP("cx", drag.cx - dx * worldPerPx * Math.cos(th));
+            setP("cz", drag.cz - dx * worldPerPx * Math.sin(th));
+            setP("ch", clamp(drag.ch + dy * worldPerPx, 0.05, 30));
+        } else {
+            const yawLimit = T === "f" ? 180 : 180;
+            setP("yaw", +clamp(drag.yaw + dx * k * 0.1, -yawLimit, yawLimit).toFixed(3));
+            setP("pitch", +clamp(drag.pitch - dy * k * 0.1, -89, 89).toFixed(2));
+        }
+        sync();
+        render();
+        return;
+    }
+    if (ed) {
+        dragEdit(pos(e), !!e.shiftKey);
+        return;
+    }
+    if (bd) {
+        const p = pos(e);
+        CR.x1 = clamp(p.x, 0, W);
+        CR.y1 = clamp(p.y, 0, H);
+        render();
+        return;
+    }
+    if (er) {
+        const p = pos(e);
+        stepErase(er.last, p);
+        er.last = p;
+        render();
+        return;
+    }
+    if (!cur) return;
+    const p = pos(e),
+        a = cur.a;
+    if (cur.ax === -1 && Math.hypot(p.x - a.x, p.y - a.y) >= 6) cur.ax = pick(a, p);
+    if (cur.ax === -2) {
+        cur.p.push(p);
+        if (cur.P0) cur.pv.p.push(V.add(camPos(), unscr(p), 1, cur.D));
+    } // フリーハンド
+    else if (cur.ax >= 0) {
+        if (cur.P0) {
+            // 定規：3Dの直線（軸に沿う）。ペンの位置を、画面上の定規の線へ垂直に落とした点まで引く
+            let E;
+            if (T === "f") {
+                const q = curveF(a, p, cur.ax);
+                E = q[q.length - 1];
+            } else {
+                const u = dirAt(a, cur.ax),
+                    tt = (p.x - a.x) * u.x + (p.y - a.y) * u.y;
+                E = { x: a.x + u.x * tt, y: a.y + u.y * tt };
+            }
+            const a3 = AXW[cur.ax],
+                t = lineParam(unscr(E), V.add(cur.P0, CO()), a3);
+            if (t != null) cur.pv.p = dens3([cur.P0, V.add(cur.P0, a3, 1, t)]);
+        } else if (T === "f")
+            cur.p = curveF(a, p, cur.ax); // 魚眼：大円の曲線に投影
+        else {
+            const u = dirAt(a, cur.ax),
+                t = (p.x - a.x) * u.x + (p.y - a.y) * u.y;
+            cur.p = [a, { x: a.x + u.x * t, y: a.y + u.y * t }];
+        } // 定規の線上に投影
+    }
+    render();
+};
+cv.onpointerup = cv.onpointercancel = (e) => {
+    if (e.pointerType === "touch") {
+        const had = TC.delete(e.pointerId);
+        if (mg) {
+            if (!TC.size) {
+                // 指が全部離れた：2本タップ=元に戻す、3本タップ=やり直し、4本タップ=プリミティブメニュー
+                if (e.type === "pointerup" && !mg.moved && Date.now() - mg.t0 < 450) {
+                    if (mg.n === 2) undo();
+                    else if (mg.n === 3) redo();
+                    else if (mg.n >= 4 && window.cityPrimitiveMenuToggle) window.cityPrimitiveMenuToggle();
+                } else if (e.type === "pointerup" && mg.moved && mg.n === 3 && window.cityThreeFingerSelect) {
+                    window.cityThreeFingerSelect(mg.x1 - mg.x0, mg.y1 - mg.y0, mg.x1, mg.y1);
+                }
+                mg = null;
+            }
+            return;
+        }
+        if (!had) return;
+    }
+    if (boxSelect && boxSelect.pointerId === e.pointerId) {
+        if (e.type === "pointerup") finishBoxSelection(boxPoint(e));
+        else boxSelect = null;
+        cancelBoxPending();
+        ptr = null;
+        ptrType = null;
+        if (e.pointerType === "pen") lastPen = Date.now();
+        return;
+    }
+    if (boxPending && boxPending.pointerId === e.pointerId) {
+        cancelBoxPending();
+        ptr = null;
+        ptrType = null;
+        if (e.pointerType === "pen") lastPen = Date.now();
+        return;
+    }
+    if (e.pointerId !== ptr) return;
+    ptr = null;
+    ptrType = null;
+    if (e.pointerType === "pen") lastPen = Date.now();
+    if (er) {
+        if (S !== er.base) {
+            HU.push(er.base);
+            RD = [];
+        }
+        er = null;
+    }
+    if (bd) {
+        bd = false;
+        const r = crect();
+        if (r.w < 8 || r.h < 8) CR = null;
+    }
+    ed = null;
+    snapHit = null;
+    drag = null;
+    if (cur && cur.pv) {
+        if (cur.pv.p.length > 1) {
+            HU.push(S);
+            S = [...S, { c: cur.c, w: cur.w, d3: true, p: dens3(cur.pv.p) }];
+            RD = [];
+        }
+    } // 3Dの線として保存
+    else if (cur && cur.p.length > 1) {
+        HU.push(S);
+        S = [...S, { c: cur.c, w: cur.w, p: dens(cur.p.map(unscr)) }];
+        RD = [];
+    }
+    cur = null;
+    render();
+}; // 向きに変換して保存
+
+// iPad Safariでキャンバス外へ指／ペンを離した場合の一般操作用保険。
+// ボックス選択以外の編集でも、古いpointerIdが次の操作をブロックしないようにする。
+function releaseInputState(e) {
+    if (e?.pointerType === "touch") {
+        TC.delete(e.pointerId);
+        if (!TC.size) mg = null;
+    }
+    if (e?.pointerType === "pen") lastPen = Date.now();
+    if (ptr === e?.pointerId) {
+        ptr = null;
+        ptrType = null;
+        ed = null;
+        drag = null;
+        cur = null;
+        bd = false;
+        er = null;
+        snapHit = null;
+    }
+}
+addEventListener("pointerup", releaseInputState, false);
+addEventListener("pointercancel", releaseInputState, false);
+addEventListener("blur", () => {
+    if (!boxSelect && !boxPending) {
+        ptr = null;
+        ptrType = null;
+        ed = null;
+        drag = null;
+        cur = null;
+        bd = false;
+        er = null;
+        TC.clear();
+        mg = null;
+    }
+});
+
+// ===== モード・ボタン =====
+function setMode(m) {
+    mode = m;
+    syncInteractionButtons();
+    cv.style.cursor = m === "view" ? "move" : "crosshair";
+    $("hint").textContent =
+        ($("pn").checked ? "【指＝視点／ペン＝描画】" : "") +
+        (m === "view"
+            ? T === "f"
+                ? "ドラッグ：視点を回転／Shiftまたは右ドラッグ：水平移動／ホイール：ズーム"
+                : "ドラッグ：視点を回転／Shiftまたは右ドラッグ：水平移動／ホイール：ズーム（矢印キーでも可）"
+            : "線を引くと、向かっているVPへ自動で吸着します。Ctrl/⌘+Zで元に戻す") +
+        " ／ 中ドラッグ：回転・Shift+ドラッグ：パン";
+}
+$("mV").onclick = () => setMode("view");
+$("mD").onclick = () => setTool("pen");
+const undo = () => {
+    if (HU.length) {
+        RD.push(S);
+        S = HU.pop();
+        render();
+    }
+},
+    redo = () => {
+        if (RD.length) {
+            HU.push(S);
+            S = RD.pop();
+            render();
+        }
+    };
+$("undo").onclick = undo;
+$("redo").onclick = redo;
+$("clr").onclick = () => {
+    if (S.length && confirm("全部消しますか？")) {
+        HU.push(S);
+        S = [];
+        RD = [];
+        render();
+    }
+};
+addEventListener("keydown", (e) => {
+    const m = e.ctrlKey || e.metaKey;
+    if (m && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        e.shiftKey ? redo() : undo();
+        return;
+    }
+    if (m && e.key.toLowerCase() === "y") {
+        redo();
+        return;
+    }
+    if (e.key === "e" && !window.cityFloorPlanActive && !/INPUT|SELECT/.test(e.target.tagName)) {
+        $("tE").click();
+        return;
+    }
+    if (!m && !/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) {
+        if (e.key === "1") {
+            if (typeof setSide === "function") {
+                setSide(!$("side").classList.contains("hide"));
+                fit();
+            }
+            return;
+        }
+        if (e.key === "2") {
+            setMode("view");
+            return;
+        }
+        if (e.key === "3") {
+            tool = "pen";
+            setTool("pen");
+            setMode("draw");
+            return;
+        }
+        if (e.key === "4") {
+            tool = "pen";
+            setTool("edit");
+            return;
+        }
+        if (e.key === "5") {
+            document.getElementById("assetToggle")?.click();
+            return;
+        }
+        if (e.key === "7") {
+            window.cityFloorPlanView?.("front");
+            return;
+        }
+        if (e.key === "8") {
+            window.cityFloorPlanView?.("side");
+            return;
+        }
+        if (e.key === "9") {
+            window.cityFloorPlanView?.("top");
+            return;
+        }
+        if (e.key === "0") {
+            if (window.cityFloorPlanActive) window.cityFloorPlanExit?.(true);
+            else window.cityStandardView?.("home");
+            return;
+        }
+    }
+    if (mode !== "view" || /INPUT|SELECT/.test(e.target.tagName)) return;
+    const d = e.shiftKey ? 5 : 0.5;
+    const L = 180;
+    if (e.key === "ArrowLeft") setP("yaw", clamp(P.yaw - d, -L, L));
+    else if (e.key === "ArrowRight") setP("yaw", clamp(P.yaw + d, -L, L));
+    else if (e.key === "ArrowUp") setP("pitch", clamp(P.pitch + d, -89, 89));
+    else if (e.key === "ArrowDown") setP("pitch", clamp(P.pitch - d, -89, 89));
+    else return;
+    sync();
+    render();
+});
+
+// 書き出しメニューは上部バーの横スクロール領域に隠れないよう、body直下へ移動して表示する。
+// addon側のUIが読み込めない場合でも、ここでメニューだけは開けるようにする。
+const exportToggle = $("exportToggle"),
+    exportMenu = $("exportMenu");
+if (exportMenu && exportMenu.parentElement !== document.body) document.body.appendChild(exportMenu);
+function setExportOpen(open) {
+    if (!exportMenu) return;
+    exportMenu.classList.toggle("open", !!open);
+    exportMenu.style.display = open ? "grid" : "none";
+}
+exportToggle.onclick = (e) => {
+    e.stopPropagation();
+    setExportOpen(!exportMenu.classList.contains("open"));
+};
+// ===== 書き出し（透過PNG） =====
+// m: 'line'=描画のみ / 'guide'=補助線のみ / 'both'=補助線＋描画（どれも背景透過・写真なし）
+// 面表示がONなら、PNGにも面と背面処理を反映する。
+function out(m, hidden = false) {
+    // 書き出す範囲：ズーム中は「画面に見えている範囲」、範囲指定があればその枠との重なり。拡大率のまま出力する
+    const fit = $("zf").checked && Z > 1;
+    let r = fit ? { x: -ox / Z, y: -oy / Z, w: W / Z, h: H / Z } : { x: 0, y: 0, w: W, h: H };
+    if (CR) {
+        const b = crect();
+        if (b.w >= 8 && b.h >= 8) {
+            const x0 = Math.max(r.x, b.x),
+                y0 = Math.max(r.y, b.y),
+                x1 = Math.min(r.x + r.w, b.x + b.w),
+                y1 = Math.min(r.y + r.h, b.y + b.h);
+            if (x1 - x0 >= 1 && y1 - y0 >= 1) r = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+        }
+    }
+    const sc = fit ? Z : 1,
+        cw = Math.max(1, Math.round(r.w * sc)),
+        ch = Math.max(1, Math.round(r.h * sc)),
+        tf = [sc, 0, 0, sc, -r.x * sc, -r.y * sc];
+    const c = document.createElement("canvas");
+    c.width = cw;
+    c.height = ch;
+    const x = c.getContext("2d");
+    if (P.surfaceMode && m !== "guide") {
+        x.setTransform(...tf);
+        drawObjectSurfaces(x);
+        x.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    if (m !== "line") {
+        x.setTransform(...tf);
+        T === "f" ? calcF() : calc();
+        if (window.cityFloorTint && $("floorTint")?.checked) window.cityFloorTint(x);
+        if ($("gg").checked) floorGrid(x);
+        orthView ? orthGuides(x) : T === "f" ? guidesF(x) : guides(x);
+        if ($("hzl").checked && !orthView) {
+            x.strokeStyle = "#e8a33d";
+            x.lineWidth = 1.2;
+            x.setLineDash([10, 8]);
+            x.beginPath();
+            if (T === "f") circ(x, AXC[0], AXC[1]);
+            else {
+                x.moveTo(0, AX.hy);
+                x.lineTo(W, AX.hy);
+            }
+            x.stroke();
+            x.setLineDash([]);
+        }
+        x.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    if (m !== "guide") x.drawImage(lineLayer(false, false, cw, ch, tf, hidden || P.surfaceMode), 0, 0); // 線画／背面処理（二値化つき）
+    return c;
+}
+function closeExportMenu() {
+    setExportOpen(false);
+}
+function save(m, name, hidden = false) {
+    try {
+        const canvas = out(m, hidden);
+        canvas.toBlob((b) => {
+            if (!b) {
+                alert("PNGを作成できませんでした。");
+                return;
+            }
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(b);
+            a.download = name;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+            closeExportMenu();
+        }, "image/png");
+    } catch (e) {
+        console.error("City Grid export error", e);
+        alert("書き出しに失敗しました。もう一度お試しください。");
+    }
+}
+$("pngL").onclick = () => save("line", "perspective-line.png");
+$("pngG").onclick = () => save("guide", "perspective-guide.png");
+$("pngB").onclick = () => save("both", "perspective-guide-line.png");
+$("pngBH").onclick = () => save("both", "perspective-guide-line-visible.png", true);
+$("pngLH").onclick = () => save("line", "perspective-line-visible.png", true);
+$("pngGH").onclick = () => save("guide", "perspective-guide-visible.png", true);
+// 線画・補助線・合成画像を、いずれも透過PNGとしてクリップボードへコピーする。
+// 未対応ブラウザでは各ボタンに状態を表示する。
+async function copyExportToClipboard(kind, id, label) {
+    const button = $(id);
+    if (!button) return;
+    try {
+        if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined")
+            throw new Error("Clipboard image API is unavailable");
+        const blob = await new Promise((resolve) => out(kind).toBlob(resolve, "image/png"));
+        if (!blob) throw new Error("PNG blob was not created");
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        button.textContent = "コピー済み";
+        closeExportMenu();
+    } catch (e) {
+        console.error("City Grid clipboard export error", e);
+        button.textContent = "コピー不可";
+    }
+    setTimeout(() => (button.textContent = label), 1500);
+}
+$("cpyL").onclick = () => copyExportToClipboard("line", "cpyL", "線画（透過）をクリップボードにコピー");
+$("cpyG").onclick = () => copyExportToClipboard("guide", "cpyG", "補助線（透過）をクリップボードにコピー");
+$("cpyB").onclick = () => copyExportToClipboard("both", "cpyB", "描画＋補助線（透過）をクリップボードにコピー");
+
+// ===== 参考写真 =====
+let IMGsrc = null,
+    dirty = false; // IMGsrc=保存用の写真データ(dataURL)
+function loadImg(f) {
+    const o = new Image();
+    o.onload = () => {
+        const k = Math.min(1, 2000 / Math.max(o.width, o.height)),
+            c = document.createElement("canvas");
+        c.width = o.width * k;
+        c.height = o.height * k;
+        c.getContext("2d").drawImage(o, 0, 0, c.width, c.height);
+        IMGsrc = f.type === "image/png" ? c.toDataURL() : c.toDataURL("image/jpeg", 0.88);
+        const im = new Image();
+        im.onload = () => {
+            IMG = im;
+            render();
+        };
+        im.src = IMGsrc;
+    };
+    o.src = URL.createObjectURL(f);
+}
+$("ph").onchange = (e) => e.target.files[0] && loadImg(e.target.files[0]);
+$("phx").onclick = () => {
+    IMG = null;
+    IMGsrc = null;
+    render();
+};
+addEventListener("paste", (e) => {
+    const f = [...e.clipboardData.files].find((f) => f.type.startsWith("image/"));
+    f && loadImg(f);
+});
+cv.ondragover = (e) => e.preventDefault();
+cv.ondrop = (e) => {
+    e.preventDefault();
+    const f = e.dataTransfer.files[0];
+    f && f.type.startsWith("image/") && loadImg(f);
+};
+
+// ===== グリッド種類の切り替え（1/2/3点は通常の透視、5/6点は魚眼） =====
+function applyType(v) {
+    v = +v;
+    T = v >= 5 ? "f" : "r";
+    const f = T === "f",
+        L = 180,
+        Lp = 90;
+    $("yaw").min = -L;
+    $("yaw").max = L;
+    $("pitch").min = -Lp;
+    $("pitch").max = Lp;
+    document.querySelectorAll(".gr").forEach((e) => (e.style.display = f ? "none" : ""));
+    document.querySelectorAll(".gf").forEach((e) => (e.style.display = f ? "" : "none"));
+    const y = P.yaw !== 0 && Math.abs(P.yaw) <= 89 ? P.yaw : 39.912,
+        set = (o) => {
+            for (const k in o) setP(k, o[k]);
+        };
+    if (v === 1) set({ yaw: 0, pitch: 0 });
+    if (v === 2) set({ yaw: y, pitch: 0 });
+    if (v === 3) set({ yaw: y, pitch: Math.abs(P.pitch) < 5 ? 30 : clamp(P.pitch, -60, 60) });
+    if (v === 5) set({ yaw: 0, pitch: 0, roll: 0, fov: 180 });
+    if (v === 6) set({ yaw: 45, pitch: 0, roll: 0, fov: 270 });
+    sync();
+    setMode(mode);
+    render();
+}
+$("gt").onchange = (e) => {
+    orthView = null;
+    applyType(e.target.value);
+};
+$("pn").onchange = () => setMode(mode);
+
+// ===== 状態の保存・読み込み（プロジェクト） =====
+const AK = "pgrid-autosave-v1";
+// 今の状態をまとめる（線は向きのベクトルなので、視点ごと再現できる）
+function pack(withPhoto) {
+    const d = {
+        app: "perspective-ruler-grid",
+        v: 1,
+        P: { ...P },
+        gt: $("gt").value,
+        orthView,
+        ar: $("ar").value,
+        show: [...show],
+        gon: $("gon").checked,
+        hzl: $("hzl").checked,
+        bgw: $("bgw").checked,
+        bin: $("bin").checked,
+        zf: $("zf").checked,
+        gg: $("gg").checked,
+        p3: $("p3").checked,
+        cr: CR,
+        snap: $("snap").value,
+        em: $("em").value,
+        pc: $("pc").value,
+        S: S.map((s) => ({ c: s.c, w: s.w, ob: s.ob, d3: s.d3, p: s.p.map((v) => v.map((x) => +x.toFixed(5))) })),
+    };
+    if (withPhoto && IMGsrc) d.photo = IMGsrc;
+    return d;
+}
+// 保存した状態を戻す
+function unpack(d) {
+    if (!d || d.app !== "perspective-ruler-grid" || !Array.isArray(d.S)) throw new Error("形式が違います");
+    $("ar").value = d.ar;
+    $("ar").onchange(); // 画面比率
+    $("gt").value = d.gt;
+    applyType(d.gt); // 種類（プリセットで値が変わるので直後に上書き）
+    for (const k in P) if (d.P && d.P[k] != null) setP(k, d.P[k]);
+    d.show.forEach((v, i) => {
+        show[i] = v;
+        document.querySelector('[data-i="' + i + '"]').checked = v;
+    });
+    ["gon", "hzl", "bgw", "bin", "zf", "gg", "p3"].forEach((k) => {
+        if (d[k] !== undefined) $(k).checked = d[k];
+    });
+    $("snap").value = d.snap;
+    $("em").value = d.em;
+    $("pc").value = d.pc;
+    {
+        const st = d.S.map((s) => (s.ob ? { ...s, ob: fixOb(s.ob) } : s)),
+            seen = new Set(),
+            gen = []; // 前の版の図形（向きで保存）は、3Dで作り直す
+        st.forEach((s) => {
+            if (s.ob && !s.d3 && !seen.has(s.ob.id)) {
+                seen.add(s.ob.id);
+                gen.push(...genShape(s.ob));
+            }
+        });
+        S = [...st.filter((s) => !(s.ob && !s.d3)), ...gen];
+    }
+    CR = d.cr || null;
+    HU = [];
+    RD = [];
+    cur = null;
+    er = null;
+    prev = null;
+    clearSelection();
+    ed = null;
+    Z = 1;
+    ox = oy = 0;
+    updZ();
+    if (d.photo) {
+        const im = new Image();
+        im.onload = () => {
+            IMG = im;
+            IMGsrc = d.photo;
+            render();
+        };
+        im.src = d.photo;
+    } else {
+        IMG = null;
+        IMGsrc = null;
+    }
+    orthView = d.orthView || null;
+    sync();
+    render();
+}
+$("svP").onclick = () => {
+    const z = (n) => String(n).padStart(2, "0"),
+        t = new Date(),
+        a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(pack(true))], { type: "application/json" }));
+    a.download = `perspective-${t.getFullYear()}${z(t.getMonth() + 1)}${z(t.getDate())}-${z(t.getHours())}${z(t.getMinutes())}.json`;
+    a.click();
+};
+$("opP").onclick = () => $("opF").click();
+$("opF").onchange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    f.text()
+        .then((t) => unpack(JSON.parse(t)))
+        .catch(() => alert("このファイルは読み込めませんでした"));
+    e.target.value = "";
+};
+// 自動保存：変更があれば3秒ごとにこのブラウザへ保存（写真は容量のためファイル保存のみ）
+setInterval(() => {
+    if (!dirty) return;
+    dirty = false;
+    try {
+        localStorage.setItem(AK, JSON.stringify(pack(false)));
+    } catch (e) { }
+}, 3000);
+$("rst").onclick = () => {
+    if (confirm("自動保存を消して初期化します。よろしいですか？")) {
+        try {
+            localStorage.removeItem(AK);
+        } catch (e) { }
+        location.reload();
+    }
+};
+
+// ⌘/Ctrlを押している間は、カーソルを視点移動の形にする
+const curs = () => {
+    cv.style.cursor = mode === "view" ? "move" : "crosshair";
+};
+addEventListener("keydown", (e) => {
+    if (e.key === "Meta" || e.key === "Control") cv.style.cursor = "move";
+});
+addEventListener("keyup", (e) => {
+    if (e.key === "Meta" || e.key === "Control") curs();
+});
+addEventListener("blur", curs);
+cv.oncontextmenu = (e) => e.preventDefault();
+
+// ===== 起動 =====
+cv.width = W;
+cv.height = H;
+sync();
+syncSurfaceToggle();
+applyType(2);
+try {
+    const sideState = localStorage.getItem("pgrid-side");
+    setSide(sideState === null ? true : sideState === "1");
+} catch (e) {
+    setSide(true);
+}
+fit();
+try {
+    const t = localStorage.getItem(AK);
+    if (t) unpack(JSON.parse(t));
+} catch (e) { } // 前回の自動保存があれば復元
