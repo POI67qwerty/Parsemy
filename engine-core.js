@@ -269,7 +269,7 @@ document.querySelectorAll("[data-i]").forEach(
             render();
         }),
 );
-["gon", "hzl", "bgw", "snap", "bin", "gg"].forEach((k) => ($(k).onchange = render));
+["gon", "hzl", "bgw", "snap", "bin", "gg"].forEach((k) => ($(k).onchange = () => render()));
 $("ar").onchange = () => {
     H = Math.round(W / +$("ar").value);
     cv.width = W;

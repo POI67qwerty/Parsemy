@@ -357,7 +357,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             .join("") +
         "</div>";
     stage.appendChild(tray);
-    assetAxisTrayInput = el("assetAxisTray");
+    const assetAxisTrayInput = el("assetAxisTray");
     window.cityGridAssetAxisTray = assetAxisTrayInput;
     const setAssetAxis = (value) => {
         P.assetAxis = clamp(Math.round(Number(value)), 0, 2);

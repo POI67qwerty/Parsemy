@@ -269,7 +269,7 @@ document.querySelectorAll("[data-i]").forEach(
             render();
         }),
 );
-["gon", "hzl", "bgw", "snap", "bin", "gg"].forEach((k) => ($(k).onchange = render));
+["gon", "hzl", "bgw", "snap", "bin", "gg"].forEach((k) => ($(k).onchange = () => render()));
 $("ar").onchange = () => {
     H = Math.round(W / +$("ar").value);
     cv.width = W;
@@ -2424,7 +2424,8 @@ function beginGizmo(h, p) {
         const C0 = V.add(h.g.C3, co),
             t0 = lineParam(r, C0, h.a.a),
             axisGuide = faceScreenGuide({ P3: h.g.C3, n: h.a.a });
-        if (t0 != null || axisGuide) ed = { ...base, t: "axis", a: h.a.a, aj: h.a.a.indexOf(1), C0, t0, axisGuide };
+        if (t0 != null || axisGuide)
+            ed = { ...base, t: "axis", a: h.a.a, aj: h.a.a.indexOf(1), C0, t0, axisGuide, p0: p };
     } else if (h.t === "face") {
         const F0 = V.add(h.f.P3, co),
             t0 = lineParam(r, F0, h.f.n),
@@ -2443,6 +2444,7 @@ function beginGizmo(h, p) {
                 fj: fj === undefined ? -1 : fj,
                 t0,
                 faceGuide,
+                p0: p,
             };
         }
     } else if (o.type === "compound")
@@ -3674,6 +3676,11 @@ function stepErase(a, b) {
     for (let i = 1; i <= n; i++) eraseAt({ x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n });
 }
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// 間取りのドラッグ状態はstudio-ui.jsのIIFE内で管理する。
+// 分割読み込みでは別スコープになるため、window経由の小さな橋を使う。
+const getCityFloorPlanDrag = () => window.cityFloorPlanGetDrag?.() || null;
+const setCityFloorPlanDrag = (value) => window.cityFloorPlanSetDrag?.(value);
+const fitCityFloorPlan = () => window.cityFloorPlanFit?.();
 // 長押し＋ドラッグのボックス選択。空白から始めたときだけ起動し、
 // 通常のオブジェクトドラッグやiPadの視点操作とは競合しないようにする。
 let boxSelect = null,
@@ -3696,7 +3703,7 @@ function armBoxPending(start, pointerId, source = "canvas", meta = {}) {
         if (boxPending !== pending) return;
         boxPending = null;
         boxTimer = null;
-        if (source === "floor") floorPlanDrag = null;
+        if (source === "floor") setCityFloorPlanDrag(null);
         boxSelect = { pointerId, start: { ...pending.start }, end: { ...pending.start }, source };
         clearSelection();
         render();
@@ -3709,15 +3716,15 @@ function updateBoxPending(p, pointerId) {
     if (Math.hypot(p.x - pending.start.x, p.y - pending.start.y) <= 8) return "pending";
     cancelBoxPending();
     if (pending.source === "floor") {
-        if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
-        floorPlanDrag = {
+        if (!Array.isArray(window.cityFloorPlanCenter)) fitCityFloorPlan();
+        setCityFloorPlanDrag({
             kind: "pan",
             pointerId,
             p0: { ...pending.start },
             center0: [...(pending.center0 || window.cityFloorPlanCenter || [0, 0])],
             tapClear: true,
             moved: true,
-        };
+        });
         return "floorPan";
     }
     return "cancel";
@@ -3851,7 +3858,8 @@ function endBoxPointer(e, commit) {
         const p = cancelBoxPending();
         if (p?.tapClear) setSelection(null, false);
     } else cancelBoxPending();
-    if (floorPlanDrag && floorPlanDrag.pointerId === pointerId) floorPlanDrag = null;
+    const floorDrag = getCityFloorPlanDrag();
+    if (floorDrag && floorDrag.pointerId === pointerId) setCityFloorPlanDrag(null);
     if (ptr === pointerId) {
         ptr = null;
         ptrType = null;
@@ -6014,7 +6022,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             .join("") +
         "</div>";
     stage.appendChild(tray);
-    assetAxisTrayInput = el("assetAxisTray");
+    const assetAxisTrayInput = el("assetAxisTray");
     window.cityGridAssetAxisTray = assetAxisTrayInput;
     const setAssetAxis = (value) => {
         P.assetAxis = clamp(Math.round(Number(value)), 0, 2);
@@ -6277,7 +6285,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         <button type="button" id="studioPresetDelete">削除</button>
       </div>
       <label><span>保存済み</span><select id="studioPresetSelect"><option value="">まだありません</option></select></label>
-      <div class="sceneNote">カメラ・グリッド・補助線・ペン・消しゴム・画面比率など、オブジェクト以外の設定を保存します。シーン内容は含みません。</div>
+      <div class="sceneNote">カメラ・魚眼画角・レンズ・グリッド種類・補助線・表示設定などを保存します。オブジェクトと描画線は保存・変更しません。</div>
       <div class="quickField"><span>階段の段数</span><input id="stairsSteps" type="number" min="2" max="24" step="1" value="6"><em>段</em></div>
       <label class="quickCheck"><input id="stairsRail" type="checkbox"> 階段に手すりをつける</label>
       <div class="quickRow"><button id="applyStairs" class="primary">選択中の階段に反映</button></div>
@@ -7015,16 +7023,12 @@ window.cityGridInstallAssetUI = function (bridge) {
         viewKeys.forEach((k) => (v[k] = P[k]));
         return v;
     };
-    let homeView = null;
     function applyStandardView(kind) {
         standardApplying = true;
-        if (kind === "home" && homeView) {
-            // 0 3Dへ戻るだけでは、現在選択中のグリッド種類を復元値で上書きしない。
-            // homeViewには古いセッションの値が残る場合があるため、gt／Tは現在値を維持する。
-            orthView = homeView.orthView || null;
-            viewKeys.forEach((k) => {
-                if (k in P) setP(k, homeView[k]);
-            });
+        if (kind === "home") {
+            // 0=3Dは正投影だけを解除する。左パネルで変更した魚眼FOV、レンズ、
+            // カメラ位置・高さ・回転・傾きなどを初期値へ戻さない。
+            orthView = null;
         } else {
             // 視点プリセットを切り替えても、ユーザーが選んだグリッド種類は変更しない。
             const keep = { lens: P.lens, hz: P.hz, ch: P.ch, cx: P.cx, cz: P.cz };
@@ -7036,7 +7040,9 @@ window.cityGridInstallAssetUI = function (bridge) {
         }
         standardApplying = false;
         sync();
-        setMode("view");
+        // 0=3Dは視点プリセットだけを切り替える。編集ツールを選択中なら、
+        // そのまま3Dギズモを使えるように描画／編集モードを維持する。
+        setMode(tool === "edit" ? "draw" : "view");
         render();
     }
     window.cityStandardView = (kind) => applyStandardView(kind);
@@ -7090,7 +7096,8 @@ window.cityGridInstallAssetUI = function (bridge) {
         });
         standardApplying = false;
         sync();
-        setMode("view");
+        // 間取りを閉じても、編集ツールを選択していたら3D編集を続けられるようにする。
+        setMode(tool === "edit" ? "draw" : "view");
         render();
     }
     function fitFloorPlan() {
@@ -7233,6 +7240,13 @@ window.cityGridInstallAssetUI = function (bridge) {
     window.cityFloorPlanEnter = enterFloorPlan;
     window.cityFloorPlanExit = exitFloorPlan;
     window.cityFloorPlanView = showFloorPlan;
+    // engine-tools.jsは別スクリプト／別スコープで読み込まれるため、
+    // ボックス選択から間取りのドラッグ状態を操作するときはこの橋を使う。
+    window.cityFloorPlanGetDrag = () => floorPlanDrag;
+    window.cityFloorPlanSetDrag = (value) => {
+        floorPlanDrag = value;
+    };
+    window.cityFloorPlanFit = fitFloorPlan;
     el("openFloorPlan").onclick = () => setStudioWorkspace("floorplan");
     el("closeFloorPlan").onclick = () => setStudioWorkspace("perspective");
 
@@ -9415,10 +9429,10 @@ window.cityGridInstallAssetUI = function (bridge) {
             trayOpen: el("assetTray")?.style.display === "block",
             workspace: quick?.querySelector("[data-workspace-tab].active")?.dataset.workspaceTab || "perspective",
         };
-        const strokes = S.filter((s) => !s?.ob).map((s) => JSON.parse(JSON.stringify(s)));
         return {
             name: name || "名称未設定",
-            version: 3,
+            version: 4,
+            // プリセットは設定だけを保存し、オブジェクトと描画線は保存しない。
             P: { ...P },
             gt: el("gt").value,
             orthView: orthView || null,
@@ -9433,7 +9447,6 @@ window.cityGridInstallAssetUI = function (bridge) {
             cr: CR ? { ...CR } : null,
             zoom: { Z, ox, oy },
             photo: typeof IMGsrc === "string" && IMGsrc.startsWith("data:") ? IMGsrc : null,
-            strokes,
             ui,
             floorActive: !!window.cityFloorPlanActive,
             floorCenter: Array.isArray(window.cityFloorPlanCenter) ? [...window.cityFloorPlanCenter] : null,
@@ -9473,11 +9486,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             Object.keys(d.P).forEach((k) => {
                 if (k in P && d.P[k] != null) setP(k, d.P[k]);
             });
-        // 3Dオブジェクトは現在のシーンを維持し、プリセット側に保存した線画だけを復元する。
-        if (Array.isArray(d.strokes)) {
-            const objects = S.filter((s) => s?.ob);
-            S = [...d.strokes.map((s) => JSON.parse(JSON.stringify(s))), ...objects];
-        }
+        // プリセット読込では、現在の3Dオブジェクトと描画線をそのまま維持する。
         if (Array.isArray(d.show))
             d.show.forEach((v, i) => {
                 if (i < show.length) {
@@ -9721,7 +9730,6 @@ window.cityGridInstallAssetUI = function (bridge) {
             localStorage.setItem("city-grid-v7-lens-50", "1");
         } catch (e) {}
     }
-    homeView = captureHomeView();
     if (innerWidth <= 900 && !sidePref) setSide(true);
     window.cityGridStudioBridge = {
         el,
