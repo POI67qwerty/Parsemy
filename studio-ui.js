@@ -59,7 +59,7 @@
       <div class="quickRow"><button id="openFloorPlan" class="primary">開く</button><button id="closeFloorPlan">3Dへ戻る</button></div>
       <div id="floorPlanSelectionStatus" class="sceneNote">未選択</div>
       <div class="quickRow floorPlanRotateRow"><button id="floorRotateLeft" disabled>↺</button><button id="floorRotateRight" disabled>↻</button><button id="floorRotate90" disabled>90°</button><button id="floorDelete" disabled>削除</button></div>
-      <div class="sceneNote">間取りでは家具のドラッグ移動、正面・上・横の移動ギズモ、選択中の前側の丸をドラッグした回転、カメラ本体のドラッグ移動、先端の丸のドラッグで向きの変更ができます。回転は15°刻みで30°・45°・90°も選べ、Shiftを押しながらドラッグすると自由な角度です。矢印キーで移動、Q/Eで15°ずつ回転します。移動中も高さ方向（Y）は専用軸で編集でき、接続テント／看板は上下方向だけに制限されます。壁面などY方向以外の面へ生成したオブジェクトは表示のみで、位置は変更しません。</div>
+      <div class="sceneNote">間取りでは全ての生成面のオブジェクトをドラッグ移動できます。正面・上・横の移動ギズモ、選択中の前側の丸をドラッグした回転、カメラ本体のドラッグ移動、先端の丸のドラッグで向きの変更ができます。回転は15°刻みで30°・45°・90°も選べ、Shiftを押しながらドラッグすると自由な角度です。矢印キーで移動、Q/Eで15°ずつ回転します。幅・奥行き・高さの編集も生成面に関係なく利用できます。接続テント／看板は接着を保つため上下方向だけに制限されます。</div>
     </section>
 
     <section class="workspaceScreen" data-workspace-screen="perspective">
@@ -1713,7 +1713,7 @@
     function floorPlanHandles() {
         const o = floorPlanObject(),
             out = { object: null, camera: null };
-        if (o && o.k === 1) {
+        if (o) {
             if (o.type === "compound") {
                 const b = obBounds(o),
                     base = objectAnchorWorld(o),
@@ -1725,10 +1725,19 @@
                         : scrW([base[0], orthView === "side" ? base[1] : -1, base[2] + dist]);
             } else {
                 const [z0, z1] = floorPlanObjectZRange(o),
-                    base = L2W(o, 0, 0, z0),
-                    mid = L2W(o, 0, 0, (z0 + z1) / 2),
+                    bounds = obBounds(o),
+                    boundsCenter = [
+                        (bounds.lo[0] + bounds.hi[0]) / 2,
+                        (bounds.lo[1] + bounds.hi[1]) / 2,
+                        (bounds.lo[2] + bounds.hi[2]) / 2,
+                    ],
+                    base = o.k !== 1 ? boundsCenter : L2W(o, 0, 0, z0),
+                    mid = o.k !== 1 ? boundsCenter : L2W(o, 0, 0, (z0 + z1) / 2),
                     a = (Number(o.rot) || 0) * DG,
-                    dist = Math.max(Math.abs(Number(o.ra) || 0.3), Math.abs(Number(o.rb) || 0.3)) + 0.42;
+                    dist =
+                        o.k !== 1
+                            ? Math.max(bounds.hi[0] - bounds.lo[0], bounds.hi[2] - bounds.lo[2], 0.6) * 0.5 + 0.62
+                            : Math.max(Math.abs(Number(o.ra) || 0.3), Math.abs(Number(o.rb) || 0.3)) + 0.42;
                 out.object = {
                     o,
                     base,
@@ -1781,16 +1790,15 @@
                 .slice()
                 .reverse()
                 .find((o) => {
-                    if (!o || !objectVisible(o) || o.k !== 1) return false;
-                    if (o.type === "compound") {
-                        const b = obBounds(o);
+                    if (!o || !objectVisible(o)) return false;
+                    const b = obBounds(o);
+                    if (o.type === "compound" || o.k !== 1)
                         return (
                             w.x >= b.lo[0] - 0.08 &&
                             w.x <= b.hi[0] + 0.08 &&
                             w.z >= b.lo[2] - 0.08 &&
                             w.z <= b.hi[2] + 0.08
                         );
-                    }
                     const base = L2W(o, 0, 0, 0),
                         dx = w.x - base[0],
                         dz = w.z - base[2],
@@ -1811,7 +1819,7 @@
                 .slice()
                 .reverse()
                 .find((o) => {
-                    if (!o || !objectVisible(o) || o.k !== 1) return false;
+                    if (!o || !objectVisible(o)) return false;
                     const b = obBounds(o),
                         pts = [];
                     for (const x of [b.lo[0], b.hi[0]])
@@ -1838,7 +1846,7 @@
                 .slice()
                 .reverse()
                 .find((o) => {
-                    if (!o || !objectVisible(o) || o.k !== 1) return false;
+                    if (!o || !objectVisible(o)) return false;
                     const q = scrW(objectAnchorWorld(o));
                     return q.ok && Math.hypot(q.x - p.x, q.y - p.y) <= 28 / Z;
                 }) || null
@@ -2249,7 +2257,7 @@
     }
     function floorPlanEditHandles() {
         const o = floorPlanObject();
-        if (!o || o.k !== 1) return null;
+        if (!o) return null;
         if (o.type === "compound") return floorCompoundEditHandles(o);
         const [z0, z1] = floorPlanObjectZRange(o),
             base = L2W(o, 0, 0, z0),
@@ -2394,7 +2402,7 @@
         return hit ? { g, h: hit.h } : null;
     }
     function floorMoveGizmo(o) {
-        if (!o || o.k !== 1) return null;
+        if (!o) return null;
         const b = obBounds(o),
             centerWorld = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2],
             center = scrW(centerWorld),
@@ -2706,12 +2714,10 @@
     window.cityFloorPlanOverlay = drawFloorPlanOverlay;
     function syncFloorPlanSelection() {
         const o = floorPlanObject(),
-            ground = !!(o && o.k === 1),
+            canRotate = !!(o && !o.attachment?.verticalOnly),
             label = o ? (o.type === "asset" ? assetLabel(o) || "アセット" : "図形") : "オブジェクト";
         const text = o
-            ? ground
-                ? `${label} を選択中（向き ${Math.round(angle360(o.rot))}°）`
-                : `${label} を選択中（壁面オブジェクトは間取りでは表示のみ）`
+            ? `${label} を選択中（向き ${Math.round(angle360(o.rot))}°）`
             : "オブジェクトを選択すると、移動・回転できます。";
         const status = el("floorPlanSelectionStatus");
         if (status) status.textContent = text;
@@ -2726,9 +2732,9 @@
             dockStatus.innerHTML = `${text}<small>幅・奥行ハンドルは反対側の面を固定　／　${cameraHint}</small>`;
         }
         [
-            ["floorRotateLeft", ground],
-            ["floorRotateRight", ground],
-            ["floorRotate90", ground],
+            ["floorRotateLeft", canRotate],
+            ["floorRotateRight", canRotate],
+            ["floorRotate90", canRotate],
             ["floorDelete", !!o],
         ].forEach(([id, on]) => {
             const b = el(id);
@@ -2736,7 +2742,8 @@
         });
         floorPlanDock.querySelectorAll("[data-floor-dock-action]").forEach((b) => {
             const a = b.dataset.floorDockAction;
-            b.disabled = a === "delete" ? !o : ["left", "right", "rot30", "rot45", "90"].includes(a) ? !ground : false;
+            b.disabled =
+                a === "delete" ? !o : ["left", "right", "rot30", "rot45", "90"].includes(a) ? !canRotate : false;
         });
         const undoButton = el("floorUndo"),
             redoButton = el("floorRedo");
@@ -2944,14 +2951,14 @@
     }
     function rotateFloorSelected(deg) {
         const o = floorPlanObject();
-        if (!o || o.k !== 1) return;
+        if (!o || o.attachment?.verticalOnly) return;
         HU.push(S);
         RD = [];
         setOb(o.id, { rot: angle360((Number(o.rot) || 0) + deg) });
         render();
     }
     function moveFloorSelected(dx, dz) {
-        const selected = selectedObjects().filter((o) => o.k === 1),
+        const selected = selectedObjects(),
             o = selected.find((q) => q.id === sel) || selected[0],
             objects = o?.attachment?.verticalOnly ? [o] : selected;
         if (!o || !objects.length) return;
@@ -3109,7 +3116,25 @@
                         (customAsset === "beveledBox" && special?.t === "beveled-offset") ||
                         special?.t?.startsWith("sign-") ||
                         (special?.t === "face" && customAsset === "sign");
-                if (special && customFloorGizmo) {
+                const activeFloorObject = sel && obOf(sel),
+                    wallPlaneSelection = !!(activeFloorObject && activeFloorObject.k !== 1),
+                    signBounds = wallPlaneSelection ? obBounds(activeFloorObject) : null,
+                    signCenter = signBounds
+                        ? scrW([
+                              (signBounds.lo[0] + signBounds.hi[0]) / 2,
+                              (signBounds.lo[1] + signBounds.hi[1]) / 2,
+                              (signBounds.lo[2] + signBounds.hi[2]) / 2,
+                          ])
+                        : null,
+                    signBodyCenterHit = !!signCenter && Math.hypot(signCenter.x - p.x, signCenter.y - p.y) <= 10 / Z,
+                    signHandleClose =
+                        !wallPlaneSelection ||
+                        !special?.t?.startsWith("sign-") ||
+                        (!special?.sign?.fallback &&
+                            !signBodyCenterHit &&
+                            special?.sign?.s?.ok &&
+                            Math.hypot(special.sign.s.x - p.x, special.sign.s.y - p.y) <= 12 / Z);
+                if (special && customFloorGizmo && !(wallPlaneSelection && special.t === "face") && signHandleClose) {
                     e.preventDefault();
                     e.stopImmediatePropagation();
                     ptr = e.pointerId;
@@ -3170,16 +3195,9 @@
             }
             const moveHandle = floorMoveHandleAt(p),
                 moveObject = floorPlanObject();
-            if (
-                moveHandle &&
-                moveObject &&
-                moveObject.k === 1 &&
-                (orthView === "top" || orthView === "side" || orthView === "front")
-            ) {
+            if (moveHandle && moveObject && (orthView === "top" || orthView === "side" || orthView === "front")) {
                 const base = objectAnchorWorld(moveObject),
-                    group = moveObject.attachment?.verticalOnly
-                        ? [moveObject]
-                        : selectedObjects().filter((o) => o.k === 1),
+                    group = moveObject.attachment?.verticalOnly ? [moveObject] : selectedObjects(),
                     snap = snapSetupGroup(group, base);
                 e.preventDefault();
                 e.stopImmediatePropagation();
@@ -3255,7 +3273,7 @@
                     }
                     const w = floorPlanVerticalWorldAt(p),
                         base = objectAnchorWorld(hit),
-                        group = hit.attachment?.verticalOnly ? [hit] : selectedObjects().filter((o) => o.k === 1),
+                        group = hit.attachment?.verticalOnly ? [hit] : selectedObjects(),
                         snap = snapSetupGroup(group, base);
                     if (!w) {
                         syncSel();
@@ -3370,7 +3388,7 @@
                     return;
                 }
                 const base = objectAnchorWorld(hit),
-                    group = hit.attachment?.verticalOnly ? [hit] : selectedObjects().filter((o) => o.k === 1),
+                    group = hit.attachment?.verticalOnly ? [hit] : selectedObjects(),
                     snap = snapSetupGroup(group, base);
                 // 選択済みオブジェクトをドラッグした場合は、選択中の地面オブジェクトを同じ量だけ動かす。
                 floorPlanDrag = {
@@ -3540,7 +3558,7 @@
                 const w = floorPlanVerticalWorldAt(pos(e));
                 if (!w) return;
                 const o = floorPlanDrag.o0;
-                if (o && o.k === 1) {
+                if (o) {
                     if (!floorPlanDrag.started) {
                         HU.push(S);
                         RD = [];
@@ -3576,7 +3594,7 @@
                     p = pos(e),
                     dx = p.x - floorPlanDrag.center.x,
                     dy = p.y - floorPlanDrag.center.y;
-                if (o && o.k === 1 && Math.hypot(dx, dy) > 1) {
+                if (o && Math.hypot(dx, dy) > 1) {
                     let angle = (Math.atan2(-dy, dx) - floorPlanDrag.angle0) / DG + floorPlanDrag.rot0;
                     if (!e.shiftKey) angle = Math.round(angle / 15) * 15;
                     if (!floorPlanDrag.started) {
@@ -3593,7 +3611,7 @@
             if (!w) return;
             if (floorPlanDrag.kind === "turn") {
                 const o = obOf(floorPlanDrag.id);
-                if (o && o.k === 1) {
+                if (o) {
                     if (o.type === "compound") {
                         let delta =
                             (Math.atan2(w.x - floorPlanDrag.center[0], w.z - floorPlanDrag.center[2]) -
@@ -3619,7 +3637,7 @@
                 }
             } else if (floorPlanDrag.kind === "item") {
                 const o = floorPlanDrag.o0;
-                if (o && o.k === 1) {
+                if (o) {
                     if (!floorPlanDrag.started) {
                         HU.push(S);
                         RD = [];

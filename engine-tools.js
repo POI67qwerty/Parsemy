@@ -2142,10 +2142,10 @@ function dragEdit(p, freeRotation = false) {
             radius = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
         patch = { ra: radius, rb: radius, h: radius * 2 };
     } else if (ed.t === "mv") {
-        // 間取りモードは地面(Y=-1)のX/Zだけを移動させる。高さ・接地状態は変えない。
-        if (window.cityFloorPlanActive && o.k !== 1) return;
-        const floorMove = !!window.cityFloorPlanActive && o.k === 1,
-            plane = floorMove ? -1 : o.d - o.d * o.lift;
+        // 間取りモードは表示面内を移動させる。高さ・接地状態は専用の
+        // 正面／横ギズモで編集し、生成面がX/Zでも位置移動を止めない。
+        const floorMove = !!window.cityFloorPlanActive,
+            plane = floorMove && o.k === 1 ? -1 : o.d - o.d * o.lift;
         const P1 = hit3(r, o.k, plane, cloc(o)); // 線をドラッグ＝面の上で移動
         if (P1 && ed.P0) {
             const dl = [0, 0, 0];
@@ -3560,15 +3560,13 @@ function finishBoxSelection(end) {
         y0 = Math.min(a.y, b.y),
         y1 = Math.max(a.y, b.y),
         chosen = [];
-    boxSceneObjects()
-        .filter((o) => !window.cityFloorPlanActive || o.k === 1)
-        .forEach((o) => {
-            const q = boxScreenBounds(o);
-            if (!q) return;
-            const cx = (q.x0 + q.x1) / 2,
-                cy = (q.y0 + q.y1) / 2;
-            if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) chosen.push(o);
-        });
+    boxSceneObjects().forEach((o) => {
+        const q = boxScreenBounds(o);
+        if (!q) return;
+        const cx = (q.x0 + q.x1) / 2,
+            cy = (q.y0 + q.y1) / 2;
+        if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) chosen.push(o);
+    });
     clearSelection();
     chosen.forEach((o) => selIds.add(o.id));
     sel = chosen.length ? chosen[chosen.length - 1].id : null;
@@ -3834,17 +3832,16 @@ cv.onpointerdown = (e) => {
                     group = o?.attachment?.verticalOnly
                         ? [{ ...o, off: [...(o.off || [0, 0, 0])] }]
                         : selectedObjects().map((q) => ({ ...q, off: [...(q.off || [0, 0, 0])] }));
-                if (!window.cityFloorPlanActive || o.k === 1)
-                    ed = {
-                        t: "mv",
-                        id,
-                        o0: { ...o },
-                        group,
-                        p0: p,
-                        P0: hit3(unscr(p), o.k, o.d - o.d * o.lift, cloc(o)),
-                        started: false,
-                        ...snapSetupGroup(group, objectAnchorWorld(o)),
-                    };
+                ed = {
+                    t: "mv",
+                    id,
+                    o0: { ...o },
+                    group,
+                    p0: p,
+                    P0: hit3(unscr(p), o.k, o.d - o.d * o.lift, cloc(o)),
+                    started: false,
+                    ...snapSetupGroup(group, objectAnchorWorld(o)),
+                };
             } else armBoxPending(p, e.pointerId, "canvas");
         }
         syncSel();
