@@ -1580,8 +1580,17 @@
 
         <script id="engine">
 /* City Grid Studio engine core.
-   Shared state, math, projection, primitive shapes, and basic object editing. */
-/* City Grid Studio engine: camera, projection, drawing, selection and core input. */
+   アプリ全体で共有する状態・座標計算・投影・基本図形・選択を担当する。
+
+   主な流れ
+   1. P / S にカメラ設定と線画・オブジェクト定義を保持する
+   2. cam / scr / orthPoint でワールド座標を画面へ投影する
+   3. genShape で基本図形の線画を生成する
+   4. setOb / regenObjects で定義変更と線画再生成を行う
+   5. 保存・読込は末尾のpack / unpack系から呼び出す
+
+   アセット固有の線画は asset.js、ギズモ・ドラッグ・描画は engine-tools.js、
+   パネルと間取りUIは studio-ui.js に分離している。 */
 const $ = (id) => document.getElementById(id);
 function isStackedBuildingAsset(o) {
     return o?.type === "asset" && ["stackedBuilding", "beveledStackedBuilding"].includes(o.asset);
@@ -1599,6 +1608,8 @@ let W = 1600,
 
 // ===== パラメータ（初期値の水平回転は参考サイトのy=39.912） =====
 const MASTER_W = 1.5;
+// P: カメラ、投影、描画設定をまとめたアプリ全体のパラメータ。
+// UIから変更された値は sync() でHTMLの入力欄と同期する。
 const P = {
     lens: 50,
     yaw: 39.912,
@@ -1623,6 +1634,8 @@ const P = {
     surfaceMode: false,
 };
 const show = [true, true, true]; // 軸ごとの補助線表示
+// Sは線画とオブジェクト定義の保存場所。RD/HUはやり直し・元に戻す履歴。
+// Z/ox/oyは表示倍率とキャンバス移動、sel/selIdsは選択状態を持つ。
 let S = [],
     RD = [],
     HU = [],
@@ -1647,6 +1660,7 @@ let S = [],
     AX = [],
     AXC = [],
     T = "r"; // T: 'r'=通常の透視 / 'f'=魚眼
+// orthViewが設定されると、透視投影ではなく正面・横・上の正投影になる。
 let orthView = null,
     standardApplying = false; // Blender風の正面・真横・真上では正投影を使う
 
@@ -1831,6 +1845,7 @@ ${R("pa", "写真の濃さ", 0, 1, 0.05)}
     $("secO").onclick = () => side.querySelectorAll("details").forEach((d) => (d.open = true));
 })();
 // ===== 値の同期 =====
+// 画面上の入力欄からPへ値を反映し、表示を更新する共通入口。
 function sync() {
     for (const k in P) {
         const el = $("v_" + k);
@@ -1921,6 +1936,7 @@ addEventListener("resize", fit);
 
 // ===== 消失点の計算（カメラ→VP） =====
 // 軸: 0=X方向, 1=Z方向, 2=垂直。VPが無限遠なら dir(平行線の向き) を返す
+// 通常の透視投影で、現在のカメラから消失点と補助軸を計算する。
 function calc() {
     const f = (W * P.lens) / 36,
         th = (P.yaw * Math.PI) / 180,
@@ -2134,6 +2150,8 @@ const orthScale = () =>
     window.cityFloorPlanActive && Number.isFinite(Number(window.cityFloorPlanScale))
         ? Number(window.cityFloorPlanScale)
         : Math.min(W, H) / 7.2;
+// 正面／横／上の間取りビュー専用の正投影。
+// right / up / depth の基底を変えるだけで3方向を同じ処理で描画する。
 function orthPoint(v) {
     const b = orthBasis(),
         sc = orthScale(),
@@ -2561,6 +2579,8 @@ function selectedObjects() {
 }
 // 図形の定義を更新して、その図形の線だけ作り直す
 // カメラ位置が変わったら、図形の線（隠れ線の判定つき）を作り直す
+// 定義からオブジェクト線画を再生成する。
+// 同じオブジェクトに属する複数の線は、最初の1回だけ生成して重複を避ける。
 function regenObjects() {
     const done = new Set(),
         out = [];
@@ -2573,6 +2593,8 @@ function regenObjects() {
     });
     S = out;
 } // 描く順番(重なり)は変えない
+// オブジェクト定義を部分更新する中心関数。
+// 更新後は対象線を作り直し、親を変更した場合は接続パーツも追従させる。
 function setOb(id, patch) {
     const o = obOf(id);
     if (!o) return;
@@ -2644,6 +2666,8 @@ function pickOb(p) {
     return best;
 }
 // 図形のローカル座標(x=幅方向,y=奥行き方向,z=高さ方向)→ワールドの3D点
+// オブジェクト固有のローカル座標をワールド座標へ変換する。
+// x=幅、y=面内の奥行き、z=法線方向の押し出しとして、k/rot/d/liftを反映する。
 function L2W(o, x, y, z) {
     if (o?.attachment) o = syncAttachedPart(o);
     const [iu, iv] = PL[o.k],
@@ -2722,6 +2746,8 @@ function syncSel() {
     });
 }
 // パネルの数値 → 図形の変更内容
+// 左パネルの幅・奥行き・高さ・回転などを、オブジェクト別の差分へ変換する。
+// アセット固有の追加項目は asset-controller.js / studio-ui.js 側で処理する。
 function fieldPatch(o, name, v) {
     if (o.attachment?.verticalOnly && ["px", "pz"].includes(name)) return {};
     if (o.attachment?.verticalOnly && name === "py") {
@@ -2897,8 +2923,19 @@ $("obOff").onclick = () => {
 };
 
 /* City Grid Studio engine tools.
-   Gizmos, drawing tools, export, persistence, and startup wiring. */
+   選択・ギズモ・スナップ・描画・書き出し・ポインター操作を担当する。
+
+   主な流れ
+   1. gizmo / specialGizmo で表示中の操作ハンドルを作る
+   2. hitGizmo でクリック対象を決める
+   3. beginGizmo / dragEdit でドラッグ量を寸法・位置へ変換する
+   4. render で面・線・補助UIを再描画する
+   5. 保存・書き出し・タッチ操作を末尾のイベント処理へ接続する
+
+   アセット形状は asset.js、棚・パネル・間取り専用操作は
+   asset-controller.js / studio-ui.js が担当する。 */
 // ===== ブレンダー風ギズモ：矢印(XYZ軸の移動)・白い四角(面の押し引き)・点線の輪(回転) =====
+// 3Dビューでは透視／魚眼、間取りでは正投影へ自動的に振り分ける。
 const scr3 = (p) => (orthView ? scr(p) : scr(V.nrm(p)));
 const scrW = (p) => scr3(V.add(p, CO())); // ワールド座標の点の画面位置
 const cloc = (o) => V.add(camPos(), o.off || [0, 0, 0], 1, -1); // 図形の座標系で見たカメラ位置
@@ -2942,6 +2979,8 @@ function faceScreenGuide(face) {
     // 不定な拡縮を起こさず「このビューでは動かない」として扱う。
     return { hidden: true, dir: { x: 0, y: 0 }, scale: Infinity };
 }
+// ワールド軸の移動量を、オブジェクト定義のca/cb/liftへ戻す。
+// 親子接続中は、必要に応じて接着オフセットも保つ。
 function moveBy(o, vec, keepAttachedOffset = false) {
     const v = [Number(vec?.[0]) || 0, Number(vec?.[1]) || 0, Number(vec?.[2]) || 0];
     if (o?.type === "compound")
@@ -4181,6 +4220,8 @@ function compoundGizmo(o) {
     return g;
 }
 // 選択中の図形のギズモの位置（画面座標つき）
+// 選択オブジェクトの中心、XYZ矢印、6面ハンドル、回転リングを作る。
+// 描画とヒット判定の両方が同じ座標を使うため、見た目と操作がずれにくい。
 function gizmo() {
     const o = sel && obOf(sel);
     if (!o) return null;
@@ -4392,6 +4433,8 @@ function insidePoly2D(p, poly) {
     return inside;
 }
 // タッチした位置にあるハンドルを調べる（アセット専用→面→軸の矢印→回転の輪）
+// 画面上のクリックを、特殊アセット用→面→軸→回転リングの順で判定する。
+// 看板・階層建物・パスパイプなどはここで専用ハンドルへ分岐する。
 function hitGizmo(p) {
     const active = sel && obOf(sel),
         special = active && specialGizmo(active),
@@ -4552,6 +4595,8 @@ function stackedObjectCorners(o) {
     });
     return out;
 }
+// オブジェクトのワールド軸外接箱を返す。
+// 選択・ボックス選択・間取りヒット判定・スナップで共通利用する重要な関数。
 function obBounds(o) {
     if (o?.attachment) o = syncAttachedPart(o);
     if (o?.type === "compound") return compoundBounds(o);
@@ -4652,6 +4697,8 @@ function tauOf(C3) {
 }
 const snapSetup = (o, C3) => ({ bb: obBounds(o), targets: targetsOf(o.id), tau: tauOf(C3) });
 // 移動量deltaを、他の図形の面や地面に近ければぴったりくっつくよう補正（軸ごと）
+// 移動量deltaを、近くの外周面・角へ吸着させる。
+// 対象軸だけ補正し、他軸の移動や親子接続を壊さない。
 function snapShift(bb, delta, axes, targets, tau) {
     const d = [...delta],
         hit = new Set();
@@ -5826,6 +5873,8 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
 
 // ===== 線画レイヤー：線だけ別キャンバスに描き、アンチエイリアスを消して二値化する =====
 let LC = null;
+// 書き出し用の線だけを別キャンバスへ描く。
+// hidden=trueでは面の深度情報を使って、背面に隠れる線を除去する。
 function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     // tf=書き出し用の変換 [拡大,0,0,拡大,ずれx,ずれy]
     if (!LC || LC.width !== cw || LC.height !== ch) {
@@ -6064,7 +6113,10 @@ function drawObjectSurfaces(c) {
 }
 function render() {
     dirty = true;
-    if (S.some((s) => s.ob && s.cs !== sigNow())) regenObjects();
+    // sigNow()は描画1回につき一度だけ計算する。以前は線ごとに再計算していたため、
+    // アセットや線が多いシーンほど不要な文字列計算が増えていた。
+    const currentSignature = sigNow();
+    if (S.some((s) => s.ob && s.cs !== currentSignature)) regenObjects();
     syncSel();
     T === "f" ? calcF() : calc();
     const c = ctx;
@@ -6634,6 +6686,9 @@ function pick(a, p) {
     });
     return b;
 }
+// 通常の3Dキャンバス操作の入口。
+// 間取りモードではstudio-ui.jsの専用pointerdownが先に処理し、
+// __cityFloorPlanPreempt が付いたイベントはここで通常処理をスキップする。
 cv.onpointerdown = (e) => {
     // 間取りのポインター処理はstudio-ui.jsが正面／横／上の専用ギズモを
     // 先に判定する。先行するtargetハンドラが通常編集へ入らないようにする。
@@ -7417,10 +7472,22 @@ try {
 </script>
         <script id="studio-ui">
 /* City Grid Studio asset module.
-   Asset catalog, low-poly geometry generation and asset-specific normalization live here.
-   The UI/controller layer stays in studio-ui.js. */
+   このファイルは「アセットの見た目」と「アセットの寸法の正規化」を担当する。
+
+   読み方の目安
+   1. ASSETS                 : アセット棚に表示する名前・初期サイズ・色
+   2. 座標／線画ヘルパー     : ローカル座標をワールド座標の線へ変換
+   3. assetLines             : アセットごとの線画を作る本体
+   4. normalizedAsset         : 古い保存データや入力値を安全な値へ整える
+   5. genAsset / obBounds     : 既存エンジンの描画・選択処理へ接続する橋
+
+   UIのボタンや編集イベントは studio-ui.js、3Dギズモと移動処理は
+   engine-tools.js が担当する。このファイルでは主に「何を描くか」を決める。 */
 "use strict";
-// ===== Low-poly asset library =====
+// ===== 1. アセットのカタログ =====
+// ここは棚に並ぶアセットの「定義表」。実際の線画を描く場所ではない。
+// w=幅、d=奥行き、h=高さの初期値。作成時に asset-controller.js が
+// これを読み取り、ra/rb/h などのオブジェクト値へ変換する。
 // 基本プリミティブを先頭にまとめ、その後に街並み用アセットを並べる。
 // 円柱は円の押し出しで作れるため、アセット棚からは外している。
 const ASSETS = {
@@ -7462,6 +7529,8 @@ const ASSETS = {
     },
     crosswalk: { label: "横断歩道", glyph: "▥", w: 3.2, d: 4.2, h: 0.02, accent: "#668cff" },
 };
+// ===== 2. 棚・選択パネルに表示する名前とアイコン =====
+// 接続パーツや結合オブジェクトは、元アセット名ではなく役割名を返す。
 const assetLabel = (o) =>
     o.linkedAsset === "buildingAwning"
         ? o.linkedRole === "parent" || o.asset === "building"
@@ -7495,7 +7564,9 @@ const assetGlyph = (o) =>
               ? "○"
               : "◇";
 
-// Coordinate helpers. Local asset coordinates are x=width, y=depth, z=up.
+// ===== 3. 座標変換と線画の共通ヘルパー =====
+// 通常アセットのローカル座標は x=幅、y=奥行き、z=高さ。
+// pt() は既存の面座標系 k/PL を使い、通常アセットをワールドへ変換する。
 const pt = (o, x, y, z) => L2W(o, x, y, z);
 // customアセットだけは、作成サイトと同じ x=左右／y=奥行き／z=高さの
 // ワールド座標で保持する。既存アセットの面座標系（k/PL）は変更しない。
@@ -7514,6 +7585,8 @@ const customPt = (o, x, y, z) => {
         baseY = (Number(o.d) || -1) - (Number(o.d) || -1) * (Number(o.lift) || 0);
     return [rx + baseX + (Number(off[0]) || 0), baseY + z + (Number(off[1]) || 0), ry + baseZ + (Number(off[2]) || 0)];
 };
+// 3Dの折れ線を1本の線画オブジェクトへ包む。
+// genShape() が返す形式に合わせることで、既存の描画エンジンへ渡せる。
 const lineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
     c: color,
     w: width,
@@ -7522,6 +7595,7 @@ const lineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
     cs: sigNow(),
     p: dens3(pts.map((q) => pt(o, q[0], q[1], q[2]))),
 });
+// customアセット用の線画。customPt()で作成サイト側の座標系を使う。
 const customLineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
     c: color,
     w: width,
@@ -7531,6 +7605,8 @@ const customLineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
     p: dens3(pts.map((q) => customPt(o, q[0], q[1], q[2]))),
 });
 const polyA = (o, pts, color, width) => lineA(o, [...pts, pts[0]], color, width);
+// 直方体の底面・上面・4本の縦辺をまとめて作る。
+// 看板、人物の胴体、ベランダなどの部品を描くための共通部品。
 function boxA(o, w, d, z0, z1, color = o.c || "#e7fff4") {
     const x = w / 2,
         y = d / 2,
@@ -7581,12 +7657,15 @@ function boxA(o, w, d, z0, z1, color = o.c || "#e7fff4") {
 // ベベル直方体の平面輪郭。四つの縦角を、オフセットを半径とする
 // 1〜4分割の円弧で面取りする。segments=1なら一枚の平面面取り、
 // segments=4なら各角を4枚の小面へ分割した丸みのあるベベルになる。
+// ベベル分割数を1〜4へ制限する。古い保存データの bevelEdges も受け付ける。
 function beveledBoxSegments(value, legacyValue, fallback = 4) {
     const direct = Number(value),
         legacy = Number(legacyValue),
         n = Number.isFinite(direct) ? direct : Number.isFinite(legacy) ? legacy : fallback;
     return clamp(Math.round(n), 1, 4);
 }
+// ベベル直方体を上から見た輪郭点を作る。
+// この点列を底面・上面・縦辺の描画と外接範囲計算で共用する。
 function beveledBoxFootprint(width, depth, offset, segmentCount) {
     const w = Math.max(0.01, Math.abs(Number(width) || 0.01)),
         d = Math.max(0.01, Math.abs(Number(depth) || 0.01)),
@@ -7618,6 +7697,8 @@ function beveledBoxParams(o) {
         bevelSegments = beveledBoxSegments(o?.bevelSegments, o?.bevelEdges);
     return { w, d, max, bevelOffset, bevelSegments };
 }
+// 階層建物の1F開口の初期値・上限値を計算する。
+// 開口はここで値を決めるだけで、実際の線画はassetLines()内で描く。
 function stackedOpeningParams(o, f = o?.floors?.[0]) {
     const w = Math.max(0.05, Math.abs(Number(f?.w) || Number(o?.ra || 2) * 2)),
         d = Math.max(0.05, Math.abs(Number(f?.d) || Number(o?.rb || 1.5) * 2)),
@@ -7634,6 +7715,8 @@ function stackedOpeningParams(o, f = o?.floors?.[0]) {
         );
     return { w, d, h, rimHeight, openingW, openingH, openingBack };
 }
+// ベランダや小部品用の「ワイヤー直方体」。
+// 中心(cx,cy)をずらして、1つのアセット内に複数部品を配置する。
 function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
     const x = w / 2,
         y = d / 2,
@@ -7657,6 +7740,9 @@ function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
         ];
     return out;
 }
+// ===== 4. パスパイプ用のベクトル計算 =====
+// パスパイプは制御点を丸めて中心線を作り、その周囲に円形断面を並べる。
+// 以下の小さな関数群は、その中心線・接線・法線を計算するためのもの。
 function pathVecSub(a, b) {
     return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 }
@@ -7690,6 +7776,7 @@ function pathRotateAroundAxis(v, axis, angle) {
         v[2] * c + cross[2] * s + axis[2] * dot * (1 - c),
     ];
 }
+// パスが未設定、または壊れている場合に使う初期制御点。
 function pathPipeDefaultPoints() {
     return [
         [-2.4, 0, 1.1],
@@ -7697,6 +7784,7 @@ function pathPipeDefaultPoints() {
         [0, 2.2, 1.1],
     ];
 }
+// 保存データから有効な3D制御点だけを取り出す。最低2点ない場合は初期値へ戻す。
 function pathPipeControlPoints(o) {
     const source = Array.isArray(o?.path) ? o.path : pathPipeDefaultPoints();
     const points = source
@@ -7704,6 +7792,7 @@ function pathPipeControlPoints(o) {
         .filter((v) => v.length === 3 && v.every(Number.isFinite));
     return points.length >= 2 ? points : pathPipeDefaultPoints();
 }
+// 制御点の折れ線を、角丸半径に応じた円弧付き中心線へ変換する。
 function pathPipeRoundedPath(o) {
     const points = pathPipeControlPoints(o),
         cornerRadius = Math.max(0, Number(o?.cornerRadius) || 0),
@@ -7756,6 +7845,8 @@ function pathPipeRoundedPath(o) {
     add(points[points.length - 1]);
     return out;
 }
+// 中心線の各点に円形リングを置き、隣り合うリングを三角形でつなぐ。
+// ここで作ったメッシュは線画の輪郭・外接範囲・ギズモ計算に使われる。
 function pathPipeMesh(o) {
     const centerline = pathPipeRoundedPath(o),
         radius = clamp(Math.abs(Number(o?.pipeRadius) || 0.18), 0.02, 20),
@@ -7802,6 +7893,7 @@ function pathPipeMesh(o) {
     }
     return { centerline, rings, triangles, radius, sides };
 }
+// 楕円リングを作る。円柱・円錐・ランタンの輪郭に使う。
 function ringA(o, rx, ry, z, n = 8, color = o.c || "#e7fff4") {
     const a = [];
     for (let i = 0; i < n; i++) {
@@ -7810,6 +7902,7 @@ function ringA(o, rx, ry, z, n = 8, color = o.c || "#e7fff4") {
     }
     return polyA(o, a, color);
 }
+// 開口建物の寸法を、描画に使いやすい形へまとめる。
 function buildingParams(o) {
     const g = buildingGeometry(o),
         w = g.w,
@@ -7828,6 +7921,9 @@ function buildingParams(o) {
         topT: Math.max(0.05, h - openingH),
     };
 }
+// ===== 5. アセットごとの線画生成本体 =====
+// kind（asset名）を見て、必要な輪郭線・補助線を返す。
+// ここではオブジェクトの値を変更しない。形状データを作るだけ。
 function assetLines(o) {
     const kind = o.asset,
         w = o.ra * 2,
@@ -7836,6 +7932,8 @@ function assetLines(o) {
         c = o.c || "#222222",
         a = c,
         out = []; // アセットも線画と同じ色で描く
+    // --- 作成サイトから読み込んだ任意形状 ---
+    // geometry.vertices / edges / loops を、そのまま3D線画へ変換する。
     if (kind === "custom") {
         // アセット作成サイトから読み込んだ任意形状。頂点と辺／ループを
         // 3D線画へ変換する。頂点はx=幅、y=奥行、z=高さのローカル座標。
@@ -7880,6 +7978,8 @@ function assetLines(o) {
                     Number(style.width) || width,
                 );
         });
+        // --- ベベル直方体 ---
+        // footprintを底面・上面へ複製し、押し出し後だけ縦辺を追加する。
     } else if (kind === "beveledBox") {
         const q = beveledBoxParams(o),
             footprint = beveledBoxFootprint(q.w, q.d, q.bevelOffset, q.bevelSegments),
@@ -7915,6 +8015,8 @@ function assetLines(o) {
                 ),
             );
         }
+        // --- パスパイプ ---
+        // 丸めた中心線のリングを描き、リング間の縦線でパイプらしさを出す。
     } else if (kind === "pathPipe") {
         const mesh = pathPipeMesh(o);
         mesh.rings.forEach((ring) => out.push(polyA(o, ring, c, 0.95)));
@@ -7927,6 +8029,8 @@ function assetLines(o) {
                     0.85,
                 ),
             );
+        // --- 階層建物／ベベル階層建物 ---
+        // floors配列を階ごとに描く。開口はopeningEnabledがtrueの1Fだけへ追加する。
     } else if (kind === "stackedBuilding" || kind === "beveledStackedBuilding") {
         const floors =
             Array.isArray(o.floors) && o.floors.length
@@ -8010,6 +8114,7 @@ function assetLines(o) {
                 ),
             );
         };
+        // 開口ON/OFFの判定はここで一度だけ行う。OFFなら通常の閉じた建物になる。
         const openingEnabled = stackedOpeningEnabled(o);
         const addOpeningWire = (f, w, d, h, opening) => {
             const ox = Number(f.x || 0),
@@ -8130,6 +8235,8 @@ function assetLines(o) {
                 addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
             }
         });
+        // --- 壁付けベランダ ---
+        // 床スラブ、前面の腰壁、左右の腰壁、支持ブラケットを別々に描く。
     } else if (kind === "balcony") {
         // 壁側（+Y）を建物外壁へ合わせ、床を外側（-Y）へ張り出すU字型のベランダ。
         // 床スラブ＋左右の腰壁＋前面の腰壁を別箱として描くため、面編集後も形状が崩れない。
@@ -8161,6 +8268,8 @@ function assetLines(o) {
                 ),
             ),
         );
+        // --- 階段 ---
+        // stepsの数だけ段板と蹴上げを作り、必要なら手すりも追加する。
     } else if (kind === "stairs") {
         const n = Math.max(2, Math.min(24, Math.round(o.steps || 6))),
             sd = d / n,
@@ -8277,6 +8386,8 @@ function assetLines(o) {
                     );
                 }
             });
+        // --- 横断歩道 ---
+        // 道路の面へ白いストライプを並べる。
     } else if (kind === "crosswalk") {
         const n = Math.max(3, Math.min(16, Math.round(o.stripes || 7))),
             gap = d / (n + 1),
@@ -8319,6 +8430,8 @@ function assetLines(o) {
                 0.9,
             ),
         );
+        // --- 円柱・円錐・球 ---
+        // 円柱は上下輪郭、円錐は底面とシルエット、球は正面向きの円だけを描く。
     } else if (kind === "cylinder") {
         // 円柱は上下の輪郭だけ。側面の縦エッジは描かない。
         out.push(ringA(o, w * 0.5, d * 0.5, 0, 12, c));
@@ -8479,6 +8592,8 @@ function assetLines(o) {
         );
         // Two inner bands suggest a glowing paper lantern without requiring a texture.
         [0.36, 0.56].forEach((z) => out.push(ringA(o, rx * 1.02, ry * 1.02, z * h, 8, a, 0.8)));
+        // --- 看板 ---
+        // 外枠と、faceW / faceHで編集できる内側の絵枠を描く。
     } else if (kind === "sign") {
         // 看板外側は通常の直方体。内側の絵枠だけを追加編集できる。
         const board0 = 0.08 * h,
@@ -8498,6 +8613,8 @@ function assetLines(o) {
             [-ix, fy, iz1],
         ];
         out.push(polyA(o, q, a, 1.1));
+        // --- 人物 ---
+        // 身長・体格・頭身・脚の開き・簡易ポーズを線画へ反映する。
     } else if (kind === "person") {
         // 人物は配置後も高さ・体格・頭身・脚の開き・簡易ポーズを編集できる。
         // 腕は既存仕様どおり描かず、立体感は胴体・脚・頭の線だけで表現する。
@@ -8676,6 +8793,8 @@ function assetLines(o) {
                 0.75,
             ),
         );
+        // --- 開口のある建物 ---
+        // 外枠に加え、開口の左右柱・上梁・内側面・奥面を描く。
     } else if (kind === "building") {
         // 外側は直方体の輪郭を保ちながら、正面から背面まで抜ける開口を作る。
         // 左右の柱＋上梁として分けて描くので、開口の左右・上面・奥行きも編集対象になる。
@@ -8792,6 +8911,8 @@ function assetLines(o) {
                 1.0,
             ),
         );
+        // --- 店舗テント ---
+        // awningGeometry()が返す手前上辺・奥側・底辺をつないでテントを描く。
     } else if (kind === "awning") {
         // 店舗テント：初期状態は直方体。手前上辺だけを高さ・奥行き方向へ動かせる。
         const g = awningGeometry(o),
@@ -8884,6 +9005,9 @@ function assetLines(o) {
     }
     return out;
 }
+// ===== 6. 保存データ・入力値の正規化 =====
+// 描画前に、寸法の下限・ベベル値・階数・パス値などを整える。
+// ここでは見た目を作らず、後段のassetLines()が安全に読める形へ変換する。
 function normalizedAsset(o) {
     let q = o?.attachment ? syncAttachedPart(o) : o;
     if (q && q.asset === "beveledBox") {
@@ -8919,6 +9043,7 @@ function normalizedAsset(o) {
             h: floors.reduce((max, f) => Math.max(max, (Number(f.z) || 0) + (Number(f.h) || 0)), 0),
         };
     }
+    // パスパイプは制御点からra/rb/h（外接範囲）も再計算する。
     if (q && q.asset === "pathPipe") {
         const path = pathPipeControlPoints(q),
             radius = clamp(Number.isFinite(Number(q.pipeRadius)) ? Math.abs(Number(q.pipeRadius)) : 0.18, 0.02, 20),
@@ -8944,6 +9069,7 @@ function normalizedAsset(o) {
             h: Math.max(0.1, Math.max(...zs) - Math.min(...zs) + radius * 2),
         };
     }
+    // ベランダの床厚・手すり厚・手すり高さを正規化する。
     if (q && q.asset === "balcony") {
         const floorT = clamp(Number(q.balconyFloorThickness) || 0.16, 0.04, 10),
             railT = clamp(Number(q.balconyRailThickness) || 0.12, 0.035, 10),
@@ -8958,6 +9084,7 @@ function normalizedAsset(o) {
             h: floorT + railH,
         };
     }
+    // 球は3方向の半径をそろえ、必ず真球として扱う。
     if (q && q.asset === "sphere") {
         const r = Math.max(
             0.005,
@@ -8969,6 +9096,7 @@ function normalizedAsset(o) {
         );
         return { ...q, ra: r, rb: r, h: r * 2 };
     }
+    // テントの編集済み手前辺を再計算し、描画とギズモで同じ値を使う。
     if (q && q.asset === "awning") {
         const g = awningGeometry(q);
         return {
@@ -8980,6 +9108,7 @@ function normalizedAsset(o) {
             awningBackBottom: g.backBottom,
         };
     }
+    // 開口幅・開口高さ・奥面位置を建物本体の範囲内へ収める。
     if (q && q.asset === "building") {
         const w = Math.max(0.1, Math.abs(Number(q.ra) || 2) * 2),
             d = Math.max(0.05, Math.abs(Number(q.rb) || 0.5) * 2),
@@ -8993,16 +9122,21 @@ function normalizedAsset(o) {
     }
     return q;
 }
+// 正規化済みアセットを線画へ変換する入口。
 function genAsset(o) {
     const q = normalizedAsset(o);
     return assetLines(q).map((s) => ({ ...s, ob: q, d3: true, cs: sigNow() }));
 }
 
-// Route the existing shape pipeline through the asset generator.
+// ===== 7. 既存エンジンへの接続 =====
+// engine-core.jsのgenShapeを置き換えず、元の関数を退避してから
+// assetだけをgenAssetへ振り分ける。通常のrect/box/circは従来処理のまま。
 const baseGenShape = genShape;
 genShape = function (o) {
     return o && o.type === "asset" ? genAsset(o) : baseGenShape(o);
 };
+// アセットの外接範囲もここで計算する。
+// 選択枠、間取りのヒット判定、ボックス選択、移動ギズモが同じ範囲を使う。
 const baseObBounds = obBounds;
 obBounds = function (o) {
     if (!o || o.type !== "asset") return baseObBounds(o);
@@ -9057,14 +9191,25 @@ obBounds = function (o) {
     );
     return { lo, hi };
 };
-// 既に自動保存されているオブジェクトも、今回の円柱・球・看板の新しい線画へ更新する。
+// ===== 8. 初期化 =====
+// すでに自動保存されているオブジェクトも、今回の円柱・球・看板の新しい線画へ更新する。
 regenObjects();
 
 /* City Grid Studio asset controller.
-   This file wires the asset generator to the shelf, JSON import, clipboard,
-   and primitive quick menu. The geometry itself lives in asset.js. */
+   アセットの配置・接続・JSON入出力・棚UIを担当する。
+
+   処理の流れ
+   1. newAsset             : 初期位置、生成面、寸法、固有値を持つ定義を作る
+   2. placeAsset           : 線画を生成してSへ登録し、選択状態を更新する
+   3. placeLinkedAsset     : 建物とテント／看板などの親子接続を作る
+   4. import / clipboard   : 定義だけを保存・複製し、新しいIDで再生成する
+   5. 棚UI                 : ボタン入力を上記処理へ接続する
+
+   線画の形状は asset.js、基本のオブジェクト編集は engine-core.js、
+   ギズモ操作は engine-tools.js が担当する。 */
 "use strict";
 
+// studio-ui.jsから受け取ったDOM・状態ブリッジを使って、アセット操作を登録する。
 window.cityGridInstallAssetUI = function (bridge) {
     const {
         el,
@@ -9089,6 +9234,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             f = [-Math.sin(yaw), 0, Math.cos(yaw)];
         return [P.cx + f[0] * depth, -1, P.cz + f[2] * depth];
     }
+    // アセット棚での1回の追加に対応する定義を作る。
+    // 生成面（P.assetAxis）をkへ変換し、アセット固有の初期値もここで付ける。
     function newAsset(kind, p, worldPoint = null) {
         const info = ASSETS[kind],
             isDefault = !p && !worldPoint;
@@ -9233,6 +9380,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             stripes: kind === "crosswalk" ? 7 : undefined,
         };
     }
+    // 建物とテント／看板を親子として作る。
+    // child.attachment が親の開口側へ追従するため、親の移動・回転・寸法変更に対応できる。
     function placeLinkedAsset(kind, p) {
         const childKind = kind === "buildingAwning" ? "awning" : "rect",
             q = p ? groundAt(p) : assetGroundPoint(),
@@ -9394,6 +9543,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             alert("ベランダを配置できませんでした。建物を選択してからもう一度クリックしてください。");
         }
     }
+    // 通常アセット、ベランダ、接続アセットを入口で振り分ける配置関数。
     function placeAsset(kind, p) {
         if (kind === "buildingAwning" || kind === "buildingSign") return placeLinkedAssetInstance(kind, p);
         if (kind === "balcony") return placeBalcony(p);
@@ -9433,12 +9583,14 @@ window.cityGridInstallAssetUI = function (bridge) {
     // オブジェクト用クリップボード。線画のクリップボードとは分けて、選択中の
     // 図形／アセット定義だけをコピーし、貼り付け時に新しいIDで再生成する。
     let objectClipboard = [];
+    // 線画ではなく、選択中オブジェクトの定義をJSONとしてクリップボードへ保持する。
     function copySelectedObjects() {
         const objects = selectedObjects();
         if (!objects.length) return false;
         objectClipboard = objects.map((o) => JSON.parse(JSON.stringify(o)));
         return true;
     }
+    // コピーした定義へ新しいID・グループIDを付け、少しずらして再生成する。
     function pasteObjectClipboard() {
         if (!objectClipboard.length) return false;
         sanitizeScene();
@@ -9527,6 +9679,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         };
         return [p, syncAttachedPart(q, p)];
     }
+    // オブジェクトJSONを検証・正規化して、現在のシーンへ追加する。
     function importObjectPayload(data) {
         const sources = Array.isArray(data?.objects) ? data.objects : data?.type === "compound" ? [data] : [];
         if (!sources.length) throw new Error("objects are missing");
@@ -9560,8 +9713,8 @@ window.cityGridInstallAssetUI = function (bridge) {
         render();
     }
 
-    // Rectangle/circle and the other primitives are created from the asset shelf.
-    // ===== Asset shelf on the canvas =====
+    // ===== アセット棚と配置ボタン =====
+    // 棚のボタンはplaceAsset()へ集約し、UIイベント内に形状生成ロジックを重複させない。
     const tray = document.createElement("div");
     tray.id = "assetTray";
     tray.innerHTML =
@@ -9714,7 +9867,8 @@ window.cityGridInstallAssetUI = function (bridge) {
         requestAnimationFrame(syncFloorPlanDockLayout);
     };
 
-    // ===== iPad four-finger primitive quick menu =====
+    // ===== 4本指プリミティブクイックメニュー =====
+    // 基本6種だけを小さなメニューから追加できる。実体の生成は通常のplaceAsset()へ委譲する。
     // 4本指タップで開く、長方形・円・円錐・球体・三角柱・三角錐専用の小型メニュー。
     const primitiveKinds = ["rect", "circle", "cone", "sphere", "triPrism", "triPyramid"];
     const primitiveMenu = document.createElement("div");
@@ -9748,14 +9902,24 @@ window.cityGridInstallAssetUI = function (bridge) {
 };
 
 /* City Grid Studio studio layer — UI, gestures, floor tools and asset library.
-   The perspective engine stays underneath so old projects remain compatible. */
+   このファイルは画面UIとユーザー操作をまとめるコントローラ層。
+
+   主な担当
+   - workspace / quick panel : 人物・ポーズ・間取り・視点の画面切り替え
+   - scene / asset panel     : オブジェクト一覧、固有パネル、配置UI
+   - floor plan              : 正面・横・上の選択、移動、回転、寸法編集
+   - presets / touch         : カメラプリセットとタッチジェスチャー
+
+   エンジンの共有状態・座標計算は engine-core.js、ギズモ本体は
+   engine-tools.js、アセット生成とJSON処理は asset.js / asset-controller.js が担当する。 */
 (function () {
     "use strict";
     const el = (id) => document.getElementById(id);
     const side = el("side"),
         stage = el("stage");
 
-    // ===== Quick workspace controls =====
+    // ===== 1. クイック操作パネルと作業画面 =====
+    // HTMLの既存サイドバーへ、人物・ポーズ・間取り・視点の操作UIを追加する。
     if (P.hm == null) P.hm = 1.7;
     if (P.floorOn == null) P.floorOn = true;
     if (P.floorColor == null) P.floorColor = "#7fa8d8";
@@ -9861,7 +10025,8 @@ window.cityGridInstallAssetUI = function (bridge) {
     const humanInput = el("humanHeight");
     humanInput.value = Number(P.hm).toFixed(2);
 
-    // ===== Separate work screens: character height/body, pose, and perspective =====
+    // ===== 2. 作業画面の切り替え =====
+    // 1つのパネル内で画面を切り替え、必要な入力だけを表示する。
     function setStudioWorkspace(name) {
         const valid = ["character", "pose", "floorplan", "perspective"],
             tab = valid.includes(name) ? name : "perspective";
@@ -10002,6 +10167,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     syncPersonControls();
 
     // ===== Transparent floor tint =====
+    // ===== 3. 床・生成方向・シーン一覧 =====
     const floorToggle = el("floorTint"),
         floorColor = el("floorTintColor"),
         floorAlpha = el("floorTintA"),
@@ -10070,6 +10236,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     // Asset placement, asset tray, object JSON and primitive menu are installed by asset.js.
     // ===== Scene outliner / object groups =====
     const list = el("objectList");
+    // Sに同じオブジェクトの線が複数あるため、ob.idごとに1件へまとめる。
     function sceneObjects() {
         const a = [],
             seen = new Set();
@@ -10237,6 +10404,8 @@ window.cityGridInstallAssetUI = function (bridge) {
         }
         render();
     }
+    // シーン一覧（アウトライナー）を現在のSから再構築する。
+    // 表示切替・選択・グループ操作の入口もここで各行へ接続する。
     function updateOutliner() {
         if (!list) return;
         normalizeSelection();
@@ -10456,6 +10625,7 @@ window.cityGridInstallAssetUI = function (bridge) {
 
     let signEditSession = false,
         buildingEditSession = false;
+    // 建物・階層建物・開口設定の入力欄を、選択中オブジェクトへ同期する。
     function syncBuildingPanel() {
         const panel = el("buildingP"),
             o = sel && obOf(sel),
@@ -10667,6 +10837,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         });
         render();
     }
+    // 1F開口の幅・高さ・奥面を更新する。上階へ自動コピーしない仕様をここで維持する。
     function applyStackOpeningProp(name, value) {
         const o = sel && obOf(sel);
         if (!o || !isStackedBuildingAsset(o)) return;
@@ -10830,6 +11001,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             buildingEditSession = false;
         };
     });
+    // 看板の外枠と内側の絵枠（faceW / faceH）をパネルへ同期する。
     function syncSignPanel() {
         const panel = el("signP"),
             o = sel && obOf(sel),
@@ -10955,6 +11127,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             .map((v) => v.map((n) => Number(n).toFixed(3)).join(","))
             .join("; ");
     }
+    // パスパイプの制御点・半径・角丸・断面分割数を編集欄へ同期する。
     function syncPathPipePanel() {
         const panel = el("pathPipeP"),
             o = sel && obOf(sel),
@@ -11076,6 +11249,8 @@ window.cityGridInstallAssetUI = function (bridge) {
         }
     }
     // Wrap render so the outliner follows undo/redo, opening files, and camera changes.
+    // ===== 4. 描画フックと視点プリセット =====
+    // エンジンのrenderを退避し、UIオーバーレイや選択状態を描いた後に呼び出す。
     const baseRender = render;
     render = function () {
         sanitizeScene();
@@ -11119,6 +11294,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     window.cityStandardView = (kind) => applyStandardView(kind);
 
     // 間取りの投影を切り替える。真上／真横とも、入る前の透視カメラ設定を保持する。
+    // 正面・横・上の表示面を切り替える。実際のオブジェクト座標は変更しない。
     function setFloorPlanProjection(kind = "top") {
         // 正投影はorthViewだけで切り替える。グリッド種類、魚眼画角、
         // レンズ、カメラ位置、高さ、回転、傾き、ロールは変更しない。
@@ -11159,6 +11335,8 @@ window.cityGridInstallAssetUI = function (bridge) {
         setMode(tool === "edit" ? "draw" : "view");
         render();
     }
+    // シーン・カメラを含む外接範囲から、間取りの表示中心と倍率を決める。
+    // 表示をフィットするだけで、オブジェクトの位置や寸法は変更しない。
     function fitFloorPlan() {
         const objects = sceneObjects().filter(objectVisible),
             bounds = [];
@@ -11239,6 +11417,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         window.cityFloorPlanCenter = [(minX + maxX) / 2, (minZ + maxZ) / 2];
         window.cityFloorPlanScale = Math.max(24, Math.min(220, fitScale));
     }
+    // 間取りモードへ入り、正投影・編集ツール・専用ドックを有効にする。
     function enterFloorPlan(kind = "top") {
         if (!window.cityFloorPlanActive) {
             floorPlanView = captureHomeView();
@@ -11308,6 +11487,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     el("openFloorPlan").onclick = () => setStudioWorkspace("floorplan");
     el("closeFloorPlan").onclick = () => setStudioWorkspace("perspective");
 
+    // ===== 5. 間取りモードの選択・移動・編集 =====
     // 間取り上の操作対象。オブジェクトの前側の丸、カメラ本体、カメラ先端の丸を
     // 3Dビューのギズモとは別に描き、参考サイトと同じ操作感にする。
     const FLOOR_CAMERA_RAY = 3;
@@ -11561,6 +11741,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 }) || null
         );
     }
+    // 正面／横ビューの画面点から、外接箱に入るオブジェクトを探す。
     function floorPlanItemAtSide(p) {
         if (!p) return null;
         return (
@@ -12004,6 +12185,142 @@ window.cityGridInstallAssetUI = function (bridge) {
         }
         return handles;
     }
+    // X／Z生成面はローカルの幅・奥行・高さが、前／横／上ビューの
+    // 画面軸と一致しない。従来のL2Wハンドルだけだと、正面では幅、
+    // 横では厚み、上では高さのハンドルが投影上つぶれて編集不能になるため、
+    // ローカル3軸を投影して見えるハンドルへ組み直す。
+    // X/Z生成面ではローカルra/rb/hが画面の幅・高さ・厚みと一致しないため、
+    // 画面ハンドルの編集量をローカル寸法へ戻す。
+    function floorWallDimensionPatch(o, param, value, side = 1) {
+        const v = Math.max(param === "h" ? 0 : 0.01, Number(value));
+        if (!Number.isFinite(v)) return null;
+        const a = (Number(o.rot) || 0) * DG,
+            cs = Math.cos(a),
+            sn = Math.sin(a),
+            old =
+                param === "ra"
+                    ? Math.abs(Number(o.ra) || 0) * 2
+                    : param === "rb"
+                      ? Math.abs(Number(o.rb) || 0) * 2
+                      : Math.max(0, Number(o.h) || 0),
+            delta = (v - old) / 2,
+            patch = {};
+        if (param === "ra") {
+            patch.ca = (Number(o.ca) || 0) + side * delta * cs;
+            patch.cb = (Number(o.cb) || 0) + side * delta * sn;
+            patch.ra = Math.max(0.005, v / 2);
+            if (o.asset === "sphere" || o.type === "cyl") patch.rb = patch.ra;
+            if (o.asset === "sphere") patch.h = patch.ra * 2;
+            return patch;
+        }
+        if (param === "rb") {
+            patch.ca = (Number(o.ca) || 0) - side * delta * sn;
+            patch.cb = (Number(o.cb) || 0) + side * delta * cs;
+            patch.rb = Math.max(0.005, v / 2);
+            if (o.asset === "sphere" || o.type === "cyl") patch.ra = patch.rb;
+            if (o.asset === "sphere") patch.h = patch.rb * 2;
+            return patch;
+        }
+        if (param === "h") {
+            patch.h = v;
+            if (side === -1) patch.lift = Number(o.lift || 0) + old - v;
+            return patch;
+        }
+        return null;
+    }
+    function floorWallEditHandles(o) {
+        const ra = Math.abs(Number(o.ra) || 0.25),
+            rb = Math.abs(Number(o.rb) || 0.25),
+            h = Math.max(0, Number(o.h) || 0),
+            b = obBounds(o),
+            centerWorld = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2],
+            center = scrW(centerWorld),
+            handles = [],
+            add = (param, label, point, probe, start, side) => {
+                const s = scrW(L2W(o, point[0], point[1], point[2])),
+                    q = scrW(L2W(o, probe[0], probe[1], probe[2]));
+                if (!s.ok || !q.ok) return;
+                const dx = q.x - s.x,
+                    dy = q.y - s.y,
+                    px = Math.hypot(dx, dy);
+                if (px < 0.01) return;
+                handles.push({
+                    kind: "wall",
+                    param,
+                    label,
+                    s,
+                    dir: { x: dx / px, y: dy / px },
+                    scale: px / 0.1,
+                    start,
+                    min: param === "h" ? 0 : 0.01,
+                    side,
+                });
+            },
+            addScreen = (param, label, point, dir, start) =>
+                handles.push({
+                    kind: "wall",
+                    param,
+                    label,
+                    s: { x: point.x, y: point.y, ok: true },
+                    dir,
+                    scale: Math.max(1, Number(orthScale()) || 1),
+                    start,
+                    min: param === "h" ? 0 : 0.01,
+                    side: 1,
+                    screen: true,
+                });
+        // local x = 面内の幅、local y = 面内の高さ、local z = 面の厚み。
+        add("ra", "幅＋", [ra, 0, h / 2], [ra + 0.1, 0, h / 2], ra * 2, 1);
+        add("ra", "幅−", [-ra, 0, h / 2], [-ra - 0.1, 0, h / 2], ra * 2, -1);
+        add("rb", "高さ＋", [0, rb, h / 2], [0, rb + 0.1, h / 2], rb * 2, 1);
+        add("rb", "高さ−", [0, -rb, h / 2], [0, -rb - 0.1, h / 2], rb * 2, -1);
+        if (h > 0.000001) {
+            add("h", "厚み＋", [0, 0, h], [0, 0, h + 0.1], h, 1);
+            add("h", "厚み−", [0, 0, 0], [0, 0, -0.1], h, -1);
+        }
+        const gap = Math.max(
+            52 / Z,
+            Math.min(96 / Z, Math.max(ra, rb, h, 0.6) * Math.max(1, Number(orthScale()) || 1) * 0.6),
+        );
+        const fallback =
+            {
+                top: {
+                    ra: { x: center.x + gap, y: center.y },
+                    rb: { x: center.x, y: center.y - gap },
+                    h: { x: center.x - gap, y: center.y },
+                },
+                side: {
+                    ra: { x: center.x, y: center.y + gap },
+                    rb: { x: center.x, y: center.y - gap },
+                    h: { x: center.x + gap, y: center.y },
+                },
+                front: {
+                    ra: { x: center.x + gap, y: center.y },
+                    rb: { x: center.x, y: center.y - gap },
+                    h: { x: center.x - gap, y: center.y },
+                },
+            }[orthView] || {};
+        [
+            ["ra", "幅"],
+            ["rb", "高さ"],
+            ["h", "厚み"],
+        ].forEach(([param, label]) => {
+            if (!handles.some((q) => q.param === param)) {
+                const p = fallback[param] || { x: center.x + gap, y: center.y },
+                    dir =
+                        p.x !== center.x ? { x: p.x > center.x ? 1 : -1, y: 0 } : { x: 0, y: p.y > center.y ? 1 : -1 };
+                addScreen(param, label, p, dir, param === "ra" ? ra * 2 : param === "rb" ? rb * 2 : h);
+            }
+        });
+        if (o.type === "asset" && o.asset === "building") handles.push(...floorBuildingInnerHandles(o));
+        if (o.type === "asset" && o.asset === "awning") {
+            const edge = floorAwningEdgeHandle(o);
+            if (edge.length) handles.push(...edge);
+        }
+        return { o, base: centerWorld, center, handles };
+    }
+    // 選択オブジェクトの寸法ハンドルを生成する。
+    // Y生成面は従来の面ハンドル、X/Z生成面はfloorWallEditHandlesを使う。
     function floorPlanEditHandles() {
         const o = floorPlanObject();
         if (!o) return null;
@@ -12019,6 +12336,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             // 専用ギズモを同じ座標へ描き、pointerdownも通常のギズモ経路へ渡す。
             customEdit = o.type === "asset" && (isStackedBuildingAsset(o) || o.asset === "pathPipe");
         if (customEdit) return { o, base, center, handles, panel: null, special: true };
+        if (o.k !== 1) return floorWallEditHandles(o);
         const add = (kind, label, point, probe, start, min = 0.01, side = 1) => {
             const s = scrW(point),
                 q = scrW(probe);
@@ -12501,6 +12819,8 @@ window.cityGridInstallAssetUI = function (bridge) {
         const lensInput = el("floorLensInput");
         if (lensInput && document.activeElement !== lensInput) lensInput.value = Number(P.lens || 35).toFixed(0);
     }
+    // Y生成面の幅・奥行き・高さハンドルを、オブジェクト定義の差分へ変換する。
+    // X/Z生成面は上のfloorWallDimensionPatchへ分岐する。
     function floorDimensionPatch(o, name, value, side = 1) {
         const v = Math.max(name === "h" ? 0 : 0.01, Number(value));
         if (!Number.isFinite(v)) return null;
@@ -12698,6 +13018,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         const next = Math.max(Number(h.min) || 0.01, Number(value) + side * best.gap);
         return floorDimensionPatch(o, h.kind, next, side);
     }
+    // 間取りドック・ショートカットから選択対象を回転する。
     function rotateFloorSelected(deg) {
         const o = floorPlanObject();
         if (!o || o.attachment?.verticalOnly) return;
@@ -12706,6 +13027,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         setOb(o.id, { rot: angle360((Number(o.rot) || 0) + deg) });
         render();
     }
+    // キーボードやドックの移動量を、表示中の面（前・横・上）の軸へ変換する。
     function moveFloorSelected(dx, dz) {
         const selected = selectedObjects(),
             o = selected.find((q) => q.id === sel) || selected[0],
@@ -13215,7 +13537,9 @@ window.cityGridInstallAssetUI = function (bridge) {
                             : h.kind === "awningEdgeY"
                               ? { awningEdgeY: value, awningEdgeEdited: true }
                               : { openingW: value }
-                    : floorResizeSnap(o, floorDimensionPatch(o, h.kind, value, h.side || 1), h, value);
+                    : h.param
+                      ? floorWallDimensionPatch(o, h.param, value, h.side || 1)
+                      : floorResizeSnap(o, floorDimensionPatch(o, h.kind, value, h.side || 1), h, value);
                 if (patch) {
                     if (!floorPlanDrag.started) {
                         HU.push(S);
@@ -13853,6 +14177,8 @@ window.cityGridInstallAssetUI = function (bridge) {
     document.addEventListener("pointerdown", (e) => {
         if (!e.target.closest("#exportMenu") && !e.target.closest("#exportToggle")) setExportOpen(false);
     });
+    // ===== 6. ヘルプ・キーボード・初期表示 =====
+    // 最後にヘルプ表示、初期設定、localStorage移行を登録してUIを完成させる。
     const help = document.createElement("div");
     help.id = "helpPanel";
     help.innerHTML =
@@ -13936,5 +14262,6 @@ window.cityGridInstallAssetUI = function (bridge) {
 })();
 
 </script>
-    <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a513bfc9eb7e7c89',t:'MTc5MzEyNTU4Nw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+    <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
+</body>
 </html>

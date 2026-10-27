@@ -1,8 +1,20 @@
 /* City Grid Studio asset module.
-   Asset catalog, low-poly geometry generation and asset-specific normalization live here.
-   The UI/controller layer stays in studio-ui.js. */
+   このファイルは「アセットの見た目」と「アセットの寸法の正規化」を担当する。
+
+   読み方の目安
+   1. ASSETS                 : アセット棚に表示する名前・初期サイズ・色
+   2. 座標／線画ヘルパー     : ローカル座標をワールド座標の線へ変換
+   3. assetLines             : アセットごとの線画を作る本体
+   4. normalizedAsset         : 古い保存データや入力値を安全な値へ整える
+   5. genAsset / obBounds     : 既存エンジンの描画・選択処理へ接続する橋
+
+   UIのボタンや編集イベントは studio-ui.js、3Dギズモと移動処理は
+   engine-tools.js が担当する。このファイルでは主に「何を描くか」を決める。 */
 "use strict";
-// ===== Low-poly asset library =====
+// ===== 1. アセットのカタログ =====
+// ここは棚に並ぶアセットの「定義表」。実際の線画を描く場所ではない。
+// w=幅、d=奥行き、h=高さの初期値。作成時に asset-controller.js が
+// これを読み取り、ra/rb/h などのオブジェクト値へ変換する。
 // 基本プリミティブを先頭にまとめ、その後に街並み用アセットを並べる。
 // 円柱は円の押し出しで作れるため、アセット棚からは外している。
 const ASSETS = {
@@ -44,6 +56,8 @@ const ASSETS = {
     },
     crosswalk: { label: "横断歩道", glyph: "▥", w: 3.2, d: 4.2, h: 0.02, accent: "#668cff" },
 };
+// ===== 2. 棚・選択パネルに表示する名前とアイコン =====
+// 接続パーツや結合オブジェクトは、元アセット名ではなく役割名を返す。
 const assetLabel = (o) =>
     o.linkedAsset === "buildingAwning"
         ? o.linkedRole === "parent" || o.asset === "building"
@@ -77,7 +91,9 @@ const assetGlyph = (o) =>
               ? "○"
               : "◇";
 
-// Coordinate helpers. Local asset coordinates are x=width, y=depth, z=up.
+// ===== 3. 座標変換と線画の共通ヘルパー =====
+// 通常アセットのローカル座標は x=幅、y=奥行き、z=高さ。
+// pt() は既存の面座標系 k/PL を使い、通常アセットをワールドへ変換する。
 const pt = (o, x, y, z) => L2W(o, x, y, z);
 // customアセットだけは、作成サイトと同じ x=左右／y=奥行き／z=高さの
 // ワールド座標で保持する。既存アセットの面座標系（k/PL）は変更しない。
@@ -96,6 +112,8 @@ const customPt = (o, x, y, z) => {
         baseY = (Number(o.d) || -1) - (Number(o.d) || -1) * (Number(o.lift) || 0);
     return [rx + baseX + (Number(off[0]) || 0), baseY + z + (Number(off[1]) || 0), ry + baseZ + (Number(off[2]) || 0)];
 };
+// 3Dの折れ線を1本の線画オブジェクトへ包む。
+// genShape() が返す形式に合わせることで、既存の描画エンジンへ渡せる。
 const lineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
     c: color,
     w: width,
@@ -104,6 +122,7 @@ const lineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
     cs: sigNow(),
     p: dens3(pts.map((q) => pt(o, q[0], q[1], q[2]))),
 });
+// customアセット用の線画。customPt()で作成サイト側の座標系を使う。
 const customLineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
     c: color,
     w: width,
@@ -113,6 +132,8 @@ const customLineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
     p: dens3(pts.map((q) => customPt(o, q[0], q[1], q[2]))),
 });
 const polyA = (o, pts, color, width) => lineA(o, [...pts, pts[0]], color, width);
+// 直方体の底面・上面・4本の縦辺をまとめて作る。
+// 看板、人物の胴体、ベランダなどの部品を描くための共通部品。
 function boxA(o, w, d, z0, z1, color = o.c || "#e7fff4") {
     const x = w / 2,
         y = d / 2,
@@ -163,12 +184,15 @@ function boxA(o, w, d, z0, z1, color = o.c || "#e7fff4") {
 // ベベル直方体の平面輪郭。四つの縦角を、オフセットを半径とする
 // 1〜4分割の円弧で面取りする。segments=1なら一枚の平面面取り、
 // segments=4なら各角を4枚の小面へ分割した丸みのあるベベルになる。
+// ベベル分割数を1〜4へ制限する。古い保存データの bevelEdges も受け付ける。
 function beveledBoxSegments(value, legacyValue, fallback = 4) {
     const direct = Number(value),
         legacy = Number(legacyValue),
         n = Number.isFinite(direct) ? direct : Number.isFinite(legacy) ? legacy : fallback;
     return clamp(Math.round(n), 1, 4);
 }
+// ベベル直方体を上から見た輪郭点を作る。
+// この点列を底面・上面・縦辺の描画と外接範囲計算で共用する。
 function beveledBoxFootprint(width, depth, offset, segmentCount) {
     const w = Math.max(0.01, Math.abs(Number(width) || 0.01)),
         d = Math.max(0.01, Math.abs(Number(depth) || 0.01)),
@@ -200,6 +224,8 @@ function beveledBoxParams(o) {
         bevelSegments = beveledBoxSegments(o?.bevelSegments, o?.bevelEdges);
     return { w, d, max, bevelOffset, bevelSegments };
 }
+// 階層建物の1F開口の初期値・上限値を計算する。
+// 開口はここで値を決めるだけで、実際の線画はassetLines()内で描く。
 function stackedOpeningParams(o, f = o?.floors?.[0]) {
     const w = Math.max(0.05, Math.abs(Number(f?.w) || Number(o?.ra || 2) * 2)),
         d = Math.max(0.05, Math.abs(Number(f?.d) || Number(o?.rb || 1.5) * 2)),
@@ -216,6 +242,8 @@ function stackedOpeningParams(o, f = o?.floors?.[0]) {
         );
     return { w, d, h, rimHeight, openingW, openingH, openingBack };
 }
+// ベランダや小部品用の「ワイヤー直方体」。
+// 中心(cx,cy)をずらして、1つのアセット内に複数部品を配置する。
 function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
     const x = w / 2,
         y = d / 2,
@@ -239,6 +267,9 @@ function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
         ];
     return out;
 }
+// ===== 4. パスパイプ用のベクトル計算 =====
+// パスパイプは制御点を丸めて中心線を作り、その周囲に円形断面を並べる。
+// 以下の小さな関数群は、その中心線・接線・法線を計算するためのもの。
 function pathVecSub(a, b) {
     return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 }
@@ -272,6 +303,7 @@ function pathRotateAroundAxis(v, axis, angle) {
         v[2] * c + cross[2] * s + axis[2] * dot * (1 - c),
     ];
 }
+// パスが未設定、または壊れている場合に使う初期制御点。
 function pathPipeDefaultPoints() {
     return [
         [-2.4, 0, 1.1],
@@ -279,6 +311,7 @@ function pathPipeDefaultPoints() {
         [0, 2.2, 1.1],
     ];
 }
+// 保存データから有効な3D制御点だけを取り出す。最低2点ない場合は初期値へ戻す。
 function pathPipeControlPoints(o) {
     const source = Array.isArray(o?.path) ? o.path : pathPipeDefaultPoints();
     const points = source
@@ -286,6 +319,7 @@ function pathPipeControlPoints(o) {
         .filter((v) => v.length === 3 && v.every(Number.isFinite));
     return points.length >= 2 ? points : pathPipeDefaultPoints();
 }
+// 制御点の折れ線を、角丸半径に応じた円弧付き中心線へ変換する。
 function pathPipeRoundedPath(o) {
     const points = pathPipeControlPoints(o),
         cornerRadius = Math.max(0, Number(o?.cornerRadius) || 0),
@@ -338,6 +372,8 @@ function pathPipeRoundedPath(o) {
     add(points[points.length - 1]);
     return out;
 }
+// 中心線の各点に円形リングを置き、隣り合うリングを三角形でつなぐ。
+// ここで作ったメッシュは線画の輪郭・外接範囲・ギズモ計算に使われる。
 function pathPipeMesh(o) {
     const centerline = pathPipeRoundedPath(o),
         radius = clamp(Math.abs(Number(o?.pipeRadius) || 0.18), 0.02, 20),
@@ -384,6 +420,7 @@ function pathPipeMesh(o) {
     }
     return { centerline, rings, triangles, radius, sides };
 }
+// 楕円リングを作る。円柱・円錐・ランタンの輪郭に使う。
 function ringA(o, rx, ry, z, n = 8, color = o.c || "#e7fff4") {
     const a = [];
     for (let i = 0; i < n; i++) {
@@ -392,6 +429,7 @@ function ringA(o, rx, ry, z, n = 8, color = o.c || "#e7fff4") {
     }
     return polyA(o, a, color);
 }
+// 開口建物の寸法を、描画に使いやすい形へまとめる。
 function buildingParams(o) {
     const g = buildingGeometry(o),
         w = g.w,
@@ -410,6 +448,9 @@ function buildingParams(o) {
         topT: Math.max(0.05, h - openingH),
     };
 }
+// ===== 5. アセットごとの線画生成本体 =====
+// kind（asset名）を見て、必要な輪郭線・補助線を返す。
+// ここではオブジェクトの値を変更しない。形状データを作るだけ。
 function assetLines(o) {
     const kind = o.asset,
         w = o.ra * 2,
@@ -418,6 +459,8 @@ function assetLines(o) {
         c = o.c || "#222222",
         a = c,
         out = []; // アセットも線画と同じ色で描く
+    // --- 作成サイトから読み込んだ任意形状 ---
+    // geometry.vertices / edges / loops を、そのまま3D線画へ変換する。
     if (kind === "custom") {
         // アセット作成サイトから読み込んだ任意形状。頂点と辺／ループを
         // 3D線画へ変換する。頂点はx=幅、y=奥行、z=高さのローカル座標。
@@ -462,6 +505,8 @@ function assetLines(o) {
                     Number(style.width) || width,
                 );
         });
+        // --- ベベル直方体 ---
+        // footprintを底面・上面へ複製し、押し出し後だけ縦辺を追加する。
     } else if (kind === "beveledBox") {
         const q = beveledBoxParams(o),
             footprint = beveledBoxFootprint(q.w, q.d, q.bevelOffset, q.bevelSegments),
@@ -497,6 +542,8 @@ function assetLines(o) {
                 ),
             );
         }
+        // --- パスパイプ ---
+        // 丸めた中心線のリングを描き、リング間の縦線でパイプらしさを出す。
     } else if (kind === "pathPipe") {
         const mesh = pathPipeMesh(o);
         mesh.rings.forEach((ring) => out.push(polyA(o, ring, c, 0.95)));
@@ -509,6 +556,8 @@ function assetLines(o) {
                     0.85,
                 ),
             );
+        // --- 階層建物／ベベル階層建物 ---
+        // floors配列を階ごとに描く。開口はopeningEnabledがtrueの1Fだけへ追加する。
     } else if (kind === "stackedBuilding" || kind === "beveledStackedBuilding") {
         const floors =
             Array.isArray(o.floors) && o.floors.length
@@ -592,6 +641,7 @@ function assetLines(o) {
                 ),
             );
         };
+        // 開口ON/OFFの判定はここで一度だけ行う。OFFなら通常の閉じた建物になる。
         const openingEnabled = stackedOpeningEnabled(o);
         const addOpeningWire = (f, w, d, h, opening) => {
             const ox = Number(f.x || 0),
@@ -712,6 +762,8 @@ function assetLines(o) {
                 addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
             }
         });
+        // --- 壁付けベランダ ---
+        // 床スラブ、前面の腰壁、左右の腰壁、支持ブラケットを別々に描く。
     } else if (kind === "balcony") {
         // 壁側（+Y）を建物外壁へ合わせ、床を外側（-Y）へ張り出すU字型のベランダ。
         // 床スラブ＋左右の腰壁＋前面の腰壁を別箱として描くため、面編集後も形状が崩れない。
@@ -743,6 +795,8 @@ function assetLines(o) {
                 ),
             ),
         );
+        // --- 階段 ---
+        // stepsの数だけ段板と蹴上げを作り、必要なら手すりも追加する。
     } else if (kind === "stairs") {
         const n = Math.max(2, Math.min(24, Math.round(o.steps || 6))),
             sd = d / n,
@@ -859,6 +913,8 @@ function assetLines(o) {
                     );
                 }
             });
+        // --- 横断歩道 ---
+        // 道路の面へ白いストライプを並べる。
     } else if (kind === "crosswalk") {
         const n = Math.max(3, Math.min(16, Math.round(o.stripes || 7))),
             gap = d / (n + 1),
@@ -901,6 +957,8 @@ function assetLines(o) {
                 0.9,
             ),
         );
+        // --- 円柱・円錐・球 ---
+        // 円柱は上下輪郭、円錐は底面とシルエット、球は正面向きの円だけを描く。
     } else if (kind === "cylinder") {
         // 円柱は上下の輪郭だけ。側面の縦エッジは描かない。
         out.push(ringA(o, w * 0.5, d * 0.5, 0, 12, c));
@@ -1061,6 +1119,8 @@ function assetLines(o) {
         );
         // Two inner bands suggest a glowing paper lantern without requiring a texture.
         [0.36, 0.56].forEach((z) => out.push(ringA(o, rx * 1.02, ry * 1.02, z * h, 8, a, 0.8)));
+        // --- 看板 ---
+        // 外枠と、faceW / faceHで編集できる内側の絵枠を描く。
     } else if (kind === "sign") {
         // 看板外側は通常の直方体。内側の絵枠だけを追加編集できる。
         const board0 = 0.08 * h,
@@ -1080,6 +1140,8 @@ function assetLines(o) {
             [-ix, fy, iz1],
         ];
         out.push(polyA(o, q, a, 1.1));
+        // --- 人物 ---
+        // 身長・体格・頭身・脚の開き・簡易ポーズを線画へ反映する。
     } else if (kind === "person") {
         // 人物は配置後も高さ・体格・頭身・脚の開き・簡易ポーズを編集できる。
         // 腕は既存仕様どおり描かず、立体感は胴体・脚・頭の線だけで表現する。
@@ -1258,6 +1320,8 @@ function assetLines(o) {
                 0.75,
             ),
         );
+        // --- 開口のある建物 ---
+        // 外枠に加え、開口の左右柱・上梁・内側面・奥面を描く。
     } else if (kind === "building") {
         // 外側は直方体の輪郭を保ちながら、正面から背面まで抜ける開口を作る。
         // 左右の柱＋上梁として分けて描くので、開口の左右・上面・奥行きも編集対象になる。
@@ -1374,6 +1438,8 @@ function assetLines(o) {
                 1.0,
             ),
         );
+        // --- 店舗テント ---
+        // awningGeometry()が返す手前上辺・奥側・底辺をつないでテントを描く。
     } else if (kind === "awning") {
         // 店舗テント：初期状態は直方体。手前上辺だけを高さ・奥行き方向へ動かせる。
         const g = awningGeometry(o),
@@ -1466,6 +1532,9 @@ function assetLines(o) {
     }
     return out;
 }
+// ===== 6. 保存データ・入力値の正規化 =====
+// 描画前に、寸法の下限・ベベル値・階数・パス値などを整える。
+// ここでは見た目を作らず、後段のassetLines()が安全に読める形へ変換する。
 function normalizedAsset(o) {
     let q = o?.attachment ? syncAttachedPart(o) : o;
     if (q && q.asset === "beveledBox") {
@@ -1501,6 +1570,7 @@ function normalizedAsset(o) {
             h: floors.reduce((max, f) => Math.max(max, (Number(f.z) || 0) + (Number(f.h) || 0)), 0),
         };
     }
+    // パスパイプは制御点からra/rb/h（外接範囲）も再計算する。
     if (q && q.asset === "pathPipe") {
         const path = pathPipeControlPoints(q),
             radius = clamp(Number.isFinite(Number(q.pipeRadius)) ? Math.abs(Number(q.pipeRadius)) : 0.18, 0.02, 20),
@@ -1526,6 +1596,7 @@ function normalizedAsset(o) {
             h: Math.max(0.1, Math.max(...zs) - Math.min(...zs) + radius * 2),
         };
     }
+    // ベランダの床厚・手すり厚・手すり高さを正規化する。
     if (q && q.asset === "balcony") {
         const floorT = clamp(Number(q.balconyFloorThickness) || 0.16, 0.04, 10),
             railT = clamp(Number(q.balconyRailThickness) || 0.12, 0.035, 10),
@@ -1540,6 +1611,7 @@ function normalizedAsset(o) {
             h: floorT + railH,
         };
     }
+    // 球は3方向の半径をそろえ、必ず真球として扱う。
     if (q && q.asset === "sphere") {
         const r = Math.max(
             0.005,
@@ -1551,6 +1623,7 @@ function normalizedAsset(o) {
         );
         return { ...q, ra: r, rb: r, h: r * 2 };
     }
+    // テントの編集済み手前辺を再計算し、描画とギズモで同じ値を使う。
     if (q && q.asset === "awning") {
         const g = awningGeometry(q);
         return {
@@ -1562,6 +1635,7 @@ function normalizedAsset(o) {
             awningBackBottom: g.backBottom,
         };
     }
+    // 開口幅・開口高さ・奥面位置を建物本体の範囲内へ収める。
     if (q && q.asset === "building") {
         const w = Math.max(0.1, Math.abs(Number(q.ra) || 2) * 2),
             d = Math.max(0.05, Math.abs(Number(q.rb) || 0.5) * 2),
@@ -1575,16 +1649,21 @@ function normalizedAsset(o) {
     }
     return q;
 }
+// 正規化済みアセットを線画へ変換する入口。
 function genAsset(o) {
     const q = normalizedAsset(o);
     return assetLines(q).map((s) => ({ ...s, ob: q, d3: true, cs: sigNow() }));
 }
 
-// Route the existing shape pipeline through the asset generator.
+// ===== 7. 既存エンジンへの接続 =====
+// engine-core.jsのgenShapeを置き換えず、元の関数を退避してから
+// assetだけをgenAssetへ振り分ける。通常のrect/box/circは従来処理のまま。
 const baseGenShape = genShape;
 genShape = function (o) {
     return o && o.type === "asset" ? genAsset(o) : baseGenShape(o);
 };
+// アセットの外接範囲もここで計算する。
+// 選択枠、間取りのヒット判定、ボックス選択、移動ギズモが同じ範囲を使う。
 const baseObBounds = obBounds;
 obBounds = function (o) {
     if (!o || o.type !== "asset") return baseObBounds(o);
@@ -1639,5 +1718,6 @@ obBounds = function (o) {
     );
     return { lo, hi };
 };
-// 既に自動保存されているオブジェクトも、今回の円柱・球・看板の新しい線画へ更新する。
+// ===== 8. 初期化 =====
+// すでに自動保存されているオブジェクトも、今回の円柱・球・看板の新しい線画へ更新する。
 regenObjects();

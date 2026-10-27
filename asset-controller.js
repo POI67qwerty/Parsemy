@@ -1,8 +1,18 @@
 /* City Grid Studio asset controller.
-   This file wires the asset generator to the shelf, JSON import, clipboard,
-   and primitive quick menu. The geometry itself lives in asset.js. */
+   アセットの配置・接続・JSON入出力・棚UIを担当する。
+
+   処理の流れ
+   1. newAsset             : 初期位置、生成面、寸法、固有値を持つ定義を作る
+   2. placeAsset           : 線画を生成してSへ登録し、選択状態を更新する
+   3. placeLinkedAsset     : 建物とテント／看板などの親子接続を作る
+   4. import / clipboard   : 定義だけを保存・複製し、新しいIDで再生成する
+   5. 棚UI                 : ボタン入力を上記処理へ接続する
+
+   線画の形状は asset.js、基本のオブジェクト編集は engine-core.js、
+   ギズモ操作は engine-tools.js が担当する。 */
 "use strict";
 
+// studio-ui.jsから受け取ったDOM・状態ブリッジを使って、アセット操作を登録する。
 window.cityGridInstallAssetUI = function (bridge) {
     const {
         el,
@@ -27,6 +37,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             f = [-Math.sin(yaw), 0, Math.cos(yaw)];
         return [P.cx + f[0] * depth, -1, P.cz + f[2] * depth];
     }
+    // アセット棚での1回の追加に対応する定義を作る。
+    // 生成面（P.assetAxis）をkへ変換し、アセット固有の初期値もここで付ける。
     function newAsset(kind, p, worldPoint = null) {
         const info = ASSETS[kind],
             isDefault = !p && !worldPoint;
@@ -171,6 +183,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             stripes: kind === "crosswalk" ? 7 : undefined,
         };
     }
+    // 建物とテント／看板を親子として作る。
+    // child.attachment が親の開口側へ追従するため、親の移動・回転・寸法変更に対応できる。
     function placeLinkedAsset(kind, p) {
         const childKind = kind === "buildingAwning" ? "awning" : "rect",
             q = p ? groundAt(p) : assetGroundPoint(),
@@ -332,6 +346,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             alert("ベランダを配置できませんでした。建物を選択してからもう一度クリックしてください。");
         }
     }
+    // 通常アセット、ベランダ、接続アセットを入口で振り分ける配置関数。
     function placeAsset(kind, p) {
         if (kind === "buildingAwning" || kind === "buildingSign") return placeLinkedAssetInstance(kind, p);
         if (kind === "balcony") return placeBalcony(p);
@@ -371,12 +386,14 @@ window.cityGridInstallAssetUI = function (bridge) {
     // オブジェクト用クリップボード。線画のクリップボードとは分けて、選択中の
     // 図形／アセット定義だけをコピーし、貼り付け時に新しいIDで再生成する。
     let objectClipboard = [];
+    // 線画ではなく、選択中オブジェクトの定義をJSONとしてクリップボードへ保持する。
     function copySelectedObjects() {
         const objects = selectedObjects();
         if (!objects.length) return false;
         objectClipboard = objects.map((o) => JSON.parse(JSON.stringify(o)));
         return true;
     }
+    // コピーした定義へ新しいID・グループIDを付け、少しずらして再生成する。
     function pasteObjectClipboard() {
         if (!objectClipboard.length) return false;
         sanitizeScene();
@@ -465,6 +482,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         };
         return [p, syncAttachedPart(q, p)];
     }
+    // オブジェクトJSONを検証・正規化して、現在のシーンへ追加する。
     function importObjectPayload(data) {
         const sources = Array.isArray(data?.objects) ? data.objects : data?.type === "compound" ? [data] : [];
         if (!sources.length) throw new Error("objects are missing");
@@ -498,8 +516,8 @@ window.cityGridInstallAssetUI = function (bridge) {
         render();
     }
 
-    // Rectangle/circle and the other primitives are created from the asset shelf.
-    // ===== Asset shelf on the canvas =====
+    // ===== アセット棚と配置ボタン =====
+    // 棚のボタンはplaceAsset()へ集約し、UIイベント内に形状生成ロジックを重複させない。
     const tray = document.createElement("div");
     tray.id = "assetTray";
     tray.innerHTML =
@@ -652,7 +670,8 @@ window.cityGridInstallAssetUI = function (bridge) {
         requestAnimationFrame(syncFloorPlanDockLayout);
     };
 
-    // ===== iPad four-finger primitive quick menu =====
+    // ===== 4本指プリミティブクイックメニュー =====
+    // 基本6種だけを小さなメニューから追加できる。実体の生成は通常のplaceAsset()へ委譲する。
     // 4本指タップで開く、長方形・円・円錐・球体・三角柱・三角錐専用の小型メニュー。
     const primitiveKinds = ["rect", "circle", "cone", "sphere", "triPrism", "triPyramid"];
     const primitiveMenu = document.createElement("div");

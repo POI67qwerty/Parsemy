@@ -1,6 +1,15 @@
 /* City Grid Studio engine core.
-   Shared state, math, projection, primitive shapes, and basic object editing. */
-/* City Grid Studio engine: camera, projection, drawing, selection and core input. */
+   アプリ全体で共有する状態・座標計算・投影・基本図形・選択を担当する。
+
+   主な流れ
+   1. P / S にカメラ設定と線画・オブジェクト定義を保持する
+   2. cam / scr / orthPoint でワールド座標を画面へ投影する
+   3. genShape で基本図形の線画を生成する
+   4. setOb / regenObjects で定義変更と線画再生成を行う
+   5. 保存・読込は末尾のpack / unpack系から呼び出す
+
+   アセット固有の線画は asset.js、ギズモ・ドラッグ・描画は engine-tools.js、
+   パネルと間取りUIは studio-ui.js に分離している。 */
 const $ = (id) => document.getElementById(id);
 function isStackedBuildingAsset(o) {
     return o?.type === "asset" && ["stackedBuilding", "beveledStackedBuilding"].includes(o.asset);
@@ -18,6 +27,8 @@ let W = 1600,
 
 // ===== パラメータ（初期値の水平回転は参考サイトのy=39.912） =====
 const MASTER_W = 1.5;
+// P: カメラ、投影、描画設定をまとめたアプリ全体のパラメータ。
+// UIから変更された値は sync() でHTMLの入力欄と同期する。
 const P = {
     lens: 50,
     yaw: 39.912,
@@ -42,6 +53,8 @@ const P = {
     surfaceMode: false,
 };
 const show = [true, true, true]; // 軸ごとの補助線表示
+// Sは線画とオブジェクト定義の保存場所。RD/HUはやり直し・元に戻す履歴。
+// Z/ox/oyは表示倍率とキャンバス移動、sel/selIdsは選択状態を持つ。
 let S = [],
     RD = [],
     HU = [],
@@ -66,6 +79,7 @@ let S = [],
     AX = [],
     AXC = [],
     T = "r"; // T: 'r'=通常の透視 / 'f'=魚眼
+// orthViewが設定されると、透視投影ではなく正面・横・上の正投影になる。
 let orthView = null,
     standardApplying = false; // Blender風の正面・真横・真上では正投影を使う
 
@@ -224,7 +238,7 @@ ${R("pa", "写真の濃さ", 0, 1, 0.05)}
             localStorage.setItem("city-grid-ui-compact-v1", "1");
         }
         st = JSON.parse(localStorage.getItem("pgrid-sec") || "{}");
-    } catch (e) {}
+    } catch (e) { }
     side.innerHTML =
         '<div class="secbar"><button id=secC>すべて閉じる</button><button id=secO>すべて開く</button></div>';
     kids.forEach((k) => {
@@ -240,7 +254,7 @@ ${R("pa", "写真の濃さ", 0, 1, 0.05)}
                 st[name] = d.open;
                 try {
                     localStorage.setItem("pgrid-sec", JSON.stringify(st));
-                } catch (e) {}
+                } catch (e) { }
             };
             det = d;
         } else if (det) det.appendChild(k);
@@ -250,6 +264,7 @@ ${R("pa", "写真の濃さ", 0, 1, 0.05)}
     $("secO").onclick = () => side.querySelectorAll("details").forEach((d) => (d.open = true));
 })();
 // ===== 値の同期 =====
+// 画面上の入力欄からPへ値を反映し、表示を更新する共通入口。
 function sync() {
     for (const k in P) {
         const el = $("v_" + k);
@@ -315,10 +330,10 @@ for (const k in P) {
 }
 document.querySelectorAll("[data-i]").forEach(
     (el) =>
-        (el.onchange = () => {
-            show[el.dataset.i] = el.checked;
-            render();
-        }),
+    (el.onchange = () => {
+        show[el.dataset.i] = el.checked;
+        render();
+    }),
 );
 ["gon", "hzl", "bgw", "snap", "bin", "gg"].forEach((k) => ($(k).onchange = () => render()));
 $("ar").onchange = () => {
@@ -340,6 +355,7 @@ addEventListener("resize", fit);
 
 // ===== 消失点の計算（カメラ→VP） =====
 // 軸: 0=X方向, 1=Z方向, 2=垂直。VPが無限遠なら dir(平行線の向き) を返す
+// 通常の透視投影で、現在のカメラから消失点と補助軸を計算する。
 function calc() {
     const f = (W * P.lens) / 36,
         th = (P.yaw * Math.PI) / 180,
@@ -553,6 +569,8 @@ const orthScale = () =>
     window.cityFloorPlanActive && Number.isFinite(Number(window.cityFloorPlanScale))
         ? Number(window.cityFloorPlanScale)
         : Math.min(W, H) / 7.2;
+// 正面／横／上の間取りビュー専用の正投影。
+// right / up / depth の基底を変えるだけで3方向を同じ処理で描画する。
 function orthPoint(v) {
     const b = orthBasis(),
         sc = orthScale(),
@@ -902,8 +920,8 @@ function syncAttachedPart(o, parentOverride = null) {
         baseZ = Number.isFinite(Number(a.baseRatio))
             ? parentH * clamp(Number(a.baseRatio), 0.02, 0.98)
             : Number.isFinite(Number(a.baseZ))
-              ? Number(a.baseZ)
-              : parentH * 0.5,
+                ? Number(a.baseZ)
+                : parentH * 0.5,
         offsetZ = Number(a.offsetZ) || 0,
         z = clamp(baseZ + offsetZ, 0.02, Math.max(0.02, parentH - 0.02));
     // 看板の直方体・テントの奥側の面を、親の開口側の面へぴったり合わせる。
@@ -980,6 +998,8 @@ function selectedObjects() {
 }
 // 図形の定義を更新して、その図形の線だけ作り直す
 // カメラ位置が変わったら、図形の線（隠れ線の判定つき）を作り直す
+// 定義からオブジェクト線画を再生成する。
+// 同じオブジェクトに属する複数の線は、最初の1回だけ生成して重複を避ける。
 function regenObjects() {
     const done = new Set(),
         out = [];
@@ -992,6 +1012,8 @@ function regenObjects() {
     });
     S = out;
 } // 描く順番(重なり)は変えない
+// オブジェクト定義を部分更新する中心関数。
+// 更新後は対象線を作り直し、親を変更した場合は接続パーツも追従させる。
 function setOb(id, patch) {
     const o = obOf(id);
     if (!o) return;
@@ -1063,6 +1085,8 @@ function pickOb(p) {
     return best;
 }
 // 図形のローカル座標(x=幅方向,y=奥行き方向,z=高さ方向)→ワールドの3D点
+// オブジェクト固有のローカル座標をワールド座標へ変換する。
+// x=幅、y=面内の奥行き、z=法線方向の押し出しとして、k/rot/d/liftを反映する。
 function L2W(o, x, y, z) {
     if (o?.attachment) o = syncAttachedPart(o);
     const [iu, iv] = PL[o.k],
@@ -1116,23 +1140,23 @@ function syncSel() {
         P3 = compound ? [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2] : L2W(o, 0, 0, 0);
     const values = compound
         ? [
-              ["rot", Number(o.compoundRot) || 0],
-              ["w", b.hi[0] - b.lo[0]],
-              ["dp", b.hi[2] - b.lo[2]],
-              ["h", b.hi[1] - b.lo[1]],
-              ["px", P3[0]],
-              ["py", P3[1] + 1],
-              ["pz", P3[2]],
-          ]
+            ["rot", Number(o.compoundRot) || 0],
+            ["w", b.hi[0] - b.lo[0]],
+            ["dp", b.hi[2] - b.lo[2]],
+            ["h", b.hi[1] - b.lo[1]],
+            ["px", P3[0]],
+            ["py", P3[1] + 1],
+            ["pz", P3[2]],
+        ]
         : [
-              ["rot", o.rot],
-              ["w", 2 * o.ra],
-              ["dp", 2 * o.rb],
-              ["h", o.h],
-              ["px", P3[0]],
-              ["py", P3[1] + 1],
-              ["pz", P3[2]],
-          ];
+            ["rot", o.rot],
+            ["w", 2 * o.ra],
+            ["dp", 2 * o.rb],
+            ["h", o.h],
+            ["px", P3[0]],
+            ["py", P3[1] + 1],
+            ["pz", P3[2]],
+        ];
     values.forEach(([k, v]) => {
         const n = $("ov_" + k),
             r = $("or_" + k);
@@ -1141,6 +1165,8 @@ function syncSel() {
     });
 }
 // パネルの数値 → 図形の変更内容
+// 左パネルの幅・奥行き・高さ・回転などを、オブジェクト別の差分へ変換する。
+// アセット固有の追加項目は asset-controller.js / studio-ui.js 側で処理する。
 function fieldPatch(o, name, v) {
     if (o.attachment?.verticalOnly && ["px", "pz"].includes(name)) return {};
     if (o.attachment?.verticalOnly && name === "py") {
@@ -1316,8 +1342,19 @@ $("obOff").onclick = () => {
 };
 
 /* City Grid Studio engine tools.
-   Gizmos, drawing tools, export, persistence, and startup wiring. */
+   選択・ギズモ・スナップ・描画・書き出し・ポインター操作を担当する。
+
+   主な流れ
+   1. gizmo / specialGizmo で表示中の操作ハンドルを作る
+   2. hitGizmo でクリック対象を決める
+   3. beginGizmo / dragEdit でドラッグ量を寸法・位置へ変換する
+   4. render で面・線・補助UIを再描画する
+   5. 保存・書き出し・タッチ操作を末尾のイベント処理へ接続する
+
+   アセット形状は asset.js、棚・パネル・間取り専用操作は
+   asset-controller.js / studio-ui.js が担当する。 */
 // ===== ブレンダー風ギズモ：矢印(XYZ軸の移動)・白い四角(面の押し引き)・点線の輪(回転) =====
+// 3Dビューでは透視／魚眼、間取りでは正投影へ自動的に振り分ける。
 const scr3 = (p) => (orthView ? scr(p) : scr(V.nrm(p)));
 const scrW = (p) => scr3(V.add(p, CO())); // ワールド座標の点の画面位置
 const cloc = (o) => V.add(camPos(), o.off || [0, 0, 0], 1, -1); // 図形の座標系で見たカメラ位置
@@ -1361,6 +1398,8 @@ function faceScreenGuide(face) {
     // 不定な拡縮を起こさず「このビューでは動かない」として扱う。
     return { hidden: true, dir: { x: 0, y: 0 }, scale: Infinity };
 }
+// ワールド軸の移動量を、オブジェクト定義のca/cb/liftへ戻す。
+// 親子接続中は、必要に応じて接着オフセットも保つ。
 function moveBy(o, vec, keepAttachedOffset = false) {
     const v = [Number(vec?.[0]) || 0, Number(vec?.[1]) || 0, Number(vec?.[2]) || 0];
     if (o?.type === "compound")
@@ -1847,12 +1886,12 @@ function stackedBevelHandle(o, f, index) {
         s: !raw?.ok
             ? raw
             : hidden
-              ? {
+                ? {
                     x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
                     y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
                     ok: true,
                 }
-              : raw,
+                : raw,
         anchor,
         dir: projected && length > 0.0001 ? { x: dx / length, y: dy / length } : fallback,
         scale:
@@ -1889,8 +1928,8 @@ function stackedOpeningGizmo(o) {
                     kind === "stacked-opening-h"
                         ? { x: 0, y: -1 }
                         : kind.endsWith("left")
-                          ? { x: -1, y: 0 }
-                          : { x: 1, y: 0 },
+                            ? { x: -1, y: 0 }
+                            : { x: 1, y: 0 },
                 gap = Math.max(30 / Z, Math.min(54 / Z, 0.34 * Math.max(1, Number(orthScale()) || 1))),
                 display = hidden ? { ...s, x: s.x + fallback.x * gap, y: s.y + fallback.y * gap, ok: true } : s;
             return {
@@ -2013,8 +2052,8 @@ function stackedBuildingGizmo(o) {
                     axis === "w"
                         ? pr(px + step * sign, py, pz)
                         : axis === "d"
-                          ? pr(px, py + step * sign, pz)
-                          : pr(px, py, pz + step),
+                            ? pr(px, py + step * sign, pz)
+                            : pr(px, py, pz + step),
                 dx = q.x - s.x,
                 dy = q.y - s.y,
                 pxLen = Math.hypot(dx, dy),
@@ -2134,10 +2173,10 @@ function pathPipeGizmo(o) {
         radiusGap = Math.max(34 / Z, Math.min(58 / Z, 0.38 * Math.max(1, Number(orthScale()) || 1))),
         radiusDisplay = radiusHidden
             ? {
-                  x: radiusAnchor.x + radiusFallback.x * radiusGap,
-                  y: radiusAnchor.y + radiusFallback.y * radiusGap,
-                  ok: true,
-              }
+                x: radiusAnchor.x + radiusFallback.x * radiusGap,
+                y: radiusAnchor.y + radiusFallback.y * radiusGap,
+                ok: true,
+            }
             : radiusPoint;
     return {
         o,
@@ -2182,12 +2221,12 @@ function beveledBoxGizmo(o) {
         displayS = !raw?.ok
             ? raw
             : hidden
-              ? {
+                ? {
                     x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
                     y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
                     ok: true,
                 }
-              : {
+                : {
                     x: raw.x - visibleDir.x * displayGap,
                     y: raw.y - visibleDir.y * displayGap,
                     ok: true,
@@ -2211,20 +2250,20 @@ function specialGizmo(o) {
     return o && o.type === "asset" && o.asset === "beveledBox"
         ? beveledBoxGizmo(o)
         : o && o.type === "asset" && o.asset === "pathPipe"
-          ? pathPipeGizmo(o)
-          : isStackedBuildingAsset(o)
-            ? stackedBuildingGizmo(o)
-            : o && o.type === "asset" && o.asset === "building"
-              ? buildingGizmo(o)
-              : o && o.type === "asset" && o.asset === "awning"
-                ? awningGizmo(o)
-                : o && o.type === "asset" && o.asset === "sign"
-                  ? signGizmo(o)
-                  : o && o.type === "asset" && o.asset === "cone"
-                    ? coneGizmo(o)
-                    : o && o.type === "asset" && o.asset === "sphere"
-                      ? sphereGizmo(o)
-                      : null;
+            ? pathPipeGizmo(o)
+            : isStackedBuildingAsset(o)
+                ? stackedBuildingGizmo(o)
+                : o && o.type === "asset" && o.asset === "building"
+                    ? buildingGizmo(o)
+                    : o && o.type === "asset" && o.asset === "awning"
+                        ? awningGizmo(o)
+                        : o && o.type === "asset" && o.asset === "sign"
+                            ? signGizmo(o)
+                            : o && o.type === "asset" && o.asset === "cone"
+                                ? coneGizmo(o)
+                                : o && o.type === "asset" && o.asset === "sphere"
+                                    ? sphereGizmo(o)
+                                    : null;
 }
 function drawSpecialGizmo(c, o) {
     const sg = specialGizmo(o);
@@ -2600,6 +2639,8 @@ function compoundGizmo(o) {
     return g;
 }
 // 選択中の図形のギズモの位置（画面座標つき）
+// 選択オブジェクトの中心、XYZ矢印、6面ハンドル、回転リングを作る。
+// 描画とヒット判定の両方が同じ座標を使うため、見た目と操作がずれにくい。
 function gizmo() {
     const o = sel && obOf(sel);
     if (!o) return null;
@@ -2661,10 +2702,10 @@ function gizmo() {
     ev[iu] = -sn;
     ev[iv] = cs; // 高さ方向・幅方向・奥行き方向の単位ベクトル
     const F = (id, x, y, z, n) => {
-            const P3 = L2W(o, x, y, z),
-                s = scrW(P3);
-            g.faces.push({ id, n, P3, s });
-        },
+        const P3 = L2W(o, x, y, z),
+            s = scrW(P3);
+        g.faces.push({ id, n, P3, s });
+    },
         neg = (v) => v.map((t) => -t);
     // 外形の6面は、開口のある建物でも編集対象にする。
     // 積層建物だけはfloors[]を持つため、汎用面ハンドルを出さない。
@@ -2811,6 +2852,8 @@ function insidePoly2D(p, poly) {
     return inside;
 }
 // タッチした位置にあるハンドルを調べる（アセット専用→面→軸の矢印→回転の輪）
+// 画面上のクリックを、特殊アセット用→面→軸→回転リングの順で判定する。
+// 看板・階層建物・パスパイプなどはここで専用ハンドルへ分岐する。
 function hitGizmo(p) {
     const active = sel && obOf(sel),
         special = active && specialGizmo(active),
@@ -2971,6 +3014,8 @@ function stackedObjectCorners(o) {
     });
     return out;
 }
+// オブジェクトのワールド軸外接箱を返す。
+// 選択・ボックス選択・間取りヒット判定・スナップで共通利用する重要な関数。
 function obBounds(o) {
     if (o?.attachment) o = syncAttachedPart(o);
     if (o?.type === "compound") return compoundBounds(o);
@@ -3071,6 +3116,8 @@ function tauOf(C3) {
 }
 const snapSetup = (o, C3) => ({ bb: obBounds(o), targets: targetsOf(o.id), tau: tauOf(C3) });
 // 移動量deltaを、他の図形の面や地面に近ければぴったりくっつくよう補正（軸ごと）
+// 移動量deltaを、近くの外周面・角へ吸着させる。
+// 対象軸だけ補正し、他軸の移動や親子接続を壊さない。
 function snapShift(bb, delta, axes, targets, tau) {
     const d = [...delta],
         hit = new Set();
@@ -3143,8 +3190,8 @@ function faceSnap(dl) {
     const halves = isU
         ? [Math.abs(o.rb), outerH / 2]
         : isV
-          ? [Math.abs(o.ra), outerH / 2]
-          : [Math.abs(o.ra), Math.abs(o.rb)];
+            ? [Math.abs(o.ra), outerH / 2]
+            : [Math.abs(o.ra), Math.abs(o.rb)];
     const faceN0 = dot3(ed.Fa, n),
         faceN = faceN0 + dl,
         faceT = tangents.map((t) => dot3(ed.Fa, t)),
@@ -3194,8 +3241,8 @@ function beginGizmo(h, p) {
         };
     if (h.t === "stack-floor") {
         const index = stackedIndividualEdit(o)
-                ? clamp(Math.round(Number(h.floorIndex) || 0), 0, Math.max(0, (o.floors || []).length - 1))
-                : 0,
+            ? clamp(Math.round(Number(h.floorIndex) || 0), 0, Math.max(0, (o.floors || []).length - 1))
+            : 0,
             f = o.floors?.[index],
             q = stackedFloorScreen(o, index);
         if (f && q) {
@@ -3404,8 +3451,8 @@ function dragEdit(p, freeRotation = false) {
             ed.t === "stacked-opening-w-left" || ed.t === "stacked-opening-w-right"
                 ? { openingW: value }
                 : ed.t === "stacked-opening-h"
-                  ? { openingH: value }
-                  : { openingBack: value };
+                    ? { openingH: value }
+                    : { openingBack: value };
     } else if (ed.t.startsWith("stacked-")) {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -3511,8 +3558,8 @@ function dragEdit(p, freeRotation = false) {
                 o.type === "compound"
                     ? compoundFacePatch(o, ed.fid, moved)
                     : o.type === "asset" && o.asset === "building"
-                      ? buildingOuterFacePatch(o, ed.fid, moved)
-                      : facePatch(o, ed.fid, moved);
+                        ? buildingOuterFacePatch(o, ed.fid, moved)
+                        : facePatch(o, ed.fid, moved);
         }
     } // 白い四角＝面の押し引き
     else if (ed.t === "ring") {
@@ -3636,7 +3683,7 @@ function setSide(h) {
     edge.style.left = h ? "env(safe-area-inset-left,0px)" : sd.getBoundingClientRect().right + "px";
     try {
         localStorage.setItem("pgrid-side", h ? "1" : "0");
-    } catch (e) {}
+    } catch (e) { }
 }
 $("tg").onclick = () => {
     setSide(!$("side").classList.contains("hide"));
@@ -4158,8 +4205,8 @@ function exportPoint(v, tf) {
     const depth = orthView
         ? dot3(rel, orthBasis().depth)
         : T === "f"
-          ? Math.hypot(rel[0], rel[1], rel[2])
-          : cam(rel)[2];
+            ? Math.hypot(rel[0], rel[1], rel[2])
+            : cam(rel)[2];
     return { x: q.x * tf[0] + tf[4], y: q.y * tf[3] + tf[5], depth };
 }
 function buildExportDepth(cw, ch, tf) {
@@ -4245,6 +4292,8 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
 
 // ===== 線画レイヤー：線だけ別キャンバスに描き、アンチエイリアスを消して二値化する =====
 let LC = null;
+// 書き出し用の線だけを別キャンバスへ描く。
+// hidden=trueでは面の深度情報を使って、背面に隠れる線を除去する。
 function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     // tf=書き出し用の変換 [拡大,0,0,拡大,ずれx,ずれy]
     if (!LC || LC.width !== cw || LC.height !== ch) {
@@ -4483,7 +4532,10 @@ function drawObjectSurfaces(c) {
 }
 function render() {
     dirty = true;
-    if (S.some((s) => s.ob && s.cs !== sigNow())) regenObjects();
+    // sigNow()は描画1回につき一度だけ計算する。以前は線ごとに再計算していたため、
+    // アセットや線が多いシーンほど不要な文字列計算が増えていた。
+    const currentSignature = sigNow();
+    if (S.some((s) => s.ob && s.cs !== currentSignature)) regenObjects();
     syncSel();
     T === "f" ? calcF() : calc();
     const c = ctx;
@@ -4974,7 +5026,7 @@ function endBoxPointer(e, commit) {
     if (e?.pointerType === "pen") lastPen = Date.now();
     try {
         if (cv.hasPointerCapture?.(pointerId)) cv.releasePointerCapture(pointerId);
-    } catch (err) {}
+    } catch (err) { }
     if (!commit) render();
     return true;
 }
@@ -5053,6 +5105,9 @@ function pick(a, p) {
     });
     return b;
 }
+// 通常の3Dキャンバス操作の入口。
+// 間取りモードではstudio-ui.jsの専用pointerdownが先に処理し、
+// __cityFloorPlanPreempt が付いたイベントはここで通常処理をスキップする。
 cv.onpointerdown = (e) => {
     // 間取りのポインター処理はstudio-ui.jsが正面／横／上の専用ギズモを
     // 先に判定する。先行するtargetハンドラが通常編集へ入らないようにする。
@@ -5112,12 +5167,12 @@ cv.onpointerdown = (e) => {
             nav || (!selectGesture && mod)
                 ? "view"
                 : editPointer
-                  ? "draw"
-                  : pn && e.pointerType === "pen" && mode === "draw"
                     ? "draw"
-                    : touchTool
-                      ? "view"
-                      : mode; // 視点モードでは、残っている編集ツールよりもカメラ操作を優先する。
+                    : pn && e.pointerType === "pen" && mode === "draw"
+                        ? "draw"
+                        : touchTool
+                            ? "view"
+                            : mode; // 視点モードでは、残っている編集ツールよりもカメラ操作を優先する。
     if (act === "view") {
         const pan = e.shiftKey || e.altKey || e.button === 2;
         drag = {
@@ -5398,12 +5453,12 @@ function setMode(m) {
 $("mV").onclick = () => setMode("view");
 $("mD").onclick = () => setTool("pen");
 const undo = () => {
-        if (HU.length) {
-            RD.push(S);
-            S = HU.pop();
-            render();
-        }
-    },
+    if (HU.length) {
+        RD.push(S);
+        S = HU.pop();
+        render();
+    }
+},
     redo = () => {
         if (RD.length) {
             HU.push(S);
@@ -5791,13 +5846,13 @@ setInterval(() => {
     dirty = false;
     try {
         localStorage.setItem(AK, JSON.stringify(pack(false)));
-    } catch (e) {}
+    } catch (e) { }
 }, 3000);
 $("rst").onclick = () => {
     if (confirm("自動保存を消して初期化します。よろしいですか？")) {
         try {
             localStorage.removeItem(AK);
-        } catch (e) {}
+        } catch (e) { }
         location.reload();
     }
 };
@@ -5831,4 +5886,4 @@ fit();
 try {
     const t = localStorage.getItem(AK);
     if (t) unpack(JSON.parse(t));
-} catch (e) {} // 前回の自動保存があれば復元
+} catch (e) { } // 前回の自動保存があれば復元

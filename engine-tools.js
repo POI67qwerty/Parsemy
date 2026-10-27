@@ -1,6 +1,17 @@
 /* City Grid Studio engine tools.
-   Gizmos, drawing tools, export, persistence, and startup wiring. */
+   選択・ギズモ・スナップ・描画・書き出し・ポインター操作を担当する。
+
+   主な流れ
+   1. gizmo / specialGizmo で表示中の操作ハンドルを作る
+   2. hitGizmo でクリック対象を決める
+   3. beginGizmo / dragEdit でドラッグ量を寸法・位置へ変換する
+   4. render で面・線・補助UIを再描画する
+   5. 保存・書き出し・タッチ操作を末尾のイベント処理へ接続する
+
+   アセット形状は asset.js、棚・パネル・間取り専用操作は
+   asset-controller.js / studio-ui.js が担当する。 */
 // ===== ブレンダー風ギズモ：矢印(XYZ軸の移動)・白い四角(面の押し引き)・点線の輪(回転) =====
+// 3Dビューでは透視／魚眼、間取りでは正投影へ自動的に振り分ける。
 const scr3 = (p) => (orthView ? scr(p) : scr(V.nrm(p)));
 const scrW = (p) => scr3(V.add(p, CO())); // ワールド座標の点の画面位置
 const cloc = (o) => V.add(camPos(), o.off || [0, 0, 0], 1, -1); // 図形の座標系で見たカメラ位置
@@ -44,6 +55,8 @@ function faceScreenGuide(face) {
     // 不定な拡縮を起こさず「このビューでは動かない」として扱う。
     return { hidden: true, dir: { x: 0, y: 0 }, scale: Infinity };
 }
+// ワールド軸の移動量を、オブジェクト定義のca/cb/liftへ戻す。
+// 親子接続中は、必要に応じて接着オフセットも保つ。
 function moveBy(o, vec, keepAttachedOffset = false) {
     const v = [Number(vec?.[0]) || 0, Number(vec?.[1]) || 0, Number(vec?.[2]) || 0];
     if (o?.type === "compound")
@@ -530,12 +543,12 @@ function stackedBevelHandle(o, f, index) {
         s: !raw?.ok
             ? raw
             : hidden
-              ? {
+                ? {
                     x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
                     y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
                     ok: true,
                 }
-              : raw,
+                : raw,
         anchor,
         dir: projected && length > 0.0001 ? { x: dx / length, y: dy / length } : fallback,
         scale:
@@ -572,8 +585,8 @@ function stackedOpeningGizmo(o) {
                     kind === "stacked-opening-h"
                         ? { x: 0, y: -1 }
                         : kind.endsWith("left")
-                          ? { x: -1, y: 0 }
-                          : { x: 1, y: 0 },
+                            ? { x: -1, y: 0 }
+                            : { x: 1, y: 0 },
                 gap = Math.max(30 / Z, Math.min(54 / Z, 0.34 * Math.max(1, Number(orthScale()) || 1))),
                 display = hidden ? { ...s, x: s.x + fallback.x * gap, y: s.y + fallback.y * gap, ok: true } : s;
             return {
@@ -696,8 +709,8 @@ function stackedBuildingGizmo(o) {
                     axis === "w"
                         ? pr(px + step * sign, py, pz)
                         : axis === "d"
-                          ? pr(px, py + step * sign, pz)
-                          : pr(px, py, pz + step),
+                            ? pr(px, py + step * sign, pz)
+                            : pr(px, py, pz + step),
                 dx = q.x - s.x,
                 dy = q.y - s.y,
                 pxLen = Math.hypot(dx, dy),
@@ -817,10 +830,10 @@ function pathPipeGizmo(o) {
         radiusGap = Math.max(34 / Z, Math.min(58 / Z, 0.38 * Math.max(1, Number(orthScale()) || 1))),
         radiusDisplay = radiusHidden
             ? {
-                  x: radiusAnchor.x + radiusFallback.x * radiusGap,
-                  y: radiusAnchor.y + radiusFallback.y * radiusGap,
-                  ok: true,
-              }
+                x: radiusAnchor.x + radiusFallback.x * radiusGap,
+                y: radiusAnchor.y + radiusFallback.y * radiusGap,
+                ok: true,
+            }
             : radiusPoint;
     return {
         o,
@@ -865,12 +878,12 @@ function beveledBoxGizmo(o) {
         displayS = !raw?.ok
             ? raw
             : hidden
-              ? {
+                ? {
                     x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
                     y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
                     ok: true,
                 }
-              : {
+                : {
                     x: raw.x - visibleDir.x * displayGap,
                     y: raw.y - visibleDir.y * displayGap,
                     ok: true,
@@ -894,20 +907,20 @@ function specialGizmo(o) {
     return o && o.type === "asset" && o.asset === "beveledBox"
         ? beveledBoxGizmo(o)
         : o && o.type === "asset" && o.asset === "pathPipe"
-          ? pathPipeGizmo(o)
-          : isStackedBuildingAsset(o)
-            ? stackedBuildingGizmo(o)
-            : o && o.type === "asset" && o.asset === "building"
-              ? buildingGizmo(o)
-              : o && o.type === "asset" && o.asset === "awning"
-                ? awningGizmo(o)
-                : o && o.type === "asset" && o.asset === "sign"
-                  ? signGizmo(o)
-                  : o && o.type === "asset" && o.asset === "cone"
-                    ? coneGizmo(o)
-                    : o && o.type === "asset" && o.asset === "sphere"
-                      ? sphereGizmo(o)
-                      : null;
+            ? pathPipeGizmo(o)
+            : isStackedBuildingAsset(o)
+                ? stackedBuildingGizmo(o)
+                : o && o.type === "asset" && o.asset === "building"
+                    ? buildingGizmo(o)
+                    : o && o.type === "asset" && o.asset === "awning"
+                        ? awningGizmo(o)
+                        : o && o.type === "asset" && o.asset === "sign"
+                            ? signGizmo(o)
+                            : o && o.type === "asset" && o.asset === "cone"
+                                ? coneGizmo(o)
+                                : o && o.type === "asset" && o.asset === "sphere"
+                                    ? sphereGizmo(o)
+                                    : null;
 }
 function drawSpecialGizmo(c, o) {
     const sg = specialGizmo(o);
@@ -1283,6 +1296,8 @@ function compoundGizmo(o) {
     return g;
 }
 // 選択中の図形のギズモの位置（画面座標つき）
+// 選択オブジェクトの中心、XYZ矢印、6面ハンドル、回転リングを作る。
+// 描画とヒット判定の両方が同じ座標を使うため、見た目と操作がずれにくい。
 function gizmo() {
     const o = sel && obOf(sel);
     if (!o) return null;
@@ -1344,10 +1359,10 @@ function gizmo() {
     ev[iu] = -sn;
     ev[iv] = cs; // 高さ方向・幅方向・奥行き方向の単位ベクトル
     const F = (id, x, y, z, n) => {
-            const P3 = L2W(o, x, y, z),
-                s = scrW(P3);
-            g.faces.push({ id, n, P3, s });
-        },
+        const P3 = L2W(o, x, y, z),
+            s = scrW(P3);
+        g.faces.push({ id, n, P3, s });
+    },
         neg = (v) => v.map((t) => -t);
     // 外形の6面は、開口のある建物でも編集対象にする。
     // 積層建物だけはfloors[]を持つため、汎用面ハンドルを出さない。
@@ -1494,6 +1509,8 @@ function insidePoly2D(p, poly) {
     return inside;
 }
 // タッチした位置にあるハンドルを調べる（アセット専用→面→軸の矢印→回転の輪）
+// 画面上のクリックを、特殊アセット用→面→軸→回転リングの順で判定する。
+// 看板・階層建物・パスパイプなどはここで専用ハンドルへ分岐する。
 function hitGizmo(p) {
     const active = sel && obOf(sel),
         special = active && specialGizmo(active),
@@ -1654,6 +1671,8 @@ function stackedObjectCorners(o) {
     });
     return out;
 }
+// オブジェクトのワールド軸外接箱を返す。
+// 選択・ボックス選択・間取りヒット判定・スナップで共通利用する重要な関数。
 function obBounds(o) {
     if (o?.attachment) o = syncAttachedPart(o);
     if (o?.type === "compound") return compoundBounds(o);
@@ -1754,6 +1773,8 @@ function tauOf(C3) {
 }
 const snapSetup = (o, C3) => ({ bb: obBounds(o), targets: targetsOf(o.id), tau: tauOf(C3) });
 // 移動量deltaを、他の図形の面や地面に近ければぴったりくっつくよう補正（軸ごと）
+// 移動量deltaを、近くの外周面・角へ吸着させる。
+// 対象軸だけ補正し、他軸の移動や親子接続を壊さない。
 function snapShift(bb, delta, axes, targets, tau) {
     const d = [...delta],
         hit = new Set();
@@ -1826,8 +1847,8 @@ function faceSnap(dl) {
     const halves = isU
         ? [Math.abs(o.rb), outerH / 2]
         : isV
-          ? [Math.abs(o.ra), outerH / 2]
-          : [Math.abs(o.ra), Math.abs(o.rb)];
+            ? [Math.abs(o.ra), outerH / 2]
+            : [Math.abs(o.ra), Math.abs(o.rb)];
     const faceN0 = dot3(ed.Fa, n),
         faceN = faceN0 + dl,
         faceT = tangents.map((t) => dot3(ed.Fa, t)),
@@ -1877,8 +1898,8 @@ function beginGizmo(h, p) {
         };
     if (h.t === "stack-floor") {
         const index = stackedIndividualEdit(o)
-                ? clamp(Math.round(Number(h.floorIndex) || 0), 0, Math.max(0, (o.floors || []).length - 1))
-                : 0,
+            ? clamp(Math.round(Number(h.floorIndex) || 0), 0, Math.max(0, (o.floors || []).length - 1))
+            : 0,
             f = o.floors?.[index],
             q = stackedFloorScreen(o, index);
         if (f && q) {
@@ -2087,8 +2108,8 @@ function dragEdit(p, freeRotation = false) {
             ed.t === "stacked-opening-w-left" || ed.t === "stacked-opening-w-right"
                 ? { openingW: value }
                 : ed.t === "stacked-opening-h"
-                  ? { openingH: value }
-                  : { openingBack: value };
+                    ? { openingH: value }
+                    : { openingBack: value };
     } else if (ed.t.startsWith("stacked-")) {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -2194,8 +2215,8 @@ function dragEdit(p, freeRotation = false) {
                 o.type === "compound"
                     ? compoundFacePatch(o, ed.fid, moved)
                     : o.type === "asset" && o.asset === "building"
-                      ? buildingOuterFacePatch(o, ed.fid, moved)
-                      : facePatch(o, ed.fid, moved);
+                        ? buildingOuterFacePatch(o, ed.fid, moved)
+                        : facePatch(o, ed.fid, moved);
         }
     } // 白い四角＝面の押し引き
     else if (ed.t === "ring") {
@@ -2319,7 +2340,7 @@ function setSide(h) {
     edge.style.left = h ? "env(safe-area-inset-left,0px)" : sd.getBoundingClientRect().right + "px";
     try {
         localStorage.setItem("pgrid-side", h ? "1" : "0");
-    } catch (e) {}
+    } catch (e) { }
 }
 $("tg").onclick = () => {
     setSide(!$("side").classList.contains("hide"));
@@ -2841,8 +2862,8 @@ function exportPoint(v, tf) {
     const depth = orthView
         ? dot3(rel, orthBasis().depth)
         : T === "f"
-          ? Math.hypot(rel[0], rel[1], rel[2])
-          : cam(rel)[2];
+            ? Math.hypot(rel[0], rel[1], rel[2])
+            : cam(rel)[2];
     return { x: q.x * tf[0] + tf[4], y: q.y * tf[3] + tf[5], depth };
 }
 function buildExportDepth(cw, ch, tf) {
@@ -2928,6 +2949,8 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
 
 // ===== 線画レイヤー：線だけ別キャンバスに描き、アンチエイリアスを消して二値化する =====
 let LC = null;
+// 書き出し用の線だけを別キャンバスへ描く。
+// hidden=trueでは面の深度情報を使って、背面に隠れる線を除去する。
 function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     // tf=書き出し用の変換 [拡大,0,0,拡大,ずれx,ずれy]
     if (!LC || LC.width !== cw || LC.height !== ch) {
@@ -3166,7 +3189,10 @@ function drawObjectSurfaces(c) {
 }
 function render() {
     dirty = true;
-    if (S.some((s) => s.ob && s.cs !== sigNow())) regenObjects();
+    // sigNow()は描画1回につき一度だけ計算する。以前は線ごとに再計算していたため、
+    // アセットや線が多いシーンほど不要な文字列計算が増えていた。
+    const currentSignature = sigNow();
+    if (S.some((s) => s.ob && s.cs !== currentSignature)) regenObjects();
     syncSel();
     T === "f" ? calcF() : calc();
     const c = ctx;
@@ -3657,7 +3683,7 @@ function endBoxPointer(e, commit) {
     if (e?.pointerType === "pen") lastPen = Date.now();
     try {
         if (cv.hasPointerCapture?.(pointerId)) cv.releasePointerCapture(pointerId);
-    } catch (err) {}
+    } catch (err) { }
     if (!commit) render();
     return true;
 }
@@ -3736,6 +3762,9 @@ function pick(a, p) {
     });
     return b;
 }
+// 通常の3Dキャンバス操作の入口。
+// 間取りモードではstudio-ui.jsの専用pointerdownが先に処理し、
+// __cityFloorPlanPreempt が付いたイベントはここで通常処理をスキップする。
 cv.onpointerdown = (e) => {
     // 間取りのポインター処理はstudio-ui.jsが正面／横／上の専用ギズモを
     // 先に判定する。先行するtargetハンドラが通常編集へ入らないようにする。
@@ -3795,12 +3824,12 @@ cv.onpointerdown = (e) => {
             nav || (!selectGesture && mod)
                 ? "view"
                 : editPointer
-                  ? "draw"
-                  : pn && e.pointerType === "pen" && mode === "draw"
                     ? "draw"
-                    : touchTool
-                      ? "view"
-                      : mode; // 視点モードでは、残っている編集ツールよりもカメラ操作を優先する。
+                    : pn && e.pointerType === "pen" && mode === "draw"
+                        ? "draw"
+                        : touchTool
+                            ? "view"
+                            : mode; // 視点モードでは、残っている編集ツールよりもカメラ操作を優先する。
     if (act === "view") {
         const pan = e.shiftKey || e.altKey || e.button === 2;
         drag = {
@@ -4081,12 +4110,12 @@ function setMode(m) {
 $("mV").onclick = () => setMode("view");
 $("mD").onclick = () => setTool("pen");
 const undo = () => {
-        if (HU.length) {
-            RD.push(S);
-            S = HU.pop();
-            render();
-        }
-    },
+    if (HU.length) {
+        RD.push(S);
+        S = HU.pop();
+        render();
+    }
+},
     redo = () => {
         if (RD.length) {
             HU.push(S);
@@ -4474,13 +4503,13 @@ setInterval(() => {
     dirty = false;
     try {
         localStorage.setItem(AK, JSON.stringify(pack(false)));
-    } catch (e) {}
+    } catch (e) { }
 }, 3000);
 $("rst").onclick = () => {
     if (confirm("自動保存を消して初期化します。よろしいですか？")) {
         try {
             localStorage.removeItem(AK);
-        } catch (e) {}
+        } catch (e) { }
         location.reload();
     }
 };
@@ -4514,4 +4543,4 @@ fit();
 try {
     const t = localStorage.getItem(AK);
     if (t) unpack(JSON.parse(t));
-} catch (e) {} // 前回の自動保存があれば復元
+} catch (e) { } // 前回の自動保存があれば復元
