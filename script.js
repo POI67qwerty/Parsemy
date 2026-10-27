@@ -5083,8 +5083,13 @@ const customPt = (o, x, y, z) => {
         rx = x * cs - y * sn,
         ry = x * sn + y * cs,
         off = o.off || [0, 0, 0],
+        // custom geometry is still an asset object, so normal object movement is stored
+        // in ca/cb/lift. Include those values here or the line mesh stays behind while
+        // the generic surface mesh (L2W) moves with the object.
+        baseX = Number(o.ca) || 0,
+        baseZ = Number(o.cb) || 0,
         baseY = (Number(o.d) || -1) - (Number(o.d) || -1) * (Number(o.lift) || 0);
-    return [rx + (Number(off[0]) || 0), baseY + z + (Number(off[1]) || 0), ry + (Number(off[2]) || 0)];
+    return [rx + baseX + (Number(off[0]) || 0), baseY + z + (Number(off[1]) || 0), ry + baseZ + (Number(off[2]) || 0)];
 };
 const lineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
     c: color,

@@ -6830,8 +6830,17 @@
                     rx = x * cs - y * sn,
                     ry = x * sn + y * cs,
                     off = o.off || [0, 0, 0],
+                    // custom geometry is still an asset object, so normal object movement is stored
+                    // in ca/cb/lift. Include those values here or the line mesh stays behind while
+                    // the generic surface mesh (L2W) moves with the object.
+                    baseX = Number(o.ca) || 0,
+                    baseZ = Number(o.cb) || 0,
                     baseY = (Number(o.d) || -1) - (Number(o.d) || -1) * (Number(o.lift) || 0);
-                return [rx + (Number(off[0]) || 0), baseY + z + (Number(off[1]) || 0), ry + (Number(off[2]) || 0)];
+                return [
+                    rx + baseX + (Number(off[0]) || 0),
+                    baseY + z + (Number(off[1]) || 0),
+                    ry + baseZ + (Number(off[2]) || 0),
+                ];
             };
             const lineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
                 c: color,
@@ -12562,6 +12571,5 @@
                 render();
             })();
         </script>
-    <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a51294d35b258cef',t:'MTc5MzExMzM0MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+    <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a512c890ca909677',t:'MTc5MzExNTQ2MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
