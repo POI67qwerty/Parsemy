@@ -814,9 +814,23 @@
         }
         const count = el("stackFloorCount"),
             individualEdit = el("stackIndividualEdit"),
+            openingCheck = el("stackOpening"),
+            openingControls = el("stackOpeningControls"),
+            openingW = el("stackOpeningW"),
+            openingH = el("stackOpeningH"),
+            openingBack = el("stackOpeningBack"),
             gap = el("stackFloorGap");
         if (count && document.activeElement !== count) count.value = o.floorCount || o.floors?.length || 1;
         if (individualEdit) individualEdit.checked = stackedIndividualEdit(o);
+        if (openingCheck) openingCheck.checked = stackedOpeningEnabled(o);
+        if (openingControls) openingControls.style.display = stackedOpeningEnabled(o) ? "" : "none";
+        if (stackedOpeningEnabled(o)) {
+            const opening = stackedOpeningParams(o, o.floors?.[0]);
+            if (openingW && document.activeElement !== openingW) openingW.value = opening.openingW.toFixed(3);
+            if (openingH && document.activeElement !== openingH) openingH.value = opening.openingH.toFixed(3);
+            if (openingBack && document.activeElement !== openingBack)
+                openingBack.value = opening.openingBack.toFixed(3);
+        }
         if (gap && document.activeElement !== gap) gap.value = Number(o.floorGap || 0).toFixed(3);
         const title = el("stackedPanelTitle"),
             bevelControls = el("stackBevelControls");
@@ -904,6 +918,42 @@
         });
         render();
     }
+    function applyStackOpeningProp(name, value) {
+        const o = sel && obOf(sel);
+        if (!o || !isStackedBuildingAsset(o)) return;
+        if (!stackedEditSession) {
+            HU.push(S);
+            RD = [];
+            stackedEditSession = true;
+        }
+        const first = o.floors?.[0],
+            g = stackedOpeningParams(o, first),
+            next =
+                name === "openingEnabled"
+                    ? !!value
+                    : name === "openingW"
+                      ? clamp(Number(value) || g.openingW, 0.1, Math.max(0.1, g.w - 0.1))
+                      : name === "openingH"
+                        ? clamp(Number(value) || g.openingH, 0.1, Math.max(0.1, g.h - g.rimHeight - 0.01))
+                        : clamp(
+                              Number.isFinite(Number(value)) ? Number(value) : g.openingBack,
+                              -g.d * 0.5 + 0.025,
+                              g.d * 0.5 - 0.025,
+                          );
+        setOb(o.id, {
+            openingEnabled: name === "openingEnabled" ? next : stackedOpeningEnabled(o),
+            [name]: next,
+            openingW: name === "openingW" ? next : g.openingW,
+            openingH: name === "openingH" ? next : g.openingH,
+            openingBack:
+                name === "openingBack"
+                    ? next
+                    : Number.isFinite(Number(o.openingBack))
+                      ? Number(o.openingBack)
+                      : g.openingBack,
+        });
+        render();
+    }
     function applyStackBevelProp(name, value) {
         const o = sel && obOf(sel);
         if (!isBeveledStackedBuildingAsset(o) || !Number.isFinite(value) || !o.floors?.length) return;
@@ -932,6 +982,21 @@
         const input = el(id);
         if (!input) return;
         input.oninput = () => applyStackBevelProp(name, parseFloat(input.value));
+        input.onchange = () => {
+            stackedEditSession = false;
+        };
+    });
+    const stackOpeningCheck = el("stackOpening");
+    if (stackOpeningCheck)
+        stackOpeningCheck.onchange = () => applyStackOpeningProp("openingEnabled", stackOpeningCheck.checked);
+    [
+        ["stackOpeningW", "openingW"],
+        ["stackOpeningH", "openingH"],
+        ["stackOpeningBack", "openingBack"],
+    ].forEach(([id, name]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => applyStackOpeningProp(name, parseFloat(input.value));
         input.onchange = () => {
             stackedEditSession = false;
         };
@@ -2236,16 +2301,60 @@
             add("d", "奥行−", L2W(o, 0, -o.rb, zc), L2W(o, 0, -o.rb - 0.1, zc), Math.abs(o.rb) * 2, 0.01, -1);
             // 真横ビューは黒い外枠の上端・下端へ高さハンドルを置く。
             // 看板の内部余白を含む全高 h の外側へは逃がさない。
-            add("h", "上端", L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + 0.1), Math.max(0, Number(o.h) || 0), 0, 1);
-            add("h", "下端", L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - 0.1), Math.max(0, Number(o.h) || 0), 0, -1);
+            // ベベル直方体は初期状態が厚み0の面なので、下端と上端が
+            // 同じ位置に重なって移動を奪わないよう、高さハンドルを上へ逃がす。
+            if (Math.max(0, Number(o.h) || 0) <= 1e-6) {
+                const gap = Math.max(
+                    48 / Z,
+                    Math.min(
+                        88 / Z,
+                        Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)) * orthScale() * 0.65,
+                    ),
+                );
+                handles.push({
+                    kind: "h",
+                    label: "高さ",
+                    s: { x: center.x, y: center.y - gap, ok: true },
+                    dir: { x: 0, y: -1 },
+                    scale: orthScale(),
+                    start: 0,
+                    min: 0,
+                    screen: true,
+                });
+            } else {
+                add("h", "上端", L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + 0.1), Math.max(0, Number(o.h) || 0), 0, 1);
+                add("h", "下端", L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - 0.1), Math.max(0, Number(o.h) || 0), 0, -1);
+            }
         } else if (orthView === "front") {
             // 正面では幅と高さを直接編集し、見えない奥行きは画面上へ逃がしたハンドルで編集する。
             // 正面の幅ハンドルも、看板では黒い外枠の下端へ置く。
             // 全高の底面 z=0 に置くと、看板の外枠から下へ浮いてしまう。
             add("w", "幅＋", L2W(o, o.ra, 0, z0), L2W(o, o.ra + 0.1, 0, z0), Math.abs(o.ra) * 2, 0.01, 1);
             add("w", "幅−", L2W(o, -o.ra, 0, z0), L2W(o, -o.ra - 0.1, 0, z0), Math.abs(o.ra) * 2, 0.01, -1);
-            add("h", "上端", L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + 0.1), Math.max(0, Number(o.h) || 0), 0, 1);
-            add("h", "下端", L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - 0.1), Math.max(0, Number(o.h) || 0), 0, -1);
+            // 初期の厚み0では上下端が同じ画面点になり、クリックが高さ編集へ
+            // 吸われる。高さハンドルを上へ逃がして面の移動を残す。
+            if (Math.max(0, Number(o.h) || 0) <= 1e-6) {
+                const gap = Math.max(
+                    48 / Z,
+                    Math.min(
+                        88 / Z,
+                        Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)) * orthScale() * 0.65,
+                    ),
+                );
+                handles.push({
+                    kind: "h",
+                    label: "高さ",
+                    s: { x: center.x, y: center.y - gap, ok: true },
+                    dir: { x: 0, y: -1 },
+                    scale: orthScale(),
+                    start: 0,
+                    min: 0,
+                    screen: true,
+                });
+            } else {
+                add("h", "上端", L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + 0.1), Math.max(0, Number(o.h) || 0), 0, 1);
+                add("h", "下端", L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - 0.1), Math.max(0, Number(o.h) || 0), 0, -1);
+            }
             const gap = Math.max(
                 48 / Z,
                 Math.min(
@@ -2519,8 +2628,14 @@
             c.arc(h.object.s.x, h.object.s.y, r * 0.52, -Math.PI * 0.15, Math.PI * 1.3);
             c.stroke();
             drawFloorMoveGizmo(c, h.object.o);
-            if (tool === "edit" && floorPlanEditHandles()?.special) drawSpecialGizmo(c, h.object.o);
-            else drawFloorPlanEditHandles(c);
+            const editHandles = floorPlanEditHandles();
+            if (editHandles?.special) drawSpecialGizmo(c, h.object.o);
+            else {
+                drawFloorPlanEditHandles(c);
+                // ベベル直方体は通常の幅／奥行／高さハンドルに加えて、
+                // 断面オフセット用の専用ハンドルも同じビューへ表示する。
+                if (tool === "edit" && h.object.o.asset === "beveledBox") drawSpecialGizmo(c, h.object.o);
+            }
         }
         // カメラ：本体をドラッグして位置、先端の丸をドラッグして向き
         const k = h.camera,
@@ -2963,6 +3078,15 @@
         },
         true,
     );
+    // canvasのIDLイベントハンドラ（engine-tools.js）がstudio-uiの後付け
+    // listenerより先に呼ばれるブラウザでも、間取りの専用経路を優先する。
+    document.addEventListener(
+        "pointerdown",
+        (e) => {
+            if (window.cityFloorPlanActive && e.target === cv) e.__cityFloorPlanPreempt = true;
+        },
+        true,
+    );
     cv.addEventListener(
         "pointerdown",
         (e) => {
@@ -2982,6 +3106,7 @@
                     customFloorGizmo =
                         ["stackedBuilding", "beveledStackedBuilding"].includes(customAsset) ||
                         customAsset === "pathPipe" ||
+                        (customAsset === "beveledBox" && special?.t === "beveled-offset") ||
                         special?.t?.startsWith("sign-") ||
                         (special?.t === "face" && customAsset === "sign");
                 if (special && customFloorGizmo) {
@@ -2995,6 +3120,31 @@
                     } catch (err) {}
                     syncSel();
                     render();
+                    return;
+                }
+            }
+            // 正面／横ビューにも、上面と同じ回転ハンドルを用意する。
+            // これまではこの2ビューだけ先に高さ／移動判定へ落ち、回転丸を
+            // 押しても通常の面編集として扱われていた。
+            if (tool === "edit" && sel && (orthView === "front" || orthView === "side")) {
+                const turn = floorPlanHandles(),
+                    turnLimit = 24 / Z;
+                if (turn.object?.s?.ok && Math.hypot(turn.object.s.x - p.x, turn.object.s.y - p.y) < turnLimit) {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    floorPlanDrag = {
+                        kind: "turnScreen",
+                        pointerId: e.pointerId,
+                        id: turn.object.o.id,
+                        center: turn.object.center,
+                        angle0: Math.atan2(-(p.y - turn.object.center.y), p.x - turn.object.center.x),
+                        rot0: Number(turn.object.o.rot) || 0,
+                        p0: p,
+                        started: false,
+                    };
+                    try {
+                        cv.setPointerCapture(e.pointerId);
+                    } catch (err) {}
                     return;
                 }
             }
@@ -3417,6 +3567,24 @@
                     (floorPlanDrag.group || [o]).forEach((g) =>
                         setOb(g.id, moveBy(g, q.d, !!(g.attachment?.parentId && ids.has(g.attachment.parentId)))),
                     );
+                }
+                render();
+                return;
+            }
+            if (floorPlanDrag.kind === "turnScreen") {
+                const o = obOf(floorPlanDrag.id),
+                    p = pos(e),
+                    dx = p.x - floorPlanDrag.center.x,
+                    dy = p.y - floorPlanDrag.center.y;
+                if (o && o.k === 1 && Math.hypot(dx, dy) > 1) {
+                    let angle = (Math.atan2(-dy, dx) - floorPlanDrag.angle0) / DG + floorPlanDrag.rot0;
+                    if (!e.shiftKey) angle = Math.round(angle / 15) * 15;
+                    if (!floorPlanDrag.started) {
+                        HU.push(S);
+                        RD = [];
+                        floorPlanDrag.started = true;
+                    }
+                    setOb(o.id, { rot: angle360(angle) });
                 }
                 render();
                 return;

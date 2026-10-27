@@ -549,6 +549,131 @@ function stackedBevelHandle(o, f, index) {
         label: "ベベル",
     };
 }
+function stackedOpeningGizmo(o) {
+    if (!isStackedBuildingAsset(o) || !stackedOpeningEnabled(o)) return null;
+    const floors = Array.isArray(o.floors) && o.floors.length ? o.floors : [];
+    if (!floors.length || typeof stackedOpeningParams !== "function") return null;
+    const f = floors[0],
+        g = stackedOpeningParams(o, f),
+        fx = Number(f.x) || 0,
+        fy = Number(f.y) || 0,
+        fz = Number(f.z) || 0,
+        near = -g.d * 0.5,
+        far = g.d * 0.5,
+        pr = (x, y, z) => scrW(customPt(o, fx + x, fy + y, fz + z)),
+        stepW = Math.max(0.05, g.w * 0.06),
+        stepH = Math.max(0.05, g.h * 0.06),
+        mk = (kind, s, q, start, min, max, step, factor = 1) => {
+            const dx = q.x - s.x,
+                dy = q.y - s.y,
+                length = Math.hypot(dx, dy),
+                hidden = !Number.isFinite(length) || length <= 0.5 / Z,
+                fallback =
+                    kind === "stacked-opening-h"
+                        ? { x: 0, y: -1 }
+                        : kind.endsWith("left")
+                          ? { x: -1, y: 0 }
+                          : { x: 1, y: 0 },
+                gap = Math.max(30 / Z, Math.min(54 / Z, 0.34 * Math.max(1, Number(orthScale()) || 1))),
+                display = hidden ? { ...s, x: s.x + fallback.x * gap, y: s.y + fallback.y * gap, ok: true } : s;
+            return {
+                kind,
+                s: display,
+                dir: hidden ? fallback : { x: dx / length, y: dy / length },
+                scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : length / step || 1,
+                start,
+                min,
+                max,
+                factor,
+            };
+        },
+        left = pr(-g.openingW * 0.5, near, g.openingH * 0.5),
+        right = pr(g.openingW * 0.5, near, g.openingH * 0.5),
+        top = pr(0, near, g.openingH),
+        backCenter = pr(0, g.openingBack, g.openingH * 0.5),
+        front = {
+            center: pr(0, near, g.openingH * 0.5),
+            frame: [
+                pr(-g.openingW * 0.5, near, 0),
+                pr(-g.openingW * 0.5, near, g.openingH),
+                pr(g.openingW * 0.5, near, g.openingH),
+                pr(g.openingW * 0.5, near, 0),
+            ],
+            handles: {
+                left: mk(
+                    "stacked-opening-w-left",
+                    left,
+                    pr(-g.openingW * 0.5 - stepW, near, g.openingH * 0.5),
+                    g.openingW,
+                    0.1,
+                    Math.max(0.1, g.w - 0.1),
+                    stepW,
+                    2,
+                ),
+                right: mk(
+                    "stacked-opening-w-right",
+                    right,
+                    pr(g.openingW * 0.5 + stepW, near, g.openingH * 0.5),
+                    g.openingW,
+                    0.1,
+                    Math.max(0.1, g.w - 0.1),
+                    stepW,
+                    2,
+                ),
+                height: mk(
+                    "stacked-opening-h",
+                    top,
+                    pr(0, near, g.openingH + stepH),
+                    g.openingH,
+                    0.1,
+                    Math.max(0.1, g.h - g.rimHeight - 0.01),
+                    stepH,
+                ),
+            },
+        },
+        backFrame = [
+            pr(-g.openingW * 0.5, far, 0),
+            pr(-g.openingW * 0.5, far, g.openingH),
+            pr(g.openingW * 0.5, far, g.openingH),
+            pr(g.openingW * 0.5, far, 0),
+        ],
+        panelFrame = [
+            pr(-g.openingW * 0.5, g.openingBack, 0),
+            pr(-g.openingW * 0.5, g.openingBack, g.openingH),
+            pr(g.openingW * 0.5, g.openingBack, g.openingH),
+            pr(g.openingW * 0.5, g.openingBack, 0),
+        ],
+        panelProbe = pr(0, g.openingBack + (g.openingBack >= 0 ? 0.1 : -0.1), g.openingH * 0.5),
+        pdx = panelProbe.x - backCenter.x,
+        pdy = panelProbe.y - backCenter.y,
+        ppx = Math.hypot(pdx, pdy),
+        panelProjected = Number.isFinite(ppx) && ppx > 0.5 / Z,
+        panelDir = panelProjected ? { x: pdx / ppx, y: pdy / ppx } : { x: 1, y: 0 },
+        panelScale = panelProjected ? ppx / 0.1 : Math.max(24, orthView ? orthScale() : 24);
+    return {
+        o,
+        opening: g,
+        front,
+        backFrame,
+        panelFrame,
+        panelCenter: backCenter,
+        handles: {
+            ...front.handles,
+            backFace: {
+                kind: "stacked-opening-back",
+                s: backCenter,
+                dir: panelDir,
+                scale: panelScale,
+                start: g.openingBack,
+                min: -g.d * 0.5 + 0.025,
+                max: g.d * 0.5 - 0.025,
+                factor: 1,
+                side: g.openingBack >= 0 ? 1 : -1,
+            },
+        },
+        C3: customPt(o, fx, fy, fz + g.h * 0.5),
+    };
+}
 function stackedBuildingGizmo(o) {
     if (!isStackedBuildingAsset(o)) return null;
     const floors = Array.isArray(o.floors) && o.floors.length ? o.floors : [];
@@ -602,8 +727,9 @@ function stackedBuildingGizmo(o) {
             height: make("stacked-height", x, y, z + h, "h", 1, "高さ"),
         },
         frame = [pr(x - w / 2, y, z), pr(x - w / 2, y, z + h), pr(x + w / 2, y, z + h), pr(x + w / 2, y, z)],
-        bevelHandle = stackedBevelHandle(o, f, index);
-    return { o, C3: p3(x, y, z + h * 0.5), center, frame, handles, bevelHandle, floorIndex: index };
+        bevelHandle = stackedBevelHandle(o, f, index),
+        opening = stackedOpeningGizmo(o);
+    return { o, C3: p3(x, y, z + h * 0.5), center, frame, handles, bevelHandle, opening, floorIndex: index };
 }
 function pathPipeGizmo(o) {
     if (
@@ -731,19 +857,29 @@ function beveledBoxGizmo(o) {
         projected = !!raw?.ok && !!probe?.ok && Number.isFinite(length),
         hidden = projected && length <= 0.5 / Z,
         fallback = orthView === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 },
+        visibleDir = hidden ? fallback : { x: dx / length, y: dy / length },
+        // 断面の実点は外周線のすぐ内側にあるため、そこへハンドルを置くと
+        // 面／移動ギズモと重なって「移動できない」ように見える。表示だけを
+        // 外側へ逃がし、編集量の方向とスケールは実点の投影から保つ。
+        displayGap = Math.max(48 / Z, 56 / Z),
+        displayS = !raw?.ok
+            ? raw
+            : hidden
+              ? {
+                    x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
+                    y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
+                    ok: true,
+                }
+              : {
+                    x: raw.x - visibleDir.x * displayGap,
+                    y: raw.y - visibleDir.y * displayGap,
+                    ok: true,
+                },
         handle = {
             kind: "beveled-offset",
-            s: !raw?.ok
-                ? raw
-                : hidden
-                  ? {
-                        x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
-                        y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
-                        ok: true,
-                    }
-                  : raw,
+            s: displayS,
             anchor,
-            dir: hidden ? fallback : { x: dx / length, y: dy / length },
+            dir: visibleDir,
             scale: hidden
                 ? Math.max(24, orthView ? orthScale() : 24)
                 : length / Math.max(0.0001, Math.min(step, q.max - q.bevelOffset || step)),
@@ -877,6 +1013,40 @@ function drawSpecialGizmo(c, o) {
         c.fillStyle = "#ffd0a8";
         c.font = `bold ${12 / Z}px system-ui`;
         c.fillText(`${sg.floorIndex + 1}F 幅/奥行/高さ`, sg.center.x + 8 / Z, sg.center.y - 8 / Z);
+        const opening = sg.opening;
+        if (opening) {
+            const drawFrame = (frame, color = "#8ce6c2") => {
+                if (!frame?.every((q) => q && q.ok)) return;
+                c.strokeStyle = color;
+                c.lineWidth = 1.25 / Z;
+                c.beginPath();
+                frame.forEach((q, i) => (i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)));
+                c.closePath();
+                c.stroke();
+            };
+            drawFrame(opening.front.frame, "#8ce6c2");
+            drawFrame(opening.panelFrame, "#ffd37a");
+            c.strokeStyle = "#8ce6c2";
+            c.beginPath();
+            [opening.handles.left, opening.handles.right, opening.handles.height].forEach((h) => {
+                if (h?.s?.ok) {
+                    c.moveTo(opening.front.center.x, opening.front.center.y);
+                    c.lineTo(h.s.x, h.s.y);
+                }
+            });
+            c.stroke();
+            [opening.handles.left, opening.handles.right, opening.handles.height].forEach((h) => sq(h.s, "#8ce6c2"));
+            if (opening.handles.backFace?.s?.ok) {
+                c.strokeStyle = "#ffd37a";
+                c.beginPath();
+                c.moveTo(opening.panelCenter.x, opening.panelCenter.y);
+                c.lineTo(opening.handles.backFace.s.x, opening.handles.backFace.s.y);
+                c.stroke();
+                sq(opening.handles.backFace.s, "#ffd37a", true);
+            }
+            c.fillStyle = "#d8fff0";
+            c.fillText("1F 開口 W/H", opening.front.center.x + 8 / Z, opening.front.center.y - 8 / Z);
+        }
         if (sg.bevelHandle?.s?.ok && sg.bevelHandle?.anchor?.ok) {
             const bh = sg.bevelHandle;
             c.setLineDash([4 / Z, 3 / Z]);
@@ -1354,6 +1524,23 @@ function hitGizmo(p) {
             }
         }
         if (isStackedBuildingAsset(active)) {
+            const opening = special.opening;
+            if (opening) {
+                for (const h of [
+                    opening.handles.left,
+                    opening.handles.right,
+                    opening.handles.height,
+                    opening.handles.backFace,
+                ])
+                    if (h?.s?.ok && Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
+                        return { t: h.kind, sign: h, g: { o: active, C3: opening.C3 } };
+                if (opening.panelFrame?.every((q) => q && q.ok) && insidePoly2D(p, opening.panelFrame))
+                    return {
+                        t: "stacked-opening-back",
+                        sign: opening.handles.backFace,
+                        g: { o: active, C3: opening.C3 },
+                    };
+            }
             if (
                 special.bevelHandle?.s?.ok &&
                 Math.hypot(special.bevelHandle.s.x - p.x, special.bevelHandle.s.y - p.y) < R
@@ -1890,6 +2077,18 @@ function dragEdit(p, freeRotation = false) {
                 h: (Number(last?.z) || 0) + (Number(last?.h) || 0),
             };
         }
+    } else if (ed.t.startsWith("stacked-opening-")) {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1),
+            value = clamp(h.start + (h.factor || 1) * amount, h.min, h.max);
+        patch =
+            ed.t === "stacked-opening-w-left" || ed.t === "stacked-opening-w-right"
+                ? { openingW: value }
+                : ed.t === "stacked-opening-h"
+                  ? { openingH: value }
+                  : { openingBack: value };
     } else if (ed.t.startsWith("stacked-")) {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -2236,6 +2435,83 @@ function exportSurfaceTriangles(o) {
             quad(a, b, c, d0);
         }
     };
+    const openingBoxAt = (cx, cy, bw, bd, z0, z1, opening) => {
+        const x = bw / 2,
+            y = bd / 2,
+            ow = clamp(Number(opening.openingW) || bw * 0.56, 0.1, Math.max(0.1, bw - 0.1)),
+            oh = clamp(Number(opening.openingH) || (z1 - z0) * 0.66, 0.1, Math.max(0.1, z1 - z0 - 0.01)),
+            panelY = clamp(Number(opening.openingBack), -y + 0.025, y - 0.025),
+            q = (a, b, c, d) => quad(a, b, c, d);
+        q([-x, -y, z0], [x, -y, z0], [x, y, z0], [-x, y, z0]);
+        q([-x, -y, z1], [-x, y, z1], [x, y, z1], [x, -y, z1]);
+        q([-x, -y, z0], [-x, -y, z1], [-x, y, z1], [-x, y, z0]);
+        q([x, -y, z0], [x, y, z0], [x, y, z1], [x, -y, z1]);
+        q([-x, y, z0], [-x, y, z1], [x, y, z1], [x, y, z0]);
+        q([-x, -y, z0], [-ow / 2, -y, z0], [-ow / 2, -y, z1], [-x, -y, z1]);
+        q([ow / 2, -y, z0], [x, -y, z0], [x, -y, z1], [ow / 2, -y, z1]);
+        q([-ow / 2, -y, oh + z0], [ow / 2, -y, oh + z0], [ow / 2, -y, z1], [-ow / 2, -y, z1]);
+        q([-ow / 2, -y, z0], [-ow / 2, panelY, z0], [-ow / 2, panelY, oh + z0], [-ow / 2, -y, oh + z0]);
+        q([ow / 2, -y, z0], [ow / 2, -y, oh + z0], [ow / 2, panelY, oh + z0], [ow / 2, panelY, z0]);
+        q([-ow / 2, -y, oh + z0], [-ow / 2, panelY, oh + z0], [ow / 2, panelY, oh + z0], [ow / 2, -y, oh + z0]);
+        q([-ow / 2, panelY, z0], [ow / 2, panelY, z0], [ow / 2, panelY, oh + z0], [-ow / 2, panelY, oh + z0]);
+    };
+    const beveledOpeningAt = (cx, cy, bw, bd, z0, z1, offset, segments, opening) => {
+        const footprint = beveledBoxFootprint(bw, bd, offset, segments),
+            x = bw / 2,
+            y = bd / 2,
+            ow = clamp(Number(opening.openingW) || bw * 0.56, 0.1, Math.max(0.1, bw - 0.1)),
+            oh = clamp(Number(opening.openingH) || (z1 - z0) * 0.66, 0.1, Math.max(0.1, z1 - z0 - 0.01)),
+            panelY = clamp(Number(opening.openingBack), -y + 0.025, y - 0.025),
+            bottom = [cx, cy, z0],
+            top = [cx, cy, z1];
+        for (let i = 0; i < footprint.length; i++) {
+            const j = (i + 1) % footprint.length,
+                a = [cx + footprint[i][0], cy + footprint[i][1], z0],
+                b = [cx + footprint[j][0], cy + footprint[j][1], z0],
+                c = [cx + footprint[j][0], cy + footprint[j][1], z1],
+                d0 = [cx + footprint[i][0], cy + footprint[i][1], z1],
+                near = Math.abs(footprint[i][1] + y) < 1e-4 && Math.abs(footprint[j][1] + y) < 1e-4;
+            tri(bottom, b, a);
+            tri(top, d0, c);
+            if (!near) quad(a, b, c, d0);
+            else {
+                const lo = Math.min(footprint[i][0], footprint[j][0]) + cx,
+                    hi = Math.max(footprint[i][0], footprint[j][0]) + cx,
+                    wall = (xa, xb, za, zb) => {
+                        const l = Math.max(lo, xa + cx),
+                            r = Math.min(hi, xb + cx);
+                        if (r > l + 1e-5) quad([l, cy - y, za], [r, cy - y, za], [r, cy - y, zb], [l, cy - y, zb]);
+                    };
+                wall(-x, -ow / 2, z0, z1);
+                wall(ow / 2, x, z0, z1);
+                wall(-ow / 2, ow / 2, oh + z0, z1);
+            }
+        }
+        quad(
+            [cx - ow / 2, cy - y, z0],
+            [cx - ow / 2, cy + panelY, z0],
+            [cx - ow / 2, cy + panelY, oh + z0],
+            [cx - ow / 2, cy - y, oh + z0],
+        );
+        quad(
+            [cx + ow / 2, cy - y, z0],
+            [cx + ow / 2, cy - y, oh + z0],
+            [cx + ow / 2, cy + panelY, oh + z0],
+            [cx + ow / 2, cy + panelY, z0],
+        );
+        quad(
+            [cx - ow / 2, cy - y, oh + z0],
+            [cx - ow / 2, cy + panelY, oh + z0],
+            [cx + ow / 2, cy + panelY, oh + z0],
+            [cx + ow / 2, cy - y, oh + z0],
+        );
+        quad(
+            [cx - ow / 2, cy + panelY, z0],
+            [cx + ow / 2, cy + panelY, z0],
+            [cx + ow / 2, cy + panelY, oh + z0],
+            [cx - ow / 2, cy + panelY, oh + z0],
+        );
+    };
     const ellipsoid = (cx, cy, cz, rx, ry, rz, lat = 8, lon = 12) => {
         for (let j = 0; j < lat; j++) {
             const p0 = -Math.PI / 2 + (j * Math.PI) / lat,
@@ -2317,7 +2593,7 @@ function exportSurfaceTriangles(o) {
             Array.isArray(o.floors) && o.floors.length
                 ? o.floors
                 : [{ x: 0, y: 0, z: 0, w, d, h, rimHeight: 0.16, rimOverhang: 0.18 }];
-        floors.forEach((f) => {
+        floors.forEach((f, i) => {
             const fw = Math.max(0.05, Math.abs(Number(f.w) || w)),
                 fd = Math.max(0.05, Math.abs(Number(f.d) || d)),
                 fh = Math.max(0.05, Math.abs(Number(f.h) || h)),
@@ -2333,13 +2609,16 @@ function exportSurfaceTriangles(o) {
                     f.bevelSegments,
                     f.bevelEdges,
                     beveledBoxSegments(o.bevelSegments, o.bevelEdges),
-                );
+                ),
+                opening = i === 0 && stackedOpeningEnabled(o) ? stackedOpeningParams(o, f) : null;
             if (kind === "beveledStackedBuilding") {
-                beveledAt(fx, fy, fw, fd, fz, fz + fh, bevelOffset, bevelSegments);
+                if (opening) beveledOpeningAt(fx, fy, fw, fd, fz, fz + fh, bevelOffset, bevelSegments, opening);
+                else beveledAt(fx, fy, fw, fd, fz, fz + fh, bevelOffset, bevelSegments);
                 // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
                 beveledAt(fx, fy, fw + ro * 2, fd + ro * 2, fz + fh - rh, fz + fh, bevelOffset, bevelSegments);
             } else {
-                boxAt(fx, fy, fw, fd, fz, fz + fh);
+                if (opening) openingBoxAt(fx, fy, fw, fd, fz, fz + fh, opening);
+                else boxAt(fx, fy, fw, fd, fz, fz + fh);
                 // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
                 boxAt(fx, fy, fw + ro * 2, fd + ro * 2, fz + fh - rh, fz + fh);
             }
@@ -3460,6 +3739,9 @@ function pick(a, p) {
     return b;
 }
 cv.onpointerdown = (e) => {
+    // 間取りのポインター処理はstudio-ui.jsが正面／横／上の専用ギズモを
+    // 先に判定する。先行するtargetハンドラが通常編集へ入らないようにする。
+    if (e.__cityFloorPlanPreempt) return;
     const touch = e.pointerType === "touch";
     if (touch && ptrType === "pen") return; // ペンで描いている間の手のひらは無視
     if (touch) {

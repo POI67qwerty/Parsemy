@@ -200,6 +200,22 @@ function beveledBoxParams(o) {
         bevelSegments = beveledBoxSegments(o?.bevelSegments, o?.bevelEdges);
     return { w, d, max, bevelOffset, bevelSegments };
 }
+function stackedOpeningParams(o, f = o?.floors?.[0]) {
+    const w = Math.max(0.05, Math.abs(Number(f?.w) || Number(o?.ra || 2) * 2)),
+        d = Math.max(0.05, Math.abs(Number(f?.d) || Number(o?.rb || 1.5) * 2)),
+        h = Math.max(0.05, Math.abs(Number(f?.h) || 2.2)),
+        rimHeight = clamp(Math.abs(Number(f?.rimHeight) || Number(o?.rimHeight) || 0.16), 0.01, h),
+        maxW = Math.max(0.1, w - 0.1),
+        maxH = Math.max(0.1, h - rimHeight - 0.01),
+        openingW = clamp(Number(o?.openingW) || w * 0.56, 0.1, maxW),
+        openingH = clamp(Number(o?.openingH) || h * 0.66, 0.1, maxH),
+        openingBack = clamp(
+            Number.isFinite(Number(o?.openingBack)) ? Number(o.openingBack) : d * 0.5 - 0.025,
+            -d * 0.5 + 0.025,
+            d * 0.5 - 0.025,
+        );
+    return { w, d, h, rimHeight, openingW, openingH, openingBack };
+}
 function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
     const x = w / 2,
         y = d / 2,
@@ -576,10 +592,102 @@ function assetLines(o) {
                 ),
             );
         };
+        const openingEnabled = stackedOpeningEnabled(o);
+        const addOpeningWire = (f, w, d, h, opening) => {
+            const ox = Number(f.x || 0),
+                oy = Number(f.y || 0),
+                oz = Number(f.z || 0),
+                near = -d * 0.5,
+                far = d * 0.5,
+                panelY = opening.openingBack,
+                ow = opening.openingW,
+                oh = opening.openingH,
+                toWorld = (p) => [p[0] + ox, p[1] + oy, p[2] + oz],
+                line = (points, color = a, width = 1.1) => out.push(customLineA(o, points.map(toWorld), color, width));
+            // 開口を持つ1Fの外周・開口枠・内側底辺／奥面を、既存の開口建物と同じ順で描く。
+            line([
+                [-w / 2, near, h],
+                [w / 2, near, h],
+            ]);
+            line([
+                [-w / 2, far, h],
+                [w / 2, far, h],
+            ]);
+            line([
+                [-ow / 2, near, 0],
+                [-ow / 2, near, oh],
+                [ow / 2, near, oh],
+                [ow / 2, near, 0],
+            ]);
+            line([
+                [-ow / 2, far, 0],
+                [-ow / 2, far, oh],
+                [ow / 2, far, oh],
+                [ow / 2, far, 0],
+            ]);
+            if (Math.abs(panelY - far) > 0.01)
+                line([
+                    [-ow / 2, panelY, 0],
+                    [-ow / 2, panelY, oh],
+                    [ow / 2, panelY, oh],
+                    [ow / 2, panelY, 0],
+                ]);
+            // 開口の床面／奥面の下辺は省略しない。正面側と閉じた内壁側の両方へ描く。
+            line(
+                [
+                    [-ow / 2, near, 0.012],
+                    [ow / 2, near, 0.012],
+                ],
+                a,
+                1.05,
+            );
+            line(
+                [
+                    [-ow / 2, panelY, 0.012],
+                    [ow / 2, panelY, 0.012],
+                ],
+                a,
+                1.15,
+            );
+            line(
+                [
+                    [-ow / 2, near, 0],
+                    [-ow / 2, panelY, 0],
+                    [-ow / 2, panelY, oh],
+                    [-ow / 2, near, oh],
+                    [-ow / 2, near, 0],
+                ],
+                a,
+                1.0,
+            );
+            line(
+                [
+                    [ow / 2, near, 0],
+                    [ow / 2, near, oh],
+                    [ow / 2, panelY, oh],
+                    [ow / 2, panelY, 0],
+                    [ow / 2, near, 0],
+                ],
+                a,
+                1.0,
+            );
+            line(
+                [
+                    [-ow / 2, near, oh],
+                    [ow / 2, near, oh],
+                    [ow / 2, panelY, oh],
+                    [-ow / 2, panelY, oh],
+                    [-ow / 2, near, oh],
+                ],
+                a,
+                1.0,
+            );
+        };
         floors.forEach((f, i) => {
             const w = Math.max(0.05, Math.abs(Number(f.w) || Number(o.ra || 2) * 2)),
                 d = Math.max(0.05, Math.abs(Number(f.d) || Number(o.rb || 1.5) * 2)),
                 h = Math.max(0.05, Math.abs(Number(f.h) || 2.2)),
+                opening = i === 0 && openingEnabled ? stackedOpeningParams(o, f) : null,
                 rh = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, h),
                 ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18)),
                 bevelOffset = Number.isFinite(Number(f.bevelOffset))
@@ -591,13 +699,15 @@ function assetLines(o) {
                     beveledBoxSegments(o.bevelSegments, o.bevelEdges),
                 );
             // 本体の上辺は上側の縁に隠れるため描かず、下側の縁は全階で作らない。
-            // 1階だけは床側の本体辺を残す。
+            // 開口をONにした場合だけ、1F本体へ開口枠・内側面を追加する。
             if (kind === "beveledStackedBuilding") {
                 addBeveledBox(f, w, d, 0, h, bevelOffset, bevelSegments, f.c || c, { bottom: i === 0, top: false });
+                if (opening) addOpeningWire(f, w, d, h, opening);
                 // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
                 addBeveledBox(f, w + ro * 2, d + ro * 2, h - rh, rh, bevelOffset, bevelSegments, f.rimColor || a);
             } else {
                 addBox(f, w, d, 0, h, f.c || c, { bottom: i === 0, top: false });
+                if (opening) addOpeningWire(f, w, d, h, opening);
                 // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
                 addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
             }
@@ -1366,8 +1476,10 @@ function normalizedAsset(o) {
             bevelSegments = beveledBoxSegments(q.bevelSegments, q.bevelEdges);
         return { ...q, bevelOffset, bevelSegments, h: Math.max(0, Number(q.h) || 0) };
     }
-    if (q && q.asset === "beveledStackedBuilding") {
+    if (q && isStackedBuildingAsset(q)) {
         const source = Array.isArray(q.floors) && q.floors.length ? q.floors : [],
+            first = source[0] || { w: Number(q.ra) * 2 || 4, d: Number(q.rb) * 2 || 3, h: 2.2, rimHeight: 0.16 },
+            opening = stackedOpeningParams(q, first),
             baseOffset = Number.isFinite(Number(q.bevelOffset)) ? Number(q.bevelOffset) : 0.28,
             baseSegments = beveledBoxSegments(q.bevelSegments, q.bevelEdges),
             floors = source.map((f) => {
@@ -1380,8 +1492,11 @@ function normalizedAsset(o) {
             });
         return {
             ...q,
-            bevelOffset: baseOffset,
-            bevelSegments: baseSegments,
+            ...(q.asset === "beveledStackedBuilding" ? { bevelOffset: baseOffset, bevelSegments: baseSegments } : {}),
+            openingEnabled: stackedOpeningEnabled(q),
+            openingW: opening.openingW,
+            openingH: opening.openingH,
+            openingBack: opening.openingBack,
             floors,
             h: floors.reduce((max, f) => Math.max(max, (Number(f.z) || 0) + (Number(f.h) || 0)), 0),
         };

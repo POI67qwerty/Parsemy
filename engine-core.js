@@ -8,6 +8,9 @@ function isStackedBuildingAsset(o) {
 function isBeveledStackedBuildingAsset(o) {
     return o?.type === "asset" && o.asset === "beveledStackedBuilding";
 }
+function stackedOpeningEnabled(o) {
+    return !!(o && isStackedBuildingAsset(o) && (o.openingEnabled === true || o.opening === true));
+}
 const cv = $("cv"),
     ctx = cv.getContext("2d");
 let W = 1600,
@@ -157,6 +160,13 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <div id=stackedP style="display:none"><h3 id=stackedPanelTitle>縁付き階層建物</h3>
 <label><span>階数</span><input type=number class=nv id=stackFloorCount min=1 max=30 step=1 style="width:100px"></label>
 <label><input type=checkbox id=stackIndividualEdit> 各階を個別編集（チェック時のみ）</label>
+<label><input type=checkbox id=stackOpening> 1Fに開口をつける</label>
+<div id=stackOpeningControls style="display:none">
+<label><span>1F開口の幅</span><input type=number class=nv id=stackOpeningW min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>1F開口の高さ</span><input type=number class=nv id=stackOpeningH min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>1F開口の奥面</span><input type=number class=nv id=stackOpeningBack step=0.05 style="width:100px"><span class=un>m</span></label>
+<div class="note">開口は1Fだけに作成します。開口幅・高さ・奥面は建物アセットと同じように、設定欄またはキャンバス上の開口ハンドルから編集できます。奥面は建物中心からの位置です。</div>
+</div>
 <label><span>階間</span><input type=number class=nv id=stackFloorGap min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
 <div id=stackBevelControls style="display:none">
 <label><span>ベベルオフセット</span><input type=number class=nv id=stackBevelOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>

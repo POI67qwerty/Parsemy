@@ -1589,6 +1589,9 @@ function isStackedBuildingAsset(o) {
 function isBeveledStackedBuildingAsset(o) {
     return o?.type === "asset" && o.asset === "beveledStackedBuilding";
 }
+function stackedOpeningEnabled(o) {
+    return !!(o && isStackedBuildingAsset(o) && (o.openingEnabled === true || o.opening === true));
+}
 const cv = $("cv"),
     ctx = cv.getContext("2d");
 let W = 1600,
@@ -1738,6 +1741,13 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <div id=stackedP style="display:none"><h3 id=stackedPanelTitle>縁付き階層建物</h3>
 <label><span>階数</span><input type=number class=nv id=stackFloorCount min=1 max=30 step=1 style="width:100px"></label>
 <label><input type=checkbox id=stackIndividualEdit> 各階を個別編集（チェック時のみ）</label>
+<label><input type=checkbox id=stackOpening> 1Fに開口をつける</label>
+<div id=stackOpeningControls style="display:none">
+<label><span>1F開口の幅</span><input type=number class=nv id=stackOpeningW min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>1F開口の高さ</span><input type=number class=nv id=stackOpeningH min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>1F開口の奥面</span><input type=number class=nv id=stackOpeningBack step=0.05 style="width:100px"><span class=un>m</span></label>
+<div class="note">開口は1Fだけに作成します。開口幅・高さ・奥面は建物アセットと同じように、設定欄またはキャンバス上の開口ハンドルから編集できます。奥面は建物中心からの位置です。</div>
+</div>
 <label><span>階間</span><input type=number class=nv id=stackFloorGap min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
 <div id=stackBevelControls style="display:none">
 <label><span>ベベルオフセット</span><input type=number class=nv id=stackBevelOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
@@ -3437,6 +3447,131 @@ function stackedBevelHandle(o, f, index) {
         label: "ベベル",
     };
 }
+function stackedOpeningGizmo(o) {
+    if (!isStackedBuildingAsset(o) || !stackedOpeningEnabled(o)) return null;
+    const floors = Array.isArray(o.floors) && o.floors.length ? o.floors : [];
+    if (!floors.length || typeof stackedOpeningParams !== "function") return null;
+    const f = floors[0],
+        g = stackedOpeningParams(o, f),
+        fx = Number(f.x) || 0,
+        fy = Number(f.y) || 0,
+        fz = Number(f.z) || 0,
+        near = -g.d * 0.5,
+        far = g.d * 0.5,
+        pr = (x, y, z) => scrW(customPt(o, fx + x, fy + y, fz + z)),
+        stepW = Math.max(0.05, g.w * 0.06),
+        stepH = Math.max(0.05, g.h * 0.06),
+        mk = (kind, s, q, start, min, max, step, factor = 1) => {
+            const dx = q.x - s.x,
+                dy = q.y - s.y,
+                length = Math.hypot(dx, dy),
+                hidden = !Number.isFinite(length) || length <= 0.5 / Z,
+                fallback =
+                    kind === "stacked-opening-h"
+                        ? { x: 0, y: -1 }
+                        : kind.endsWith("left")
+                          ? { x: -1, y: 0 }
+                          : { x: 1, y: 0 },
+                gap = Math.max(30 / Z, Math.min(54 / Z, 0.34 * Math.max(1, Number(orthScale()) || 1))),
+                display = hidden ? { ...s, x: s.x + fallback.x * gap, y: s.y + fallback.y * gap, ok: true } : s;
+            return {
+                kind,
+                s: display,
+                dir: hidden ? fallback : { x: dx / length, y: dy / length },
+                scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : length / step || 1,
+                start,
+                min,
+                max,
+                factor,
+            };
+        },
+        left = pr(-g.openingW * 0.5, near, g.openingH * 0.5),
+        right = pr(g.openingW * 0.5, near, g.openingH * 0.5),
+        top = pr(0, near, g.openingH),
+        backCenter = pr(0, g.openingBack, g.openingH * 0.5),
+        front = {
+            center: pr(0, near, g.openingH * 0.5),
+            frame: [
+                pr(-g.openingW * 0.5, near, 0),
+                pr(-g.openingW * 0.5, near, g.openingH),
+                pr(g.openingW * 0.5, near, g.openingH),
+                pr(g.openingW * 0.5, near, 0),
+            ],
+            handles: {
+                left: mk(
+                    "stacked-opening-w-left",
+                    left,
+                    pr(-g.openingW * 0.5 - stepW, near, g.openingH * 0.5),
+                    g.openingW,
+                    0.1,
+                    Math.max(0.1, g.w - 0.1),
+                    stepW,
+                    2,
+                ),
+                right: mk(
+                    "stacked-opening-w-right",
+                    right,
+                    pr(g.openingW * 0.5 + stepW, near, g.openingH * 0.5),
+                    g.openingW,
+                    0.1,
+                    Math.max(0.1, g.w - 0.1),
+                    stepW,
+                    2,
+                ),
+                height: mk(
+                    "stacked-opening-h",
+                    top,
+                    pr(0, near, g.openingH + stepH),
+                    g.openingH,
+                    0.1,
+                    Math.max(0.1, g.h - g.rimHeight - 0.01),
+                    stepH,
+                ),
+            },
+        },
+        backFrame = [
+            pr(-g.openingW * 0.5, far, 0),
+            pr(-g.openingW * 0.5, far, g.openingH),
+            pr(g.openingW * 0.5, far, g.openingH),
+            pr(g.openingW * 0.5, far, 0),
+        ],
+        panelFrame = [
+            pr(-g.openingW * 0.5, g.openingBack, 0),
+            pr(-g.openingW * 0.5, g.openingBack, g.openingH),
+            pr(g.openingW * 0.5, g.openingBack, g.openingH),
+            pr(g.openingW * 0.5, g.openingBack, 0),
+        ],
+        panelProbe = pr(0, g.openingBack + (g.openingBack >= 0 ? 0.1 : -0.1), g.openingH * 0.5),
+        pdx = panelProbe.x - backCenter.x,
+        pdy = panelProbe.y - backCenter.y,
+        ppx = Math.hypot(pdx, pdy),
+        panelProjected = Number.isFinite(ppx) && ppx > 0.5 / Z,
+        panelDir = panelProjected ? { x: pdx / ppx, y: pdy / ppx } : { x: 1, y: 0 },
+        panelScale = panelProjected ? ppx / 0.1 : Math.max(24, orthView ? orthScale() : 24);
+    return {
+        o,
+        opening: g,
+        front,
+        backFrame,
+        panelFrame,
+        panelCenter: backCenter,
+        handles: {
+            ...front.handles,
+            backFace: {
+                kind: "stacked-opening-back",
+                s: backCenter,
+                dir: panelDir,
+                scale: panelScale,
+                start: g.openingBack,
+                min: -g.d * 0.5 + 0.025,
+                max: g.d * 0.5 - 0.025,
+                factor: 1,
+                side: g.openingBack >= 0 ? 1 : -1,
+            },
+        },
+        C3: customPt(o, fx, fy, fz + g.h * 0.5),
+    };
+}
 function stackedBuildingGizmo(o) {
     if (!isStackedBuildingAsset(o)) return null;
     const floors = Array.isArray(o.floors) && o.floors.length ? o.floors : [];
@@ -3490,8 +3625,9 @@ function stackedBuildingGizmo(o) {
             height: make("stacked-height", x, y, z + h, "h", 1, "高さ"),
         },
         frame = [pr(x - w / 2, y, z), pr(x - w / 2, y, z + h), pr(x + w / 2, y, z + h), pr(x + w / 2, y, z)],
-        bevelHandle = stackedBevelHandle(o, f, index);
-    return { o, C3: p3(x, y, z + h * 0.5), center, frame, handles, bevelHandle, floorIndex: index };
+        bevelHandle = stackedBevelHandle(o, f, index),
+        opening = stackedOpeningGizmo(o);
+    return { o, C3: p3(x, y, z + h * 0.5), center, frame, handles, bevelHandle, opening, floorIndex: index };
 }
 function pathPipeGizmo(o) {
     if (
@@ -3619,19 +3755,29 @@ function beveledBoxGizmo(o) {
         projected = !!raw?.ok && !!probe?.ok && Number.isFinite(length),
         hidden = projected && length <= 0.5 / Z,
         fallback = orthView === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 },
+        visibleDir = hidden ? fallback : { x: dx / length, y: dy / length },
+        // 断面の実点は外周線のすぐ内側にあるため、そこへハンドルを置くと
+        // 面／移動ギズモと重なって「移動できない」ように見える。表示だけを
+        // 外側へ逃がし、編集量の方向とスケールは実点の投影から保つ。
+        displayGap = Math.max(48 / Z, 56 / Z),
+        displayS = !raw?.ok
+            ? raw
+            : hidden
+              ? {
+                    x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
+                    y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
+                    ok: true,
+                }
+              : {
+                    x: raw.x - visibleDir.x * displayGap,
+                    y: raw.y - visibleDir.y * displayGap,
+                    ok: true,
+                },
         handle = {
             kind: "beveled-offset",
-            s: !raw?.ok
-                ? raw
-                : hidden
-                  ? {
-                        x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
-                        y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
-                        ok: true,
-                    }
-                  : raw,
+            s: displayS,
             anchor,
-            dir: hidden ? fallback : { x: dx / length, y: dy / length },
+            dir: visibleDir,
             scale: hidden
                 ? Math.max(24, orthView ? orthScale() : 24)
                 : length / Math.max(0.0001, Math.min(step, q.max - q.bevelOffset || step)),
@@ -3765,6 +3911,40 @@ function drawSpecialGizmo(c, o) {
         c.fillStyle = "#ffd0a8";
         c.font = `bold ${12 / Z}px system-ui`;
         c.fillText(`${sg.floorIndex + 1}F 幅/奥行/高さ`, sg.center.x + 8 / Z, sg.center.y - 8 / Z);
+        const opening = sg.opening;
+        if (opening) {
+            const drawFrame = (frame, color = "#8ce6c2") => {
+                if (!frame?.every((q) => q && q.ok)) return;
+                c.strokeStyle = color;
+                c.lineWidth = 1.25 / Z;
+                c.beginPath();
+                frame.forEach((q, i) => (i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)));
+                c.closePath();
+                c.stroke();
+            };
+            drawFrame(opening.front.frame, "#8ce6c2");
+            drawFrame(opening.panelFrame, "#ffd37a");
+            c.strokeStyle = "#8ce6c2";
+            c.beginPath();
+            [opening.handles.left, opening.handles.right, opening.handles.height].forEach((h) => {
+                if (h?.s?.ok) {
+                    c.moveTo(opening.front.center.x, opening.front.center.y);
+                    c.lineTo(h.s.x, h.s.y);
+                }
+            });
+            c.stroke();
+            [opening.handles.left, opening.handles.right, opening.handles.height].forEach((h) => sq(h.s, "#8ce6c2"));
+            if (opening.handles.backFace?.s?.ok) {
+                c.strokeStyle = "#ffd37a";
+                c.beginPath();
+                c.moveTo(opening.panelCenter.x, opening.panelCenter.y);
+                c.lineTo(opening.handles.backFace.s.x, opening.handles.backFace.s.y);
+                c.stroke();
+                sq(opening.handles.backFace.s, "#ffd37a", true);
+            }
+            c.fillStyle = "#d8fff0";
+            c.fillText("1F 開口 W/H", opening.front.center.x + 8 / Z, opening.front.center.y - 8 / Z);
+        }
         if (sg.bevelHandle?.s?.ok && sg.bevelHandle?.anchor?.ok) {
             const bh = sg.bevelHandle;
             c.setLineDash([4 / Z, 3 / Z]);
@@ -4242,6 +4422,23 @@ function hitGizmo(p) {
             }
         }
         if (isStackedBuildingAsset(active)) {
+            const opening = special.opening;
+            if (opening) {
+                for (const h of [
+                    opening.handles.left,
+                    opening.handles.right,
+                    opening.handles.height,
+                    opening.handles.backFace,
+                ])
+                    if (h?.s?.ok && Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
+                        return { t: h.kind, sign: h, g: { o: active, C3: opening.C3 } };
+                if (opening.panelFrame?.every((q) => q && q.ok) && insidePoly2D(p, opening.panelFrame))
+                    return {
+                        t: "stacked-opening-back",
+                        sign: opening.handles.backFace,
+                        g: { o: active, C3: opening.C3 },
+                    };
+            }
             if (
                 special.bevelHandle?.s?.ok &&
                 Math.hypot(special.bevelHandle.s.x - p.x, special.bevelHandle.s.y - p.y) < R
@@ -4778,6 +4975,18 @@ function dragEdit(p, freeRotation = false) {
                 h: (Number(last?.z) || 0) + (Number(last?.h) || 0),
             };
         }
+    } else if (ed.t.startsWith("stacked-opening-")) {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1),
+            value = clamp(h.start + (h.factor || 1) * amount, h.min, h.max);
+        patch =
+            ed.t === "stacked-opening-w-left" || ed.t === "stacked-opening-w-right"
+                ? { openingW: value }
+                : ed.t === "stacked-opening-h"
+                  ? { openingH: value }
+                  : { openingBack: value };
     } else if (ed.t.startsWith("stacked-")) {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -5124,6 +5333,83 @@ function exportSurfaceTriangles(o) {
             quad(a, b, c, d0);
         }
     };
+    const openingBoxAt = (cx, cy, bw, bd, z0, z1, opening) => {
+        const x = bw / 2,
+            y = bd / 2,
+            ow = clamp(Number(opening.openingW) || bw * 0.56, 0.1, Math.max(0.1, bw - 0.1)),
+            oh = clamp(Number(opening.openingH) || (z1 - z0) * 0.66, 0.1, Math.max(0.1, z1 - z0 - 0.01)),
+            panelY = clamp(Number(opening.openingBack), -y + 0.025, y - 0.025),
+            q = (a, b, c, d) => quad(a, b, c, d);
+        q([-x, -y, z0], [x, -y, z0], [x, y, z0], [-x, y, z0]);
+        q([-x, -y, z1], [-x, y, z1], [x, y, z1], [x, -y, z1]);
+        q([-x, -y, z0], [-x, -y, z1], [-x, y, z1], [-x, y, z0]);
+        q([x, -y, z0], [x, y, z0], [x, y, z1], [x, -y, z1]);
+        q([-x, y, z0], [-x, y, z1], [x, y, z1], [x, y, z0]);
+        q([-x, -y, z0], [-ow / 2, -y, z0], [-ow / 2, -y, z1], [-x, -y, z1]);
+        q([ow / 2, -y, z0], [x, -y, z0], [x, -y, z1], [ow / 2, -y, z1]);
+        q([-ow / 2, -y, oh + z0], [ow / 2, -y, oh + z0], [ow / 2, -y, z1], [-ow / 2, -y, z1]);
+        q([-ow / 2, -y, z0], [-ow / 2, panelY, z0], [-ow / 2, panelY, oh + z0], [-ow / 2, -y, oh + z0]);
+        q([ow / 2, -y, z0], [ow / 2, -y, oh + z0], [ow / 2, panelY, oh + z0], [ow / 2, panelY, z0]);
+        q([-ow / 2, -y, oh + z0], [-ow / 2, panelY, oh + z0], [ow / 2, panelY, oh + z0], [ow / 2, -y, oh + z0]);
+        q([-ow / 2, panelY, z0], [ow / 2, panelY, z0], [ow / 2, panelY, oh + z0], [-ow / 2, panelY, oh + z0]);
+    };
+    const beveledOpeningAt = (cx, cy, bw, bd, z0, z1, offset, segments, opening) => {
+        const footprint = beveledBoxFootprint(bw, bd, offset, segments),
+            x = bw / 2,
+            y = bd / 2,
+            ow = clamp(Number(opening.openingW) || bw * 0.56, 0.1, Math.max(0.1, bw - 0.1)),
+            oh = clamp(Number(opening.openingH) || (z1 - z0) * 0.66, 0.1, Math.max(0.1, z1 - z0 - 0.01)),
+            panelY = clamp(Number(opening.openingBack), -y + 0.025, y - 0.025),
+            bottom = [cx, cy, z0],
+            top = [cx, cy, z1];
+        for (let i = 0; i < footprint.length; i++) {
+            const j = (i + 1) % footprint.length,
+                a = [cx + footprint[i][0], cy + footprint[i][1], z0],
+                b = [cx + footprint[j][0], cy + footprint[j][1], z0],
+                c = [cx + footprint[j][0], cy + footprint[j][1], z1],
+                d0 = [cx + footprint[i][0], cy + footprint[i][1], z1],
+                near = Math.abs(footprint[i][1] + y) < 1e-4 && Math.abs(footprint[j][1] + y) < 1e-4;
+            tri(bottom, b, a);
+            tri(top, d0, c);
+            if (!near) quad(a, b, c, d0);
+            else {
+                const lo = Math.min(footprint[i][0], footprint[j][0]) + cx,
+                    hi = Math.max(footprint[i][0], footprint[j][0]) + cx,
+                    wall = (xa, xb, za, zb) => {
+                        const l = Math.max(lo, xa + cx),
+                            r = Math.min(hi, xb + cx);
+                        if (r > l + 1e-5) quad([l, cy - y, za], [r, cy - y, za], [r, cy - y, zb], [l, cy - y, zb]);
+                    };
+                wall(-x, -ow / 2, z0, z1);
+                wall(ow / 2, x, z0, z1);
+                wall(-ow / 2, ow / 2, oh + z0, z1);
+            }
+        }
+        quad(
+            [cx - ow / 2, cy - y, z0],
+            [cx - ow / 2, cy + panelY, z0],
+            [cx - ow / 2, cy + panelY, oh + z0],
+            [cx - ow / 2, cy - y, oh + z0],
+        );
+        quad(
+            [cx + ow / 2, cy - y, z0],
+            [cx + ow / 2, cy - y, oh + z0],
+            [cx + ow / 2, cy + panelY, oh + z0],
+            [cx + ow / 2, cy + panelY, z0],
+        );
+        quad(
+            [cx - ow / 2, cy - y, oh + z0],
+            [cx - ow / 2, cy + panelY, oh + z0],
+            [cx + ow / 2, cy + panelY, oh + z0],
+            [cx + ow / 2, cy - y, oh + z0],
+        );
+        quad(
+            [cx - ow / 2, cy + panelY, z0],
+            [cx + ow / 2, cy + panelY, z0],
+            [cx + ow / 2, cy + panelY, oh + z0],
+            [cx - ow / 2, cy + panelY, oh + z0],
+        );
+    };
     const ellipsoid = (cx, cy, cz, rx, ry, rz, lat = 8, lon = 12) => {
         for (let j = 0; j < lat; j++) {
             const p0 = -Math.PI / 2 + (j * Math.PI) / lat,
@@ -5205,7 +5491,7 @@ function exportSurfaceTriangles(o) {
             Array.isArray(o.floors) && o.floors.length
                 ? o.floors
                 : [{ x: 0, y: 0, z: 0, w, d, h, rimHeight: 0.16, rimOverhang: 0.18 }];
-        floors.forEach((f) => {
+        floors.forEach((f, i) => {
             const fw = Math.max(0.05, Math.abs(Number(f.w) || w)),
                 fd = Math.max(0.05, Math.abs(Number(f.d) || d)),
                 fh = Math.max(0.05, Math.abs(Number(f.h) || h)),
@@ -5221,13 +5507,16 @@ function exportSurfaceTriangles(o) {
                     f.bevelSegments,
                     f.bevelEdges,
                     beveledBoxSegments(o.bevelSegments, o.bevelEdges),
-                );
+                ),
+                opening = i === 0 && stackedOpeningEnabled(o) ? stackedOpeningParams(o, f) : null;
             if (kind === "beveledStackedBuilding") {
-                beveledAt(fx, fy, fw, fd, fz, fz + fh, bevelOffset, bevelSegments);
+                if (opening) beveledOpeningAt(fx, fy, fw, fd, fz, fz + fh, bevelOffset, bevelSegments, opening);
+                else beveledAt(fx, fy, fw, fd, fz, fz + fh, bevelOffset, bevelSegments);
                 // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
                 beveledAt(fx, fy, fw + ro * 2, fd + ro * 2, fz + fh - rh, fz + fh, bevelOffset, bevelSegments);
             } else {
-                boxAt(fx, fy, fw, fd, fz, fz + fh);
+                if (opening) openingBoxAt(fx, fy, fw, fd, fz, fz + fh, opening);
+                else boxAt(fx, fy, fw, fd, fz, fz + fh);
                 // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
                 boxAt(fx, fy, fw + ro * 2, fd + ro * 2, fz + fh - rh, fz + fh);
             }
@@ -6348,6 +6637,9 @@ function pick(a, p) {
     return b;
 }
 cv.onpointerdown = (e) => {
+    // 間取りのポインター処理はstudio-ui.jsが正面／横／上の専用ギズモを
+    // 先に判定する。先行するtargetハンドラが通常編集へ入らないようにする。
+    if (e.__cityFloorPlanPreempt) return;
     const touch = e.pointerType === "touch";
     if (touch && ptrType === "pen") return; // ペンで描いている間の手のひらは無視
     if (touch) {
@@ -7329,6 +7621,22 @@ function beveledBoxParams(o) {
         bevelSegments = beveledBoxSegments(o?.bevelSegments, o?.bevelEdges);
     return { w, d, max, bevelOffset, bevelSegments };
 }
+function stackedOpeningParams(o, f = o?.floors?.[0]) {
+    const w = Math.max(0.05, Math.abs(Number(f?.w) || Number(o?.ra || 2) * 2)),
+        d = Math.max(0.05, Math.abs(Number(f?.d) || Number(o?.rb || 1.5) * 2)),
+        h = Math.max(0.05, Math.abs(Number(f?.h) || 2.2)),
+        rimHeight = clamp(Math.abs(Number(f?.rimHeight) || Number(o?.rimHeight) || 0.16), 0.01, h),
+        maxW = Math.max(0.1, w - 0.1),
+        maxH = Math.max(0.1, h - rimHeight - 0.01),
+        openingW = clamp(Number(o?.openingW) || w * 0.56, 0.1, maxW),
+        openingH = clamp(Number(o?.openingH) || h * 0.66, 0.1, maxH),
+        openingBack = clamp(
+            Number.isFinite(Number(o?.openingBack)) ? Number(o.openingBack) : d * 0.5 - 0.025,
+            -d * 0.5 + 0.025,
+            d * 0.5 - 0.025,
+        );
+    return { w, d, h, rimHeight, openingW, openingH, openingBack };
+}
 function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
     const x = w / 2,
         y = d / 2,
@@ -7705,10 +8013,102 @@ function assetLines(o) {
                 ),
             );
         };
+        const openingEnabled = stackedOpeningEnabled(o);
+        const addOpeningWire = (f, w, d, h, opening) => {
+            const ox = Number(f.x || 0),
+                oy = Number(f.y || 0),
+                oz = Number(f.z || 0),
+                near = -d * 0.5,
+                far = d * 0.5,
+                panelY = opening.openingBack,
+                ow = opening.openingW,
+                oh = opening.openingH,
+                toWorld = (p) => [p[0] + ox, p[1] + oy, p[2] + oz],
+                line = (points, color = a, width = 1.1) => out.push(customLineA(o, points.map(toWorld), color, width));
+            // 開口を持つ1Fの外周・開口枠・内側底辺／奥面を、既存の開口建物と同じ順で描く。
+            line([
+                [-w / 2, near, h],
+                [w / 2, near, h],
+            ]);
+            line([
+                [-w / 2, far, h],
+                [w / 2, far, h],
+            ]);
+            line([
+                [-ow / 2, near, 0],
+                [-ow / 2, near, oh],
+                [ow / 2, near, oh],
+                [ow / 2, near, 0],
+            ]);
+            line([
+                [-ow / 2, far, 0],
+                [-ow / 2, far, oh],
+                [ow / 2, far, oh],
+                [ow / 2, far, 0],
+            ]);
+            if (Math.abs(panelY - far) > 0.01)
+                line([
+                    [-ow / 2, panelY, 0],
+                    [-ow / 2, panelY, oh],
+                    [ow / 2, panelY, oh],
+                    [ow / 2, panelY, 0],
+                ]);
+            // 開口の床面／奥面の下辺は省略しない。正面側と閉じた内壁側の両方へ描く。
+            line(
+                [
+                    [-ow / 2, near, 0.012],
+                    [ow / 2, near, 0.012],
+                ],
+                a,
+                1.05,
+            );
+            line(
+                [
+                    [-ow / 2, panelY, 0.012],
+                    [ow / 2, panelY, 0.012],
+                ],
+                a,
+                1.15,
+            );
+            line(
+                [
+                    [-ow / 2, near, 0],
+                    [-ow / 2, panelY, 0],
+                    [-ow / 2, panelY, oh],
+                    [-ow / 2, near, oh],
+                    [-ow / 2, near, 0],
+                ],
+                a,
+                1.0,
+            );
+            line(
+                [
+                    [ow / 2, near, 0],
+                    [ow / 2, near, oh],
+                    [ow / 2, panelY, oh],
+                    [ow / 2, panelY, 0],
+                    [ow / 2, near, 0],
+                ],
+                a,
+                1.0,
+            );
+            line(
+                [
+                    [-ow / 2, near, oh],
+                    [ow / 2, near, oh],
+                    [ow / 2, panelY, oh],
+                    [-ow / 2, panelY, oh],
+                    [-ow / 2, near, oh],
+                ],
+                a,
+                1.0,
+            );
+        };
         floors.forEach((f, i) => {
             const w = Math.max(0.05, Math.abs(Number(f.w) || Number(o.ra || 2) * 2)),
                 d = Math.max(0.05, Math.abs(Number(f.d) || Number(o.rb || 1.5) * 2)),
                 h = Math.max(0.05, Math.abs(Number(f.h) || 2.2)),
+                opening = i === 0 && openingEnabled ? stackedOpeningParams(o, f) : null,
                 rh = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, h),
                 ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18)),
                 bevelOffset = Number.isFinite(Number(f.bevelOffset))
@@ -7720,13 +8120,15 @@ function assetLines(o) {
                     beveledBoxSegments(o.bevelSegments, o.bevelEdges),
                 );
             // 本体の上辺は上側の縁に隠れるため描かず、下側の縁は全階で作らない。
-            // 1階だけは床側の本体辺を残す。
+            // 開口をONにした場合だけ、1F本体へ開口枠・内側面を追加する。
             if (kind === "beveledStackedBuilding") {
                 addBeveledBox(f, w, d, 0, h, bevelOffset, bevelSegments, f.c || c, { bottom: i === 0, top: false });
+                if (opening) addOpeningWire(f, w, d, h, opening);
                 // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
                 addBeveledBox(f, w + ro * 2, d + ro * 2, h - rh, rh, bevelOffset, bevelSegments, f.rimColor || a);
             } else {
                 addBox(f, w, d, 0, h, f.c || c, { bottom: i === 0, top: false });
+                if (opening) addOpeningWire(f, w, d, h, opening);
                 // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
                 addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
             }
@@ -8495,8 +8897,10 @@ function normalizedAsset(o) {
             bevelSegments = beveledBoxSegments(q.bevelSegments, q.bevelEdges);
         return { ...q, bevelOffset, bevelSegments, h: Math.max(0, Number(q.h) || 0) };
     }
-    if (q && q.asset === "beveledStackedBuilding") {
+    if (q && isStackedBuildingAsset(q)) {
         const source = Array.isArray(q.floors) && q.floors.length ? q.floors : [],
+            first = source[0] || { w: Number(q.ra) * 2 || 4, d: Number(q.rb) * 2 || 3, h: 2.2, rimHeight: 0.16 },
+            opening = stackedOpeningParams(q, first),
             baseOffset = Number.isFinite(Number(q.bevelOffset)) ? Number(q.bevelOffset) : 0.28,
             baseSegments = beveledBoxSegments(q.bevelSegments, q.bevelEdges),
             floors = source.map((f) => {
@@ -8509,8 +8913,11 @@ function normalizedAsset(o) {
             });
         return {
             ...q,
-            bevelOffset: baseOffset,
-            bevelSegments: baseSegments,
+            ...(q.asset === "beveledStackedBuilding" ? { bevelOffset: baseOffset, bevelSegments: baseSegments } : {}),
+            openingEnabled: stackedOpeningEnabled(q),
+            openingW: opening.openingW,
+            openingH: opening.openingH,
+            openingBack: opening.openingBack,
             floors,
             h: floors.reduce((max, f) => Math.max(max, (Number(f.z) || 0) + (Number(f.h) || 0)), 0),
         };
@@ -8756,6 +9163,10 @@ window.cityGridInstallAssetUI = function (bridge) {
                 rimOverhang: 0.18,
                 bevelOffset: beveled ? info.bevelOffset : undefined,
                 bevelSegments: beveled ? info.bevelSegments : undefined,
+                openingEnabled: false,
+                openingW: info.w * 0.56,
+                openingH: floorHeight * 0.66,
+                openingBack: info.d * 0.5 - 0.025,
                 // 既定は1F編集を全階へ連動。旧JSONのsyncFirstは互換用に残す。
                 syncFirst: true,
                 individualEdit: false,
@@ -10155,9 +10566,23 @@ window.cityGridInstallAssetUI = function (bridge) {
         }
         const count = el("stackFloorCount"),
             individualEdit = el("stackIndividualEdit"),
+            openingCheck = el("stackOpening"),
+            openingControls = el("stackOpeningControls"),
+            openingW = el("stackOpeningW"),
+            openingH = el("stackOpeningH"),
+            openingBack = el("stackOpeningBack"),
             gap = el("stackFloorGap");
         if (count && document.activeElement !== count) count.value = o.floorCount || o.floors?.length || 1;
         if (individualEdit) individualEdit.checked = stackedIndividualEdit(o);
+        if (openingCheck) openingCheck.checked = stackedOpeningEnabled(o);
+        if (openingControls) openingControls.style.display = stackedOpeningEnabled(o) ? "" : "none";
+        if (stackedOpeningEnabled(o)) {
+            const opening = stackedOpeningParams(o, o.floors?.[0]);
+            if (openingW && document.activeElement !== openingW) openingW.value = opening.openingW.toFixed(3);
+            if (openingH && document.activeElement !== openingH) openingH.value = opening.openingH.toFixed(3);
+            if (openingBack && document.activeElement !== openingBack)
+                openingBack.value = opening.openingBack.toFixed(3);
+        }
         if (gap && document.activeElement !== gap) gap.value = Number(o.floorGap || 0).toFixed(3);
         const title = el("stackedPanelTitle"),
             bevelControls = el("stackBevelControls");
@@ -10245,6 +10670,42 @@ window.cityGridInstallAssetUI = function (bridge) {
         });
         render();
     }
+    function applyStackOpeningProp(name, value) {
+        const o = sel && obOf(sel);
+        if (!o || !isStackedBuildingAsset(o)) return;
+        if (!stackedEditSession) {
+            HU.push(S);
+            RD = [];
+            stackedEditSession = true;
+        }
+        const first = o.floors?.[0],
+            g = stackedOpeningParams(o, first),
+            next =
+                name === "openingEnabled"
+                    ? !!value
+                    : name === "openingW"
+                      ? clamp(Number(value) || g.openingW, 0.1, Math.max(0.1, g.w - 0.1))
+                      : name === "openingH"
+                        ? clamp(Number(value) || g.openingH, 0.1, Math.max(0.1, g.h - g.rimHeight - 0.01))
+                        : clamp(
+                              Number.isFinite(Number(value)) ? Number(value) : g.openingBack,
+                              -g.d * 0.5 + 0.025,
+                              g.d * 0.5 - 0.025,
+                          );
+        setOb(o.id, {
+            openingEnabled: name === "openingEnabled" ? next : stackedOpeningEnabled(o),
+            [name]: next,
+            openingW: name === "openingW" ? next : g.openingW,
+            openingH: name === "openingH" ? next : g.openingH,
+            openingBack:
+                name === "openingBack"
+                    ? next
+                    : Number.isFinite(Number(o.openingBack))
+                      ? Number(o.openingBack)
+                      : g.openingBack,
+        });
+        render();
+    }
     function applyStackBevelProp(name, value) {
         const o = sel && obOf(sel);
         if (!isBeveledStackedBuildingAsset(o) || !Number.isFinite(value) || !o.floors?.length) return;
@@ -10273,6 +10734,21 @@ window.cityGridInstallAssetUI = function (bridge) {
         const input = el(id);
         if (!input) return;
         input.oninput = () => applyStackBevelProp(name, parseFloat(input.value));
+        input.onchange = () => {
+            stackedEditSession = false;
+        };
+    });
+    const stackOpeningCheck = el("stackOpening");
+    if (stackOpeningCheck)
+        stackOpeningCheck.onchange = () => applyStackOpeningProp("openingEnabled", stackOpeningCheck.checked);
+    [
+        ["stackOpeningW", "openingW"],
+        ["stackOpeningH", "openingH"],
+        ["stackOpeningBack", "openingBack"],
+    ].forEach(([id, name]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => applyStackOpeningProp(name, parseFloat(input.value));
         input.onchange = () => {
             stackedEditSession = false;
         };
@@ -10515,7 +10991,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         else if (name === "pipeSides" && Number.isFinite(value)) patch.pipeSides = clamp(Math.round(value), 6, 24);
         else if (name === "path") {
             const path = String(value || "")
-                .split(/[;\n]+/)
+                .split(/[;\\n]+/)
                 .map((chunk) => chunk.trim())
                 .filter(Boolean)
                 .map((chunk) => chunk.split(/[ ,]+/).map(Number).slice(0, 3))
@@ -11577,16 +12053,60 @@ window.cityGridInstallAssetUI = function (bridge) {
             add("d", "奥行−", L2W(o, 0, -o.rb, zc), L2W(o, 0, -o.rb - 0.1, zc), Math.abs(o.rb) * 2, 0.01, -1);
             // 真横ビューは黒い外枠の上端・下端へ高さハンドルを置く。
             // 看板の内部余白を含む全高 h の外側へは逃がさない。
-            add("h", "上端", L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + 0.1), Math.max(0, Number(o.h) || 0), 0, 1);
-            add("h", "下端", L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - 0.1), Math.max(0, Number(o.h) || 0), 0, -1);
+            // ベベル直方体は初期状態が厚み0の面なので、下端と上端が
+            // 同じ位置に重なって移動を奪わないよう、高さハンドルを上へ逃がす。
+            if (Math.max(0, Number(o.h) || 0) <= 1e-6) {
+                const gap = Math.max(
+                    48 / Z,
+                    Math.min(
+                        88 / Z,
+                        Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)) * orthScale() * 0.65,
+                    ),
+                );
+                handles.push({
+                    kind: "h",
+                    label: "高さ",
+                    s: { x: center.x, y: center.y - gap, ok: true },
+                    dir: { x: 0, y: -1 },
+                    scale: orthScale(),
+                    start: 0,
+                    min: 0,
+                    screen: true,
+                });
+            } else {
+                add("h", "上端", L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + 0.1), Math.max(0, Number(o.h) || 0), 0, 1);
+                add("h", "下端", L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - 0.1), Math.max(0, Number(o.h) || 0), 0, -1);
+            }
         } else if (orthView === "front") {
             // 正面では幅と高さを直接編集し、見えない奥行きは画面上へ逃がしたハンドルで編集する。
             // 正面の幅ハンドルも、看板では黒い外枠の下端へ置く。
             // 全高の底面 z=0 に置くと、看板の外枠から下へ浮いてしまう。
             add("w", "幅＋", L2W(o, o.ra, 0, z0), L2W(o, o.ra + 0.1, 0, z0), Math.abs(o.ra) * 2, 0.01, 1);
             add("w", "幅−", L2W(o, -o.ra, 0, z0), L2W(o, -o.ra - 0.1, 0, z0), Math.abs(o.ra) * 2, 0.01, -1);
-            add("h", "上端", L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + 0.1), Math.max(0, Number(o.h) || 0), 0, 1);
-            add("h", "下端", L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - 0.1), Math.max(0, Number(o.h) || 0), 0, -1);
+            // 初期の厚み0では上下端が同じ画面点になり、クリックが高さ編集へ
+            // 吸われる。高さハンドルを上へ逃がして面の移動を残す。
+            if (Math.max(0, Number(o.h) || 0) <= 1e-6) {
+                const gap = Math.max(
+                    48 / Z,
+                    Math.min(
+                        88 / Z,
+                        Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)) * orthScale() * 0.65,
+                    ),
+                );
+                handles.push({
+                    kind: "h",
+                    label: "高さ",
+                    s: { x: center.x, y: center.y - gap, ok: true },
+                    dir: { x: 0, y: -1 },
+                    scale: orthScale(),
+                    start: 0,
+                    min: 0,
+                    screen: true,
+                });
+            } else {
+                add("h", "上端", L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + 0.1), Math.max(0, Number(o.h) || 0), 0, 1);
+                add("h", "下端", L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - 0.1), Math.max(0, Number(o.h) || 0), 0, -1);
+            }
             const gap = Math.max(
                 48 / Z,
                 Math.min(
@@ -11860,8 +12380,14 @@ window.cityGridInstallAssetUI = function (bridge) {
             c.arc(h.object.s.x, h.object.s.y, r * 0.52, -Math.PI * 0.15, Math.PI * 1.3);
             c.stroke();
             drawFloorMoveGizmo(c, h.object.o);
-            if (tool === "edit" && floorPlanEditHandles()?.special) drawSpecialGizmo(c, h.object.o);
-            else drawFloorPlanEditHandles(c);
+            const editHandles = floorPlanEditHandles();
+            if (editHandles?.special) drawSpecialGizmo(c, h.object.o);
+            else {
+                drawFloorPlanEditHandles(c);
+                // ベベル直方体は通常の幅／奥行／高さハンドルに加えて、
+                // 断面オフセット用の専用ハンドルも同じビューへ表示する。
+                if (tool === "edit" && h.object.o.asset === "beveledBox") drawSpecialGizmo(c, h.object.o);
+            }
         }
         // カメラ：本体をドラッグして位置、先端の丸をドラッグして向き
         const k = h.camera,
@@ -12304,6 +12830,15 @@ window.cityGridInstallAssetUI = function (bridge) {
         },
         true,
     );
+    // canvasのIDLイベントハンドラ（engine-tools.js）がstudio-uiの後付け
+    // listenerより先に呼ばれるブラウザでも、間取りの専用経路を優先する。
+    document.addEventListener(
+        "pointerdown",
+        (e) => {
+            if (window.cityFloorPlanActive && e.target === cv) e.__cityFloorPlanPreempt = true;
+        },
+        true,
+    );
     cv.addEventListener(
         "pointerdown",
         (e) => {
@@ -12323,6 +12858,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     customFloorGizmo =
                         ["stackedBuilding", "beveledStackedBuilding"].includes(customAsset) ||
                         customAsset === "pathPipe" ||
+                        (customAsset === "beveledBox" && special?.t === "beveled-offset") ||
                         special?.t?.startsWith("sign-") ||
                         (special?.t === "face" && customAsset === "sign");
                 if (special && customFloorGizmo) {
@@ -12336,6 +12872,31 @@ window.cityGridInstallAssetUI = function (bridge) {
                     } catch (err) {}
                     syncSel();
                     render();
+                    return;
+                }
+            }
+            // 正面／横ビューにも、上面と同じ回転ハンドルを用意する。
+            // これまではこの2ビューだけ先に高さ／移動判定へ落ち、回転丸を
+            // 押しても通常の面編集として扱われていた。
+            if (tool === "edit" && sel && (orthView === "front" || orthView === "side")) {
+                const turn = floorPlanHandles(),
+                    turnLimit = 24 / Z;
+                if (turn.object?.s?.ok && Math.hypot(turn.object.s.x - p.x, turn.object.s.y - p.y) < turnLimit) {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    floorPlanDrag = {
+                        kind: "turnScreen",
+                        pointerId: e.pointerId,
+                        id: turn.object.o.id,
+                        center: turn.object.center,
+                        angle0: Math.atan2(-(p.y - turn.object.center.y), p.x - turn.object.center.x),
+                        rot0: Number(turn.object.o.rot) || 0,
+                        p0: p,
+                        started: false,
+                    };
+                    try {
+                        cv.setPointerCapture(e.pointerId);
+                    } catch (err) {}
                     return;
                 }
             }
@@ -12758,6 +13319,24 @@ window.cityGridInstallAssetUI = function (bridge) {
                     (floorPlanDrag.group || [o]).forEach((g) =>
                         setOb(g.id, moveBy(g, q.d, !!(g.attachment?.parentId && ids.has(g.attachment.parentId)))),
                     );
+                }
+                render();
+                return;
+            }
+            if (floorPlanDrag.kind === "turnScreen") {
+                const o = obOf(floorPlanDrag.id),
+                    p = pos(e),
+                    dx = p.x - floorPlanDrag.center.x,
+                    dy = p.y - floorPlanDrag.center.y;
+                if (o && o.k === 1 && Math.hypot(dx, dy) > 1) {
+                    let angle = (Math.atan2(-dy, dx) - floorPlanDrag.angle0) / DG + floorPlanDrag.rot0;
+                    if (!e.shiftKey) angle = Math.round(angle / 15) * 15;
+                    if (!floorPlanDrag.started) {
+                        HU.push(S);
+                        RD = [];
+                        floorPlanDrag.started = true;
+                    }
+                    setOb(o.id, { rot: angle360(angle) });
                 }
                 render();
                 return;
@@ -13342,6 +13921,5 @@ window.cityGridInstallAssetUI = function (bridge) {
 })();
 
 </script>
-    <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a51364c1cb8500bc',t:'MTc5MzEyMTg1OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
-</body>
+    <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a5139fc9cbc39674',t:'MTc5MzEyNDI3Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

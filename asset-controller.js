@@ -98,6 +98,10 @@ window.cityGridInstallAssetUI = function (bridge) {
                 rimOverhang: 0.18,
                 bevelOffset: beveled ? info.bevelOffset : undefined,
                 bevelSegments: beveled ? info.bevelSegments : undefined,
+                openingEnabled: false,
+                openingW: info.w * 0.56,
+                openingH: floorHeight * 0.66,
+                openingBack: info.d * 0.5 - 0.025,
                 // 既定は1F編集を全階へ連動。旧JSONのsyncFirstは互換用に残す。
                 syncFirst: true,
                 individualEdit: false,
