@@ -1757,8 +1757,9 @@
             };
             function leaveOrthView(changedKey) {
                 if (standardApplying) return;
-                // 間取り中のレンズ変更は正投影を解除せず、カメラの画角だけを更新する。
-                if (window.cityFloorPlanActive && changedKey === "lens") return;
+                // 間取り中は左パネルのカメラ値を変更しても正投影を解除しない。
+                // 0=3Dで現在の魚眼画角・レンズ・位置・高さ・回転・傾きをそのまま引き継ぐ。
+                if (window.cityFloorPlanActive) return;
                 if (orthView === "top" && changedKey !== "pitch") {
                     P.pitch = -75;
                     const pitchInput = $("pitch");
@@ -8744,19 +8745,9 @@
                 };
                 function applyStandardView(kind) {
                     standardApplying = true;
-                    if (kind === "home") {
-                        // 0=3Dは正投影だけを解除する。左パネルで変更した魚眼FOV、レンズ、
-                        // カメラ位置・高さ・回転・傾きなどを初期値へ戻さない。
-                        orthView = null;
-                    } else {
-                        // 視点プリセットを切り替えても、ユーザーが選んだグリッド種類は変更しない。
-                        const keep = { lens: P.lens, hz: P.hz, ch: P.ch, cx: P.cx, cz: P.cz };
-                        if (kind === "front") Object.assign(keep, { yaw: 0, pitch: 0 });
-                        else if (kind === "side") Object.assign(keep, { yaw: 90, pitch: 0 });
-                        else Object.assign(keep, { yaw: 0, pitch: -90 });
-                        Object.entries(keep).forEach(([k, v]) => setP(k, v));
-                        orthView = kind === "front" || kind === "side" || kind === "top" ? kind : null;
-                    }
+                    // 正面・横・上は表示用の正投影だけを切り替える。
+                    // yaw／pitch／高さ／位置／レンズ／魚眼画角／ロールは一切変更しない。
+                    orthView = kind === "front" || kind === "side" || kind === "top" ? kind : null;
                     standardApplying = false;
                     sync();
                     // 0=3Dは視点プリセットだけを切り替える。編集ツールを選択中なら、
@@ -8766,25 +8757,11 @@
                 }
                 window.cityStandardView = (kind) => applyStandardView(kind);
 
-                // 間取りの投影を切り替える。真上／真横とも、入る前の透視カメラ位置は保持する。
+                // 間取りの投影を切り替える。真上／真横とも、入る前の透視カメラ設定を保持する。
                 function setFloorPlanProjection(kind = "top") {
-                    // 視点切り替えではグリッド種類を変更しない。
-                    // 正投影はorthViewだけで切り替え、1／2／3点透視・魚眼の選択と設定を保持する。
-                    const cameraBefore = {
-                        lens: P.lens,
-                        hz: P.hz,
-                        ch: P.ch,
-                        cx: P.cx,
-                        cz: P.cz,
-                        yaw: P.yaw,
-                        pitch: P.pitch,
-                    };
+                    // 正投影はorthViewだけで切り替える。グリッド種類、魚眼画角、
+                    // レンズ、カメラ位置、高さ、回転、傾き、ロールは変更しない。
                     standardApplying = true;
-                    // 真上／真横は表示だけを正投影へ切り替え、共有カメラの実値もグリッド種類も変更しない。
-                    // ここでpitchを0/-90へ固定すると、横で調整した上下の傾きが
-                    // 「上」へ移った瞬間や0 3Dへ戻った瞬間に失われる。
-                    const keep = { ...cameraBefore, fov: 180, roll: 0 };
-                    Object.entries(keep).forEach(([k, v]) => setP(k, v));
                     orthView = kind === "side" ? "side" : kind === "front" ? "front" : "top";
                     standardApplying = false;
                     sync();
@@ -8810,18 +8787,12 @@
                 let floorPlanView = null,
                     floorPlanSideWasHidden = null,
                     floorPlanAutoHidSide = false;
-                function restoreStudioView(v, preserve = {}) {
-                    if (!v) {
-                        applyStandardView("home");
-                        return;
-                    }
+                function restoreStudioView(v) {
+                    // 間取り終了時は保存した古いカメラ値へ戻さず、現在の設定をそのまま使う。
+                    // 間取り中に左パネルで変更した魚眼画角、レンズ、位置、高さ、回転、傾き、
+                    // ロールも含め、0=3Dで失われないようにする。
                     standardApplying = true;
-                    // 間取りから戻るときも、現在のグリッド種類／透視法の選択は保持する。
-                    // v.gtは保存された表示状態の情報として残すが、視点復帰でUIを2点透視へ戻さない。
-                    orthView = v.orthView || null;
-                    viewKeys.forEach((k) => {
-                        if (k in P) setP(k, k in preserve ? preserve[k] : v[k]);
-                    });
+                    orthView = null;
                     standardApplying = false;
                     sync();
                     // 間取りを閉じても、編集ツールを選択していたら3D編集を続けられるようにする。
@@ -8939,8 +8910,7 @@
                 }
                 function exitFloorPlan(restore = true) {
                     if (!window.cityFloorPlanActive) return;
-                    // 間取り中に変更した共有カメラの位置・高さ・向き・上下の傾き・レンズを3D視点へ引き継ぐ。
-                    const keepCamera = { yaw: P.yaw, cx: P.cx, cz: P.cz, lens: P.lens, ch: P.ch, pitch: P.pitch };
+                    // 間取り中に変更した共有カメラ設定は、そのまま3D視点へ引き継ぐ。
                     window.cityFloorPlanActive = false;
                     floorPlanDock.classList.remove("open");
                     const saved = floorPlanView,
@@ -8950,7 +8920,7 @@
                     floorPlanAutoHidSide = false;
                     window.cityFloorPlanCenter = null;
                     window.cityFloorPlanScale = null;
-                    if (restore) restoreStudioView(saved, keepCamera);
+                    if (restore) restoreStudioView(saved);
                     else {
                         setMode("view");
                         render();
@@ -11604,10 +11574,6 @@
                 render();
             })();
         </script>
-    <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
-<<<<<<< HEAD
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a511e445dd00fc99',t:'MTc5MzEwNjExMA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
-=======
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a511c7c9bf4cfca0',t:'MTc5MzEwNDk0Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
->>>>>>> e9e948abc5ab798cf7c9bec02dc4491b98a59848
+    <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a5120625684219c4',t:'MTc5MzEwNzQ5Nw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
+</body>
 </html>

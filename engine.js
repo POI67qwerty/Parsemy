@@ -223,8 +223,9 @@ $("surfaceToggle").onclick = () => {
 };
 function leaveOrthView(changedKey) {
     if (standardApplying) return;
-    // 間取り中のレンズ変更は正投影を解除せず、カメラの画角だけを更新する。
-    if (window.cityFloorPlanActive && changedKey === "lens") return;
+    // 間取り中は左パネルのカメラ値を変更しても正投影を解除しない。
+    // 0=3Dで現在の魚眼画角・レンズ・位置・高さ・回転・傾きをそのまま引き継ぐ。
+    if (window.cityFloorPlanActive) return;
     if (orthView === "top" && changedKey !== "pitch") {
         P.pitch = -75;
         const pitchInput = $("pitch");
