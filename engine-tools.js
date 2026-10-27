@@ -521,12 +521,16 @@ function stackedBuildingGizmo(o) {
                           : pr(px, py, pz + step),
                 dx = q.x - s.x,
                 dy = q.y - s.y,
-                pxLen = Math.hypot(dx, dy);
+                pxLen = Math.hypot(dx, dy),
+                hidden = pxLen <= 0.5 / Z,
+                fallback = axis === "h" ? { x: 0, y: -1 } : { x: 1, y: 0 },
+                displayGap = Math.max(30 / Z, Math.min(54 / Z, 0.34 * Math.max(1, Number(orthScale()) || 1))),
+                display = hidden ? { x: s.x + fallback.x * displayGap, y: s.y + fallback.y * displayGap, ok: true } : s;
             return {
                 kind,
-                s,
-                dir: { x: dx / (pxLen || 1), y: dy / (pxLen || 1) },
-                scale: pxLen / step || 1,
+                s: display,
+                dir: hidden ? fallback : { x: dx / pxLen, y: dy / pxLen },
+                scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : pxLen / step,
                 start: axis === "w" ? w : axis === "d" ? d : h,
                 min: 0.08,
                 max: 30,
@@ -546,20 +550,130 @@ function stackedBuildingGizmo(o) {
         frame = [pr(x - w / 2, y, z), pr(x - w / 2, y, z + h), pr(x + w / 2, y, z + h), pr(x + w / 2, y, z)];
     return { o, C3: p3(x, y, z + h * 0.5), center, frame, handles, floorIndex: index };
 }
+function pathPipeGizmo(o) {
+    if (
+        !o ||
+        o.type !== "asset" ||
+        o.asset !== "pathPipe" ||
+        typeof pathPipeControlPoints !== "function" ||
+        typeof pathPipeMesh !== "function" ||
+        typeof pt !== "function"
+    )
+        return null;
+    const points = pathPipeControlPoints(o),
+        pr = (v) => scrW(pt(o, v[0], v[1], v[2])),
+        controlPoints = points.map((v) => pr(v)),
+        pathHandles = [],
+        axisNames = ["X", "Y", "Z"],
+        axisColors = ["#e8743d", "#4a7be8", "#2fb5a5"],
+        // 正面／横ビューでは、経路の別の点が投影上で同じ場所になることがある
+        // （例：奥行きだけが違う2点）。同じ画面座標へ全ハンドルを重ねると
+        // hitGizmoが常に先頭の点を返すため、重なった点の操作列を扇状に分ける。
+        pointFan = controlPoints.map((anchor, index) => {
+            const peers = controlPoints
+                .map((q, i) => (q?.ok && anchor?.ok && Math.hypot(q.x - anchor.x, q.y - anchor.y) < 12 / Z ? i : -1))
+                .filter((i) => i >= 0);
+            if (peers.length < 2) return { x: 0, y: 0 };
+            const rank = peers.indexOf(index),
+                lane = rank - (peers.length - 1) * 0.5,
+                gap = Math.max(44 / Z, Math.min(64 / Z, 0.42 * Math.max(1, Number(orthScale()) || 1))),
+                d = { x: Math.SQRT1_2, y: Math.SQRT1_2 };
+            return { x: d.x * lane * gap, y: d.y * lane * gap };
+        });
+    points.forEach((v, index) => {
+        const rawAnchor = pr(v),
+            fan = pointFan[index] || { x: 0, y: 0 },
+            anchor = rawAnchor?.ok ? { ...rawAnchor, x: rawAnchor.x + fan.x, y: rawAnchor.y + fan.y } : rawAnchor;
+        [0, 1, 2].forEach((axis) => {
+            const step = Math.max(0.18, (Number(o.pipeRadius) || 0.18) * 2.4),
+                probePoint = [...v];
+            probePoint[axis] += step;
+            const probe = pr(probePoint),
+                dx = probe.x - rawAnchor.x,
+                dy = probe.y - rawAnchor.y,
+                length = Math.hypot(dx, dy),
+                fallback = axis === 2 ? { x: 0, y: -1 } : { x: 1, y: 0 },
+                projected = !!probe?.ok && Number.isFinite(dx) && Number.isFinite(dy) && Number.isFinite(length),
+                hidden = !projected || length <= 0.5 / Z,
+                // 正面／横／上では奥行きまたは高さの軸が画面へつぶれる。
+                // そのまま中心点へ重ねると、制御点を押しても別軸を拾ったり、
+                // 「押せるハンドルがない」ように見えるため、画面上へ逃がす。
+                displayGap = Math.max(30 / Z, Math.min(54 / Z, 0.34 * Math.max(1, Number(orthScale()) || 1))),
+                display = hidden
+                    ? { x: anchor.x + fallback.x * displayGap, y: anchor.y + fallback.y * displayGap, ok: true }
+                    : { ...probe, x: probe.x + fan.x, y: probe.y + fan.y };
+            pathHandles.push({
+                kind: `path-point-${index}-${axis}`,
+                index,
+                axis,
+                s: display,
+                anchor,
+                dir: hidden ? fallback : { x: dx / length, y: dy / length },
+                scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : length / step,
+                start: Number(v[axis]) || 0,
+                min: -50,
+                max: 50,
+                label: axisNames[axis],
+                color: axisColors[axis],
+            });
+        });
+    });
+    const mesh = pathPipeMesh(o),
+        radius = Math.max(0.02, Number(o.pipeRadius) || 0.18),
+        radiusAnchor = controlPoints[0],
+        radiusPoint = mesh.rings[0]?.[0] ? pr(mesh.rings[0][0]) : radiusAnchor,
+        rdx = radiusPoint.x - radiusAnchor.x,
+        rdy = radiusPoint.y - radiusAnchor.y,
+        rLength = Math.hypot(rdx, rdy),
+        radiusProjected =
+            !!radiusPoint?.ok &&
+            !!radiusAnchor?.ok &&
+            Number.isFinite(rdx) &&
+            Number.isFinite(rdy) &&
+            Number.isFinite(rLength),
+        radiusHidden = !radiusProjected || rLength <= 0.5 / Z,
+        radiusFallback = orthView === "top" ? { x: 0, y: 1 } : { x: -1, y: 0 },
+        radiusGap = Math.max(34 / Z, Math.min(58 / Z, 0.38 * Math.max(1, Number(orthScale()) || 1))),
+        radiusDisplay = radiusHidden
+            ? {
+                  x: radiusAnchor.x + radiusFallback.x * radiusGap,
+                  y: radiusAnchor.y + radiusFallback.y * radiusGap,
+                  ok: true,
+              }
+            : radiusPoint;
+    return {
+        o,
+        C3: L2W(o, points[0][0], points[0][1], points[0][2]),
+        controlPoints,
+        pathHandles,
+        radiusHandle: {
+            kind: "path-radius",
+            s: radiusDisplay,
+            anchor: radiusAnchor,
+            dir: radiusHidden ? radiusFallback : { x: rdx / rLength, y: rdy / rLength },
+            scale: radiusHidden ? Math.max(24, orthView ? orthScale() : 24) : rLength / radius,
+            start: radius,
+            min: 0.02,
+            max: 5,
+        },
+    };
+}
 function specialGizmo(o) {
-    return o && o.type === "asset" && o.asset === "stackedBuilding"
-        ? stackedBuildingGizmo(o)
-        : o && o.type === "asset" && o.asset === "building"
-          ? buildingGizmo(o)
-          : o && o.type === "asset" && o.asset === "awning"
-            ? awningGizmo(o)
-            : o && o.type === "asset" && o.asset === "sign"
-              ? signGizmo(o)
-              : o && o.type === "asset" && o.asset === "cone"
-                ? coneGizmo(o)
-                : o && o.type === "asset" && o.asset === "sphere"
-                  ? sphereGizmo(o)
-                  : null;
+    return o && o.type === "asset" && o.asset === "pathPipe"
+        ? pathPipeGizmo(o)
+        : o && o.type === "asset" && o.asset === "stackedBuilding"
+          ? stackedBuildingGizmo(o)
+          : o && o.type === "asset" && o.asset === "building"
+            ? buildingGizmo(o)
+            : o && o.type === "asset" && o.asset === "awning"
+              ? awningGizmo(o)
+              : o && o.type === "asset" && o.asset === "sign"
+                ? signGizmo(o)
+                : o && o.type === "asset" && o.asset === "cone"
+                  ? coneGizmo(o)
+                  : o && o.type === "asset" && o.asset === "sphere"
+                    ? sphereGizmo(o)
+                    : null;
 }
 function drawSpecialGizmo(c, o) {
     const sg = specialGizmo(o);
@@ -583,7 +697,50 @@ function drawSpecialGizmo(c, o) {
         c.fill();
         c.stroke();
     };
-    if (sg.o.asset === "stackedBuilding") {
+    if (sg.o.asset === "pathPipe") {
+        const h = sg.radiusHandle;
+        c.setLineDash([5 / Z, 4 / Z]);
+        c.strokeStyle = "rgba(255,159,104,.9)";
+        c.lineWidth = 1.2 / Z;
+        if (sg.controlPoints.length > 1) {
+            c.beginPath();
+            sg.controlPoints.forEach((q, i) => (i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)));
+            c.stroke();
+        }
+        sg.pathHandles.forEach((handle) => {
+            if (!handle.s?.ok || !handle.anchor?.ok) return;
+            c.strokeStyle = handle.color;
+            c.beginPath();
+            c.moveTo(handle.anchor.x, handle.anchor.y);
+            c.lineTo(handle.s.x, handle.s.y);
+            c.stroke();
+            sq(handle.s, handle.color, true);
+        });
+        c.setLineDash([]);
+        sg.controlPoints.forEach((q) => {
+            if (!q?.ok) return;
+            c.fillStyle = "#fff";
+            c.strokeStyle = "#ff9f68";
+            c.lineWidth = 1.5 / Z;
+            c.beginPath();
+            c.arc(q.x, q.y, 5 / Z, 0, Math.PI * 2);
+            c.fill();
+            c.stroke();
+        });
+        if (h?.s?.ok && h?.anchor?.ok) {
+            c.setLineDash([4 / Z, 3 / Z]);
+            c.strokeStyle = "#ff9f68";
+            c.beginPath();
+            c.moveTo(h.anchor.x, h.anchor.y);
+            c.lineTo(h.s.x, h.s.y);
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, "#ff9f68", true);
+            c.fillStyle = "#ffd0a8";
+            c.font = `bold ${12 / Z}px system-ui`;
+            c.fillText("半径", h.s.x + 9 / Z, h.s.y - 8 / Z);
+        }
+    } else if (sg.o.asset === "stackedBuilding") {
         const h = sg.handles,
             usable = Object.values(h).filter((handle) => Math.hypot(handle.dir.x, handle.dir.y) > 0.15);
         c.setLineDash([5 / Z, 4 / Z]);
@@ -853,7 +1010,8 @@ function gizmo() {
                     o.asset === "stairs" ||
                     o.asset === "building" ||
                     o.asset === "awning" ||
-                    o.asset === "balcony")),
+                    o.asset === "balcony" ||
+                    o.asset === "pathPipe")),
         [z0, z1] = outerZRange(o),
         zc = solid ? (z0 + z1) / 2 : 0;
     const C3 = L2W(o, 0, 0, zc),
@@ -1040,6 +1198,25 @@ function hitGizmo(p) {
         special = active && specialGizmo(active),
         R = 20 / Z;
     if (special) {
+        if (active.asset === "pathPipe") {
+            // 扇状に分けた隣接点のハンドルが許容半径へ少し重なることがある。
+            // 配列の先頭ではなく、押した位置に最も近いハンドルを返して
+            // 奥側の制御点を手前の点へ誤配分しない。
+            const pathHits = special.pathHandles
+                .filter((h) => h.s?.ok)
+                .map((h) => ({ h, d: Math.hypot(h.s.x - p.x, h.s.y - p.y), t: h.kind }))
+                .filter((q) => q.d < R);
+            const radius = special.radiusHandle;
+            if (radius?.s?.ok) {
+                const d = Math.hypot(radius.s.x - p.x, radius.s.y - p.y);
+                if (d < R) pathHits.push({ h: radius, d, t: "path-radius" });
+            }
+            pathHits.sort((a, b) => a.d - b.d);
+            if (pathHits.length) {
+                const q = pathHits[0];
+                return { t: q.t, sign: q.h, g: { o: active, C3: special.C3 } };
+            }
+        }
         if (active.asset === "stackedBuilding") {
             for (const h of Object.values(special.handles))
                 if (Math.hypot(h.dir.x, h.dir.y) > 0.15 && Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
@@ -1349,6 +1526,8 @@ function beginGizmo(h, p) {
         h.t.startsWith("building-") ||
         h.t.startsWith("awning-") ||
         h.t.startsWith("stacked-") ||
+        h.t.startsWith("path-point-") ||
+        h.t === "path-radius" ||
         h.t === "cone-height" ||
         h.t === "sphere-radius"
     )
@@ -1403,7 +1582,23 @@ function dragEdit(p, freeRotation = false) {
         if (q.hit.size) snapHit = q.hit;
         return q.d;
     };
-    if (ed.t.startsWith("building-")) {
+    if (ed.t.startsWith("path-point-")) {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1),
+            path = pathPipeControlPoints(o).map((point) => [...point]);
+        if (path[h.index]) {
+            path[h.index][h.axis] = clamp(h.start + amount, h.min, h.max);
+            patch = { path };
+        }
+    } else if (ed.t === "path-radius") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            radius = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { pipeRadius: radius };
+    } else if (ed.t.startsWith("building-")) {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
             deltaY = p.y - ed.p0.y,
@@ -1822,6 +2017,11 @@ function exportSurfaceTriangles(o) {
         }
     };
     const kind = o.asset || o.type;
+    if (kind === "pathPipe" && typeof pathPipeMesh === "function") {
+        const mesh = pathPipeMesh(o);
+        mesh.triangles.forEach((triangle) => out.push(triangle.map((v) => L(...v))));
+        return out;
+    }
     if (kind === "stackedBuilding") {
         const floors =
             Array.isArray(o.floors) && o.floors.length

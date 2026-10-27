@@ -136,6 +136,13 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><input type=checkbox id=balconySideRail checked> 左右の側壁を表示</label>
 <div class="note">建物を選択して棚の「壁付けベランダ」を押すと、建物の正面壁へ2階相当の高さで接着します。接着後は親建物の移動・幅・奥行き・高さに追従し、ベランダ単体の幅・奥行き・手すり高さを編集できます。</div>
 </div>
+<div id=pathPipeP style="display:none"><h3>パスパイプ</h3>
+<label><span>パイプ半径</span><input type=number class=nv id=pathPipeRadius min=0.02 step=0.02 style="width:100px"><span class=un>m</span></label>
+<label><span>曲がり半径</span><input type=number class=nv id=pathPipeCornerRadius min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>円周分割</span><input type=number class=nv id=pathPipeSides min=6 max=24 step=1 style="width:100px"></label>
+<label class=full><span>パス点（x,y,z）</span><textarea id=pathPipePoints rows=4 placeholder="-2,0,1.1; 0,0,1.1; 0,2.2,1.1"></textarea></label>
+<div class="note">キャンバス上の各パス点にあるX／Y／Zハンドルをドラッグすると経路を編集できます。オレンジの「半径」ハンドルで太さを変更できます。曲がり半径を0にすると角が直線になります。</div>
+</div>
 <div id=stackedP style="display:none"><h3>縁付き階層建物</h3>
 <label><span>階数</span><input type=number class=nv id=stackFloorCount min=1 max=30 step=1 style="width:100px"></label>
 <label><input type=checkbox id=stackSyncFirst checked> 1階の寸法を全階へ反映</label>
@@ -1803,12 +1810,16 @@ function stackedBuildingGizmo(o) {
                           : pr(px, py, pz + step),
                 dx = q.x - s.x,
                 dy = q.y - s.y,
-                pxLen = Math.hypot(dx, dy);
+                pxLen = Math.hypot(dx, dy),
+                hidden = pxLen <= 0.5 / Z,
+                fallback = axis === "h" ? { x: 0, y: -1 } : { x: 1, y: 0 },
+                displayGap = Math.max(30 / Z, Math.min(54 / Z, 0.34 * Math.max(1, Number(orthScale()) || 1))),
+                display = hidden ? { x: s.x + fallback.x * displayGap, y: s.y + fallback.y * displayGap, ok: true } : s;
             return {
                 kind,
-                s,
-                dir: { x: dx / (pxLen || 1), y: dy / (pxLen || 1) },
-                scale: pxLen / step || 1,
+                s: display,
+                dir: hidden ? fallback : { x: dx / pxLen, y: dy / pxLen },
+                scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : pxLen / step,
                 start: axis === "w" ? w : axis === "d" ? d : h,
                 min: 0.08,
                 max: 30,
@@ -1828,20 +1839,130 @@ function stackedBuildingGizmo(o) {
         frame = [pr(x - w / 2, y, z), pr(x - w / 2, y, z + h), pr(x + w / 2, y, z + h), pr(x + w / 2, y, z)];
     return { o, C3: p3(x, y, z + h * 0.5), center, frame, handles, floorIndex: index };
 }
+function pathPipeGizmo(o) {
+    if (
+        !o ||
+        o.type !== "asset" ||
+        o.asset !== "pathPipe" ||
+        typeof pathPipeControlPoints !== "function" ||
+        typeof pathPipeMesh !== "function" ||
+        typeof pt !== "function"
+    )
+        return null;
+    const points = pathPipeControlPoints(o),
+        pr = (v) => scrW(pt(o, v[0], v[1], v[2])),
+        controlPoints = points.map((v) => pr(v)),
+        pathHandles = [],
+        axisNames = ["X", "Y", "Z"],
+        axisColors = ["#e8743d", "#4a7be8", "#2fb5a5"],
+        // 正面／横ビューでは、経路の別の点が投影上で同じ場所になることがある
+        // （例：奥行きだけが違う2点）。同じ画面座標へ全ハンドルを重ねると
+        // hitGizmoが常に先頭の点を返すため、重なった点の操作列を扇状に分ける。
+        pointFan = controlPoints.map((anchor, index) => {
+            const peers = controlPoints
+                .map((q, i) => (q?.ok && anchor?.ok && Math.hypot(q.x - anchor.x, q.y - anchor.y) < 12 / Z ? i : -1))
+                .filter((i) => i >= 0);
+            if (peers.length < 2) return { x: 0, y: 0 };
+            const rank = peers.indexOf(index),
+                lane = rank - (peers.length - 1) * 0.5,
+                gap = Math.max(44 / Z, Math.min(64 / Z, 0.42 * Math.max(1, Number(orthScale()) || 1))),
+                d = { x: Math.SQRT1_2, y: Math.SQRT1_2 };
+            return { x: d.x * lane * gap, y: d.y * lane * gap };
+        });
+    points.forEach((v, index) => {
+        const rawAnchor = pr(v),
+            fan = pointFan[index] || { x: 0, y: 0 },
+            anchor = rawAnchor?.ok ? { ...rawAnchor, x: rawAnchor.x + fan.x, y: rawAnchor.y + fan.y } : rawAnchor;
+        [0, 1, 2].forEach((axis) => {
+            const step = Math.max(0.18, (Number(o.pipeRadius) || 0.18) * 2.4),
+                probePoint = [...v];
+            probePoint[axis] += step;
+            const probe = pr(probePoint),
+                dx = probe.x - rawAnchor.x,
+                dy = probe.y - rawAnchor.y,
+                length = Math.hypot(dx, dy),
+                fallback = axis === 2 ? { x: 0, y: -1 } : { x: 1, y: 0 },
+                projected = !!probe?.ok && Number.isFinite(dx) && Number.isFinite(dy) && Number.isFinite(length),
+                hidden = !projected || length <= 0.5 / Z,
+                // 正面／横／上では奥行きまたは高さの軸が画面へつぶれる。
+                // そのまま中心点へ重ねると、制御点を押しても別軸を拾ったり、
+                // 「押せるハンドルがない」ように見えるため、画面上へ逃がす。
+                displayGap = Math.max(30 / Z, Math.min(54 / Z, 0.34 * Math.max(1, Number(orthScale()) || 1))),
+                display = hidden
+                    ? { x: anchor.x + fallback.x * displayGap, y: anchor.y + fallback.y * displayGap, ok: true }
+                    : { ...probe, x: probe.x + fan.x, y: probe.y + fan.y };
+            pathHandles.push({
+                kind: `path-point-${index}-${axis}`,
+                index,
+                axis,
+                s: display,
+                anchor,
+                dir: hidden ? fallback : { x: dx / length, y: dy / length },
+                scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : length / step,
+                start: Number(v[axis]) || 0,
+                min: -50,
+                max: 50,
+                label: axisNames[axis],
+                color: axisColors[axis],
+            });
+        });
+    });
+    const mesh = pathPipeMesh(o),
+        radius = Math.max(0.02, Number(o.pipeRadius) || 0.18),
+        radiusAnchor = controlPoints[0],
+        radiusPoint = mesh.rings[0]?.[0] ? pr(mesh.rings[0][0]) : radiusAnchor,
+        rdx = radiusPoint.x - radiusAnchor.x,
+        rdy = radiusPoint.y - radiusAnchor.y,
+        rLength = Math.hypot(rdx, rdy),
+        radiusProjected =
+            !!radiusPoint?.ok &&
+            !!radiusAnchor?.ok &&
+            Number.isFinite(rdx) &&
+            Number.isFinite(rdy) &&
+            Number.isFinite(rLength),
+        radiusHidden = !radiusProjected || rLength <= 0.5 / Z,
+        radiusFallback = orthView === "top" ? { x: 0, y: 1 } : { x: -1, y: 0 },
+        radiusGap = Math.max(34 / Z, Math.min(58 / Z, 0.38 * Math.max(1, Number(orthScale()) || 1))),
+        radiusDisplay = radiusHidden
+            ? {
+                  x: radiusAnchor.x + radiusFallback.x * radiusGap,
+                  y: radiusAnchor.y + radiusFallback.y * radiusGap,
+                  ok: true,
+              }
+            : radiusPoint;
+    return {
+        o,
+        C3: L2W(o, points[0][0], points[0][1], points[0][2]),
+        controlPoints,
+        pathHandles,
+        radiusHandle: {
+            kind: "path-radius",
+            s: radiusDisplay,
+            anchor: radiusAnchor,
+            dir: radiusHidden ? radiusFallback : { x: rdx / rLength, y: rdy / rLength },
+            scale: radiusHidden ? Math.max(24, orthView ? orthScale() : 24) : rLength / radius,
+            start: radius,
+            min: 0.02,
+            max: 5,
+        },
+    };
+}
 function specialGizmo(o) {
-    return o && o.type === "asset" && o.asset === "stackedBuilding"
-        ? stackedBuildingGizmo(o)
-        : o && o.type === "asset" && o.asset === "building"
-          ? buildingGizmo(o)
-          : o && o.type === "asset" && o.asset === "awning"
-            ? awningGizmo(o)
-            : o && o.type === "asset" && o.asset === "sign"
-              ? signGizmo(o)
-              : o && o.type === "asset" && o.asset === "cone"
-                ? coneGizmo(o)
-                : o && o.type === "asset" && o.asset === "sphere"
-                  ? sphereGizmo(o)
-                  : null;
+    return o && o.type === "asset" && o.asset === "pathPipe"
+        ? pathPipeGizmo(o)
+        : o && o.type === "asset" && o.asset === "stackedBuilding"
+          ? stackedBuildingGizmo(o)
+          : o && o.type === "asset" && o.asset === "building"
+            ? buildingGizmo(o)
+            : o && o.type === "asset" && o.asset === "awning"
+              ? awningGizmo(o)
+              : o && o.type === "asset" && o.asset === "sign"
+                ? signGizmo(o)
+                : o && o.type === "asset" && o.asset === "cone"
+                  ? coneGizmo(o)
+                  : o && o.type === "asset" && o.asset === "sphere"
+                    ? sphereGizmo(o)
+                    : null;
 }
 function drawSpecialGizmo(c, o) {
     const sg = specialGizmo(o);
@@ -1865,7 +1986,50 @@ function drawSpecialGizmo(c, o) {
         c.fill();
         c.stroke();
     };
-    if (sg.o.asset === "stackedBuilding") {
+    if (sg.o.asset === "pathPipe") {
+        const h = sg.radiusHandle;
+        c.setLineDash([5 / Z, 4 / Z]);
+        c.strokeStyle = "rgba(255,159,104,.9)";
+        c.lineWidth = 1.2 / Z;
+        if (sg.controlPoints.length > 1) {
+            c.beginPath();
+            sg.controlPoints.forEach((q, i) => (i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)));
+            c.stroke();
+        }
+        sg.pathHandles.forEach((handle) => {
+            if (!handle.s?.ok || !handle.anchor?.ok) return;
+            c.strokeStyle = handle.color;
+            c.beginPath();
+            c.moveTo(handle.anchor.x, handle.anchor.y);
+            c.lineTo(handle.s.x, handle.s.y);
+            c.stroke();
+            sq(handle.s, handle.color, true);
+        });
+        c.setLineDash([]);
+        sg.controlPoints.forEach((q) => {
+            if (!q?.ok) return;
+            c.fillStyle = "#fff";
+            c.strokeStyle = "#ff9f68";
+            c.lineWidth = 1.5 / Z;
+            c.beginPath();
+            c.arc(q.x, q.y, 5 / Z, 0, Math.PI * 2);
+            c.fill();
+            c.stroke();
+        });
+        if (h?.s?.ok && h?.anchor?.ok) {
+            c.setLineDash([4 / Z, 3 / Z]);
+            c.strokeStyle = "#ff9f68";
+            c.beginPath();
+            c.moveTo(h.anchor.x, h.anchor.y);
+            c.lineTo(h.s.x, h.s.y);
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, "#ff9f68", true);
+            c.fillStyle = "#ffd0a8";
+            c.font = `bold ${12 / Z}px system-ui`;
+            c.fillText("半径", h.s.x + 9 / Z, h.s.y - 8 / Z);
+        }
+    } else if (sg.o.asset === "stackedBuilding") {
         const h = sg.handles,
             usable = Object.values(h).filter((handle) => Math.hypot(handle.dir.x, handle.dir.y) > 0.15);
         c.setLineDash([5 / Z, 4 / Z]);
@@ -2135,7 +2299,8 @@ function gizmo() {
                     o.asset === "stairs" ||
                     o.asset === "building" ||
                     o.asset === "awning" ||
-                    o.asset === "balcony")),
+                    o.asset === "balcony" ||
+                    o.asset === "pathPipe")),
         [z0, z1] = outerZRange(o),
         zc = solid ? (z0 + z1) / 2 : 0;
     const C3 = L2W(o, 0, 0, zc),
@@ -2322,6 +2487,25 @@ function hitGizmo(p) {
         special = active && specialGizmo(active),
         R = 20 / Z;
     if (special) {
+        if (active.asset === "pathPipe") {
+            // 扇状に分けた隣接点のハンドルが許容半径へ少し重なることがある。
+            // 配列の先頭ではなく、押した位置に最も近いハンドルを返して
+            // 奥側の制御点を手前の点へ誤配分しない。
+            const pathHits = special.pathHandles
+                .filter((h) => h.s?.ok)
+                .map((h) => ({ h, d: Math.hypot(h.s.x - p.x, h.s.y - p.y), t: h.kind }))
+                .filter((q) => q.d < R);
+            const radius = special.radiusHandle;
+            if (radius?.s?.ok) {
+                const d = Math.hypot(radius.s.x - p.x, radius.s.y - p.y);
+                if (d < R) pathHits.push({ h: radius, d, t: "path-radius" });
+            }
+            pathHits.sort((a, b) => a.d - b.d);
+            if (pathHits.length) {
+                const q = pathHits[0];
+                return { t: q.t, sign: q.h, g: { o: active, C3: special.C3 } };
+            }
+        }
         if (active.asset === "stackedBuilding") {
             for (const h of Object.values(special.handles))
                 if (Math.hypot(h.dir.x, h.dir.y) > 0.15 && Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
@@ -2631,6 +2815,8 @@ function beginGizmo(h, p) {
         h.t.startsWith("building-") ||
         h.t.startsWith("awning-") ||
         h.t.startsWith("stacked-") ||
+        h.t.startsWith("path-point-") ||
+        h.t === "path-radius" ||
         h.t === "cone-height" ||
         h.t === "sphere-radius"
     )
@@ -2685,7 +2871,23 @@ function dragEdit(p, freeRotation = false) {
         if (q.hit.size) snapHit = q.hit;
         return q.d;
     };
-    if (ed.t.startsWith("building-")) {
+    if (ed.t.startsWith("path-point-")) {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1),
+            path = pathPipeControlPoints(o).map((point) => [...point]);
+        if (path[h.index]) {
+            path[h.index][h.axis] = clamp(h.start + amount, h.min, h.max);
+            patch = { path };
+        }
+    } else if (ed.t === "path-radius") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            radius = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { pipeRadius: radius };
+    } else if (ed.t.startsWith("building-")) {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
             deltaY = p.y - ed.p0.y,
@@ -3104,6 +3306,11 @@ function exportSurfaceTriangles(o) {
         }
     };
     const kind = o.asset || o.type;
+    if (kind === "pathPipe" && typeof pathPipeMesh === "function") {
+        const mesh = pathPipeMesh(o);
+        mesh.triangles.forEach((triangle) => out.push(triangle.map((v) => L(...v))));
+        return out;
+    }
     if (kind === "stackedBuilding") {
         const floors =
             Array.isArray(o.floors) && o.floors.length
@@ -5017,7 +5224,7 @@ try {
 /* City Grid Studio asset module.
    Asset catalog, low-poly geometry generation and asset-specific normalization live here.
    The UI/controller layer stays in studio-ui.js. */
-("use strict");
+"use strict";
 // ===== Low-poly asset library =====
 // 基本プリミティブを先頭にまとめ、その後に街並み用アセットを並べる。
 // 円柱は円の押し出しで作れるため、アセット棚からは外している。
@@ -5031,6 +5238,7 @@ const ASSETS = {
     sign: { label: "看板", glyph: "▤", w: 1.0, d: 0.2, h: 2.15, accent: "#76d9ff" },
     awning: { label: "店舗テント", glyph: "▱", w: 3.8, d: 1.35, h: 0.35, accent: "#d98b68" },
     balcony: { label: "壁付けベランダ", glyph: "▱", w: 3.2, d: 1.8, h: 1.25, accent: "#e6a36f" },
+    pathPipe: { label: "パスパイプ", glyph: "◉", w: 4.8, d: 4.2, h: 1.5, accent: "#ff9f68" },
     person: { label: "人物", glyph: "♙", w: 0.46, d: 0.3, h: 1.7, accent: "#ad9cff" },
     stairs: { label: "階段", glyph: "▰", w: 1.45, d: 2.4, h: 0.78, accent: "#ffb36f" },
     building: { label: "開口のある建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#8ce6c2" },
@@ -5178,6 +5386,151 @@ function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
         ];
     return out;
 }
+function pathVecSub(a, b) {
+    return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+function pathVecAdd(a, b, scale = 1) {
+    return [a[0] + b[0] * scale, a[1] + b[1] * scale, a[2] + b[2] * scale];
+}
+function pathVecScale(a, scale) {
+    return [a[0] * scale, a[1] * scale, a[2] * scale];
+}
+function pathVecDot(a, b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+function pathVecCross(a, b) {
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+function pathVecLength(a) {
+    return Math.hypot(a[0], a[1], a[2]);
+}
+function pathVecUnit(a, fallback = [1, 0, 0]) {
+    const n = pathVecLength(a);
+    return n > 1e-7 ? pathVecScale(a, 1 / n) : [...fallback];
+}
+function pathRotateAroundAxis(v, axis, angle) {
+    const c = Math.cos(angle),
+        s = Math.sin(angle),
+        dot = pathVecDot(axis, v),
+        cross = pathVecCross(axis, v);
+    return [
+        v[0] * c + cross[0] * s + axis[0] * dot * (1 - c),
+        v[1] * c + cross[1] * s + axis[1] * dot * (1 - c),
+        v[2] * c + cross[2] * s + axis[2] * dot * (1 - c),
+    ];
+}
+function pathPipeDefaultPoints() {
+    return [
+        [-2.4, 0, 1.1],
+        [0, 0, 1.1],
+        [0, 2.2, 1.1],
+    ];
+}
+function pathPipeControlPoints(o) {
+    const source = Array.isArray(o?.path) ? o.path : pathPipeDefaultPoints();
+    const points = source
+        .map((v) => (Array.isArray(v) ? v.slice(0, 3).map(Number) : []))
+        .filter((v) => v.length === 3 && v.every(Number.isFinite));
+    return points.length >= 2 ? points : pathPipeDefaultPoints();
+}
+function pathPipeRoundedPath(o) {
+    const points = pathPipeControlPoints(o),
+        cornerRadius = Math.max(0, Number(o?.cornerRadius) || 0),
+        arcSteps = clamp(Math.round(Number(o?.cornerSteps) || 6), 2, 16),
+        out = [],
+        add = (p) => {
+            const last = out[out.length - 1];
+            if (!last || pathVecLength(pathVecSub(p, last)) > 1e-5) out.push(p);
+        };
+    add(points[0]);
+    for (let i = 1; i < points.length - 1; i++) {
+        const p = points[i],
+            prev = points[i - 1],
+            next = points[i + 1],
+            toPrev = pathVecUnit(pathVecSub(prev, p)),
+            toNext = pathVecUnit(pathVecSub(next, p)),
+            lenPrev = pathVecLength(pathVecSub(p, prev)),
+            lenNext = pathVecLength(pathVecSub(next, p)),
+            alpha = Math.acos(clamp(pathVecDot(toPrev, toNext), -1, 1)),
+            turn = Math.PI - alpha,
+            bisector = pathVecUnit(pathVecAdd(toPrev, toNext));
+        if (
+            cornerRadius <= 1e-5 ||
+            turn <= 0.01 ||
+            !Number.isFinite(alpha) ||
+            pathVecLength(pathVecAdd(toPrev, toNext)) < 1e-5
+        ) {
+            add(p);
+            continue;
+        }
+        const tanHalf = Math.tan(turn * 0.5),
+            cut = Math.min(cornerRadius * tanHalf, lenPrev * 0.45, lenNext * 0.45),
+            radius = cut / Math.max(1e-5, tanHalf),
+            entry = pathVecAdd(p, toPrev, cut),
+            exit = pathVecAdd(p, toNext, cut),
+            normal = pathVecUnit(pathVecCross(toPrev, toNext), [0, 0, 1]),
+            centerDistance = radius / Math.max(1e-5, Math.sin(alpha * 0.5)),
+            center = pathVecAdd(p, bisector, centerDistance),
+            start = pathVecSub(entry, center),
+            finish = pathVecSub(exit, center),
+            angle = Math.atan2(pathVecDot(normal, pathVecCross(start, finish)), pathVecDot(start, finish));
+        add(entry);
+        if (!Number.isFinite(angle) || pathVecLength(pathVecCross(start, finish)) < 1e-5) {
+            add(exit);
+            continue;
+        }
+        for (let j = 1; j <= arcSteps; j++)
+            add(pathVecAdd(center, pathRotateAroundAxis(start, normal, (angle * j) / arcSteps)));
+    }
+    add(points[points.length - 1]);
+    return out;
+}
+function pathPipeMesh(o) {
+    const centerline = pathPipeRoundedPath(o),
+        radius = clamp(Math.abs(Number(o?.pipeRadius) || 0.18), 0.02, 20),
+        sides = clamp(Math.round(Number(o?.pipeSides) || 10), 6, 24),
+        rings = [],
+        triangles = [];
+    centerline.forEach((center, i) => {
+        const before = centerline[Math.max(0, i - 1)],
+            after = centerline[Math.min(centerline.length - 1, i + 1)],
+            tangent = pathVecUnit(pathVecSub(after, before)),
+            reference = Math.abs(tangent[2]) > 0.92 ? [0, 1, 0] : [0, 0, 1],
+            side = pathVecUnit(pathVecCross(tangent, reference), [1, 0, 0]),
+            binormal = pathVecUnit(pathVecCross(tangent, side), [0, 1, 0]);
+        rings.push(
+            Array.from({ length: sides }, (_, j) => {
+                const angle = (j / sides) * Math.PI * 2,
+                    radial = pathVecAdd(
+                        pathVecScale(side, Math.cos(angle) * radius),
+                        pathVecScale(binormal, Math.sin(angle) * radius),
+                    );
+                return pathVecAdd(center, radial);
+            }),
+        );
+    });
+    for (let i = 0; i < rings.length - 1; i++)
+        for (let j = 0; j < sides; j++) {
+            const next = (j + 1) % sides,
+                a = rings[i][j],
+                b = rings[i][next],
+                c = rings[i + 1][next],
+                d = rings[i + 1][j];
+            triangles.push([a, b, c], [a, c, d]);
+        }
+    if (rings.length) {
+        const startCenter = centerline[0],
+            endCenter = centerline[centerline.length - 1];
+        for (let j = 0; j < sides; j++) {
+            const next = (j + 1) % sides;
+            triangles.push(
+                [startCenter, rings[0][next], rings[0][j]],
+                [endCenter, rings[rings.length - 1][j], rings[rings.length - 1][next]],
+            );
+        }
+    }
+    return { centerline, rings, triangles, radius, sides };
+}
 function ringA(o, rx, ry, z, n = 8, color = o.c || "#e7fff4") {
     const a = [];
     for (let i = 0; i < n; i++) {
@@ -5256,6 +5609,18 @@ function assetLines(o) {
                     Number(style.width) || width,
                 );
         });
+    } else if (kind === "pathPipe") {
+        const mesh = pathPipeMesh(o);
+        mesh.rings.forEach((ring) => out.push(polyA(o, ring, c, 0.95)));
+        for (let j = 0; j < mesh.sides; j++)
+            out.push(
+                lineA(
+                    o,
+                    mesh.rings.map((ring) => ring[j]),
+                    c,
+                    0.85,
+                ),
+            );
     } else if (kind === "stackedBuilding") {
         const floors =
             Array.isArray(o.floors) && o.floors.length
@@ -6075,6 +6440,31 @@ function assetLines(o) {
 }
 function normalizedAsset(o) {
     let q = o?.attachment ? syncAttachedPart(o) : o;
+    if (q && q.asset === "pathPipe") {
+        const path = pathPipeControlPoints(q),
+            radius = clamp(Number.isFinite(Number(q.pipeRadius)) ? Math.abs(Number(q.pipeRadius)) : 0.18, 0.02, 20),
+            cornerRadius = clamp(
+                Number.isFinite(Number(q.cornerRadius)) ? Math.abs(Number(q.cornerRadius)) : 0.55,
+                0,
+                20,
+            ),
+            pipeSides = clamp(Math.round(Number(q.pipeSides) || 10), 6, 24),
+            cornerSteps = clamp(Math.round(Number(q.cornerSteps) || 6), 2, 16),
+            xs = path.map((v) => v[0]),
+            ys = path.map((v) => v[1]),
+            zs = path.map((v) => v[2]);
+        q = {
+            ...q,
+            path,
+            pipeRadius: radius,
+            cornerRadius,
+            pipeSides,
+            cornerSteps,
+            ra: Math.max(0.1, (Math.max(...xs) - Math.min(...xs)) * 0.5 + radius),
+            rb: Math.max(0.1, (Math.max(...ys) - Math.min(...ys)) * 0.5 + radius),
+            h: Math.max(0.1, Math.max(...zs) - Math.min(...zs) + radius * 2),
+        };
+    }
     if (q && q.asset === "balcony") {
         const floorT = clamp(Number(q.balconyFloorThickness) || 0.16, 0.04, 10),
             railT = clamp(Number(q.balconyRailThickness) || 0.12, 0.035, 10),
@@ -6144,6 +6534,11 @@ obBounds = function (o) {
             if (Array.isArray(v) && v.length >= 3)
                 pts.push(customPt(q, Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0));
         });
+    } else if (q.asset === "pathPipe") {
+        const mesh = pathPipeMesh(q);
+        mesh.rings.forEach((ring) =>
+            ring.forEach((v) => pts.push(pt(q, Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0))),
+        );
     } else if (q.asset === "stackedBuilding") {
         const floors =
             Array.isArray(q.floors) && q.floors.length
@@ -6188,7 +6583,7 @@ regenObjects();
 /* City Grid Studio asset controller.
    This file wires the asset generator to the shelf, JSON import, clipboard,
    and primitive quick menu. The geometry itself lives in asset.js. */
-("use strict");
+"use strict";
 
 window.cityGridInstallAssetUI = function (bridge) {
     const {
@@ -6226,7 +6621,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             q = [q[0] + ((n % 4) - 1.5) * 0.85, q[1], q[2] + Math.floor(n / 4) * 1.05];
         }
         // 生成方向は「その軸に立つ面」の法線。Y=地面、X/Z=壁面として配置する。
-        const k = kind === "balcony" ? 1 : clamp(Math.round(Number(P.assetAxis ?? 1)), 0, 2),
+        const k = ["balcony", "pathPipe"].includes(kind) ? 1 : clamp(Math.round(Number(P.assetAxis ?? 1)), 0, 2),
             d = -1,
             [iu, iv] = PL[k],
             off = [0, 0, 0];
@@ -6323,6 +6718,11 @@ window.cityGridInstallAssetUI = function (bridge) {
             balconyFrontRail: kind === "balcony" ? true : undefined,
             balconySideRail: kind === "balcony" ? true : undefined,
             balconyRailHeightEdited: kind === "balcony" ? false : undefined,
+            path: kind === "pathPipe" ? pathPipeDefaultPoints() : undefined,
+            pipeRadius: kind === "pathPipe" ? 0.18 : undefined,
+            cornerRadius: kind === "pathPipe" ? 0.55 : undefined,
+            cornerSteps: kind === "pathPipe" ? 6 : undefined,
+            pipeSides: kind === "pathPipe" ? 10 : undefined,
             steps: kind === "stairs" ? Math.round(Number(el("stairsSteps")?.value) || 6) : undefined,
             handrail: kind === "stairs" ? !!el("stairsRail")?.checked : undefined,
             stripes: kind === "crosswalk" ? 7 : undefined,
@@ -6667,7 +7067,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     `<button class="assetCard" data-asset="${k}" title="${v.label}を追加${k === "balcony" ? "（建物選択中は壁へ接着）" : ""}"><span class="assetGlyph">${v.glyph}</span><span>${v.label}</span></button>`,
             )
             .join("") +
-        '</div><div class="assetTrayNote">建物を選択して「壁付けベランダ」を押すと、正面壁の2階相当へ自動接着。未選択なら地面へ配置。</div>';
+        '</div><div class="assetTrayNote">建物を選択して「壁付けベランダ」を押すと、正面壁の2階相当へ自動接着。未選択なら地面へ配置。パスパイプは選択後に画面上の制御点と半径ハンドルを編集できます。</div>';
     stage.appendChild(tray);
     const assetAxisTrayInput = el("assetAxisTray");
     window.cityGridAssetAxisTray = assetAxisTrayInput;
@@ -7898,6 +8298,76 @@ window.cityGridInstallAssetUI = function (bridge) {
             render();
         };
     });
+    let pathPipeEditSession = false;
+    function pathPipeText(path) {
+        return (Array.isArray(path) ? path : pathPipeDefaultPoints())
+            .map((v) => v.map((n) => Number(n).toFixed(3)).join(","))
+            .join("; ");
+    }
+    function syncPathPipePanel() {
+        const panel = el("pathPipeP"),
+            o = sel && obOf(sel),
+            isPipe = !!(o && o.type === "asset" && o.asset === "pathPipe");
+        if (!panel) return;
+        panel.style.display = isPipe ? "" : "none";
+        if (!isPipe) return;
+        [
+            ["pathPipeRadius", Number(o.pipeRadius) || 0.18],
+            ["pathPipeCornerRadius", Number.isFinite(Number(o.cornerRadius)) ? Number(o.cornerRadius) : 0.55],
+            ["pathPipeSides", Number(o.pipeSides) || 10],
+        ].forEach(([id, value]) => {
+            const input = el(id);
+            if (input && document.activeElement !== input)
+                input.value = Number(value).toFixed(id === "pathPipeSides" ? 0 : 3);
+        });
+        const points = el("pathPipePoints");
+        if (points && document.activeElement !== points) points.value = pathPipeText(o.path);
+    }
+    function applyPathPipeProp(name, value) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || o.asset !== "pathPipe") return;
+        if (!pathPipeEditSession) {
+            HU.push(S);
+            RD = [];
+            pathPipeEditSession = true;
+        }
+        const patch = {};
+        if (name === "pipeRadius" && Number.isFinite(value)) patch.pipeRadius = clamp(value, 0.02, 5);
+        else if (name === "cornerRadius" && Number.isFinite(value)) patch.cornerRadius = clamp(value, 0, 20);
+        else if (name === "pipeSides" && Number.isFinite(value)) patch.pipeSides = clamp(Math.round(value), 6, 24);
+        else if (name === "path") {
+            const path = String(value || "")
+                .split(/[;\\n]+/)
+                .map((chunk) => chunk.trim())
+                .filter(Boolean)
+                .map((chunk) => chunk.split(/[ ,]+/).map(Number).slice(0, 3))
+                .filter((point) => point.length === 3 && point.every(Number.isFinite));
+            if (path.length < 2) return;
+            patch.path = path;
+        }
+        if (!Object.keys(patch).length) return;
+        setOb(sel, patch);
+        render();
+    }
+    [
+        ["pathPipeRadius", "pipeRadius"],
+        ["pathPipeCornerRadius", "cornerRadius"],
+        ["pathPipeSides", "pipeSides"],
+    ].forEach(([id, name]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => applyPathPipeProp(name, parseFloat(input.value));
+        input.onchange = () => {
+            pathPipeEditSession = false;
+        };
+    });
+    const pathInput = el("pathPipePoints");
+    if (pathInput) {
+        pathInput.oninput = () => applyPathPipeProp("path", pathInput.value);
+        pathInput.onchange = () => {
+            pathPipeEditSession = false;
+        };
+    }
     function syncAssetControls() {
         const o = sel && obOf(sel);
         if (o && o.type === "asset" && o.asset === "stairs") {
@@ -7915,6 +8385,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         syncSignPanel();
         syncBuildingPanel();
         syncBalconyPanel();
+        syncPathPipePanel();
         syncStackedPanel();
         syncFloorControls();
         syncAssetDepth();
@@ -8833,7 +9304,12 @@ window.cityGridInstallAssetUI = function (bridge) {
             zc = (z0 + z1) / 2,
             center = scrW(L2W(o, 0, 0, zc)),
             handles = [],
-            panel = o.type === "asset" && o.asset === "building" ? floorBuildingBackPanel(o) : null;
+            panel = o.type === "asset" && o.asset === "building" ? floorBuildingBackPanel(o) : null,
+            // 積層建物とパスパイプは、単一のra/rb/hではなく floors/path[] を
+            // 持つため、間取り用の汎用ハンドルを出すと別の古い寸法を編集してしまう。
+            // 専用ギズモを同じ座標へ描き、pointerdownも通常のギズモ経路へ渡す。
+            customEdit = o.type === "asset" && (o.asset === "stackedBuilding" || o.asset === "pathPipe");
+        if (customEdit) return { o, base, center, handles, panel: null, special: true };
         const add = (kind, label, point, probe, start, min = 0.01, side = 1) => {
             const s = scrW(point),
                 q = scrW(probe);
@@ -9156,7 +9632,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             c.arc(h.object.s.x, h.object.s.y, r * 0.52, -Math.PI * 0.15, Math.PI * 1.3);
             c.stroke();
             drawFloorMoveGizmo(c, h.object.o);
-            drawFloorPlanEditHandles(c);
+            if (tool === "edit" && floorPlanEditHandles()?.special) drawSpecialGizmo(c, h.object.o);
+            else drawFloorPlanEditHandles(c);
         }
         // カメラ：本体をドラッグして位置、先端の丸をドラッグして向き
         const k = h.camera,
@@ -9613,11 +10090,14 @@ window.cityGridInstallAssetUI = function (bridge) {
             // 看板の絵枠ハンドルは通常の3Dギズモと同じ編集経路へ渡す。
             // これを家具の間取り判定より後にすると、横／上ビューで本体移動として処理される。
             if (tool === "edit" && sel) {
-                const special = hitGizmo(p);
-                if (
-                    special &&
-                    (special.t.startsWith("sign-") || (special.t === "face" && special.g?.o?.asset === "sign"))
-                ) {
+                const special = hitGizmo(p),
+                    customAsset = special?.g?.o?.asset,
+                    customFloorGizmo =
+                        customAsset === "stackedBuilding" ||
+                        customAsset === "pathPipe" ||
+                        special?.t?.startsWith("sign-") ||
+                        (special?.t === "face" && customAsset === "sign");
+                if (special && customFloorGizmo) {
                     e.preventDefault();
                     e.stopImmediatePropagation();
                     ptr = e.pointerId;

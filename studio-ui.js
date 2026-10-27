@@ -1055,6 +1055,76 @@
             render();
         };
     });
+    let pathPipeEditSession = false;
+    function pathPipeText(path) {
+        return (Array.isArray(path) ? path : pathPipeDefaultPoints())
+            .map((v) => v.map((n) => Number(n).toFixed(3)).join(","))
+            .join("; ");
+    }
+    function syncPathPipePanel() {
+        const panel = el("pathPipeP"),
+            o = sel && obOf(sel),
+            isPipe = !!(o && o.type === "asset" && o.asset === "pathPipe");
+        if (!panel) return;
+        panel.style.display = isPipe ? "" : "none";
+        if (!isPipe) return;
+        [
+            ["pathPipeRadius", Number(o.pipeRadius) || 0.18],
+            ["pathPipeCornerRadius", Number.isFinite(Number(o.cornerRadius)) ? Number(o.cornerRadius) : 0.55],
+            ["pathPipeSides", Number(o.pipeSides) || 10],
+        ].forEach(([id, value]) => {
+            const input = el(id);
+            if (input && document.activeElement !== input)
+                input.value = Number(value).toFixed(id === "pathPipeSides" ? 0 : 3);
+        });
+        const points = el("pathPipePoints");
+        if (points && document.activeElement !== points) points.value = pathPipeText(o.path);
+    }
+    function applyPathPipeProp(name, value) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || o.asset !== "pathPipe") return;
+        if (!pathPipeEditSession) {
+            HU.push(S);
+            RD = [];
+            pathPipeEditSession = true;
+        }
+        const patch = {};
+        if (name === "pipeRadius" && Number.isFinite(value)) patch.pipeRadius = clamp(value, 0.02, 5);
+        else if (name === "cornerRadius" && Number.isFinite(value)) patch.cornerRadius = clamp(value, 0, 20);
+        else if (name === "pipeSides" && Number.isFinite(value)) patch.pipeSides = clamp(Math.round(value), 6, 24);
+        else if (name === "path") {
+            const path = String(value || "")
+                .split(/[;\\n]+/)
+                .map((chunk) => chunk.trim())
+                .filter(Boolean)
+                .map((chunk) => chunk.split(/[ ,]+/).map(Number).slice(0, 3))
+                .filter((point) => point.length === 3 && point.every(Number.isFinite));
+            if (path.length < 2) return;
+            patch.path = path;
+        }
+        if (!Object.keys(patch).length) return;
+        setOb(sel, patch);
+        render();
+    }
+    [
+        ["pathPipeRadius", "pipeRadius"],
+        ["pathPipeCornerRadius", "cornerRadius"],
+        ["pathPipeSides", "pipeSides"],
+    ].forEach(([id, name]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => applyPathPipeProp(name, parseFloat(input.value));
+        input.onchange = () => {
+            pathPipeEditSession = false;
+        };
+    });
+    const pathInput = el("pathPipePoints");
+    if (pathInput) {
+        pathInput.oninput = () => applyPathPipeProp("path", pathInput.value);
+        pathInput.onchange = () => {
+            pathPipeEditSession = false;
+        };
+    }
     function syncAssetControls() {
         const o = sel && obOf(sel);
         if (o && o.type === "asset" && o.asset === "stairs") {
@@ -1072,6 +1142,7 @@
         syncSignPanel();
         syncBuildingPanel();
         syncBalconyPanel();
+        syncPathPipePanel();
         syncStackedPanel();
         syncFloorControls();
         syncAssetDepth();
@@ -1990,7 +2061,12 @@
             zc = (z0 + z1) / 2,
             center = scrW(L2W(o, 0, 0, zc)),
             handles = [],
-            panel = o.type === "asset" && o.asset === "building" ? floorBuildingBackPanel(o) : null;
+            panel = o.type === "asset" && o.asset === "building" ? floorBuildingBackPanel(o) : null,
+            // 積層建物とパスパイプは、単一のra/rb/hではなく floors/path[] を
+            // 持つため、間取り用の汎用ハンドルを出すと別の古い寸法を編集してしまう。
+            // 専用ギズモを同じ座標へ描き、pointerdownも通常のギズモ経路へ渡す。
+            customEdit = o.type === "asset" && (o.asset === "stackedBuilding" || o.asset === "pathPipe");
+        if (customEdit) return { o, base, center, handles, panel: null, special: true };
         const add = (kind, label, point, probe, start, min = 0.01, side = 1) => {
             const s = scrW(point),
                 q = scrW(probe);
@@ -2313,7 +2389,8 @@
             c.arc(h.object.s.x, h.object.s.y, r * 0.52, -Math.PI * 0.15, Math.PI * 1.3);
             c.stroke();
             drawFloorMoveGizmo(c, h.object.o);
-            drawFloorPlanEditHandles(c);
+            if (tool === "edit" && floorPlanEditHandles()?.special) drawSpecialGizmo(c, h.object.o);
+            else drawFloorPlanEditHandles(c);
         }
         // カメラ：本体をドラッグして位置、先端の丸をドラッグして向き
         const k = h.camera,
@@ -2770,11 +2847,14 @@
             // 看板の絵枠ハンドルは通常の3Dギズモと同じ編集経路へ渡す。
             // これを家具の間取り判定より後にすると、横／上ビューで本体移動として処理される。
             if (tool === "edit" && sel) {
-                const special = hitGizmo(p);
-                if (
-                    special &&
-                    (special.t.startsWith("sign-") || (special.t === "face" && special.g?.o?.asset === "sign"))
-                ) {
+                const special = hitGizmo(p),
+                    customAsset = special?.g?.o?.asset,
+                    customFloorGizmo =
+                        customAsset === "stackedBuilding" ||
+                        customAsset === "pathPipe" ||
+                        special?.t?.startsWith("sign-") ||
+                        (special?.t === "face" && customAsset === "sign");
+                if (special && customFloorGizmo) {
                     e.preventDefault();
                     e.stopImmediatePropagation();
                     ptr = e.pointerId;

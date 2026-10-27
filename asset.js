@@ -15,6 +15,7 @@ const ASSETS = {
     sign: { label: "看板", glyph: "▤", w: 1.0, d: 0.2, h: 2.15, accent: "#76d9ff" },
     awning: { label: "店舗テント", glyph: "▱", w: 3.8, d: 1.35, h: 0.35, accent: "#d98b68" },
     balcony: { label: "壁付けベランダ", glyph: "▱", w: 3.2, d: 1.8, h: 1.25, accent: "#e6a36f" },
+    pathPipe: { label: "パスパイプ", glyph: "◉", w: 4.8, d: 4.2, h: 1.5, accent: "#ff9f68" },
     person: { label: "人物", glyph: "♙", w: 0.46, d: 0.3, h: 1.7, accent: "#ad9cff" },
     stairs: { label: "階段", glyph: "▰", w: 1.45, d: 2.4, h: 0.78, accent: "#ffb36f" },
     building: { label: "開口のある建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#8ce6c2" },
@@ -29,32 +30,32 @@ const assetLabel = (o) =>
             ? "テント付き建物"
             : "接続テント"
         : o.linkedAsset === "buildingSign"
-          ? o.linkedRole === "parent" || o.asset === "building"
-              ? "看板付き開口建物"
-              : "接続看板"
-          : o.type === "compound"
-            ? "結合オブジェクト"
-            : o.type === "asset"
-              ? o.assetName || ASSETS[o.asset]?.label || (o.asset === "cylinder" ? "円柱" : "アセット")
-              : o.type === "rect"
-                ? "長方形"
-                : o.type === "circ"
-                  ? "円"
-                  : o.type === "box"
-                    ? "箱"
-                    : o.type === "cyl"
-                      ? "円柱"
-                      : "図形";
+            ? o.linkedRole === "parent" || o.asset === "building"
+                ? "看板付き開口建物"
+                : "接続看板"
+            : o.type === "compound"
+                ? "結合オブジェクト"
+                : o.type === "asset"
+                    ? o.assetName || ASSETS[o.asset]?.label || (o.asset === "cylinder" ? "円柱" : "アセット")
+                    : o.type === "rect"
+                        ? "長方形"
+                        : o.type === "circ"
+                            ? "円"
+                            : o.type === "box"
+                                ? "箱"
+                                : o.type === "cyl"
+                                    ? "円柱"
+                                    : "図形";
 const assetGlyph = (o) =>
     o.type === "compound"
         ? "◆"
         : o.type === "asset"
-          ? ASSETS[o.asset]?.glyph || (o.asset === "custom" ? "⬡" : o.asset === "cylinder" ? "◉" : "◆")
-          : o.type === "rect"
-            ? "□"
-            : o.type === "circ"
-              ? "○"
-              : "◇";
+            ? ASSETS[o.asset]?.glyph || (o.asset === "custom" ? "⬡" : o.asset === "cylinder" ? "◉" : "◆")
+            : o.type === "rect"
+                ? "□"
+                : o.type === "circ"
+                    ? "○"
+                    : "◇";
 
 // Coordinate helpers. Local asset coordinates are x=width, y=depth, z=up.
 const pt = (o, x, y, z) => L2W(o, x, y, z);
@@ -162,6 +163,151 @@ function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
         ];
     return out;
 }
+function pathVecSub(a, b) {
+    return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+function pathVecAdd(a, b, scale = 1) {
+    return [a[0] + b[0] * scale, a[1] + b[1] * scale, a[2] + b[2] * scale];
+}
+function pathVecScale(a, scale) {
+    return [a[0] * scale, a[1] * scale, a[2] * scale];
+}
+function pathVecDot(a, b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+function pathVecCross(a, b) {
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+function pathVecLength(a) {
+    return Math.hypot(a[0], a[1], a[2]);
+}
+function pathVecUnit(a, fallback = [1, 0, 0]) {
+    const n = pathVecLength(a);
+    return n > 1e-7 ? pathVecScale(a, 1 / n) : [...fallback];
+}
+function pathRotateAroundAxis(v, axis, angle) {
+    const c = Math.cos(angle),
+        s = Math.sin(angle),
+        dot = pathVecDot(axis, v),
+        cross = pathVecCross(axis, v);
+    return [
+        v[0] * c + cross[0] * s + axis[0] * dot * (1 - c),
+        v[1] * c + cross[1] * s + axis[1] * dot * (1 - c),
+        v[2] * c + cross[2] * s + axis[2] * dot * (1 - c),
+    ];
+}
+function pathPipeDefaultPoints() {
+    return [
+        [-2.4, 0, 1.1],
+        [0, 0, 1.1],
+        [0, 2.2, 1.1],
+    ];
+}
+function pathPipeControlPoints(o) {
+    const source = Array.isArray(o?.path) ? o.path : pathPipeDefaultPoints();
+    const points = source
+        .map((v) => (Array.isArray(v) ? v.slice(0, 3).map(Number) : []))
+        .filter((v) => v.length === 3 && v.every(Number.isFinite));
+    return points.length >= 2 ? points : pathPipeDefaultPoints();
+}
+function pathPipeRoundedPath(o) {
+    const points = pathPipeControlPoints(o),
+        cornerRadius = Math.max(0, Number(o?.cornerRadius) || 0),
+        arcSteps = clamp(Math.round(Number(o?.cornerSteps) || 6), 2, 16),
+        out = [],
+        add = (p) => {
+            const last = out[out.length - 1];
+            if (!last || pathVecLength(pathVecSub(p, last)) > 1e-5) out.push(p);
+        };
+    add(points[0]);
+    for (let i = 1; i < points.length - 1; i++) {
+        const p = points[i],
+            prev = points[i - 1],
+            next = points[i + 1],
+            toPrev = pathVecUnit(pathVecSub(prev, p)),
+            toNext = pathVecUnit(pathVecSub(next, p)),
+            lenPrev = pathVecLength(pathVecSub(p, prev)),
+            lenNext = pathVecLength(pathVecSub(next, p)),
+            alpha = Math.acos(clamp(pathVecDot(toPrev, toNext), -1, 1)),
+            turn = Math.PI - alpha,
+            bisector = pathVecUnit(pathVecAdd(toPrev, toNext));
+        if (
+            cornerRadius <= 1e-5 ||
+            turn <= 0.01 ||
+            !Number.isFinite(alpha) ||
+            pathVecLength(pathVecAdd(toPrev, toNext)) < 1e-5
+        ) {
+            add(p);
+            continue;
+        }
+        const tanHalf = Math.tan(turn * 0.5),
+            cut = Math.min(cornerRadius * tanHalf, lenPrev * 0.45, lenNext * 0.45),
+            radius = cut / Math.max(1e-5, tanHalf),
+            entry = pathVecAdd(p, toPrev, cut),
+            exit = pathVecAdd(p, toNext, cut),
+            normal = pathVecUnit(pathVecCross(toPrev, toNext), [0, 0, 1]),
+            centerDistance = radius / Math.max(1e-5, Math.sin(alpha * 0.5)),
+            center = pathVecAdd(p, bisector, centerDistance),
+            start = pathVecSub(entry, center),
+            finish = pathVecSub(exit, center),
+            angle = Math.atan2(pathVecDot(normal, pathVecCross(start, finish)), pathVecDot(start, finish));
+        add(entry);
+        if (!Number.isFinite(angle) || pathVecLength(pathVecCross(start, finish)) < 1e-5) {
+            add(exit);
+            continue;
+        }
+        for (let j = 1; j <= arcSteps; j++)
+            add(pathVecAdd(center, pathRotateAroundAxis(start, normal, (angle * j) / arcSteps)));
+    }
+    add(points[points.length - 1]);
+    return out;
+}
+function pathPipeMesh(o) {
+    const centerline = pathPipeRoundedPath(o),
+        radius = clamp(Math.abs(Number(o?.pipeRadius) || 0.18), 0.02, 20),
+        sides = clamp(Math.round(Number(o?.pipeSides) || 10), 6, 24),
+        rings = [],
+        triangles = [];
+    centerline.forEach((center, i) => {
+        const before = centerline[Math.max(0, i - 1)],
+            after = centerline[Math.min(centerline.length - 1, i + 1)],
+            tangent = pathVecUnit(pathVecSub(after, before)),
+            reference = Math.abs(tangent[2]) > 0.92 ? [0, 1, 0] : [0, 0, 1],
+            side = pathVecUnit(pathVecCross(tangent, reference), [1, 0, 0]),
+            binormal = pathVecUnit(pathVecCross(tangent, side), [0, 1, 0]);
+        rings.push(
+            Array.from({ length: sides }, (_, j) => {
+                const angle = (j / sides) * Math.PI * 2,
+                    radial = pathVecAdd(
+                        pathVecScale(side, Math.cos(angle) * radius),
+                        pathVecScale(binormal, Math.sin(angle) * radius),
+                    );
+                return pathVecAdd(center, radial);
+            }),
+        );
+    });
+    for (let i = 0; i < rings.length - 1; i++)
+        for (let j = 0; j < sides; j++) {
+            const next = (j + 1) % sides,
+                a = rings[i][j],
+                b = rings[i][next],
+                c = rings[i + 1][next],
+                d = rings[i + 1][j];
+            triangles.push([a, b, c], [a, c, d]);
+        }
+    if (rings.length) {
+        const startCenter = centerline[0],
+            endCenter = centerline[centerline.length - 1];
+        for (let j = 0; j < sides; j++) {
+            const next = (j + 1) % sides;
+            triangles.push(
+                [startCenter, rings[0][next], rings[0][j]],
+                [endCenter, rings[rings.length - 1][j], rings[rings.length - 1][next]],
+            );
+        }
+    }
+    return { centerline, rings, triangles, radius, sides };
+}
 function ringA(o, rx, ry, z, n = 8, color = o.c || "#e7fff4") {
     const a = [];
     for (let i = 0; i < n; i++) {
@@ -207,14 +353,14 @@ function assetLines(o) {
             loopStyles = Array.isArray(g.loopStyles) ? g.loopStyles : [],
             width = Number(o.w) || MASTER_W;
         const customLine = (points, color = c, lineWidth = width) =>
-                out.push({
-                    c: color,
-                    w: lineWidth,
-                    ob: o,
-                    d3: true,
-                    cs: sigNow(),
-                    p: dens3(points.map((q) => customPt(o, q[0], q[1], q[2]))),
-                }),
+            out.push({
+                c: color,
+                w: lineWidth,
+                ob: o,
+                d3: true,
+                cs: sigNow(),
+                p: dens3(points.map((q) => customPt(o, q[0], q[1], q[2]))),
+            }),
             addEdge = (ia, ib, color = c, lineWidth = width) => {
                 const u = vertices[ia],
                     v = vertices[ib];
@@ -240,22 +386,34 @@ function assetLines(o) {
                     Number(style.width) || width,
                 );
         });
+    } else if (kind === "pathPipe") {
+        const mesh = pathPipeMesh(o);
+        mesh.rings.forEach((ring) => out.push(polyA(o, ring, c, 0.95)));
+        for (let j = 0; j < mesh.sides; j++)
+            out.push(
+                lineA(
+                    o,
+                    mesh.rings.map((ring) => ring[j]),
+                    c,
+                    0.85,
+                ),
+            );
     } else if (kind === "stackedBuilding") {
         const floors =
             Array.isArray(o.floors) && o.floors.length
                 ? o.floors
                 : [
-                      {
-                          x: 0,
-                          y: 0,
-                          z: 0,
-                          w: o.ra * 2 || 4,
-                          d: o.rb * 2 || 3,
-                          h: o.h || 2.2,
-                          rimHeight: 0.16,
-                          rimOverhang: 0.18,
-                      },
-                  ];
+                    {
+                        x: 0,
+                        y: 0,
+                        z: 0,
+                        w: o.ra * 2 || 4,
+                        d: o.rb * 2 || 3,
+                        h: o.h || 2.2,
+                        rimHeight: 0.16,
+                        rimOverhang: 0.18,
+                    },
+                ];
         const addBox = (f, w, d, z, h, color = c, caps = { bottom: true, top: true }) => {
             const x = w / 2,
                 y = d / 2,
@@ -859,11 +1017,11 @@ function assetLines(o) {
             side = bp.sideT,
             centerX = (ow + side) / 2;
         const outerFront = [
-                [-w / 2, -d / 2, 0],
-                [w / 2, -d / 2, 0],
-                [w / 2, -d / 2, h],
-                [-w / 2, -d / 2, h],
-            ],
+            [-w / 2, -d / 2, 0],
+            [w / 2, -d / 2, 0],
+            [w / 2, -d / 2, h],
+            [-w / 2, -d / 2, h],
+        ],
             outerBack = [
                 [-w / 2, d / 2, 0],
                 [w / 2, d / 2, 0],
@@ -873,11 +1031,11 @@ function assetLines(o) {
         out.push(polyA(o, outerFront, c));
         out.push(polyA(o, outerBack, c));
         const innerFront = [
-                [-ow / 2, -d / 2, 0],
-                [-ow / 2, -d / 2, oh],
-                [ow / 2, -d / 2, oh],
-                [ow / 2, -d / 2, 0],
-            ],
+            [-ow / 2, -d / 2, 0],
+            [-ow / 2, -d / 2, oh],
+            [ow / 2, -d / 2, oh],
+            [ow / 2, -d / 2, 0],
+        ],
             innerBack = [
                 [-ow / 2, d / 2, 0],
                 [-ow / 2, d / 2, oh],
@@ -1059,6 +1217,31 @@ function assetLines(o) {
 }
 function normalizedAsset(o) {
     let q = o?.attachment ? syncAttachedPart(o) : o;
+    if (q && q.asset === "pathPipe") {
+        const path = pathPipeControlPoints(q),
+            radius = clamp(Number.isFinite(Number(q.pipeRadius)) ? Math.abs(Number(q.pipeRadius)) : 0.18, 0.02, 20),
+            cornerRadius = clamp(
+                Number.isFinite(Number(q.cornerRadius)) ? Math.abs(Number(q.cornerRadius)) : 0.55,
+                0,
+                20,
+            ),
+            pipeSides = clamp(Math.round(Number(q.pipeSides) || 10), 6, 24),
+            cornerSteps = clamp(Math.round(Number(q.cornerSteps) || 6), 2, 16),
+            xs = path.map((v) => v[0]),
+            ys = path.map((v) => v[1]),
+            zs = path.map((v) => v[2]);
+        q = {
+            ...q,
+            path,
+            pipeRadius: radius,
+            cornerRadius,
+            pipeSides,
+            cornerSteps,
+            ra: Math.max(0.1, (Math.max(...xs) - Math.min(...xs)) * 0.5 + radius),
+            rb: Math.max(0.1, (Math.max(...ys) - Math.min(...ys)) * 0.5 + radius),
+            h: Math.max(0.1, Math.max(...zs) - Math.min(...zs) + radius * 2),
+        };
+    }
     if (q && q.asset === "balcony") {
         const floorT = clamp(Number(q.balconyFloorThickness) || 0.16, 0.04, 10),
             railT = clamp(Number(q.balconyRailThickness) || 0.12, 0.035, 10),
@@ -1128,6 +1311,11 @@ obBounds = function (o) {
             if (Array.isArray(v) && v.length >= 3)
                 pts.push(customPt(q, Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0));
         });
+    } else if (q.asset === "pathPipe") {
+        const mesh = pathPipeMesh(q);
+        mesh.rings.forEach((ring) =>
+            ring.forEach((v) => pts.push(pt(q, Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0))),
+        );
     } else if (q.asset === "stackedBuilding") {
         const floors =
             Array.isArray(q.floors) && q.floors.length

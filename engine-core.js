@@ -136,6 +136,13 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><input type=checkbox id=balconySideRail checked> 左右の側壁を表示</label>
 <div class="note">建物を選択して棚の「壁付けベランダ」を押すと、建物の正面壁へ2階相当の高さで接着します。接着後は親建物の移動・幅・奥行き・高さに追従し、ベランダ単体の幅・奥行き・手すり高さを編集できます。</div>
 </div>
+<div id=pathPipeP style="display:none"><h3>パスパイプ</h3>
+<label><span>パイプ半径</span><input type=number class=nv id=pathPipeRadius min=0.02 step=0.02 style="width:100px"><span class=un>m</span></label>
+<label><span>曲がり半径</span><input type=number class=nv id=pathPipeCornerRadius min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>円周分割</span><input type=number class=nv id=pathPipeSides min=6 max=24 step=1 style="width:100px"></label>
+<label class=full><span>パス点（x,y,z）</span><textarea id=pathPipePoints rows=4 placeholder="-2,0,1.1; 0,0,1.1; 0,2.2,1.1"></textarea></label>
+<div class="note">キャンバス上の各パス点にあるX／Y／Zハンドルをドラッグすると経路を編集できます。オレンジの「半径」ハンドルで太さを変更できます。曲がり半径を0にすると角が直線になります。</div>
+</div>
 <div id=stackedP style="display:none"><h3>縁付き階層建物</h3>
 <label><span>階数</span><input type=number class=nv id=stackFloorCount min=1 max=30 step=1 style="width:100px"></label>
 <label><input type=checkbox id=stackSyncFirst checked> 1階の寸法を全階へ反映</label>

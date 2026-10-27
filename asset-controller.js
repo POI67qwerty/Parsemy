@@ -39,7 +39,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             q = [q[0] + ((n % 4) - 1.5) * 0.85, q[1], q[2] + Math.floor(n / 4) * 1.05];
         }
         // 生成方向は「その軸に立つ面」の法線。Y=地面、X/Z=壁面として配置する。
-        const k = kind === "balcony" ? 1 : clamp(Math.round(Number(P.assetAxis ?? 1)), 0, 2),
+        const k = ["balcony", "pathPipe"].includes(kind) ? 1 : clamp(Math.round(Number(P.assetAxis ?? 1)), 0, 2),
             d = -1,
             [iu, iv] = PL[k],
             off = [0, 0, 0];
@@ -136,6 +136,11 @@ window.cityGridInstallAssetUI = function (bridge) {
             balconyFrontRail: kind === "balcony" ? true : undefined,
             balconySideRail: kind === "balcony" ? true : undefined,
             balconyRailHeightEdited: kind === "balcony" ? false : undefined,
+            path: kind === "pathPipe" ? pathPipeDefaultPoints() : undefined,
+            pipeRadius: kind === "pathPipe" ? 0.18 : undefined,
+            cornerRadius: kind === "pathPipe" ? 0.55 : undefined,
+            cornerSteps: kind === "pathPipe" ? 6 : undefined,
+            pipeSides: kind === "pathPipe" ? 10 : undefined,
             steps: kind === "stairs" ? Math.round(Number(el("stairsSteps")?.value) || 6) : undefined,
             handrail: kind === "stairs" ? !!el("stairsRail")?.checked : undefined,
             stripes: kind === "crosswalk" ? 7 : undefined,
@@ -480,7 +485,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     `<button class="assetCard" data-asset="${k}" title="${v.label}を追加${k === "balcony" ? "（建物選択中は壁へ接着）" : ""}"><span class="assetGlyph">${v.glyph}</span><span>${v.label}</span></button>`,
             )
             .join("") +
-        '</div><div class="assetTrayNote">建物を選択して「壁付けベランダ」を押すと、正面壁の2階相当へ自動接着。未選択なら地面へ配置。</div>';
+        '</div><div class="assetTrayNote">建物を選択して「壁付けベランダ」を押すと、正面壁の2階相当へ自動接着。未選択なら地面へ配置。パスパイプは選択後に画面上の制御点と半径ハンドルを編集できます。</div>';
     stage.appendChild(tray);
     const assetAxisTrayInput = el("assetAxisTray");
     window.cityGridAssetAxisTray = assetAxisTrayInput;
