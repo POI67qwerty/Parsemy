@@ -495,11 +495,15 @@ function awningGizmo(o) {
         handle: null,
     };
 }
+function stackedIndividualEdit(o) {
+    // 新形式はindividualEditを優先し、旧JSONのsyncFirst=falseも個別編集として読む。
+    return o?.individualEdit === true || (o?.individualEdit == null && o?.syncFirst === false);
+}
 function stackedBuildingGizmo(o) {
     if (!o || o.type !== "asset" || o.asset !== "stackedBuilding") return null;
     const floors = Array.isArray(o.floors) && o.floors.length ? o.floors : [];
     if (!floors.length) return null;
-    const index = clamp(Math.round(Number(o.activeFloor) || 0), 0, floors.length - 1),
+    const index = stackedIndividualEdit(o) ? clamp(Math.round(Number(o.activeFloor) || 0), 0, floors.length - 1) : 0,
         f = floors[index],
         w = Math.max(0.08, Math.abs(Number(f.w) || 4)),
         d = Math.max(0.08, Math.abs(Number(f.d) || 3)),
@@ -990,10 +994,10 @@ function gizmo() {
     const o = sel && obOf(sel);
     if (!o) return null;
     if (o.type === "compound") return compoundGizmo(o);
-    // 積層建物は階別の専用面ハンドルを使う。汎用のra/rb/hハンドルを重ねると、
-    // floors[]ではなく古い単層値だけを編集してしまうため表示・ヒット対象から外す。
-    if (o.type === "asset" && o.asset === "stackedBuilding") return null;
-    const [iu, iv] = PL[o.k],
+    // 積層建物も3Dの移動・回転ギズモは表示する。ただし、
+    // ra/rb/hへ書き込む汎用の面ハンドルは使わず、寸法編集は階別ギズモへ渡す。
+    const stacked = o.type === "asset" && o.asset === "stackedBuilding",
+        [iu, iv] = PL[o.k],
         cs = Math.cos(o.rot * DG),
         sn = Math.sin(o.rot * DG),
         solid =
@@ -1011,7 +1015,8 @@ function gizmo() {
                     o.asset === "building" ||
                     o.asset === "awning" ||
                     o.asset === "balcony" ||
-                    o.asset === "pathPipe")),
+                    o.asset === "pathPipe" ||
+                    o.asset === "stackedBuilding")),
         [z0, z1] = outerZRange(o),
         zc = solid ? (z0 + z1) / 2 : 0;
     const C3 = L2W(o, 0, 0, zc),
@@ -1051,14 +1056,16 @@ function gizmo() {
         },
         neg = (v) => v.map((t) => -t);
     // 外形の6面は、開口のある建物でも編集対象にする。
-    // 特殊ハンドル（開口W/H・奥の面）とは別に、白い四角で外側の幅・奥行・高さを編集できる。
-    F("u+", o.ra, 0, zc, eu);
-    F("u-", -o.ra, 0, zc, neg(eu));
-    F("v+", 0, o.rb, zc, ev);
-    F("v-", 0, -o.rb, zc, neg(ev));
-    if (solid) {
-        F("top", 0, 0, z1, en);
-        F("base", 0, 0, z0, neg(en));
+    // 積層建物だけはfloors[]を持つため、汎用面ハンドルを出さない。
+    if (!stacked) {
+        F("u+", o.ra, 0, zc, eu);
+        F("u-", -o.ra, 0, zc, neg(eu));
+        F("v+", 0, o.rb, zc, ev);
+        F("v-", 0, -o.rb, zc, neg(ev));
+        if (solid) {
+            F("top", 0, 0, z1, en);
+            F("base", 0, 0, z0, neg(en));
+        }
     }
     const R = Math.max(o.ra, o.rb) * 1.4;
     for (let i = 0; i <= 72; i++) {
@@ -1221,6 +1228,11 @@ function hitGizmo(p) {
             for (const h of Object.values(special.handles))
                 if (Math.hypot(h.dir.x, h.dir.y) > 0.15 && Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
                     return { t: h.kind, sign: h, g: { o: active, C3: special.C3 } };
+            // X／Y／Z移動矢印は階の外形判定より先に拾う。
+            // 矢印の先端が階の箱の中に見える3D視点でも、1Fだけの移動へ落とさない。
+            const moveG = gizmo();
+            if (moveG && Math.hypot(moveG.sC.x - p.x, moveG.sC.y - p.y) > R * 0.8)
+                for (const a of moveG.axes) if (segd(p, moveG.sC, a.sT) < R * 0.7) return { t: "axis", a, g: moveG };
             const floor = stackedFloorHit(active, p);
             if (floor) return { t: "stack-floor", floorIndex: floor.index, floor, g: { o: active, C3: special.C3 } };
         }
@@ -1498,7 +1510,9 @@ function beginGizmo(h, p) {
             ...(group.length > 1 ? snapSetupGroup(group, h.g.C3) : snapSetup(o, h.g.C3)),
         };
     if (h.t === "stack-floor") {
-        const index = clamp(Math.round(Number(h.floorIndex) || 0), 0, Math.max(0, (o.floors || []).length - 1)),
+        const index = stackedIndividualEdit(o)
+                ? clamp(Math.round(Number(h.floorIndex) || 0), 0, Math.max(0, (o.floors || []).length - 1))
+                : 0,
             f = o.floors?.[index],
             q = stackedFloorScreen(o, index);
         if (f && q) {
@@ -1627,11 +1641,24 @@ function dragEdit(p, freeRotation = false) {
         const floors = Array.isArray(o.floors) ? o.floors.map((f) => ({ ...f })) : [],
             floor = floors[ed.floorIndex];
         if (floor) {
-            floor.x = h.x + mx;
-            floor.y = h.y + my;
+            const nextX = h.x + mx,
+                nextY = h.y + my;
+            if (stackedIndividualEdit(o)) {
+                floor.x = nextX;
+                floor.y = nextY;
+            } else {
+                // 通常モードの階移動は1Fの移動量を建物全体へ加える。
+                // 1Fだけを書き換えると、見た目の階層がばらけてしまう。
+                const dx = nextX - (Number(floor.x) || 0),
+                    dy = nextY - (Number(floor.y) || 0);
+                floors.forEach((f) => {
+                    f.x = (Number(f.x) || 0) + dx;
+                    f.y = (Number(f.y) || 0) + dy;
+                });
+            }
             patch = {
                 floors,
-                activeFloor: ed.floorIndex,
+                activeFloor: stackedIndividualEdit(o) ? ed.floorIndex : 0,
                 h: (Number(floors[floors.length - 1]?.z) || 0) + (Number(floors[floors.length - 1]?.h) || 0),
             };
         }
@@ -1645,7 +1672,7 @@ function dragEdit(p, freeRotation = false) {
         if (floor) {
             const key = h.axis === "w" ? "w" : h.axis === "d" ? "d" : "h";
             floor[key] = clamp(h.start + amount, h.min, h.max);
-            if (o.syncFirst !== false && h.floorIndex === 0 && ["w", "d", "h"].includes(key))
+            if (!stackedIndividualEdit(o) && h.floorIndex === 0 && ["w", "d", "h"].includes(key))
                 floors.forEach((f) => (f[key] = floor[key]));
             const last = floors[floors.length - 1];
             patch = { floors, floorCount: floors.length, h: (Number(last?.z) || 0) + (Number(last?.h) || 0) };

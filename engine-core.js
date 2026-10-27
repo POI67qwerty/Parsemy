@@ -145,9 +145,10 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 </div>
 <div id=stackedP style="display:none"><h3>縁付き階層建物</h3>
 <label><span>階数</span><input type=number class=nv id=stackFloorCount min=1 max=30 step=1 style="width:100px"></label>
-<label><input type=checkbox id=stackSyncFirst checked> 1階の寸法を全階へ反映</label>
+<label><input type=checkbox id=stackIndividualEdit> 各階を個別編集（チェック時のみ）</label>
 <label><span>階間</span><input type=number class=nv id=stackFloorGap min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
 <label><button id=stackAlign class="primary">上方向へ整列</button><button id=stackCopyFirst>1F寸法をコピー</button></label>
+<div class="note">通常は1Fのハンドルと数値だけを編集し、幅・奥行・高さ・縁が全階へ自動連動します。チェックを入れると、選択した階を個別に編集できます。</div>
 <div id=stackFloorRows></div>
 <div class="note">正面・横・上ビューでは、選択中の階にオレンジの面ハンドルが表示されます。1階の幅・奥行き・高さ・縁を変更すると、同期ONの間は全階へ反映されます。下側の縁は全階で作らず、各階の上側だけに配置します。</div>
 </div>

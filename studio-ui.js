@@ -746,6 +746,9 @@
                         index = Number(n.dataset.stackFloor),
                         key = n.dataset.stackKey;
                     if (!current?.floors?.[index]) return;
+                    const individualEdit = stackedIndividualEdit(current);
+                    // 通常モードでは1Fだけを編集対象にする。上階の欄は表示専用。
+                    if (!individualEdit && index !== 0) return;
                     if (!stackedEditSession) {
                         HU.push(S);
                         RD = [];
@@ -753,12 +756,14 @@
                     }
                     const nextFloors = current.floors.map((f) => ({ ...f }));
                     nextFloors[index][key] = Number(n.value) || 0;
-                    if (
-                        current.syncFirst !== false &&
-                        index === 0 &&
-                        ["w", "d", "h", "rimOverhang", "rimHeight"].includes(key)
-                    )
+                    if (!individualEdit && index === 0 && ["w", "d", "h", "rimOverhang", "rimHeight"].includes(key))
                         nextFloors.forEach((f) => (f[key] = nextFloors[0][key]));
+                    if (!individualEdit && index === 0 && ["x", "y", "z"].includes(key)) {
+                        const delta = (Number(nextFloors[0][key]) || 0) - (Number(current.floors[0][key]) || 0);
+                        nextFloors.forEach((f, i) => {
+                            if (i) f[key] = (Number(f[key]) || 0) + delta;
+                        });
+                    }
                     setOb(current.id, { floors: nextFloors, h: stackFloorHeight({ floors: nextFloors }) });
                     render();
                 };
@@ -767,18 +772,27 @@
                 n.onclick = () => {
                     const current = sel && obOf(sel);
                     if (!current) return;
-                    setOb(current.id, { activeFloor: Number(n.dataset.stackFloorSelect) });
+                    const index = Number(n.dataset.stackFloorSelect);
+                    if (!stackedIndividualEdit(current) && index !== 0) return;
+                    setOb(current.id, { activeFloor: index });
                     render();
                 };
             });
         }
+        const individualEdit = stackedIndividualEdit(o),
+            activeFloor = individualEdit ? Number(o.activeFloor || 0) : 0;
         rows.querySelectorAll("[data-floor-row]").forEach((row) =>
-            row.classList.toggle("active", Number(row.dataset.floorRow) === Number(o.activeFloor || 0)),
+            row.classList.toggle("active", Number(row.dataset.floorRow) === activeFloor),
         );
         rows.querySelectorAll("[data-stack-floor]").forEach((n) => {
-            const f = floors[Number(n.dataset.stackFloor)],
+            const index = Number(n.dataset.stackFloor),
+                f = floors[index],
                 key = n.dataset.stackKey;
+            n.disabled = !individualEdit && index !== 0;
             if (f && document.activeElement !== n) n.value = Number(f[key] || 0).toFixed(3);
+        });
+        rows.querySelectorAll("[data-stack-floor-select]").forEach((n) => {
+            n.disabled = !individualEdit && Number(n.dataset.stackFloorSelect) !== 0;
         });
     }
     function syncStackedPanel() {
@@ -792,10 +806,10 @@
             return;
         }
         const count = el("stackFloorCount"),
-            syncFirst = el("stackSyncFirst"),
+            individualEdit = el("stackIndividualEdit"),
             gap = el("stackFloorGap");
         if (count && document.activeElement !== count) count.value = o.floorCount || o.floors?.length || 1;
-        if (syncFirst) syncFirst.checked = o.syncFirst !== false;
+        if (individualEdit) individualEdit.checked = stackedIndividualEdit(o);
         if (gap && document.activeElement !== gap) gap.value = Number(o.floorGap || 0).toFixed(3);
         rebuildStackFloorRows(o);
     }
@@ -807,10 +821,10 @@
             RD = [];
             stackedEditSession = true;
         }
-        if (key === "syncFirst") {
-            const syncFirst = !!value,
-                patch = { syncFirst };
-            if (syncFirst && o.floors?.length) {
+        if (key === "individualEdit") {
+            const individualEdit = !!value,
+                patch = { individualEdit, syncFirst: !individualEdit };
+            if (!individualEdit && o.floors?.length) {
                 const first = o.floors[0];
                 patch.floors = o.floors.map((f) => ({
                     ...f,
@@ -821,6 +835,7 @@
                     rimOverhang: first.rimOverhang,
                 }));
                 patch.h = stackFloorHeight(patch);
+                patch.activeFloor = 0;
             }
             setOb(o.id, patch);
             render();
@@ -903,8 +918,8 @@
         const n = el(id);
         if (n) n.oninput = () => applyStackMeta(key, n.value);
     });
-    const stackSync = el("stackSyncFirst");
-    if (stackSync) stackSync.onchange = () => applyStackMeta("syncFirst", stackSync.checked);
+    const stackIndividual = el("stackIndividualEdit");
+    if (stackIndividual) stackIndividual.onchange = () => applyStackMeta("individualEdit", stackIndividual.checked);
     const stackAlign = el("stackAlign");
     if (stackAlign) stackAlign.onclick = alignStackedObject;
     const stackCopy = el("stackCopyFirst");
