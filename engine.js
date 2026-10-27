@@ -128,6 +128,22 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>開口の高さ</span><input type=number class=nv id=ov_openingH step=0.05 style="width:100px"><span class=un>m</span></label>
 <div class="note">建物の外形は軸・回転に加え、3Dの白い外側面ハンドルでも幅・奥行き・高さを編集できます。緑のハンドルで開口の幅・高さ、オレンジの「奥の面」で閉じた内壁の奥行きを編集できます。</div>
 </div>
+<div id=balconyP style="display:none"><h3>壁付けベランダ</h3>
+<label><span>手すり／腰壁の高さ</span><input type=number class=nv id=balconyRailHeight min=0.12 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>床スラブの厚さ</span><input type=number class=nv id=balconyFloorThickness min=0.04 step=0.02 style="width:100px"><span class=un>m</span></label>
+<label><span>壁の厚さ</span><input type=number class=nv id=balconyRailThickness min=0.035 step=0.02 style="width:100px"><span class=un>m</span></label>
+<label><input type=checkbox id=balconyFrontRail checked> 前面の腰壁を表示</label>
+<label><input type=checkbox id=balconySideRail checked> 左右の側壁を表示</label>
+<div class="note">建物を選択して棚の「壁付けベランダ」を押すと、建物の正面壁へ2階相当の高さで接着します。接着後は親建物の移動・幅・奥行き・高さに追従し、ベランダ単体の幅・奥行き・手すり高さを編集できます。</div>
+</div>
+<div id=stackedP style="display:none"><h3>縁付き階層建物</h3>
+<label><span>階数</span><input type=number class=nv id=stackFloorCount min=1 max=30 step=1 style="width:100px"></label>
+<label><input type=checkbox id=stackSyncFirst checked> 1階の寸法を全階へ反映</label>
+<label><span>階間</span><input type=number class=nv id=stackFloorGap min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><button id=stackAlign class="primary">上方向へ整列</button><button id=stackCopyFirst>1F寸法をコピー</button></label>
+<div id=stackFloorRows></div>
+<div class="note">正面・横・上ビューでは、選択中の階にオレンジの面ハンドルが表示されます。1階の幅・奥行き・高さ・縁を変更すると、同期ONの間は全階へ反映されます。下側の縁は全階で作らず、各階の上側だけに配置します。</div>
+</div>
 <label><button id=obExtrude>押し出しを有効</button><button id=obGnd>地面につける</button><button id=obDup>複製</button><button id=obDel>消去</button><button id=obOff>選択解除</button></label>
 <label><button id=objectInfoCopy aria-label="JSONコピー" title="選択中オブジェクトの定義JSONをコピー" disabled>JSONコピー</button><button id=objectInfoSave aria-label="JSON保存" title="選択中オブジェクトの定義JSONを保存" disabled>JSON保存</button></label>
 <div class="note">JSON保存は寸法・位置・向き・アセット固有設定をテキストで書き出します。後から線画化できる定義形式です。</div>
@@ -815,12 +831,46 @@ function syncAttachedPart(o, parentOverride = null) {
     if (!a?.parentId) return o;
     const parent = parentOverride || obOf(a.parentId);
     if (!parent) return o;
+    const side = Number(a.side) === -1 ? -1 : 1,
+        px = Number(a.x) || 0;
+    // 積層建物はgeometryがcustomPt（階ごとのx/y/z）で保持されるため、
+    // 標準建物のL2Wとは別に、指定階の壁面へベランダを同期する。
+    if (parent.asset === "stackedBuilding" && a.stackedFloor) {
+        const floors = Array.isArray(parent.floors) ? parent.floors : [],
+            index = clamp(Math.round(Number(a.floorIndex) || 0), 0, Math.max(0, floors.length - 1)),
+            f = floors[index];
+        if (!f || typeof customPt !== "function") return o;
+        const fd = Math.max(0.05, Math.abs(Number(f.d) || 3)),
+            attachedNormal = Math.abs(Number(o.rb) || 0.1) + 0.008,
+            floorZ = Number(f.z) || 0,
+            floorOffset = Number(a.offsetZ) || 0,
+            p = customPt(
+                parent,
+                (Number(f.x) || 0) + px,
+                (Number(f.y) || 0) + side * (fd * 0.5 + attachedNormal),
+                floorZ + floorOffset,
+            ),
+            rot = Number(parent.rot || 0) + Number(a.rotOffset || 0);
+        return {
+            ...o,
+            attachment: { ...a, side, floorIndex: index },
+            k: 1,
+            d: -1,
+            rot,
+            ca: p[0],
+            cb: p[2],
+            lift: p[1] + 1,
+            off: [0, 0, 0],
+        };
+    }
     const linkedFace = !!o.linkedAsset,
-        side = linkedFace ? -1 : Number(a.side) === -1 ? -1 : 1,
-        px = Number(a.x) || 0,
-        baseZ = Number.isFinite(Number(a.baseZ)) ? Number(a.baseZ) : Math.max(0.1, (Number(parent.h) || 1) * 0.5),
-        offsetZ = Number(a.offsetZ) || 0;
-    const parentH = Math.max(0.1, Number(parent.h) || 1),
+        parentH = Math.max(0.1, Number(parent.h) || 1),
+        baseZ = Number.isFinite(Number(a.baseRatio))
+            ? parentH * clamp(Number(a.baseRatio), 0.02, 0.98)
+            : Number.isFinite(Number(a.baseZ))
+              ? Number(a.baseZ)
+              : parentH * 0.5,
+        offsetZ = Number(a.offsetZ) || 0,
         z = clamp(baseZ + offsetZ, 0.02, Math.max(0.02, parentH - 0.02));
     // 看板の直方体・テントの奥側の面を、親の開口側の面へぴったり合わせる。
     // k=1ではrbがローカルY（建物の奥行き／壁面法線方向）の半径で、hは上下の高さ。
@@ -936,7 +986,9 @@ function setOb(id, patch) {
             const parentBase = L2W(parent, 0, 0, 0)[1],
                 rawBase =
                     (Number(next.d) || -1) - (Number(next.d) || -1) * (Number(next.lift) || 0) + (next.off?.[1] || 0),
-                baseZ = Number(next.attachment.baseZ) || 0;
+                baseZ = Number.isFinite(Number(next.attachment.baseRatio))
+                    ? (Number(parent.h) || 1) * clamp(Number(next.attachment.baseRatio), 0.02, 0.98)
+                    : Number(next.attachment.baseZ) || 0;
             next.attachment = { ...next.attachment, offsetZ: rawBase - parentBase - baseZ };
         }
     }
@@ -1725,18 +1777,71 @@ function awningGizmo(o) {
         handle: null,
     };
 }
+function stackedBuildingGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "stackedBuilding") return null;
+    const floors = Array.isArray(o.floors) && o.floors.length ? o.floors : [];
+    if (!floors.length) return null;
+    const index = clamp(Math.round(Number(o.activeFloor) || 0), 0, floors.length - 1),
+        f = floors[index],
+        w = Math.max(0.08, Math.abs(Number(f.w) || 4)),
+        d = Math.max(0.08, Math.abs(Number(f.d) || 3)),
+        h = Math.max(0.08, Math.abs(Number(f.h) || 2.2)),
+        x = Number(f.x) || 0,
+        y = Number(f.y) || 0,
+        z = Number(f.z) || 0,
+        p3 = (px, py, pz) => customPt(o, px, py, pz),
+        pr = (px, py, pz) => scrW(p3(px, py, pz)),
+        center = pr(x, y, z + h * 0.5),
+        make = (kind, px, py, pz, axis, sign, label) => {
+            const s = pr(px, py, pz),
+                step = axis === "h" ? Math.max(0.05, h * 0.08) : Math.max(0.05, (axis === "w" ? w : d) * 0.08),
+                q =
+                    axis === "w"
+                        ? pr(px + step * sign, py, pz)
+                        : axis === "d"
+                          ? pr(px, py + step * sign, pz)
+                          : pr(px, py, pz + step),
+                dx = q.x - s.x,
+                dy = q.y - s.y,
+                pxLen = Math.hypot(dx, dy);
+            return {
+                kind,
+                s,
+                dir: { x: dx / (pxLen || 1), y: dy / (pxLen || 1) },
+                scale: pxLen / step || 1,
+                start: axis === "w" ? w : axis === "d" ? d : h,
+                min: 0.08,
+                max: 30,
+                axis,
+                sign,
+                floorIndex: index,
+                label,
+            };
+        },
+        handles = {
+            widthLeft: make("stacked-width", x - w * 0.5, y, z + h * 0.5, "w", -1, "幅"),
+            widthRight: make("stacked-width", x + w * 0.5, y, z + h * 0.5, "w", 1, "幅"),
+            depthLeft: make("stacked-depth", x, y - d * 0.5, z + h * 0.5, "d", -1, "奥行"),
+            depthRight: make("stacked-depth", x, y + d * 0.5, z + h * 0.5, "d", 1, "奥行"),
+            height: make("stacked-height", x, y, z + h, "h", 1, "高さ"),
+        },
+        frame = [pr(x - w / 2, y, z), pr(x - w / 2, y, z + h), pr(x + w / 2, y, z + h), pr(x + w / 2, y, z)];
+    return { o, C3: p3(x, y, z + h * 0.5), center, frame, handles, floorIndex: index };
+}
 function specialGizmo(o) {
-    return o && o.type === "asset" && o.asset === "building"
-        ? buildingGizmo(o)
-        : o && o.type === "asset" && o.asset === "awning"
-          ? awningGizmo(o)
-          : o && o.type === "asset" && o.asset === "sign"
-            ? signGizmo(o)
-            : o && o.type === "asset" && o.asset === "cone"
-              ? coneGizmo(o)
-              : o && o.type === "asset" && o.asset === "sphere"
-                ? sphereGizmo(o)
-                : null;
+    return o && o.type === "asset" && o.asset === "stackedBuilding"
+        ? stackedBuildingGizmo(o)
+        : o && o.type === "asset" && o.asset === "building"
+          ? buildingGizmo(o)
+          : o && o.type === "asset" && o.asset === "awning"
+            ? awningGizmo(o)
+            : o && o.type === "asset" && o.asset === "sign"
+              ? signGizmo(o)
+              : o && o.type === "asset" && o.asset === "cone"
+                ? coneGizmo(o)
+                : o && o.type === "asset" && o.asset === "sphere"
+                  ? sphereGizmo(o)
+                  : null;
 }
 function drawSpecialGizmo(c, o) {
     const sg = specialGizmo(o);
@@ -1760,7 +1865,30 @@ function drawSpecialGizmo(c, o) {
         c.fill();
         c.stroke();
     };
-    if (sg.o.asset === "building") {
+    if (sg.o.asset === "stackedBuilding") {
+        const h = sg.handles,
+            usable = Object.values(h).filter((handle) => Math.hypot(handle.dir.x, handle.dir.y) > 0.15);
+        c.setLineDash([5 / Z, 4 / Z]);
+        c.strokeStyle = "rgba(255,179,111,.9)";
+        c.lineWidth = 1.4 / Z;
+        if (sg.frame && sg.frame.every((q) => q && q.ok)) {
+            c.beginPath();
+            sg.frame.forEach((q, i) => (i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)));
+            c.closePath();
+            c.stroke();
+        }
+        usable.forEach((handle) => {
+            c.beginPath();
+            c.moveTo(sg.center.x, sg.center.y);
+            c.lineTo(handle.s.x, handle.s.y);
+            c.stroke();
+        });
+        c.setLineDash([]);
+        usable.forEach((handle) => sq(handle.s, "#ffb36f", handle.kind === "stacked-height"));
+        c.fillStyle = "#ffd0a8";
+        c.font = `bold ${12 / Z}px system-ui`;
+        c.fillText(`${sg.floorIndex + 1}F 幅/奥行/高さ`, sg.center.x + 8 / Z, sg.center.y - 8 / Z);
+    } else if (sg.o.asset === "building") {
         const h = sg.handles,
             front = ["frontOpeningWLeft", "frontOpeningWRight", "frontOpeningH"],
             back = ["backOpeningWLeft", "backOpeningWRight", "backOpeningH"];
@@ -1987,6 +2115,9 @@ function gizmo() {
     const o = sel && obOf(sel);
     if (!o) return null;
     if (o.type === "compound") return compoundGizmo(o);
+    // 積層建物は階別の専用面ハンドルを使う。汎用のra/rb/hハンドルを重ねると、
+    // floors[]ではなく古い単層値だけを編集してしまうため表示・ヒット対象から外す。
+    if (o.type === "asset" && o.asset === "stackedBuilding") return null;
     const [iu, iv] = PL[o.k],
         cs = Math.cos(o.rot * DG),
         sn = Math.sin(o.rot * DG),
@@ -2003,7 +2134,8 @@ function gizmo() {
                     o.asset === "sign" ||
                     o.asset === "stairs" ||
                     o.asset === "building" ||
-                    o.asset === "awning")),
+                    o.asset === "awning" ||
+                    o.asset === "balcony")),
         [z0, z1] = outerZRange(o),
         zc = solid ? (z0 + z1) / 2 : 0;
     const C3 = L2W(o, 0, 0, zc),
@@ -2124,6 +2256,56 @@ function drawGizmo(c) {
     drawSpecialGizmo(c, g.o);
     c.restore();
 }
+function stackedFloorScreen(o, index) {
+    const f = o?.floors?.[index];
+    if (!f) return null;
+    const w = Math.max(0.08, Math.abs(Number(f.w) || 4)),
+        d = Math.max(0.08, Math.abs(Number(f.d) || 3)),
+        h = Math.max(0.08, Math.abs(Number(f.h) || 2.2)),
+        x = Number(f.x) || 0,
+        y = Number(f.y) || 0,
+        z = Number(f.z) || 0,
+        p3 = (px, py, pz) => customPt(o, px, py, pz),
+        pr = (px, py, pz) => scrW(p3(px, py, pz)),
+        center = pr(x, y, z + h * 0.5),
+        top = [
+            pr(x - w / 2, y - d / 2, z + h),
+            pr(x + w / 2, y - d / 2, z + h),
+            pr(x + w / 2, y + d / 2, z + h),
+            pr(x - w / 2, y + d / 2, z + h),
+        ],
+        corners = [
+            pr(x - w / 2, y - d / 2, z),
+            pr(x + w / 2, y - d / 2, z),
+            pr(x + w / 2, y + d / 2, z),
+            pr(x - w / 2, y + d / 2, z),
+            ...top,
+        ];
+    return { f, center, top, corners, index };
+}
+function stackedFloorHit(o, p) {
+    if (!o || o.asset !== "stackedBuilding" || !Array.isArray(o.floors)) return null;
+    let best = null;
+    o.floors.forEach((f, index) => {
+        const q = stackedFloorScreen(o, index),
+            valid = q && q.center?.ok && q.corners.every((v) => v && v.ok);
+        if (!valid) return;
+        const xs = q.corners.map((v) => v.x),
+            ys = q.corners.map((v) => v.y),
+            inside = insidePoly2D(
+                p,
+                q.top.filter((v) => v && v.ok),
+            ),
+            inBox =
+                p.x >= Math.min(...xs) - 12 / Z &&
+                p.x <= Math.max(...xs) + 12 / Z &&
+                p.y >= Math.min(...ys) - 12 / Z &&
+                p.y <= Math.max(...ys) + 12 / Z,
+            distance = Math.hypot(p.x - q.center.x, p.y - q.center.y);
+        if ((inside || inBox) && (!best || distance < best.distance)) best = { ...q, distance };
+    });
+    return best;
+}
 function insidePoly2D(p, poly) {
     let inside = false;
     for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -2140,6 +2322,13 @@ function hitGizmo(p) {
         special = active && specialGizmo(active),
         R = 20 / Z;
     if (special) {
+        if (active.asset === "stackedBuilding") {
+            for (const h of Object.values(special.handles))
+                if (Math.hypot(h.dir.x, h.dir.y) > 0.15 && Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
+                    return { t: h.kind, sign: h, g: { o: active, C3: special.C3 } };
+            const floor = stackedFloorHit(active, p);
+            if (floor) return { t: "stack-floor", floorIndex: floor.index, floor, g: { o: active, C3: special.C3 } };
+        }
         if (active.asset === "building") {
             for (const h of Object.values(special.handles))
                 if (Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
@@ -2413,10 +2602,35 @@ function beginGizmo(h, p) {
             started: false,
             ...(group.length > 1 ? snapSetupGroup(group, h.g.C3) : snapSetup(o, h.g.C3)),
         };
-    if (
+    if (h.t === "stack-floor") {
+        const index = clamp(Math.round(Number(h.floorIndex) || 0), 0, Math.max(0, (o.floors || []).length - 1)),
+            f = o.floors?.[index],
+            q = stackedFloorScreen(o, index);
+        if (f && q) {
+            const zmid = (Number(f.z) || 0) + (Number(f.h) || 2.2) * 0.5,
+                c = scrW(customPt(o, Number(f.x) || 0, Number(f.y) || 0, zmid)),
+                bx = scrW(customPt(o, (Number(f.x) || 0) + 1, Number(f.y) || 0, zmid)),
+                by = scrW(customPt(o, Number(f.x) || 0, (Number(f.y) || 0) + 1, zmid));
+            setOb(o.id, { activeFloor: index });
+            ed = {
+                ...base,
+                o0: { ...o, floors: (o.floors || []).map((floor) => ({ ...floor })) },
+                t: "stack-floor-mv",
+                floorIndex: index,
+                p0: p,
+                stackMove: {
+                    x: Number(f.x) || 0,
+                    y: Number(f.y) || 0,
+                    bx: { x: (bx?.x || c.x) - c.x, y: (bx?.y || c.y) - c.y },
+                    by: { x: (by?.x || c.x) - c.x, y: (by?.y || c.y) - c.y },
+                },
+            };
+        }
+    } else if (
         h.t.startsWith("sign-") ||
         h.t.startsWith("building-") ||
         h.t.startsWith("awning-") ||
+        h.t.startsWith("stacked-") ||
         h.t === "cone-height" ||
         h.t === "sphere-radius"
     )
@@ -2480,6 +2694,49 @@ function dragEdit(p, freeRotation = false) {
             patch = { openingBack: clamp(h.start + (h.factor || 1) * amount, h.min, h.max) };
         else if (ed.t.includes("OpeningH")) patch = { openingH: clamp(h.start + amount, h.min, h.max) };
         else patch = { openingW: clamp(h.start + (h.factor || 1) * amount, h.min, h.max) };
+    } else if (ed.t === "stack-floor-mv") {
+        const h = ed.stackMove,
+            dx = p.x - ed.p0.x,
+            dy = p.y - ed.p0.y,
+            det = h.bx.x * h.by.y - h.bx.y * h.by.x;
+        let mx = 0,
+            my = 0;
+        if (Math.abs(det) > 1e-6) {
+            mx = (dx * h.by.y - dy * h.by.x) / det;
+            my = (h.bx.x * dy - h.bx.y * dx) / det;
+        } else if (Math.hypot(h.bx.x, h.bx.y) >= Math.hypot(h.by.x, h.by.y)) {
+            const n = Math.hypot(h.bx.x, h.bx.y) || 1;
+            mx = (dx * h.bx.x + dy * h.bx.y) / (n * n);
+        } else {
+            const n = Math.hypot(h.by.x, h.by.y) || 1;
+            my = (dx * h.by.x + dy * h.by.y) / (n * n);
+        }
+        const floors = Array.isArray(o.floors) ? o.floors.map((f) => ({ ...f })) : [],
+            floor = floors[ed.floorIndex];
+        if (floor) {
+            floor.x = h.x + mx;
+            floor.y = h.y + my;
+            patch = {
+                floors,
+                activeFloor: ed.floorIndex,
+                h: (Number(floors[floors.length - 1]?.z) || 0) + (Number(floors[floors.length - 1]?.h) || 0),
+            };
+        }
+    } else if (ed.t.startsWith("stacked-")) {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1),
+            floors = Array.isArray(o.floors) ? o.floors.map((f) => ({ ...f })) : [],
+            floor = floors[h.floorIndex];
+        if (floor) {
+            const key = h.axis === "w" ? "w" : h.axis === "d" ? "d" : "h";
+            floor[key] = clamp(h.start + amount, h.min, h.max);
+            if (o.syncFirst !== false && h.floorIndex === 0 && ["w", "d", "h"].includes(key))
+                floors.forEach((f) => (f[key] = floor[key]));
+            const last = floors[floors.length - 1];
+            patch = { floors, floorCount: floors.length, h: (Number(last?.z) || 0) + (Number(last?.h) || 0) };
+        }
     } else if (ed.t === "awning-edgeZ") {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -2847,6 +3104,38 @@ function exportSurfaceTriangles(o) {
         }
     };
     const kind = o.asset || o.type;
+    if (kind === "stackedBuilding") {
+        const floors =
+            Array.isArray(o.floors) && o.floors.length
+                ? o.floors
+                : [{ x: 0, y: 0, z: 0, w, d, h, rimHeight: 0.16, rimOverhang: 0.18 }];
+        floors.forEach((f) => {
+            const fw = Math.max(0.05, Math.abs(Number(f.w) || w)),
+                fd = Math.max(0.05, Math.abs(Number(f.d) || d)),
+                fh = Math.max(0.05, Math.abs(Number(f.h) || h)),
+                fz = Number(f.z) || 0,
+                fx = Number(f.x) || 0,
+                fy = Number(f.y) || 0,
+                rh = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, fh),
+                ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18));
+            boxAt(fx, fy, fw, fd, fz, fz + fh);
+            // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
+            boxAt(fx, fy, fw + ro * 2, fd + ro * 2, fz + fh - rh, fz + fh);
+        });
+        return out;
+    }
+    if (kind === "balcony") {
+        const floorT = clamp(Number(o.balconyFloorThickness) || 0.16, 0.04, Math.max(0.05, h * 0.7)),
+            railH = clamp(Number(o.balconyRailHeight) || Math.max(0.18, h - floorT), 0.12, Math.max(0.12, h - 0.01)),
+            railT = clamp(Number(o.balconyRailThickness) || 0.12, 0.035, Math.min(w, d) * 0.35);
+        boxAt(0, 0, w, d, 0, floorT);
+        if (o.balconyFrontRail !== false) boxAt(0, -d / 2 + railT / 2, w, railT, floorT, floorT + railH);
+        if (o.balconySideRail !== false) {
+            boxAt(-w / 2 + railT / 2, 0, railT, d, floorT, floorT + railH);
+            boxAt(w / 2 - railT / 2, 0, railT, d, floorT, floorT + railH);
+        }
+        return out;
+    }
     if (kind === "awning") {
         const g = awningGeometry(o),
             x = g.w / 2,

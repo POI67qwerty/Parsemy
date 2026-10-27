@@ -14,11 +14,13 @@ const ASSETS = {
     triPyramid: { label: "三角錐", glyph: "▲", w: 1.5, d: 1.5, h: 1.45, accent: "#ff79ba" },
     sign: { label: "看板", glyph: "▤", w: 1.0, d: 0.2, h: 2.15, accent: "#76d9ff" },
     awning: { label: "店舗テント", glyph: "▱", w: 3.8, d: 1.35, h: 0.35, accent: "#d98b68" },
+    balcony: { label: "壁付けベランダ", glyph: "▱", w: 3.2, d: 1.8, h: 1.25, accent: "#e6a36f" },
     person: { label: "人物", glyph: "♙", w: 0.46, d: 0.3, h: 1.7, accent: "#ad9cff" },
     stairs: { label: "階段", glyph: "▰", w: 1.45, d: 2.4, h: 0.78, accent: "#ffb36f" },
     building: { label: "開口のある建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#8ce6c2" },
     buildingAwning: { label: "テント付き建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#d98b68" },
     buildingSign: { label: "看板付き開口建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#76d9ff" },
+    stackedBuilding: { label: "縁付き階層建物", glyph: "▥", w: 4, d: 3, h: 8.98, accent: "#8ce6c2" },
     crosswalk: { label: "横断歩道", glyph: "▥", w: 3.2, d: 4.2, h: 0.02, accent: "#668cff" },
 };
 const assetLabel = (o) =>
@@ -33,7 +35,7 @@ const assetLabel = (o) =>
           : o.type === "compound"
             ? "結合オブジェクト"
             : o.type === "asset"
-              ? ASSETS[o.asset]?.label || (o.asset === "cylinder" ? "円柱" : "アセット")
+              ? o.assetName || ASSETS[o.asset]?.label || (o.asset === "cylinder" ? "円柱" : "アセット")
               : o.type === "rect"
                 ? "長方形"
                 : o.type === "circ"
@@ -47,7 +49,7 @@ const assetGlyph = (o) =>
     o.type === "compound"
         ? "◆"
         : o.type === "asset"
-          ? ASSETS[o.asset]?.glyph || (o.asset === "cylinder" ? "◉" : "◆")
+          ? ASSETS[o.asset]?.glyph || (o.asset === "custom" ? "⬡" : o.asset === "cylinder" ? "◉" : "◆")
           : o.type === "rect"
             ? "□"
             : o.type === "circ"
@@ -56,6 +58,18 @@ const assetGlyph = (o) =>
 
 // Coordinate helpers. Local asset coordinates are x=width, y=depth, z=up.
 const pt = (o, x, y, z) => L2W(o, x, y, z);
+// customアセットだけは、作成サイトと同じ x=左右／y=奥行き／z=高さの
+// ワールド座標で保持する。既存アセットの面座標系（k/PL）は変更しない。
+const customPt = (o, x, y, z) => {
+    const a = (Number(o.rot) || 0) * DG,
+        cs = Math.cos(a),
+        sn = Math.sin(a),
+        rx = x * cs - y * sn,
+        ry = x * sn + y * cs,
+        off = o.off || [0, 0, 0],
+        baseY = (Number(o.d) || -1) - (Number(o.d) || -1) * (Number(o.lift) || 0);
+    return [rx + (Number(off[0]) || 0), baseY + z + (Number(off[1]) || 0), ry + (Number(off[2]) || 0)];
+};
 const lineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
     c: color,
     w: width,
@@ -63,6 +77,14 @@ const lineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
     d3: true,
     cs: sigNow(),
     p: dens3(pts.map((q) => pt(o, q[0], q[1], q[2]))),
+});
+const customLineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
+    c: color,
+    w: width,
+    ob: o,
+    d3: true,
+    cs: sigNow(),
+    p: dens3(pts.map((q) => customPt(o, q[0], q[1], q[2]))),
 });
 const polyA = (o, pts, color, width) => lineA(o, [...pts, pts[0]], color, width);
 function boxA(o, w, d, z0, z1, color = o.c || "#e7fff4") {
@@ -112,6 +134,29 @@ function boxA(o, w, d, z0, z1, color = o.c || "#e7fff4") {
     );
     return out;
 }
+function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
+    const x = w / 2,
+        y = d / 2,
+        v = [
+            [cx - x, cy - y, z0],
+            [cx + x, cy - y, z0],
+            [cx + x, cy + y, z0],
+            [cx - x, cy + y, z0],
+            [cx - x, cy - y, z1],
+            [cx + x, cy - y, z1],
+            [cx + x, cy + y, z1],
+            [cx - x, cy + y, z1],
+        ],
+        out = [
+            polyA(o, [v[0], v[1], v[2], v[3]], color),
+            polyA(o, [v[4], v[5], v[6], v[7]], color),
+            lineA(o, [v[0], v[4]], color),
+            lineA(o, [v[1], v[5]], color),
+            lineA(o, [v[2], v[6]], color),
+            lineA(o, [v[3], v[7]], color),
+        ];
+    return out;
+}
 function ringA(o, rx, ry, z, n = 8, color = o.c || "#e7fff4") {
     const a = [];
     for (let i = 0; i < n; i++) {
@@ -146,7 +191,145 @@ function assetLines(o) {
         c = o.c || "#222222",
         a = c,
         out = []; // アセットも線画と同じ色で描く
-    if (kind === "stairs") {
+    if (kind === "custom") {
+        // アセット作成サイトから読み込んだ任意形状。頂点と辺／ループを
+        // 3D線画へ変換する。頂点はx=幅、y=奥行、z=高さのローカル座標。
+        const g = o.geometry || {},
+            vertices = Array.isArray(g.vertices) ? g.vertices : [],
+            edges = Array.isArray(g.edges) ? g.edges : [],
+            loops = Array.isArray(g.loops) ? g.loops : [],
+            edgeStyles = Array.isArray(g.edgeStyles) ? g.edgeStyles : [],
+            loopStyles = Array.isArray(g.loopStyles) ? g.loopStyles : [],
+            width = Number(o.w) || MASTER_W;
+        const customLine = (points, color = c, lineWidth = width) =>
+                out.push({
+                    c: color,
+                    w: lineWidth,
+                    ob: o,
+                    d3: true,
+                    cs: sigNow(),
+                    p: dens3(points.map((q) => customPt(o, q[0], q[1], q[2]))),
+                }),
+            addEdge = (ia, ib, color = c, lineWidth = width) => {
+                const u = vertices[ia],
+                    v = vertices[ib];
+                if (!Array.isArray(u) || !Array.isArray(v) || u.length < 3 || v.length < 3) return;
+                const a3 = u.slice(0, 3).map(Number),
+                    b3 = v.slice(0, 3).map(Number);
+                if (!a3.every(Number.isFinite) || !b3.every(Number.isFinite)) return;
+                customLine([a3, b3], color, lineWidth);
+            };
+        edges.forEach((e, i) => {
+            if (!Array.isArray(e) || e.length < 2) return;
+            const style = edgeStyles[i] || {};
+            addEdge(Number(e[0]), Number(e[1]), style.color || c, Number(style.width) || width);
+        });
+        loops.forEach((loop, li) => {
+            if (!Array.isArray(loop) || loop.length < 2) return;
+            const style = loopStyles[li] || {};
+            for (let i = 0; i < loop.length; i++)
+                addEdge(
+                    Number(loop[i]),
+                    Number(loop[(i + 1) % loop.length]),
+                    style.color || c,
+                    Number(style.width) || width,
+                );
+        });
+    } else if (kind === "stackedBuilding") {
+        const floors =
+            Array.isArray(o.floors) && o.floors.length
+                ? o.floors
+                : [
+                      {
+                          x: 0,
+                          y: 0,
+                          z: 0,
+                          w: o.ra * 2 || 4,
+                          d: o.rb * 2 || 3,
+                          h: o.h || 2.2,
+                          rimHeight: 0.16,
+                          rimOverhang: 0.18,
+                      },
+                  ];
+        const addBox = (f, w, d, z, h, color = c, caps = { bottom: true, top: true }) => {
+            const x = w / 2,
+                y = d / 2,
+                ox = Number(f.x || 0),
+                oy = Number(f.y || 0),
+                oz = Number(f.z || 0),
+                v = [
+                    [-x, -y, z],
+                    [x, -y, z],
+                    [x, y, z],
+                    [-x, y, z],
+                    [-x, -y, z + h],
+                    [x, -y, z + h],
+                    [x, y, z + h],
+                    [-x, y, z + h],
+                ],
+                toWorld = (q) => [q[0] + ox, q[1] + oy, q[2] + oz];
+            // 面ごとに輪郭を足すと共有辺が2回描かれるため、箱の12辺を一度だけ描く。
+            [
+                ...(caps.bottom ? [[0, 1, 2, 3, 0]] : []),
+                ...(caps.top ? [[4, 5, 6, 7, 4]] : []),
+                [0, 4],
+                [1, 5],
+                [2, 6],
+                [3, 7],
+            ].forEach((edge) =>
+                out.push(
+                    customLineA(
+                        o,
+                        edge.map((i) => toWorld(v[i])),
+                        color,
+                    ),
+                ),
+            );
+        };
+        floors.forEach((f, i) => {
+            const w = Math.max(0.05, Math.abs(Number(f.w) || Number(o.ra || 2) * 2)),
+                d = Math.max(0.05, Math.abs(Number(f.d) || Number(o.rb || 1.5) * 2)),
+                h = Math.max(0.05, Math.abs(Number(f.h) || 2.2)),
+                rh = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, h),
+                ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18));
+            // 本体の上辺は上側の縁に隠れるため描かず、下側の縁は全階で作らない。
+            // 1階だけは床側の本体辺を残す。
+            addBox(f, w, d, 0, h, f.c || c, { bottom: i === 0, top: false });
+            // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
+            addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
+        });
+    } else if (kind === "balcony") {
+        // 壁側（+Y）を建物外壁へ合わせ、床を外側（-Y）へ張り出すU字型のベランダ。
+        // 床スラブ＋左右の腰壁＋前面の腰壁を別箱として描くため、面編集後も形状が崩れない。
+        const floorT = clamp(Number(o.balconyFloorThickness) || 0.16, 0.04, Math.max(0.05, h * 0.7)),
+            railH = clamp(Number(o.balconyRailHeight) || Math.max(0.18, h - floorT), 0.12, Math.max(0.12, h - 0.01)),
+            railT = clamp(Number(o.balconyRailThickness) || 0.12, 0.035, Math.min(w, d) * 0.35),
+            frontRail = o.balconyFrontRail !== false,
+            sideRail = o.balconySideRail !== false;
+        out.push(...wireBoxA(o, 0, 0, w, d, 0, floorT, c));
+        if (frontRail) out.push(...wireBoxA(o, 0, -d / 2 + railT / 2, w, railT, floorT, floorT + railH, c));
+        if (sideRail) {
+            out.push(...wireBoxA(o, -w / 2 + railT / 2, 0, railT, d, floorT, floorT + railH, c));
+            out.push(...wireBoxA(o, w / 2 - railT / 2, 0, railT, d, floorT, floorT + railH, c));
+        }
+        // 壁付け面の床下に短い支持ブラケットを入れ、正面／3D線画で張り出し方向を読み取りやすくする。
+        const bracketZ = Math.max(0.02, floorT * 0.18),
+            wallY = d / 2 - railT * 0.5,
+            frontY = -d / 2 + railT * 0.5;
+        [-w * 0.34, w * 0.34].forEach((x) =>
+            out.push(
+                lineA(
+                    o,
+                    [
+                        [x, wallY, bracketZ],
+                        [x, frontY, 0],
+                    ],
+                    c,
+                    0.85,
+                ),
+            ),
+        );
+    } else if (kind === "stairs") {
         const n = Math.max(2, Math.min(24, Math.round(o.steps || 6))),
             sd = d / n,
             sh = h / n;
@@ -871,6 +1054,20 @@ function assetLines(o) {
 }
 function normalizedAsset(o) {
     let q = o?.attachment ? syncAttachedPart(o) : o;
+    if (q && q.asset === "balcony") {
+        const floorT = clamp(Number(q.balconyFloorThickness) || 0.16, 0.04, 10),
+            railT = clamp(Number(q.balconyRailThickness) || 0.12, 0.035, 10),
+            railH = q.balconyRailHeightEdited
+                ? clamp(Number(q.balconyRailHeight) || 0.9, 0.12, 30)
+                : Math.max(0.12, (Number(q.h) || 1.25) - floorT);
+        q = {
+            ...q,
+            balconyFloorThickness: floorT,
+            balconyRailThickness: railT,
+            balconyRailHeight: railH,
+            h: floorT + railH,
+        };
+    }
     if (q && q.asset === "sphere") {
         const r = Math.max(
             0.005,
@@ -921,10 +1118,40 @@ obBounds = function (o) {
     if (!o || o.type !== "asset") return baseObBounds(o);
     const q = syncAttachedPart(o),
         pts = [];
-    const hs = [0, q.h],
-        xs = [-q.ra, q.ra],
-        ys = [-q.rb, q.rb];
-    hs.forEach((z) => xs.forEach((x) => ys.forEach((y) => pts.push(pt(q, x, y, z)))));
+    if (q.asset === "custom" && Array.isArray(q.geometry?.vertices) && q.geometry.vertices.length) {
+        q.geometry.vertices.forEach((v) => {
+            if (Array.isArray(v) && v.length >= 3)
+                pts.push(customPt(q, Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0));
+        });
+    } else if (q.asset === "stackedBuilding") {
+        const floors =
+            Array.isArray(q.floors) && q.floors.length
+                ? q.floors
+                : [{ x: 0, y: 0, z: 0, w: q.ra * 2 || 4, d: q.rb * 2 || 3, h: q.h || 2.2 }];
+        floors.forEach((f) => {
+            const w = Math.abs(Number(f.w) || 4),
+                d = Math.abs(Number(f.d) || 3),
+                h = Math.abs(Number(f.h) || 2.2),
+                rh = Math.min(h, Math.max(0.01, Math.abs(Number(f.rimHeight) || q.rimHeight || 0.16))),
+                ro = Math.max(0, Math.abs(Number(f.rimOverhang) || q.rimOverhang || 0.18)),
+                add = (ww, dd, z0, z1) => {
+                    [-ww / 2, ww / 2].forEach((x) =>
+                        [-dd / 2, dd / 2].forEach((y) =>
+                            [z0, z1].forEach((z) =>
+                                pts.push(customPt(q, x + Number(f.x || 0), y + Number(f.y || 0), z + Number(f.z || 0))),
+                            ),
+                        ),
+                    );
+                };
+            add(w, d, 0, h);
+            add(w + ro * 2, d + ro * 2, h - rh, h);
+        });
+    } else {
+        const hs = [0, q.h],
+            xs = [-q.ra, q.ra],
+            ys = [-q.rb, q.rb];
+        hs.forEach((z) => xs.forEach((x) => ys.forEach((y) => pts.push(pt(q, x, y, z)))));
+    }
     const lo = [Infinity, Infinity, Infinity],
         hi = [-Infinity, -Infinity, -Infinity];
     pts.forEach((v) =>

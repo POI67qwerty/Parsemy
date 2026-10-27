@@ -723,6 +723,193 @@
             if (n && document.activeElement !== n) n.value = Number(v).toFixed(3);
         });
     }
+    let stackedEditSession = false;
+    function stackFloorHeight(o) {
+        const floors = Array.isArray(o?.floors) ? o.floors : [];
+        return floors.reduce((max, f) => Math.max(max, (Number(f.z) || 0) + (Number(f.h) || 0)), 0);
+    }
+    function rebuildStackFloorRows(o) {
+        const rows = el("stackFloorRows");
+        if (!rows) return;
+        const floors = Array.isArray(o?.floors) ? o.floors : [];
+        if (rows.dataset.count !== String(floors.length)) {
+            rows.innerHTML = floors
+                .map(
+                    (f, i) =>
+                        `<div class="stackFloorRow" data-floor-row="${i}"><button type="button" data-stack-floor-select="${i}" class="stackFloorSelect">${i + 1}F</button><label>幅<input data-stack-floor="${i}" data-stack-key="w" type="number" step="0.05"></label><label>奥行<input data-stack-floor="${i}" data-stack-key="d" type="number" step="0.05"></label><label>高さ<input data-stack-floor="${i}" data-stack-key="h" type="number" step="0.05"></label><label>X<input data-stack-floor="${i}" data-stack-key="x" type="number" step="0.05"></label><label>Y<input data-stack-floor="${i}" data-stack-key="y" type="number" step="0.05"></label><label>Z<input data-stack-floor="${i}" data-stack-key="z" type="number" step="0.05"></label><label>縁出<input data-stack-floor="${i}" data-stack-key="rimOverhang" type="number" step="0.01"></label><label>縁高<input data-stack-floor="${i}" data-stack-key="rimHeight" type="number" step="0.01"></label></div>`,
+                )
+                .join("");
+            rows.dataset.count = String(floors.length);
+            rows.querySelectorAll("[data-stack-floor]").forEach((n) => {
+                n.oninput = () => {
+                    const current = sel && obOf(sel),
+                        index = Number(n.dataset.stackFloor),
+                        key = n.dataset.stackKey;
+                    if (!current?.floors?.[index]) return;
+                    if (!stackedEditSession) {
+                        HU.push(S);
+                        RD = [];
+                        stackedEditSession = true;
+                    }
+                    const nextFloors = current.floors.map((f) => ({ ...f }));
+                    nextFloors[index][key] = Number(n.value) || 0;
+                    if (
+                        current.syncFirst !== false &&
+                        index === 0 &&
+                        ["w", "d", "h", "rimOverhang", "rimHeight"].includes(key)
+                    )
+                        nextFloors.forEach((f) => (f[key] = nextFloors[0][key]));
+                    setOb(current.id, { floors: nextFloors, h: stackFloorHeight({ floors: nextFloors }) });
+                    render();
+                };
+            });
+            rows.querySelectorAll("[data-stack-floor-select]").forEach((n) => {
+                n.onclick = () => {
+                    const current = sel && obOf(sel);
+                    if (!current) return;
+                    setOb(current.id, { activeFloor: Number(n.dataset.stackFloorSelect) });
+                    render();
+                };
+            });
+        }
+        rows.querySelectorAll("[data-floor-row]").forEach((row) =>
+            row.classList.toggle("active", Number(row.dataset.floorRow) === Number(o.activeFloor || 0)),
+        );
+        rows.querySelectorAll("[data-stack-floor]").forEach((n) => {
+            const f = floors[Number(n.dataset.stackFloor)],
+                key = n.dataset.stackKey;
+            if (f && document.activeElement !== n) n.value = Number(f[key] || 0).toFixed(3);
+        });
+    }
+    function syncStackedPanel() {
+        const panel = el("stackedP"),
+            o = sel && obOf(sel),
+            active = !!(o && o.type === "asset" && o.asset === "stackedBuilding");
+        if (!panel) return;
+        panel.style.display = active ? "" : "none";
+        if (!active) {
+            stackedEditSession = false;
+            return;
+        }
+        const count = el("stackFloorCount"),
+            syncFirst = el("stackSyncFirst"),
+            gap = el("stackFloorGap");
+        if (count && document.activeElement !== count) count.value = o.floorCount || o.floors?.length || 1;
+        if (syncFirst) syncFirst.checked = o.syncFirst !== false;
+        if (gap && document.activeElement !== gap) gap.value = Number(o.floorGap || 0).toFixed(3);
+        rebuildStackFloorRows(o);
+    }
+    function applyStackMeta(key, value) {
+        const o = sel && obOf(sel);
+        if (!o || o.asset !== "stackedBuilding") return;
+        if (!stackedEditSession) {
+            HU.push(S);
+            RD = [];
+            stackedEditSession = true;
+        }
+        if (key === "syncFirst") {
+            const syncFirst = !!value,
+                patch = { syncFirst };
+            if (syncFirst && o.floors?.length) {
+                const first = o.floors[0];
+                patch.floors = o.floors.map((f) => ({
+                    ...f,
+                    w: first.w,
+                    d: first.d,
+                    h: first.h,
+                    rimHeight: first.rimHeight,
+                    rimOverhang: first.rimOverhang,
+                }));
+                patch.h = stackFloorHeight(patch);
+            }
+            setOb(o.id, patch);
+            render();
+            return;
+        }
+        if (key === "floorGap") {
+            setOb(o.id, { floorGap: Math.max(0, Number(value) || 0) });
+            render();
+            return;
+        }
+        const count = Math.max(1, Math.min(30, Math.round(Number(value) || 1))),
+            floors = (o.floors || []).map((f) => ({ ...f }));
+        while (floors.length < count) {
+            const prev = floors[floors.length - 1] || {
+                x: 0,
+                y: 0,
+                z: 0,
+                w: o.ra * 2 || 4,
+                d: o.rb * 2 || 3,
+                h: 2.2,
+                rimHeight: 0.16,
+                rimOverhang: 0.18,
+            };
+            floors.push({
+                ...prev,
+                name: `${floors.length + 1}F`,
+                z: (Number(prev.z) || 0) + (Number(prev.h) || 2.2) + (Number(o.floorGap) || 0.06),
+            });
+        }
+        floors.length = count;
+        setOb(o.id, {
+            floorCount: count,
+            floors,
+            activeFloor: Math.min(Math.max(0, Number(o.activeFloor) || 0), count - 1),
+            h: stackFloorHeight({ floors }),
+        });
+        render();
+    }
+    function alignStackedObject() {
+        const o = sel && obOf(sel);
+        if (!o || o.asset !== "stackedBuilding" || !o.floors?.length) return;
+        HU.push(S);
+        RD = [];
+        const floors = o.floors.map((f) => ({ ...f })),
+            first = floors[0],
+            x = Number(first.x) || 0,
+            y = Number(first.y) || 0;
+        let z = Number(first.z) || 0;
+        floors.forEach((f) => {
+            f.x = x;
+            f.y = y;
+            f.z = z;
+            z += Math.max(0.05, Number(f.h) || 2.2) + Math.max(0, Number(o.floorGap) || 0.06);
+        });
+        setOb(o.id, { floors, h: stackFloorHeight({ floors }) });
+        stackedEditSession = false;
+        render();
+    }
+    function copyFirstFloorToAll() {
+        const o = sel && obOf(sel);
+        if (!o || o.asset !== "stackedBuilding" || !o.floors?.length) return;
+        HU.push(S);
+        RD = [];
+        const first = o.floors[0],
+            floors = o.floors.map((f) => ({
+                ...f,
+                w: first.w,
+                d: first.d,
+                h: first.h,
+                rimHeight: first.rimHeight,
+                rimOverhang: first.rimOverhang,
+            }));
+        setOb(o.id, { floors, h: stackFloorHeight({ floors }) });
+        render();
+    }
+    [
+        ["stackFloorCount", "floorCount"],
+        ["stackFloorGap", "floorGap"],
+    ].forEach(([id, key]) => {
+        const n = el(id);
+        if (n) n.oninput = () => applyStackMeta(key, n.value);
+    });
+    const stackSync = el("stackSyncFirst");
+    if (stackSync) stackSync.onchange = () => applyStackMeta("syncFirst", stackSync.checked);
+    const stackAlign = el("stackAlign");
+    if (stackAlign) stackAlign.onclick = alignStackedObject;
+    const stackCopy = el("stackCopyFirst");
+    if (stackCopy) stackCopy.onclick = copyFirstFloorToAll;
+
     function applyBuildingProp(name, v) {
         const o = sel && obOf(sel);
         if (!o || o.type !== "asset" || o.asset !== "building" || !Number.isFinite(v)) return;
@@ -795,6 +982,79 @@
             signEditSession = false;
         };
     });
+    let balconyEditSession = false;
+    function syncBalconyPanel() {
+        const panel = el("balconyP"),
+            o = sel && obOf(sel),
+            isBalcony = !!(o && o.type === "asset" && o.asset === "balcony");
+        if (!panel) return;
+        panel.style.display = isBalcony ? "" : "none";
+        if (!isBalcony) return;
+        const floorT = Number(o.balconyFloorThickness) || 0.16,
+            railH = Number(o.balconyRailHeight) || Math.max(0.12, (Number(o.h) || 1.25) - floorT),
+            railT = Number(o.balconyRailThickness) || 0.12;
+        [
+            ["balconyRailHeight", railH],
+            ["balconyFloorThickness", floorT],
+            ["balconyRailThickness", railT],
+        ].forEach(([id, v]) => {
+            const n = el(id);
+            if (n && document.activeElement !== n) n.value = Number(v).toFixed(3);
+        });
+        const front = el("balconyFrontRail"),
+            side = el("balconySideRail");
+        if (front && document.activeElement !== front) front.checked = o.balconyFrontRail !== false;
+        if (side && document.activeElement !== side) side.checked = o.balconySideRail !== false;
+    }
+    function applyBalconyProp(name, value) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || o.asset !== "balcony" || !Number.isFinite(value)) return;
+        if (!balconyEditSession) {
+            HU.push(S);
+            RD = [];
+            balconyEditSession = true;
+        }
+        const floorT = Math.max(0.04, Number(o.balconyFloorThickness) || 0.16),
+            railH = Math.max(0.12, Number(o.balconyRailHeight) || Math.max(0.12, (Number(o.h) || 1.25) - floorT)),
+            patch = {};
+        if (name === "balconyRailHeight") {
+            patch.balconyRailHeight = clamp(value, 0.12, 30);
+            patch.balconyRailHeightEdited = true;
+            patch.h = floorT + patch.balconyRailHeight;
+        } else if (name === "balconyFloorThickness") {
+            patch.balconyFloorThickness = clamp(value, 0.04, 10);
+            patch.h = patch.balconyFloorThickness + railH;
+        } else if (name === "balconyRailThickness") patch.balconyRailThickness = clamp(value, 0.035, 10);
+        setOb(sel, patch);
+        render();
+    }
+    [
+        ["balconyRailHeight", "balconyRailHeight"],
+        ["balconyFloorThickness", "balconyFloorThickness"],
+        ["balconyRailThickness", "balconyRailThickness"],
+    ].forEach(([id, name]) => {
+        const n = el(id);
+        if (!n) return;
+        n.oninput = () => applyBalconyProp(name, parseFloat(n.value));
+        n.onchange = () => {
+            balconyEditSession = false;
+        };
+    });
+    [
+        ["balconyFrontRail", "balconyFrontRail"],
+        ["balconySideRail", "balconySideRail"],
+    ].forEach(([id, name]) => {
+        const n = el(id);
+        if (!n) return;
+        n.onchange = () => {
+            const o = sel && obOf(sel);
+            if (!o || o.type !== "asset" || o.asset !== "balcony") return;
+            HU.push(S);
+            RD = [];
+            setOb(sel, { [name]: !!n.checked });
+            render();
+        };
+    });
     function syncAssetControls() {
         const o = sel && obOf(sel);
         if (o && o.type === "asset" && o.asset === "stairs") {
@@ -811,6 +1071,8 @@
         syncAssetControls();
         syncSignPanel();
         syncBuildingPanel();
+        syncBalconyPanel();
+        syncStackedPanel();
         syncFloorControls();
         syncAssetDepth();
         syncAssetAxis();

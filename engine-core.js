@@ -128,6 +128,22 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>開口の高さ</span><input type=number class=nv id=ov_openingH step=0.05 style="width:100px"><span class=un>m</span></label>
 <div class="note">建物の外形は軸・回転に加え、3Dの白い外側面ハンドルでも幅・奥行き・高さを編集できます。緑のハンドルで開口の幅・高さ、オレンジの「奥の面」で閉じた内壁の奥行きを編集できます。</div>
 </div>
+<div id=balconyP style="display:none"><h3>壁付けベランダ</h3>
+<label><span>手すり／腰壁の高さ</span><input type=number class=nv id=balconyRailHeight min=0.12 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>床スラブの厚さ</span><input type=number class=nv id=balconyFloorThickness min=0.04 step=0.02 style="width:100px"><span class=un>m</span></label>
+<label><span>壁の厚さ</span><input type=number class=nv id=balconyRailThickness min=0.035 step=0.02 style="width:100px"><span class=un>m</span></label>
+<label><input type=checkbox id=balconyFrontRail checked> 前面の腰壁を表示</label>
+<label><input type=checkbox id=balconySideRail checked> 左右の側壁を表示</label>
+<div class="note">建物を選択して棚の「壁付けベランダ」を押すと、建物の正面壁へ2階相当の高さで接着します。接着後は親建物の移動・幅・奥行き・高さに追従し、ベランダ単体の幅・奥行き・手すり高さを編集できます。</div>
+</div>
+<div id=stackedP style="display:none"><h3>縁付き階層建物</h3>
+<label><span>階数</span><input type=number class=nv id=stackFloorCount min=1 max=30 step=1 style="width:100px"></label>
+<label><input type=checkbox id=stackSyncFirst checked> 1階の寸法を全階へ反映</label>
+<label><span>階間</span><input type=number class=nv id=stackFloorGap min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><button id=stackAlign class="primary">上方向へ整列</button><button id=stackCopyFirst>1F寸法をコピー</button></label>
+<div id=stackFloorRows></div>
+<div class="note">正面・横・上ビューでは、選択中の階にオレンジの面ハンドルが表示されます。1階の幅・奥行き・高さ・縁を変更すると、同期ONの間は全階へ反映されます。下側の縁は全階で作らず、各階の上側だけに配置します。</div>
+</div>
 <label><button id=obExtrude>押し出しを有効</button><button id=obGnd>地面につける</button><button id=obDup>複製</button><button id=obDel>消去</button><button id=obOff>選択解除</button></label>
 <label><button id=objectInfoCopy aria-label="JSONコピー" title="選択中オブジェクトの定義JSONをコピー" disabled>JSONコピー</button><button id=objectInfoSave aria-label="JSON保存" title="選択中オブジェクトの定義JSONを保存" disabled>JSON保存</button></label>
 <div class="note">JSON保存は寸法・位置・向き・アセット固有設定をテキストで書き出します。後から線画化できる定義形式です。</div>
@@ -815,12 +831,46 @@ function syncAttachedPart(o, parentOverride = null) {
     if (!a?.parentId) return o;
     const parent = parentOverride || obOf(a.parentId);
     if (!parent) return o;
+    const side = Number(a.side) === -1 ? -1 : 1,
+        px = Number(a.x) || 0;
+    // 積層建物はgeometryがcustomPt（階ごとのx/y/z）で保持されるため、
+    // 標準建物のL2Wとは別に、指定階の壁面へベランダを同期する。
+    if (parent.asset === "stackedBuilding" && a.stackedFloor) {
+        const floors = Array.isArray(parent.floors) ? parent.floors : [],
+            index = clamp(Math.round(Number(a.floorIndex) || 0), 0, Math.max(0, floors.length - 1)),
+            f = floors[index];
+        if (!f || typeof customPt !== "function") return o;
+        const fd = Math.max(0.05, Math.abs(Number(f.d) || 3)),
+            attachedNormal = Math.abs(Number(o.rb) || 0.1) + 0.008,
+            floorZ = Number(f.z) || 0,
+            floorOffset = Number(a.offsetZ) || 0,
+            p = customPt(
+                parent,
+                (Number(f.x) || 0) + px,
+                (Number(f.y) || 0) + side * (fd * 0.5 + attachedNormal),
+                floorZ + floorOffset,
+            ),
+            rot = Number(parent.rot || 0) + Number(a.rotOffset || 0);
+        return {
+            ...o,
+            attachment: { ...a, side, floorIndex: index },
+            k: 1,
+            d: -1,
+            rot,
+            ca: p[0],
+            cb: p[2],
+            lift: p[1] + 1,
+            off: [0, 0, 0],
+        };
+    }
     const linkedFace = !!o.linkedAsset,
-        side = linkedFace ? -1 : Number(a.side) === -1 ? -1 : 1,
-        px = Number(a.x) || 0,
-        baseZ = Number.isFinite(Number(a.baseZ)) ? Number(a.baseZ) : Math.max(0.1, (Number(parent.h) || 1) * 0.5),
-        offsetZ = Number(a.offsetZ) || 0;
-    const parentH = Math.max(0.1, Number(parent.h) || 1),
+        parentH = Math.max(0.1, Number(parent.h) || 1),
+        baseZ = Number.isFinite(Number(a.baseRatio))
+            ? parentH * clamp(Number(a.baseRatio), 0.02, 0.98)
+            : Number.isFinite(Number(a.baseZ))
+              ? Number(a.baseZ)
+              : parentH * 0.5,
+        offsetZ = Number(a.offsetZ) || 0,
         z = clamp(baseZ + offsetZ, 0.02, Math.max(0.02, parentH - 0.02));
     // 看板の直方体・テントの奥側の面を、親の開口側の面へぴったり合わせる。
     // k=1ではrbがローカルY（建物の奥行き／壁面法線方向）の半径で、hは上下の高さ。
@@ -936,7 +986,9 @@ function setOb(id, patch) {
             const parentBase = L2W(parent, 0, 0, 0)[1],
                 rawBase =
                     (Number(next.d) || -1) - (Number(next.d) || -1) * (Number(next.lift) || 0) + (next.off?.[1] || 0),
-                baseZ = Number(next.attachment.baseZ) || 0;
+                baseZ = Number.isFinite(Number(next.attachment.baseRatio))
+                    ? (Number(parent.h) || 1) * clamp(Number(next.attachment.baseRatio), 0.02, 0.98)
+                    : Number(next.attachment.baseZ) || 0;
             next.attachment = { ...next.attachment, offsetZ: rawBase - parentBase - baseZ };
         }
     }

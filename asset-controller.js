@@ -39,7 +39,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             q = [q[0] + ((n % 4) - 1.5) * 0.85, q[1], q[2] + Math.floor(n / 4) * 1.05];
         }
         // 生成方向は「その軸に立つ面」の法線。Y=地面、X/Z=壁面として配置する。
-        const k = clamp(Math.round(Number(P.assetAxis ?? 1)), 0, 2),
+        const k = kind === "balcony" ? 1 : clamp(Math.round(Number(P.assetAxis ?? 1)), 0, 2),
             d = -1,
             [iu, iv] = PL[k],
             off = [0, 0, 0];
@@ -60,6 +60,44 @@ window.cityGridInstallAssetUI = function (bridge) {
             accent: info.accent,
         };
         const height = kind === "person" ? Number(P.hm) || 1.7 : info.h;
+        if (kind === "stackedBuilding") {
+            const floorHeight = 2.2,
+                floorGap = 0.06,
+                floors = Array.from({ length: 4 }, (_, i) => ({
+                    name: `${i + 1}F`,
+                    x: 0,
+                    y: 0,
+                    z: i * (floorHeight + floorGap),
+                    w: info.w,
+                    d: info.d,
+                    h: floorHeight,
+                    rimHeight: 0.16,
+                    rimOverhang: 0.18,
+                }));
+            return {
+                ...base,
+                type: "asset",
+                asset: kind,
+                assetId: "stacked-building",
+                assetName: info.label,
+                k: 1,
+                d: -1,
+                off: [q[0], 0, q[2]],
+                ca: 0,
+                cb: 0,
+                h: floors[floors.length - 1].z + floorHeight,
+                ra: info.w / 2,
+                rb: info.d / 2,
+                floorCount: floors.length,
+                floorHeight,
+                floorGap,
+                rimHeight: 0.16,
+                rimOverhang: 0.18,
+                syncFirst: true,
+                activeFloor: 0,
+                floors,
+            };
+        }
         if (kind === "rect" || kind === "circle")
             return {
                 ...base,
@@ -92,6 +130,12 @@ window.cityGridInstallAssetUI = function (bridge) {
             awningFrontBottom: kind === "awning" ? 0 : undefined,
             awningBackBottom: kind === "awning" ? 0 : undefined,
             awningEdgeEdited: kind === "awning" ? false : undefined,
+            balconyFloorThickness: kind === "balcony" ? 0.16 : undefined,
+            balconyRailHeight: kind === "balcony" ? Math.max(0.12, height - 0.16) : undefined,
+            balconyRailThickness: kind === "balcony" ? 0.12 : undefined,
+            balconyFrontRail: kind === "balcony" ? true : undefined,
+            balconySideRail: kind === "balcony" ? true : undefined,
+            balconyRailHeightEdited: kind === "balcony" ? false : undefined,
             steps: kind === "stairs" ? Math.round(Number(el("stairsSteps")?.value) || 6) : undefined,
             handrail: kind === "stairs" ? !!el("stairsRail")?.checked : undefined,
             stripes: kind === "crosswalk" ? 7 : undefined,
@@ -178,8 +222,89 @@ window.cityGridInstallAssetUI = function (bridge) {
             alert("接続アセットを配置できませんでした。もう一度クリックしてください。");
         }
     }
+    function selectedBalconyParent() {
+        const parent = sel ? obOf(sel) : null;
+        // 建物アセットを選択しているときは、その正面（ローカルYマイナス面）へ自動接着する。
+        // 既存の建物接着と同じ親子同期経路を使うため、親の移動・寸法変更にも追従する。
+        return parent &&
+            parent.type === "asset" &&
+            ["building", "stackedBuilding"].includes(parent.asset) &&
+            parent.k === 1
+            ? parent
+            : null;
+    }
+    function newAttachedBalcony(parent) {
+        const isStacked = parent.asset === "stackedBuilding",
+            floors = Array.isArray(parent.floors) ? parent.floors : [],
+            floorIndex = isStacked
+                ? clamp(Math.round(Number(parent.activeFloor) || 1), 0, Math.max(0, floors.length - 1))
+                : 0,
+            floor = isStacked ? floors[floorIndex] : null,
+            wallPoint = isStacked
+                ? customPt(
+                      parent,
+                      Number(floor?.x) || 0,
+                      (Number(floor?.y) || 0) - Math.abs(Number(floor?.d) || 3) * 0.5,
+                      Number(floor?.z) || 0,
+                  )
+                : L2W(parent, 0, -Math.abs(Number(parent.rb) || 0.5), 0),
+            child = newAsset("balcony", null, wallPoint);
+        child.k = 1;
+        child.d = -1;
+        child.ca = 0;
+        child.cb = 0;
+        child.off = [0, 0, 0];
+        child.lift = 0;
+        child.rot = Number(parent.rot) || 0;
+        child.attachment = {
+            parentId: parent.id,
+            side: -1,
+            x: 0,
+            ...(isStacked
+                ? { stackedFloor: true, floorIndex, baseZ: Number(floor?.z) || 0 }
+                : { baseRatio: 0.58, baseZ: Math.max(0.1, (Number(parent.h) || 3) * 0.58) }),
+            offsetZ: 0,
+            rotOffset: 0,
+            verticalOnly: true,
+        };
+        return syncAttachedPart(child, parent);
+    }
+    function placeBalcony(p) {
+        sanitizeScene();
+        const before = S.slice(),
+            wasFloor = !!window.cityFloorPlanActive;
+        try {
+            const parent = selectedBalconyParent(),
+                o = parent ? newAttachedBalcony(parent) : newAsset("balcony", p),
+                lines = genShape(o);
+            if (!lines.length || lines.some((s) => !validStroke(s)))
+                throw new Error("balcony geometry is empty or malformed");
+            HU.push(S);
+            RD = [];
+            S = [...S, ...lines];
+            setSelection(o.id, false);
+            tool = "edit";
+            setMode("draw");
+            if (wasFloor) {
+                fitFloorPlan();
+                setMode("draw");
+            }
+            syncSel();
+            render();
+        } catch (err) {
+            S = before;
+            prev = null;
+            clearSelection();
+            console.error("City Grid balcony asset error", err);
+            try {
+                render();
+            } catch (e) {}
+            alert("ベランダを配置できませんでした。建物を選択してからもう一度クリックしてください。");
+        }
+    }
     function placeAsset(kind, p) {
         if (kind === "buildingAwning" || kind === "buildingSign") return placeLinkedAssetInstance(kind, p);
+        if (kind === "balcony") return placeBalcony(p);
         sanitizeScene();
         const before = S.slice(),
             wasFloor = !!window.cityFloorPlanActive;
@@ -352,10 +477,10 @@ window.cityGridInstallAssetUI = function (bridge) {
         Object.entries(ASSETS)
             .map(
                 ([k, v]) =>
-                    `<button class="assetCard" data-asset="${k}" title="${v.label}を追加"><span class="assetGlyph">${v.glyph}</span><span>${v.label}</span></button>`,
+                    `<button class="assetCard" data-asset="${k}" title="${v.label}を追加${k === "balcony" ? "（建物選択中は壁へ接着）" : ""}"><span class="assetGlyph">${v.glyph}</span><span>${v.label}</span></button>`,
             )
             .join("") +
-        "</div>";
+        '</div><div class="assetTrayNote">建物を選択して「壁付けベランダ」を押すと、正面壁の2階相当へ自動接着。未選択なら地面へ配置。</div>';
     stage.appendChild(tray);
     const assetAxisTrayInput = el("assetAxisTray");
     window.cityGridAssetAxisTray = assetAxisTrayInput;

@@ -128,6 +128,22 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>開口の高さ</span><input type=number class=nv id=ov_openingH step=0.05 style="width:100px"><span class=un>m</span></label>
 <div class="note">建物の外形は軸・回転に加え、3Dの白い外側面ハンドルでも幅・奥行き・高さを編集できます。緑のハンドルで開口の幅・高さ、オレンジの「奥の面」で閉じた内壁の奥行きを編集できます。</div>
 </div>
+<div id=balconyP style="display:none"><h3>壁付けベランダ</h3>
+<label><span>手すり／腰壁の高さ</span><input type=number class=nv id=balconyRailHeight min=0.12 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>床スラブの厚さ</span><input type=number class=nv id=balconyFloorThickness min=0.04 step=0.02 style="width:100px"><span class=un>m</span></label>
+<label><span>壁の厚さ</span><input type=number class=nv id=balconyRailThickness min=0.035 step=0.02 style="width:100px"><span class=un>m</span></label>
+<label><input type=checkbox id=balconyFrontRail checked> 前面の腰壁を表示</label>
+<label><input type=checkbox id=balconySideRail checked> 左右の側壁を表示</label>
+<div class="note">建物を選択して棚の「壁付けベランダ」を押すと、建物の正面壁へ2階相当の高さで接着します。接着後は親建物の移動・幅・奥行き・高さに追従し、ベランダ単体の幅・奥行き・手すり高さを編集できます。</div>
+</div>
+<div id=stackedP style="display:none"><h3>縁付き階層建物</h3>
+<label><span>階数</span><input type=number class=nv id=stackFloorCount min=1 max=30 step=1 style="width:100px"></label>
+<label><input type=checkbox id=stackSyncFirst checked> 1階の寸法を全階へ反映</label>
+<label><span>階間</span><input type=number class=nv id=stackFloorGap min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><button id=stackAlign class="primary">上方向へ整列</button><button id=stackCopyFirst>1F寸法をコピー</button></label>
+<div id=stackFloorRows></div>
+<div class="note">正面・横・上ビューでは、選択中の階にオレンジの面ハンドルが表示されます。1階の幅・奥行き・高さ・縁を変更すると、同期ONの間は全階へ反映されます。下側の縁は全階で作らず、各階の上側だけに配置します。</div>
+</div>
 <label><button id=obExtrude>押し出しを有効</button><button id=obGnd>地面につける</button><button id=obDup>複製</button><button id=obDel>消去</button><button id=obOff>選択解除</button></label>
 <label><button id=objectInfoCopy aria-label="JSONコピー" title="選択中オブジェクトの定義JSONをコピー" disabled>JSONコピー</button><button id=objectInfoSave aria-label="JSON保存" title="選択中オブジェクトの定義JSONを保存" disabled>JSON保存</button></label>
 <div class="note">JSON保存は寸法・位置・向き・アセット固有設定をテキストで書き出します。後から線画化できる定義形式です。</div>
@@ -815,12 +831,46 @@ function syncAttachedPart(o, parentOverride = null) {
     if (!a?.parentId) return o;
     const parent = parentOverride || obOf(a.parentId);
     if (!parent) return o;
+    const side = Number(a.side) === -1 ? -1 : 1,
+        px = Number(a.x) || 0;
+    // 積層建物はgeometryがcustomPt（階ごとのx/y/z）で保持されるため、
+    // 標準建物のL2Wとは別に、指定階の壁面へベランダを同期する。
+    if (parent.asset === "stackedBuilding" && a.stackedFloor) {
+        const floors = Array.isArray(parent.floors) ? parent.floors : [],
+            index = clamp(Math.round(Number(a.floorIndex) || 0), 0, Math.max(0, floors.length - 1)),
+            f = floors[index];
+        if (!f || typeof customPt !== "function") return o;
+        const fd = Math.max(0.05, Math.abs(Number(f.d) || 3)),
+            attachedNormal = Math.abs(Number(o.rb) || 0.1) + 0.008,
+            floorZ = Number(f.z) || 0,
+            floorOffset = Number(a.offsetZ) || 0,
+            p = customPt(
+                parent,
+                (Number(f.x) || 0) + px,
+                (Number(f.y) || 0) + side * (fd * 0.5 + attachedNormal),
+                floorZ + floorOffset,
+            ),
+            rot = Number(parent.rot || 0) + Number(a.rotOffset || 0);
+        return {
+            ...o,
+            attachment: { ...a, side, floorIndex: index },
+            k: 1,
+            d: -1,
+            rot,
+            ca: p[0],
+            cb: p[2],
+            lift: p[1] + 1,
+            off: [0, 0, 0],
+        };
+    }
     const linkedFace = !!o.linkedAsset,
-        side = linkedFace ? -1 : Number(a.side) === -1 ? -1 : 1,
-        px = Number(a.x) || 0,
-        baseZ = Number.isFinite(Number(a.baseZ)) ? Number(a.baseZ) : Math.max(0.1, (Number(parent.h) || 1) * 0.5),
-        offsetZ = Number(a.offsetZ) || 0;
-    const parentH = Math.max(0.1, Number(parent.h) || 1),
+        parentH = Math.max(0.1, Number(parent.h) || 1),
+        baseZ = Number.isFinite(Number(a.baseRatio))
+            ? parentH * clamp(Number(a.baseRatio), 0.02, 0.98)
+            : Number.isFinite(Number(a.baseZ))
+              ? Number(a.baseZ)
+              : parentH * 0.5,
+        offsetZ = Number(a.offsetZ) || 0,
         z = clamp(baseZ + offsetZ, 0.02, Math.max(0.02, parentH - 0.02));
     // 看板の直方体・テントの奥側の面を、親の開口側の面へぴったり合わせる。
     // k=1ではrbがローカルY（建物の奥行き／壁面法線方向）の半径で、hは上下の高さ。
@@ -936,7 +986,9 @@ function setOb(id, patch) {
             const parentBase = L2W(parent, 0, 0, 0)[1],
                 rawBase =
                     (Number(next.d) || -1) - (Number(next.d) || -1) * (Number(next.lift) || 0) + (next.off?.[1] || 0),
-                baseZ = Number(next.attachment.baseZ) || 0;
+                baseZ = Number.isFinite(Number(next.attachment.baseRatio))
+                    ? (Number(parent.h) || 1) * clamp(Number(next.attachment.baseRatio), 0.02, 0.98)
+                    : Number(next.attachment.baseZ) || 0;
             next.attachment = { ...next.attachment, offsetZ: rawBase - parentBase - baseZ };
         }
     }
@@ -1725,18 +1777,71 @@ function awningGizmo(o) {
         handle: null,
     };
 }
+function stackedBuildingGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "stackedBuilding") return null;
+    const floors = Array.isArray(o.floors) && o.floors.length ? o.floors : [];
+    if (!floors.length) return null;
+    const index = clamp(Math.round(Number(o.activeFloor) || 0), 0, floors.length - 1),
+        f = floors[index],
+        w = Math.max(0.08, Math.abs(Number(f.w) || 4)),
+        d = Math.max(0.08, Math.abs(Number(f.d) || 3)),
+        h = Math.max(0.08, Math.abs(Number(f.h) || 2.2)),
+        x = Number(f.x) || 0,
+        y = Number(f.y) || 0,
+        z = Number(f.z) || 0,
+        p3 = (px, py, pz) => customPt(o, px, py, pz),
+        pr = (px, py, pz) => scrW(p3(px, py, pz)),
+        center = pr(x, y, z + h * 0.5),
+        make = (kind, px, py, pz, axis, sign, label) => {
+            const s = pr(px, py, pz),
+                step = axis === "h" ? Math.max(0.05, h * 0.08) : Math.max(0.05, (axis === "w" ? w : d) * 0.08),
+                q =
+                    axis === "w"
+                        ? pr(px + step * sign, py, pz)
+                        : axis === "d"
+                          ? pr(px, py + step * sign, pz)
+                          : pr(px, py, pz + step),
+                dx = q.x - s.x,
+                dy = q.y - s.y,
+                pxLen = Math.hypot(dx, dy);
+            return {
+                kind,
+                s,
+                dir: { x: dx / (pxLen || 1), y: dy / (pxLen || 1) },
+                scale: pxLen / step || 1,
+                start: axis === "w" ? w : axis === "d" ? d : h,
+                min: 0.08,
+                max: 30,
+                axis,
+                sign,
+                floorIndex: index,
+                label,
+            };
+        },
+        handles = {
+            widthLeft: make("stacked-width", x - w * 0.5, y, z + h * 0.5, "w", -1, "幅"),
+            widthRight: make("stacked-width", x + w * 0.5, y, z + h * 0.5, "w", 1, "幅"),
+            depthLeft: make("stacked-depth", x, y - d * 0.5, z + h * 0.5, "d", -1, "奥行"),
+            depthRight: make("stacked-depth", x, y + d * 0.5, z + h * 0.5, "d", 1, "奥行"),
+            height: make("stacked-height", x, y, z + h, "h", 1, "高さ"),
+        },
+        frame = [pr(x - w / 2, y, z), pr(x - w / 2, y, z + h), pr(x + w / 2, y, z + h), pr(x + w / 2, y, z)];
+    return { o, C3: p3(x, y, z + h * 0.5), center, frame, handles, floorIndex: index };
+}
 function specialGizmo(o) {
-    return o && o.type === "asset" && o.asset === "building"
-        ? buildingGizmo(o)
-        : o && o.type === "asset" && o.asset === "awning"
-          ? awningGizmo(o)
-          : o && o.type === "asset" && o.asset === "sign"
-            ? signGizmo(o)
-            : o && o.type === "asset" && o.asset === "cone"
-              ? coneGizmo(o)
-              : o && o.type === "asset" && o.asset === "sphere"
-                ? sphereGizmo(o)
-                : null;
+    return o && o.type === "asset" && o.asset === "stackedBuilding"
+        ? stackedBuildingGizmo(o)
+        : o && o.type === "asset" && o.asset === "building"
+          ? buildingGizmo(o)
+          : o && o.type === "asset" && o.asset === "awning"
+            ? awningGizmo(o)
+            : o && o.type === "asset" && o.asset === "sign"
+              ? signGizmo(o)
+              : o && o.type === "asset" && o.asset === "cone"
+                ? coneGizmo(o)
+                : o && o.type === "asset" && o.asset === "sphere"
+                  ? sphereGizmo(o)
+                  : null;
 }
 function drawSpecialGizmo(c, o) {
     const sg = specialGizmo(o);
@@ -1760,7 +1865,30 @@ function drawSpecialGizmo(c, o) {
         c.fill();
         c.stroke();
     };
-    if (sg.o.asset === "building") {
+    if (sg.o.asset === "stackedBuilding") {
+        const h = sg.handles,
+            usable = Object.values(h).filter((handle) => Math.hypot(handle.dir.x, handle.dir.y) > 0.15);
+        c.setLineDash([5 / Z, 4 / Z]);
+        c.strokeStyle = "rgba(255,179,111,.9)";
+        c.lineWidth = 1.4 / Z;
+        if (sg.frame && sg.frame.every((q) => q && q.ok)) {
+            c.beginPath();
+            sg.frame.forEach((q, i) => (i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)));
+            c.closePath();
+            c.stroke();
+        }
+        usable.forEach((handle) => {
+            c.beginPath();
+            c.moveTo(sg.center.x, sg.center.y);
+            c.lineTo(handle.s.x, handle.s.y);
+            c.stroke();
+        });
+        c.setLineDash([]);
+        usable.forEach((handle) => sq(handle.s, "#ffb36f", handle.kind === "stacked-height"));
+        c.fillStyle = "#ffd0a8";
+        c.font = `bold ${12 / Z}px system-ui`;
+        c.fillText(`${sg.floorIndex + 1}F 幅/奥行/高さ`, sg.center.x + 8 / Z, sg.center.y - 8 / Z);
+    } else if (sg.o.asset === "building") {
         const h = sg.handles,
             front = ["frontOpeningWLeft", "frontOpeningWRight", "frontOpeningH"],
             back = ["backOpeningWLeft", "backOpeningWRight", "backOpeningH"];
@@ -1987,6 +2115,9 @@ function gizmo() {
     const o = sel && obOf(sel);
     if (!o) return null;
     if (o.type === "compound") return compoundGizmo(o);
+    // 積層建物は階別の専用面ハンドルを使う。汎用のra/rb/hハンドルを重ねると、
+    // floors[]ではなく古い単層値だけを編集してしまうため表示・ヒット対象から外す。
+    if (o.type === "asset" && o.asset === "stackedBuilding") return null;
     const [iu, iv] = PL[o.k],
         cs = Math.cos(o.rot * DG),
         sn = Math.sin(o.rot * DG),
@@ -2003,7 +2134,8 @@ function gizmo() {
                     o.asset === "sign" ||
                     o.asset === "stairs" ||
                     o.asset === "building" ||
-                    o.asset === "awning")),
+                    o.asset === "awning" ||
+                    o.asset === "balcony")),
         [z0, z1] = outerZRange(o),
         zc = solid ? (z0 + z1) / 2 : 0;
     const C3 = L2W(o, 0, 0, zc),
@@ -2124,6 +2256,56 @@ function drawGizmo(c) {
     drawSpecialGizmo(c, g.o);
     c.restore();
 }
+function stackedFloorScreen(o, index) {
+    const f = o?.floors?.[index];
+    if (!f) return null;
+    const w = Math.max(0.08, Math.abs(Number(f.w) || 4)),
+        d = Math.max(0.08, Math.abs(Number(f.d) || 3)),
+        h = Math.max(0.08, Math.abs(Number(f.h) || 2.2)),
+        x = Number(f.x) || 0,
+        y = Number(f.y) || 0,
+        z = Number(f.z) || 0,
+        p3 = (px, py, pz) => customPt(o, px, py, pz),
+        pr = (px, py, pz) => scrW(p3(px, py, pz)),
+        center = pr(x, y, z + h * 0.5),
+        top = [
+            pr(x - w / 2, y - d / 2, z + h),
+            pr(x + w / 2, y - d / 2, z + h),
+            pr(x + w / 2, y + d / 2, z + h),
+            pr(x - w / 2, y + d / 2, z + h),
+        ],
+        corners = [
+            pr(x - w / 2, y - d / 2, z),
+            pr(x + w / 2, y - d / 2, z),
+            pr(x + w / 2, y + d / 2, z),
+            pr(x - w / 2, y + d / 2, z),
+            ...top,
+        ];
+    return { f, center, top, corners, index };
+}
+function stackedFloorHit(o, p) {
+    if (!o || o.asset !== "stackedBuilding" || !Array.isArray(o.floors)) return null;
+    let best = null;
+    o.floors.forEach((f, index) => {
+        const q = stackedFloorScreen(o, index),
+            valid = q && q.center?.ok && q.corners.every((v) => v && v.ok);
+        if (!valid) return;
+        const xs = q.corners.map((v) => v.x),
+            ys = q.corners.map((v) => v.y),
+            inside = insidePoly2D(
+                p,
+                q.top.filter((v) => v && v.ok),
+            ),
+            inBox =
+                p.x >= Math.min(...xs) - 12 / Z &&
+                p.x <= Math.max(...xs) + 12 / Z &&
+                p.y >= Math.min(...ys) - 12 / Z &&
+                p.y <= Math.max(...ys) + 12 / Z,
+            distance = Math.hypot(p.x - q.center.x, p.y - q.center.y);
+        if ((inside || inBox) && (!best || distance < best.distance)) best = { ...q, distance };
+    });
+    return best;
+}
 function insidePoly2D(p, poly) {
     let inside = false;
     for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -2140,6 +2322,13 @@ function hitGizmo(p) {
         special = active && specialGizmo(active),
         R = 20 / Z;
     if (special) {
+        if (active.asset === "stackedBuilding") {
+            for (const h of Object.values(special.handles))
+                if (Math.hypot(h.dir.x, h.dir.y) > 0.15 && Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
+                    return { t: h.kind, sign: h, g: { o: active, C3: special.C3 } };
+            const floor = stackedFloorHit(active, p);
+            if (floor) return { t: "stack-floor", floorIndex: floor.index, floor, g: { o: active, C3: special.C3 } };
+        }
         if (active.asset === "building") {
             for (const h of Object.values(special.handles))
                 if (Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
@@ -2413,10 +2602,35 @@ function beginGizmo(h, p) {
             started: false,
             ...(group.length > 1 ? snapSetupGroup(group, h.g.C3) : snapSetup(o, h.g.C3)),
         };
-    if (
+    if (h.t === "stack-floor") {
+        const index = clamp(Math.round(Number(h.floorIndex) || 0), 0, Math.max(0, (o.floors || []).length - 1)),
+            f = o.floors?.[index],
+            q = stackedFloorScreen(o, index);
+        if (f && q) {
+            const zmid = (Number(f.z) || 0) + (Number(f.h) || 2.2) * 0.5,
+                c = scrW(customPt(o, Number(f.x) || 0, Number(f.y) || 0, zmid)),
+                bx = scrW(customPt(o, (Number(f.x) || 0) + 1, Number(f.y) || 0, zmid)),
+                by = scrW(customPt(o, Number(f.x) || 0, (Number(f.y) || 0) + 1, zmid));
+            setOb(o.id, { activeFloor: index });
+            ed = {
+                ...base,
+                o0: { ...o, floors: (o.floors || []).map((floor) => ({ ...floor })) },
+                t: "stack-floor-mv",
+                floorIndex: index,
+                p0: p,
+                stackMove: {
+                    x: Number(f.x) || 0,
+                    y: Number(f.y) || 0,
+                    bx: { x: (bx?.x || c.x) - c.x, y: (bx?.y || c.y) - c.y },
+                    by: { x: (by?.x || c.x) - c.x, y: (by?.y || c.y) - c.y },
+                },
+            };
+        }
+    } else if (
         h.t.startsWith("sign-") ||
         h.t.startsWith("building-") ||
         h.t.startsWith("awning-") ||
+        h.t.startsWith("stacked-") ||
         h.t === "cone-height" ||
         h.t === "sphere-radius"
     )
@@ -2480,6 +2694,49 @@ function dragEdit(p, freeRotation = false) {
             patch = { openingBack: clamp(h.start + (h.factor || 1) * amount, h.min, h.max) };
         else if (ed.t.includes("OpeningH")) patch = { openingH: clamp(h.start + amount, h.min, h.max) };
         else patch = { openingW: clamp(h.start + (h.factor || 1) * amount, h.min, h.max) };
+    } else if (ed.t === "stack-floor-mv") {
+        const h = ed.stackMove,
+            dx = p.x - ed.p0.x,
+            dy = p.y - ed.p0.y,
+            det = h.bx.x * h.by.y - h.bx.y * h.by.x;
+        let mx = 0,
+            my = 0;
+        if (Math.abs(det) > 1e-6) {
+            mx = (dx * h.by.y - dy * h.by.x) / det;
+            my = (h.bx.x * dy - h.bx.y * dx) / det;
+        } else if (Math.hypot(h.bx.x, h.bx.y) >= Math.hypot(h.by.x, h.by.y)) {
+            const n = Math.hypot(h.bx.x, h.bx.y) || 1;
+            mx = (dx * h.bx.x + dy * h.bx.y) / (n * n);
+        } else {
+            const n = Math.hypot(h.by.x, h.by.y) || 1;
+            my = (dx * h.by.x + dy * h.by.y) / (n * n);
+        }
+        const floors = Array.isArray(o.floors) ? o.floors.map((f) => ({ ...f })) : [],
+            floor = floors[ed.floorIndex];
+        if (floor) {
+            floor.x = h.x + mx;
+            floor.y = h.y + my;
+            patch = {
+                floors,
+                activeFloor: ed.floorIndex,
+                h: (Number(floors[floors.length - 1]?.z) || 0) + (Number(floors[floors.length - 1]?.h) || 0),
+            };
+        }
+    } else if (ed.t.startsWith("stacked-")) {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1),
+            floors = Array.isArray(o.floors) ? o.floors.map((f) => ({ ...f })) : [],
+            floor = floors[h.floorIndex];
+        if (floor) {
+            const key = h.axis === "w" ? "w" : h.axis === "d" ? "d" : "h";
+            floor[key] = clamp(h.start + amount, h.min, h.max);
+            if (o.syncFirst !== false && h.floorIndex === 0 && ["w", "d", "h"].includes(key))
+                floors.forEach((f) => (f[key] = floor[key]));
+            const last = floors[floors.length - 1];
+            patch = { floors, floorCount: floors.length, h: (Number(last?.z) || 0) + (Number(last?.h) || 0) };
+        }
     } else if (ed.t === "awning-edgeZ") {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -2847,6 +3104,38 @@ function exportSurfaceTriangles(o) {
         }
     };
     const kind = o.asset || o.type;
+    if (kind === "stackedBuilding") {
+        const floors =
+            Array.isArray(o.floors) && o.floors.length
+                ? o.floors
+                : [{ x: 0, y: 0, z: 0, w, d, h, rimHeight: 0.16, rimOverhang: 0.18 }];
+        floors.forEach((f) => {
+            const fw = Math.max(0.05, Math.abs(Number(f.w) || w)),
+                fd = Math.max(0.05, Math.abs(Number(f.d) || d)),
+                fh = Math.max(0.05, Math.abs(Number(f.h) || h)),
+                fz = Number(f.z) || 0,
+                fx = Number(f.x) || 0,
+                fy = Number(f.y) || 0,
+                rh = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, fh),
+                ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18));
+            boxAt(fx, fy, fw, fd, fz, fz + fh);
+            // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
+            boxAt(fx, fy, fw + ro * 2, fd + ro * 2, fz + fh - rh, fz + fh);
+        });
+        return out;
+    }
+    if (kind === "balcony") {
+        const floorT = clamp(Number(o.balconyFloorThickness) || 0.16, 0.04, Math.max(0.05, h * 0.7)),
+            railH = clamp(Number(o.balconyRailHeight) || Math.max(0.18, h - floorT), 0.12, Math.max(0.12, h - 0.01)),
+            railT = clamp(Number(o.balconyRailThickness) || 0.12, 0.035, Math.min(w, d) * 0.35);
+        boxAt(0, 0, w, d, 0, floorT);
+        if (o.balconyFrontRail !== false) boxAt(0, -d / 2 + railT / 2, w, railT, floorT, floorT + railH);
+        if (o.balconySideRail !== false) {
+            boxAt(-w / 2 + railT / 2, 0, railT, d, floorT, floorT + railH);
+            boxAt(w / 2 - railT / 2, 0, railT, d, floorT, floorT + railH);
+        }
+        return out;
+    }
     if (kind === "awning") {
         const g = awningGeometry(o),
             x = g.w / 2,
@@ -4741,11 +5030,13 @@ const ASSETS = {
     triPyramid: { label: "三角錐", glyph: "▲", w: 1.5, d: 1.5, h: 1.45, accent: "#ff79ba" },
     sign: { label: "看板", glyph: "▤", w: 1.0, d: 0.2, h: 2.15, accent: "#76d9ff" },
     awning: { label: "店舗テント", glyph: "▱", w: 3.8, d: 1.35, h: 0.35, accent: "#d98b68" },
+    balcony: { label: "壁付けベランダ", glyph: "▱", w: 3.2, d: 1.8, h: 1.25, accent: "#e6a36f" },
     person: { label: "人物", glyph: "♙", w: 0.46, d: 0.3, h: 1.7, accent: "#ad9cff" },
     stairs: { label: "階段", glyph: "▰", w: 1.45, d: 2.4, h: 0.78, accent: "#ffb36f" },
     building: { label: "開口のある建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#8ce6c2" },
     buildingAwning: { label: "テント付き建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#d98b68" },
     buildingSign: { label: "看板付き開口建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#76d9ff" },
+    stackedBuilding: { label: "縁付き階層建物", glyph: "▥", w: 4, d: 3, h: 8.98, accent: "#8ce6c2" },
     crosswalk: { label: "横断歩道", glyph: "▥", w: 3.2, d: 4.2, h: 0.02, accent: "#668cff" },
 };
 const assetLabel = (o) =>
@@ -4760,7 +5051,7 @@ const assetLabel = (o) =>
           : o.type === "compound"
             ? "結合オブジェクト"
             : o.type === "asset"
-              ? ASSETS[o.asset]?.label || (o.asset === "cylinder" ? "円柱" : "アセット")
+              ? o.assetName || ASSETS[o.asset]?.label || (o.asset === "cylinder" ? "円柱" : "アセット")
               : o.type === "rect"
                 ? "長方形"
                 : o.type === "circ"
@@ -4774,7 +5065,7 @@ const assetGlyph = (o) =>
     o.type === "compound"
         ? "◆"
         : o.type === "asset"
-          ? ASSETS[o.asset]?.glyph || (o.asset === "cylinder" ? "◉" : "◆")
+          ? ASSETS[o.asset]?.glyph || (o.asset === "custom" ? "⬡" : o.asset === "cylinder" ? "◉" : "◆")
           : o.type === "rect"
             ? "□"
             : o.type === "circ"
@@ -4783,6 +5074,18 @@ const assetGlyph = (o) =>
 
 // Coordinate helpers. Local asset coordinates are x=width, y=depth, z=up.
 const pt = (o, x, y, z) => L2W(o, x, y, z);
+// customアセットだけは、作成サイトと同じ x=左右／y=奥行き／z=高さの
+// ワールド座標で保持する。既存アセットの面座標系（k/PL）は変更しない。
+const customPt = (o, x, y, z) => {
+    const a = (Number(o.rot) || 0) * DG,
+        cs = Math.cos(a),
+        sn = Math.sin(a),
+        rx = x * cs - y * sn,
+        ry = x * sn + y * cs,
+        off = o.off || [0, 0, 0],
+        baseY = (Number(o.d) || -1) - (Number(o.d) || -1) * (Number(o.lift) || 0);
+    return [rx + (Number(off[0]) || 0), baseY + z + (Number(off[1]) || 0), ry + (Number(off[2]) || 0)];
+};
 const lineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
     c: color,
     w: width,
@@ -4790,6 +5093,14 @@ const lineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
     d3: true,
     cs: sigNow(),
     p: dens3(pts.map((q) => pt(o, q[0], q[1], q[2]))),
+});
+const customLineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({
+    c: color,
+    w: width,
+    ob: o,
+    d3: true,
+    cs: sigNow(),
+    p: dens3(pts.map((q) => customPt(o, q[0], q[1], q[2]))),
 });
 const polyA = (o, pts, color, width) => lineA(o, [...pts, pts[0]], color, width);
 function boxA(o, w, d, z0, z1, color = o.c || "#e7fff4") {
@@ -4839,6 +5150,29 @@ function boxA(o, w, d, z0, z1, color = o.c || "#e7fff4") {
     );
     return out;
 }
+function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
+    const x = w / 2,
+        y = d / 2,
+        v = [
+            [cx - x, cy - y, z0],
+            [cx + x, cy - y, z0],
+            [cx + x, cy + y, z0],
+            [cx - x, cy + y, z0],
+            [cx - x, cy - y, z1],
+            [cx + x, cy - y, z1],
+            [cx + x, cy + y, z1],
+            [cx - x, cy + y, z1],
+        ],
+        out = [
+            polyA(o, [v[0], v[1], v[2], v[3]], color),
+            polyA(o, [v[4], v[5], v[6], v[7]], color),
+            lineA(o, [v[0], v[4]], color),
+            lineA(o, [v[1], v[5]], color),
+            lineA(o, [v[2], v[6]], color),
+            lineA(o, [v[3], v[7]], color),
+        ];
+    return out;
+}
 function ringA(o, rx, ry, z, n = 8, color = o.c || "#e7fff4") {
     const a = [];
     for (let i = 0; i < n; i++) {
@@ -4873,7 +5207,145 @@ function assetLines(o) {
         c = o.c || "#222222",
         a = c,
         out = []; // アセットも線画と同じ色で描く
-    if (kind === "stairs") {
+    if (kind === "custom") {
+        // アセット作成サイトから読み込んだ任意形状。頂点と辺／ループを
+        // 3D線画へ変換する。頂点はx=幅、y=奥行、z=高さのローカル座標。
+        const g = o.geometry || {},
+            vertices = Array.isArray(g.vertices) ? g.vertices : [],
+            edges = Array.isArray(g.edges) ? g.edges : [],
+            loops = Array.isArray(g.loops) ? g.loops : [],
+            edgeStyles = Array.isArray(g.edgeStyles) ? g.edgeStyles : [],
+            loopStyles = Array.isArray(g.loopStyles) ? g.loopStyles : [],
+            width = Number(o.w) || MASTER_W;
+        const customLine = (points, color = c, lineWidth = width) =>
+                out.push({
+                    c: color,
+                    w: lineWidth,
+                    ob: o,
+                    d3: true,
+                    cs: sigNow(),
+                    p: dens3(points.map((q) => customPt(o, q[0], q[1], q[2]))),
+                }),
+            addEdge = (ia, ib, color = c, lineWidth = width) => {
+                const u = vertices[ia],
+                    v = vertices[ib];
+                if (!Array.isArray(u) || !Array.isArray(v) || u.length < 3 || v.length < 3) return;
+                const a3 = u.slice(0, 3).map(Number),
+                    b3 = v.slice(0, 3).map(Number);
+                if (!a3.every(Number.isFinite) || !b3.every(Number.isFinite)) return;
+                customLine([a3, b3], color, lineWidth);
+            };
+        edges.forEach((e, i) => {
+            if (!Array.isArray(e) || e.length < 2) return;
+            const style = edgeStyles[i] || {};
+            addEdge(Number(e[0]), Number(e[1]), style.color || c, Number(style.width) || width);
+        });
+        loops.forEach((loop, li) => {
+            if (!Array.isArray(loop) || loop.length < 2) return;
+            const style = loopStyles[li] || {};
+            for (let i = 0; i < loop.length; i++)
+                addEdge(
+                    Number(loop[i]),
+                    Number(loop[(i + 1) % loop.length]),
+                    style.color || c,
+                    Number(style.width) || width,
+                );
+        });
+    } else if (kind === "stackedBuilding") {
+        const floors =
+            Array.isArray(o.floors) && o.floors.length
+                ? o.floors
+                : [
+                      {
+                          x: 0,
+                          y: 0,
+                          z: 0,
+                          w: o.ra * 2 || 4,
+                          d: o.rb * 2 || 3,
+                          h: o.h || 2.2,
+                          rimHeight: 0.16,
+                          rimOverhang: 0.18,
+                      },
+                  ];
+        const addBox = (f, w, d, z, h, color = c, caps = { bottom: true, top: true }) => {
+            const x = w / 2,
+                y = d / 2,
+                ox = Number(f.x || 0),
+                oy = Number(f.y || 0),
+                oz = Number(f.z || 0),
+                v = [
+                    [-x, -y, z],
+                    [x, -y, z],
+                    [x, y, z],
+                    [-x, y, z],
+                    [-x, -y, z + h],
+                    [x, -y, z + h],
+                    [x, y, z + h],
+                    [-x, y, z + h],
+                ],
+                toWorld = (q) => [q[0] + ox, q[1] + oy, q[2] + oz];
+            // 面ごとに輪郭を足すと共有辺が2回描かれるため、箱の12辺を一度だけ描く。
+            [
+                ...(caps.bottom ? [[0, 1, 2, 3, 0]] : []),
+                ...(caps.top ? [[4, 5, 6, 7, 4]] : []),
+                [0, 4],
+                [1, 5],
+                [2, 6],
+                [3, 7],
+            ].forEach((edge) =>
+                out.push(
+                    customLineA(
+                        o,
+                        edge.map((i) => toWorld(v[i])),
+                        color,
+                    ),
+                ),
+            );
+        };
+        floors.forEach((f, i) => {
+            const w = Math.max(0.05, Math.abs(Number(f.w) || Number(o.ra || 2) * 2)),
+                d = Math.max(0.05, Math.abs(Number(f.d) || Number(o.rb || 1.5) * 2)),
+                h = Math.max(0.05, Math.abs(Number(f.h) || 2.2)),
+                rh = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, h),
+                ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18));
+            // 本体の上辺は上側の縁に隠れるため描かず、下側の縁は全階で作らない。
+            // 1階だけは床側の本体辺を残す。
+            addBox(f, w, d, 0, h, f.c || c, { bottom: i === 0, top: false });
+            // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
+            addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
+        });
+    } else if (kind === "balcony") {
+        // 壁側（+Y）を建物外壁へ合わせ、床を外側（-Y）へ張り出すU字型のベランダ。
+        // 床スラブ＋左右の腰壁＋前面の腰壁を別箱として描くため、面編集後も形状が崩れない。
+        const floorT = clamp(Number(o.balconyFloorThickness) || 0.16, 0.04, Math.max(0.05, h * 0.7)),
+            railH = clamp(Number(o.balconyRailHeight) || Math.max(0.18, h - floorT), 0.12, Math.max(0.12, h - 0.01)),
+            railT = clamp(Number(o.balconyRailThickness) || 0.12, 0.035, Math.min(w, d) * 0.35),
+            frontRail = o.balconyFrontRail !== false,
+            sideRail = o.balconySideRail !== false;
+        out.push(...wireBoxA(o, 0, 0, w, d, 0, floorT, c));
+        if (frontRail) out.push(...wireBoxA(o, 0, -d / 2 + railT / 2, w, railT, floorT, floorT + railH, c));
+        if (sideRail) {
+            out.push(...wireBoxA(o, -w / 2 + railT / 2, 0, railT, d, floorT, floorT + railH, c));
+            out.push(...wireBoxA(o, w / 2 - railT / 2, 0, railT, d, floorT, floorT + railH, c));
+        }
+        // 壁付け面の床下に短い支持ブラケットを入れ、正面／3D線画で張り出し方向を読み取りやすくする。
+        const bracketZ = Math.max(0.02, floorT * 0.18),
+            wallY = d / 2 - railT * 0.5,
+            frontY = -d / 2 + railT * 0.5;
+        [-w * 0.34, w * 0.34].forEach((x) =>
+            out.push(
+                lineA(
+                    o,
+                    [
+                        [x, wallY, bracketZ],
+                        [x, frontY, 0],
+                    ],
+                    c,
+                    0.85,
+                ),
+            ),
+        );
+    } else if (kind === "stairs") {
         const n = Math.max(2, Math.min(24, Math.round(o.steps || 6))),
             sd = d / n,
             sh = h / n;
@@ -5598,6 +6070,20 @@ function assetLines(o) {
 }
 function normalizedAsset(o) {
     let q = o?.attachment ? syncAttachedPart(o) : o;
+    if (q && q.asset === "balcony") {
+        const floorT = clamp(Number(q.balconyFloorThickness) || 0.16, 0.04, 10),
+            railT = clamp(Number(q.balconyRailThickness) || 0.12, 0.035, 10),
+            railH = q.balconyRailHeightEdited
+                ? clamp(Number(q.balconyRailHeight) || 0.9, 0.12, 30)
+                : Math.max(0.12, (Number(q.h) || 1.25) - floorT);
+        q = {
+            ...q,
+            balconyFloorThickness: floorT,
+            balconyRailThickness: railT,
+            balconyRailHeight: railH,
+            h: floorT + railH,
+        };
+    }
     if (q && q.asset === "sphere") {
         const r = Math.max(
             0.005,
@@ -5648,10 +6134,40 @@ obBounds = function (o) {
     if (!o || o.type !== "asset") return baseObBounds(o);
     const q = syncAttachedPart(o),
         pts = [];
-    const hs = [0, q.h],
-        xs = [-q.ra, q.ra],
-        ys = [-q.rb, q.rb];
-    hs.forEach((z) => xs.forEach((x) => ys.forEach((y) => pts.push(pt(q, x, y, z)))));
+    if (q.asset === "custom" && Array.isArray(q.geometry?.vertices) && q.geometry.vertices.length) {
+        q.geometry.vertices.forEach((v) => {
+            if (Array.isArray(v) && v.length >= 3)
+                pts.push(customPt(q, Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0));
+        });
+    } else if (q.asset === "stackedBuilding") {
+        const floors =
+            Array.isArray(q.floors) && q.floors.length
+                ? q.floors
+                : [{ x: 0, y: 0, z: 0, w: q.ra * 2 || 4, d: q.rb * 2 || 3, h: q.h || 2.2 }];
+        floors.forEach((f) => {
+            const w = Math.abs(Number(f.w) || 4),
+                d = Math.abs(Number(f.d) || 3),
+                h = Math.abs(Number(f.h) || 2.2),
+                rh = Math.min(h, Math.max(0.01, Math.abs(Number(f.rimHeight) || q.rimHeight || 0.16))),
+                ro = Math.max(0, Math.abs(Number(f.rimOverhang) || q.rimOverhang || 0.18)),
+                add = (ww, dd, z0, z1) => {
+                    [-ww / 2, ww / 2].forEach((x) =>
+                        [-dd / 2, dd / 2].forEach((y) =>
+                            [z0, z1].forEach((z) =>
+                                pts.push(customPt(q, x + Number(f.x || 0), y + Number(f.y || 0), z + Number(f.z || 0))),
+                            ),
+                        ),
+                    );
+                };
+            add(w, d, 0, h);
+            add(w + ro * 2, d + ro * 2, h - rh, h);
+        });
+    } else {
+        const hs = [0, q.h],
+            xs = [-q.ra, q.ra],
+            ys = [-q.rb, q.rb];
+        hs.forEach((z) => xs.forEach((x) => ys.forEach((y) => pts.push(pt(q, x, y, z)))));
+    }
     const lo = [Infinity, Infinity, Infinity],
         hi = [-Infinity, -Infinity, -Infinity];
     pts.forEach((v) =>
@@ -5705,7 +6221,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             q = [q[0] + ((n % 4) - 1.5) * 0.85, q[1], q[2] + Math.floor(n / 4) * 1.05];
         }
         // 生成方向は「その軸に立つ面」の法線。Y=地面、X/Z=壁面として配置する。
-        const k = clamp(Math.round(Number(P.assetAxis ?? 1)), 0, 2),
+        const k = kind === "balcony" ? 1 : clamp(Math.round(Number(P.assetAxis ?? 1)), 0, 2),
             d = -1,
             [iu, iv] = PL[k],
             off = [0, 0, 0];
@@ -5726,6 +6242,44 @@ window.cityGridInstallAssetUI = function (bridge) {
             accent: info.accent,
         };
         const height = kind === "person" ? Number(P.hm) || 1.7 : info.h;
+        if (kind === "stackedBuilding") {
+            const floorHeight = 2.2,
+                floorGap = 0.06,
+                floors = Array.from({ length: 4 }, (_, i) => ({
+                    name: `${i + 1}F`,
+                    x: 0,
+                    y: 0,
+                    z: i * (floorHeight + floorGap),
+                    w: info.w,
+                    d: info.d,
+                    h: floorHeight,
+                    rimHeight: 0.16,
+                    rimOverhang: 0.18,
+                }));
+            return {
+                ...base,
+                type: "asset",
+                asset: kind,
+                assetId: "stacked-building",
+                assetName: info.label,
+                k: 1,
+                d: -1,
+                off: [q[0], 0, q[2]],
+                ca: 0,
+                cb: 0,
+                h: floors[floors.length - 1].z + floorHeight,
+                ra: info.w / 2,
+                rb: info.d / 2,
+                floorCount: floors.length,
+                floorHeight,
+                floorGap,
+                rimHeight: 0.16,
+                rimOverhang: 0.18,
+                syncFirst: true,
+                activeFloor: 0,
+                floors,
+            };
+        }
         if (kind === "rect" || kind === "circle")
             return {
                 ...base,
@@ -5758,6 +6312,12 @@ window.cityGridInstallAssetUI = function (bridge) {
             awningFrontBottom: kind === "awning" ? 0 : undefined,
             awningBackBottom: kind === "awning" ? 0 : undefined,
             awningEdgeEdited: kind === "awning" ? false : undefined,
+            balconyFloorThickness: kind === "balcony" ? 0.16 : undefined,
+            balconyRailHeight: kind === "balcony" ? Math.max(0.12, height - 0.16) : undefined,
+            balconyRailThickness: kind === "balcony" ? 0.12 : undefined,
+            balconyFrontRail: kind === "balcony" ? true : undefined,
+            balconySideRail: kind === "balcony" ? true : undefined,
+            balconyRailHeightEdited: kind === "balcony" ? false : undefined,
             steps: kind === "stairs" ? Math.round(Number(el("stairsSteps")?.value) || 6) : undefined,
             handrail: kind === "stairs" ? !!el("stairsRail")?.checked : undefined,
             stripes: kind === "crosswalk" ? 7 : undefined,
@@ -5844,8 +6404,89 @@ window.cityGridInstallAssetUI = function (bridge) {
             alert("接続アセットを配置できませんでした。もう一度クリックしてください。");
         }
     }
+    function selectedBalconyParent() {
+        const parent = sel ? obOf(sel) : null;
+        // 建物アセットを選択しているときは、その正面（ローカルYマイナス面）へ自動接着する。
+        // 既存の建物接着と同じ親子同期経路を使うため、親の移動・寸法変更にも追従する。
+        return parent &&
+            parent.type === "asset" &&
+            ["building", "stackedBuilding"].includes(parent.asset) &&
+            parent.k === 1
+            ? parent
+            : null;
+    }
+    function newAttachedBalcony(parent) {
+        const isStacked = parent.asset === "stackedBuilding",
+            floors = Array.isArray(parent.floors) ? parent.floors : [],
+            floorIndex = isStacked
+                ? clamp(Math.round(Number(parent.activeFloor) || 1), 0, Math.max(0, floors.length - 1))
+                : 0,
+            floor = isStacked ? floors[floorIndex] : null,
+            wallPoint = isStacked
+                ? customPt(
+                      parent,
+                      Number(floor?.x) || 0,
+                      (Number(floor?.y) || 0) - Math.abs(Number(floor?.d) || 3) * 0.5,
+                      Number(floor?.z) || 0,
+                  )
+                : L2W(parent, 0, -Math.abs(Number(parent.rb) || 0.5), 0),
+            child = newAsset("balcony", null, wallPoint);
+        child.k = 1;
+        child.d = -1;
+        child.ca = 0;
+        child.cb = 0;
+        child.off = [0, 0, 0];
+        child.lift = 0;
+        child.rot = Number(parent.rot) || 0;
+        child.attachment = {
+            parentId: parent.id,
+            side: -1,
+            x: 0,
+            ...(isStacked
+                ? { stackedFloor: true, floorIndex, baseZ: Number(floor?.z) || 0 }
+                : { baseRatio: 0.58, baseZ: Math.max(0.1, (Number(parent.h) || 3) * 0.58) }),
+            offsetZ: 0,
+            rotOffset: 0,
+            verticalOnly: true,
+        };
+        return syncAttachedPart(child, parent);
+    }
+    function placeBalcony(p) {
+        sanitizeScene();
+        const before = S.slice(),
+            wasFloor = !!window.cityFloorPlanActive;
+        try {
+            const parent = selectedBalconyParent(),
+                o = parent ? newAttachedBalcony(parent) : newAsset("balcony", p),
+                lines = genShape(o);
+            if (!lines.length || lines.some((s) => !validStroke(s)))
+                throw new Error("balcony geometry is empty or malformed");
+            HU.push(S);
+            RD = [];
+            S = [...S, ...lines];
+            setSelection(o.id, false);
+            tool = "edit";
+            setMode("draw");
+            if (wasFloor) {
+                fitFloorPlan();
+                setMode("draw");
+            }
+            syncSel();
+            render();
+        } catch (err) {
+            S = before;
+            prev = null;
+            clearSelection();
+            console.error("City Grid balcony asset error", err);
+            try {
+                render();
+            } catch (e) {}
+            alert("ベランダを配置できませんでした。建物を選択してからもう一度クリックしてください。");
+        }
+    }
     function placeAsset(kind, p) {
         if (kind === "buildingAwning" || kind === "buildingSign") return placeLinkedAssetInstance(kind, p);
+        if (kind === "balcony") return placeBalcony(p);
         sanitizeScene();
         const before = S.slice(),
             wasFloor = !!window.cityFloorPlanActive;
@@ -6018,10 +6659,10 @@ window.cityGridInstallAssetUI = function (bridge) {
         Object.entries(ASSETS)
             .map(
                 ([k, v]) =>
-                    `<button class="assetCard" data-asset="${k}" title="${v.label}を追加"><span class="assetGlyph">${v.glyph}</span><span>${v.label}</span></button>`,
+                    `<button class="assetCard" data-asset="${k}" title="${v.label}を追加${k === "balcony" ? "（建物選択中は壁へ接着）" : ""}"><span class="assetGlyph">${v.glyph}</span><span>${v.label}</span></button>`,
             )
             .join("") +
-        "</div>";
+        '</div><div class="assetTrayNote">建物を選択して「壁付けベランダ」を押すと、正面壁の2階相当へ自動接着。未選択なら地面へ配置。</div>';
     stage.appendChild(tray);
     const assetAxisTrayInput = el("assetAxisTray");
     window.cityGridAssetAxisTray = assetAxisTrayInput;
@@ -6920,6 +7561,193 @@ window.cityGridInstallAssetUI = function (bridge) {
             if (n && document.activeElement !== n) n.value = Number(v).toFixed(3);
         });
     }
+    let stackedEditSession = false;
+    function stackFloorHeight(o) {
+        const floors = Array.isArray(o?.floors) ? o.floors : [];
+        return floors.reduce((max, f) => Math.max(max, (Number(f.z) || 0) + (Number(f.h) || 0)), 0);
+    }
+    function rebuildStackFloorRows(o) {
+        const rows = el("stackFloorRows");
+        if (!rows) return;
+        const floors = Array.isArray(o?.floors) ? o.floors : [];
+        if (rows.dataset.count !== String(floors.length)) {
+            rows.innerHTML = floors
+                .map(
+                    (f, i) =>
+                        `<div class="stackFloorRow" data-floor-row="${i}"><button type="button" data-stack-floor-select="${i}" class="stackFloorSelect">${i + 1}F</button><label>幅<input data-stack-floor="${i}" data-stack-key="w" type="number" step="0.05"></label><label>奥行<input data-stack-floor="${i}" data-stack-key="d" type="number" step="0.05"></label><label>高さ<input data-stack-floor="${i}" data-stack-key="h" type="number" step="0.05"></label><label>X<input data-stack-floor="${i}" data-stack-key="x" type="number" step="0.05"></label><label>Y<input data-stack-floor="${i}" data-stack-key="y" type="number" step="0.05"></label><label>Z<input data-stack-floor="${i}" data-stack-key="z" type="number" step="0.05"></label><label>縁出<input data-stack-floor="${i}" data-stack-key="rimOverhang" type="number" step="0.01"></label><label>縁高<input data-stack-floor="${i}" data-stack-key="rimHeight" type="number" step="0.01"></label></div>`,
+                )
+                .join("");
+            rows.dataset.count = String(floors.length);
+            rows.querySelectorAll("[data-stack-floor]").forEach((n) => {
+                n.oninput = () => {
+                    const current = sel && obOf(sel),
+                        index = Number(n.dataset.stackFloor),
+                        key = n.dataset.stackKey;
+                    if (!current?.floors?.[index]) return;
+                    if (!stackedEditSession) {
+                        HU.push(S);
+                        RD = [];
+                        stackedEditSession = true;
+                    }
+                    const nextFloors = current.floors.map((f) => ({ ...f }));
+                    nextFloors[index][key] = Number(n.value) || 0;
+                    if (
+                        current.syncFirst !== false &&
+                        index === 0 &&
+                        ["w", "d", "h", "rimOverhang", "rimHeight"].includes(key)
+                    )
+                        nextFloors.forEach((f) => (f[key] = nextFloors[0][key]));
+                    setOb(current.id, { floors: nextFloors, h: stackFloorHeight({ floors: nextFloors }) });
+                    render();
+                };
+            });
+            rows.querySelectorAll("[data-stack-floor-select]").forEach((n) => {
+                n.onclick = () => {
+                    const current = sel && obOf(sel);
+                    if (!current) return;
+                    setOb(current.id, { activeFloor: Number(n.dataset.stackFloorSelect) });
+                    render();
+                };
+            });
+        }
+        rows.querySelectorAll("[data-floor-row]").forEach((row) =>
+            row.classList.toggle("active", Number(row.dataset.floorRow) === Number(o.activeFloor || 0)),
+        );
+        rows.querySelectorAll("[data-stack-floor]").forEach((n) => {
+            const f = floors[Number(n.dataset.stackFloor)],
+                key = n.dataset.stackKey;
+            if (f && document.activeElement !== n) n.value = Number(f[key] || 0).toFixed(3);
+        });
+    }
+    function syncStackedPanel() {
+        const panel = el("stackedP"),
+            o = sel && obOf(sel),
+            active = !!(o && o.type === "asset" && o.asset === "stackedBuilding");
+        if (!panel) return;
+        panel.style.display = active ? "" : "none";
+        if (!active) {
+            stackedEditSession = false;
+            return;
+        }
+        const count = el("stackFloorCount"),
+            syncFirst = el("stackSyncFirst"),
+            gap = el("stackFloorGap");
+        if (count && document.activeElement !== count) count.value = o.floorCount || o.floors?.length || 1;
+        if (syncFirst) syncFirst.checked = o.syncFirst !== false;
+        if (gap && document.activeElement !== gap) gap.value = Number(o.floorGap || 0).toFixed(3);
+        rebuildStackFloorRows(o);
+    }
+    function applyStackMeta(key, value) {
+        const o = sel && obOf(sel);
+        if (!o || o.asset !== "stackedBuilding") return;
+        if (!stackedEditSession) {
+            HU.push(S);
+            RD = [];
+            stackedEditSession = true;
+        }
+        if (key === "syncFirst") {
+            const syncFirst = !!value,
+                patch = { syncFirst };
+            if (syncFirst && o.floors?.length) {
+                const first = o.floors[0];
+                patch.floors = o.floors.map((f) => ({
+                    ...f,
+                    w: first.w,
+                    d: first.d,
+                    h: first.h,
+                    rimHeight: first.rimHeight,
+                    rimOverhang: first.rimOverhang,
+                }));
+                patch.h = stackFloorHeight(patch);
+            }
+            setOb(o.id, patch);
+            render();
+            return;
+        }
+        if (key === "floorGap") {
+            setOb(o.id, { floorGap: Math.max(0, Number(value) || 0) });
+            render();
+            return;
+        }
+        const count = Math.max(1, Math.min(30, Math.round(Number(value) || 1))),
+            floors = (o.floors || []).map((f) => ({ ...f }));
+        while (floors.length < count) {
+            const prev = floors[floors.length - 1] || {
+                x: 0,
+                y: 0,
+                z: 0,
+                w: o.ra * 2 || 4,
+                d: o.rb * 2 || 3,
+                h: 2.2,
+                rimHeight: 0.16,
+                rimOverhang: 0.18,
+            };
+            floors.push({
+                ...prev,
+                name: `${floors.length + 1}F`,
+                z: (Number(prev.z) || 0) + (Number(prev.h) || 2.2) + (Number(o.floorGap) || 0.06),
+            });
+        }
+        floors.length = count;
+        setOb(o.id, {
+            floorCount: count,
+            floors,
+            activeFloor: Math.min(Math.max(0, Number(o.activeFloor) || 0), count - 1),
+            h: stackFloorHeight({ floors }),
+        });
+        render();
+    }
+    function alignStackedObject() {
+        const o = sel && obOf(sel);
+        if (!o || o.asset !== "stackedBuilding" || !o.floors?.length) return;
+        HU.push(S);
+        RD = [];
+        const floors = o.floors.map((f) => ({ ...f })),
+            first = floors[0],
+            x = Number(first.x) || 0,
+            y = Number(first.y) || 0;
+        let z = Number(first.z) || 0;
+        floors.forEach((f) => {
+            f.x = x;
+            f.y = y;
+            f.z = z;
+            z += Math.max(0.05, Number(f.h) || 2.2) + Math.max(0, Number(o.floorGap) || 0.06);
+        });
+        setOb(o.id, { floors, h: stackFloorHeight({ floors }) });
+        stackedEditSession = false;
+        render();
+    }
+    function copyFirstFloorToAll() {
+        const o = sel && obOf(sel);
+        if (!o || o.asset !== "stackedBuilding" || !o.floors?.length) return;
+        HU.push(S);
+        RD = [];
+        const first = o.floors[0],
+            floors = o.floors.map((f) => ({
+                ...f,
+                w: first.w,
+                d: first.d,
+                h: first.h,
+                rimHeight: first.rimHeight,
+                rimOverhang: first.rimOverhang,
+            }));
+        setOb(o.id, { floors, h: stackFloorHeight({ floors }) });
+        render();
+    }
+    [
+        ["stackFloorCount", "floorCount"],
+        ["stackFloorGap", "floorGap"],
+    ].forEach(([id, key]) => {
+        const n = el(id);
+        if (n) n.oninput = () => applyStackMeta(key, n.value);
+    });
+    const stackSync = el("stackSyncFirst");
+    if (stackSync) stackSync.onchange = () => applyStackMeta("syncFirst", stackSync.checked);
+    const stackAlign = el("stackAlign");
+    if (stackAlign) stackAlign.onclick = alignStackedObject;
+    const stackCopy = el("stackCopyFirst");
+    if (stackCopy) stackCopy.onclick = copyFirstFloorToAll;
+
     function applyBuildingProp(name, v) {
         const o = sel && obOf(sel);
         if (!o || o.type !== "asset" || o.asset !== "building" || !Number.isFinite(v)) return;
@@ -6992,6 +7820,79 @@ window.cityGridInstallAssetUI = function (bridge) {
             signEditSession = false;
         };
     });
+    let balconyEditSession = false;
+    function syncBalconyPanel() {
+        const panel = el("balconyP"),
+            o = sel && obOf(sel),
+            isBalcony = !!(o && o.type === "asset" && o.asset === "balcony");
+        if (!panel) return;
+        panel.style.display = isBalcony ? "" : "none";
+        if (!isBalcony) return;
+        const floorT = Number(o.balconyFloorThickness) || 0.16,
+            railH = Number(o.balconyRailHeight) || Math.max(0.12, (Number(o.h) || 1.25) - floorT),
+            railT = Number(o.balconyRailThickness) || 0.12;
+        [
+            ["balconyRailHeight", railH],
+            ["balconyFloorThickness", floorT],
+            ["balconyRailThickness", railT],
+        ].forEach(([id, v]) => {
+            const n = el(id);
+            if (n && document.activeElement !== n) n.value = Number(v).toFixed(3);
+        });
+        const front = el("balconyFrontRail"),
+            side = el("balconySideRail");
+        if (front && document.activeElement !== front) front.checked = o.balconyFrontRail !== false;
+        if (side && document.activeElement !== side) side.checked = o.balconySideRail !== false;
+    }
+    function applyBalconyProp(name, value) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || o.asset !== "balcony" || !Number.isFinite(value)) return;
+        if (!balconyEditSession) {
+            HU.push(S);
+            RD = [];
+            balconyEditSession = true;
+        }
+        const floorT = Math.max(0.04, Number(o.balconyFloorThickness) || 0.16),
+            railH = Math.max(0.12, Number(o.balconyRailHeight) || Math.max(0.12, (Number(o.h) || 1.25) - floorT)),
+            patch = {};
+        if (name === "balconyRailHeight") {
+            patch.balconyRailHeight = clamp(value, 0.12, 30);
+            patch.balconyRailHeightEdited = true;
+            patch.h = floorT + patch.balconyRailHeight;
+        } else if (name === "balconyFloorThickness") {
+            patch.balconyFloorThickness = clamp(value, 0.04, 10);
+            patch.h = patch.balconyFloorThickness + railH;
+        } else if (name === "balconyRailThickness") patch.balconyRailThickness = clamp(value, 0.035, 10);
+        setOb(sel, patch);
+        render();
+    }
+    [
+        ["balconyRailHeight", "balconyRailHeight"],
+        ["balconyFloorThickness", "balconyFloorThickness"],
+        ["balconyRailThickness", "balconyRailThickness"],
+    ].forEach(([id, name]) => {
+        const n = el(id);
+        if (!n) return;
+        n.oninput = () => applyBalconyProp(name, parseFloat(n.value));
+        n.onchange = () => {
+            balconyEditSession = false;
+        };
+    });
+    [
+        ["balconyFrontRail", "balconyFrontRail"],
+        ["balconySideRail", "balconySideRail"],
+    ].forEach(([id, name]) => {
+        const n = el(id);
+        if (!n) return;
+        n.onchange = () => {
+            const o = sel && obOf(sel);
+            if (!o || o.type !== "asset" || o.asset !== "balcony") return;
+            HU.push(S);
+            RD = [];
+            setOb(sel, { [name]: !!n.checked });
+            render();
+        };
+    });
     function syncAssetControls() {
         const o = sel && obOf(sel);
         if (o && o.type === "asset" && o.asset === "stairs") {
@@ -7008,6 +7909,8 @@ window.cityGridInstallAssetUI = function (bridge) {
         syncAssetControls();
         syncSignPanel();
         syncBuildingPanel();
+        syncBalconyPanel();
+        syncStackedPanel();
         syncFloorControls();
         syncAssetDepth();
         syncAssetAxis();
