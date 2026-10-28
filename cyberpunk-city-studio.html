@@ -1728,6 +1728,7 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>絵枠の高さ</span><input type=number class=nv id=ov_faceH step=0.01 style="width:100px"><span class=un>m</span></label>
 </div>
 <div id=buildingP style="display:none"><h3>建物の開口</h3>
+<label id=linkedBuildingOpeningRow style="display:none"><input type=checkbox id=linkedBuildingOpening> 開口をつける</label>
 <label><span>開口の幅</span><input type=number class=nv id=ov_openingW step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><span>開口の高さ</span><input type=number class=nv id=ov_openingH step=0.05 style="width:100px"><span class=un>m</span></label>
 <div class="note">建物の外形は軸・回転に加え、3Dの白い外側面ハンドルでも幅・奥行き・高さを編集できます。緑のハンドルで開口の幅・高さ、オレンジの「奥の面」で閉じた内壁の奥行きを編集できます。</div>
@@ -2689,6 +2690,31 @@ function fixOb(o) {
             rb = o.rb * f;
         n = { ...o, ra, rb, h: (Math.min(ra, rb) * 2 * (o.hr || 100)) / 100, sc: undefined, hr: undefined };
     }
+    // 旧保存データの接続建物も、現在の建物アセットとY面基準へ移行する。
+    // 以前はテント付き建物の親がrectのまま保存され、開口設定と接着計算を共有できなかった。
+    if (n?.linkedAsset === "buildingAwning" && (n.type === "rect" || n.asset === "rect")) {
+        n = {
+            ...n,
+            type: "asset",
+            asset: "building",
+            assetId: "building-awning",
+            assetName: "テント付き建物",
+            openingEnabled: false,
+            openingW: Number(n.openingW) || Math.abs(Number(n.ra) || 2) * 2 * 0.56,
+            openingH: Number(n.openingH) || Math.max(0.1, Number(n.h) || 3.6) * 0.66,
+        };
+    } else if (n?.linkedAsset === "buildingSign" && n.asset === "building" && n.openingEnabled == null) {
+        n = { ...n, openingEnabled: true };
+    }
+    if (
+        n?.linkedRole === "parent" &&
+        ["buildingAwning", "buildingSign"].includes(n.linkedAsset) &&
+        Number(n.k) !== 1 &&
+        PL[n.k]
+    ) {
+        const center = L2W(n, 0, 0, 0);
+        n = { ...n, k: 1, d: -1, ca: center[0], cb: center[2], lift: 0, off: [0, 0, 0] };
+    }
     if (n?.asset === "awning" && !n.awningEdgeEdited) {
         const hh = Math.max(0.1, Number(n.h) || 1),
             old = Number(n.awningEdgeZ);
@@ -3252,7 +3278,7 @@ function buildingFaceDepth(o) {
     return (V.dot(rel, axis) >= 0 ? 1 : -1) * (half + 0.025);
 }
 function buildingGizmo(o) {
-    if (!o || o.type !== "asset" || o.asset !== "building") return null;
+    if (!o || o.type !== "asset" || o.asset !== "building" || o.openingEnabled === false) return null;
     const g = buildingGeometry(o),
         half = Math.abs(Number(o.rb) || 0.1),
         near = buildingFaceDepth(o) >= 0 ? half : -half,
@@ -5250,7 +5276,12 @@ function setTool(t) {
     if (HT[tool]) $("hint").textContent = HT[tool] + " ／ ⌘(Ctrl)+ドラッグ＝視点移動";
 }
 $("tE").onclick = () => setTool("erase");
-$("tB").onclick = () => setTool("border");
+// 「範囲」は同じボタンをもう一度押すとOFFに戻せるトグルにする。
+// 指定済みの書き出し範囲(CR)自体は消さず、範囲ドラッグだけを終了する。
+$("tB").onclick = () => {
+    if (mode === "draw" && tool === "border") setMode("view");
+    else setTool("border");
+};
 $("tM").onclick = () => setTool("edit");
 const edge = document.createElement("button");
 edge.id = "edgeTab";
@@ -5602,6 +5633,11 @@ function exportSurfaceTriangles(o) {
         return out;
     }
     if (kind === "building") {
+        // 開口OFFでは面表示も通常の閉じた直方体へ戻す。
+        if (o.openingEnabled === false) {
+            boxAt(0, 0, w, d, 0, h);
+            return out;
+        }
         const g = buildingGeometry(o),
             side = Math.max(0.05, (g.w - g.openingW) / 2),
             cx = (g.openingW + side) / 2,
@@ -7921,6 +7957,32 @@ function buildingParams(o) {
         topT: Math.max(0.05, h - openingH),
     };
 }
+// 開口OFF時の建物を、通常の閉じた箱として線画化する。
+// openingEnabledが未指定の通常建物は従来どおり開口ありとして扱う。
+function closedBuildingLines(o, w, d, h, color = o.c || "#222222") {
+    const x = w / 2,
+        y = d / 2,
+        front = [
+            [-x, -y, 0],
+            [x, -y, 0],
+            [x, -y, h],
+            [-x, -y, h],
+        ],
+        back = [
+            [-x, y, 0],
+            [x, y, 0],
+            [x, y, h],
+            [-x, y, h],
+        ];
+    return [
+        polyA(o, [...front, front[0]], color),
+        polyA(o, [...back, back[0]], color),
+        lineA(o, [front[0], back[0]], color),
+        lineA(o, [front[1], back[1]], color),
+        lineA(o, [front[2], back[2]], color),
+        lineA(o, [front[3], back[3]], color),
+    ];
+}
 // ===== 5. アセットごとの線画生成本体 =====
 // kind（asset名）を見て、必要な輪郭線・補助線を返す。
 // ここではオブジェクトの値を変更しない。形状データを作るだけ。
@@ -8796,6 +8858,8 @@ function assetLines(o) {
         // --- 開口のある建物 ---
         // 外枠に加え、開口の左右柱・上梁・内側面・奥面を描く。
     } else if (kind === "building") {
+        // チェックを外したリンク建物は、開口のない通常の閉じた箱へ戻す。
+        if (o.openingEnabled === false) return closedBuildingLines(o, w, d, h, c);
         // 外側は直方体の輪郭を保ちながら、正面から背面まで抜ける開口を作る。
         // 左右の柱＋上梁として分けて描くので、開口の左右・上面・奥行きも編集対象になる。
         const bp = buildingParams(o),
@@ -9385,15 +9449,30 @@ window.cityGridInstallAssetUI = function (bridge) {
     function placeLinkedAsset(kind, p) {
         const childKind = kind === "buildingAwning" ? "awning" : "rect",
             q = p ? groundAt(p) : assetGroundPoint(),
-            parent = newAsset(kind === "buildingAwning" ? "rect" : "building", null, q),
+            parent = newAsset("building", null, q),
             child = newAsset(childKind, null, q),
             groupId = "linked-" + uid();
+        // テント／看板付き建物は、親建物を必ずY面（地面に立つ向き）で作る。
+        // assetAxisがX/Zでも親まで壁面向きにすると、parent.rbが高さ扱いになり、
+        // 子テントの接着計算が建物の中央へ入り込むため、ここで座標系を固定する。
+        if (kind === "buildingAwning" || kind === "buildingSign") {
+            parent.k = 1;
+            parent.d = -1;
+            parent.ca = Number(q[0]) || 0;
+            parent.cb = Number(q[2]) || 0;
+            parent.lift = 0;
+            parent.off = [0, 0, 0];
+        }
         if (kind === "buildingAwning") {
             parent.ra = ASSETS.building.w / 2;
             parent.rb = ASSETS.building.d / 2;
             parent.h = ASSETS.building.h;
             parent.extrude = true;
+            parent.openingEnabled = false;
             parent.accent = "#d98b68";
+        } else {
+            // 看板付き建物は従来どおり開口ありを初期状態にする。
+            parent.openingEnabled = true;
         }
         parent.groupId = child.groupId = groupId;
         parent.linkedAsset = child.linkedAsset = kind;
@@ -9662,6 +9741,30 @@ window.cityGridInstallAssetUI = function (bridge) {
             groupId = "linked-" + uid(),
             p = { ...parent, id: uid(), groupId, linkedAsset: kind, linkedRole: "parent" },
             q = { ...child, id: uid(), groupId, linkedAsset: kind, linkedRole: "child" };
+        // 旧テント付きcompoundの親はrectで保存されているため、現在の建物アセットへ移行する。
+        // これで新しい開口チェックボックスと、開口建物の線画・面表示を共通利用できる。
+        if (kind === "buildingAwning") {
+            p.type = "asset";
+            p.asset = "building";
+            p.assetId = "building-awning";
+            p.assetName = ASSETS.buildingAwning.label;
+            p.openingEnabled = false;
+            p.openingW = Number(p.openingW) || Math.abs(Number(p.ra) || 2) * 2 * 0.56;
+            p.openingH = Number(p.openingH) || Math.max(0.1, Number(p.h) || 3.6) * 0.66;
+        } else {
+            p.openingEnabled = p.openingEnabled !== false;
+        }
+        // 旧compound JSONにX/Z面の親が残っていても、接続建物は地面に立つY面へ戻す。
+        // これにより、読み込み後のテント／看板も親の高さ・奥行き基準で接着できる。
+        if (p.k !== 1) {
+            const center = L2W(p, 0, 0, 0);
+            p.k = 1;
+            p.d = -1;
+            p.ca = Number(center[0]) || 0;
+            p.cb = Number(center[2]) || 0;
+            p.lift = 0;
+            p.off = [0, 0, 0];
+        }
         const pb = L2W(p, 0, 0, 0),
             cb = L2W(q, 0, 0, 0),
             dx = cb[0] - pb[0],
@@ -10611,6 +10714,10 @@ window.cityGridInstallAssetUI = function (bridge) {
     unpack = function (d) {
         baseUnpack(d);
         migrateLineArt();
+        // 旧保存データの接続建物は親の座標系を補正した後に一度だけ再生成する。
+        // 保存済みの線をそのまま残すと、補正前のテント位置が画面に残るため。
+        if (S.some((s) => s.ob?.linkedAsset === "buildingAwning" || s.ob?.linkedAsset === "buildingSign"))
+            regenObjects();
         el("p3").checked = true;
         el("p3").disabled = true;
         render();
@@ -10625,14 +10732,34 @@ window.cityGridInstallAssetUI = function (bridge) {
 
     let signEditSession = false,
         buildingEditSession = false;
+    // テント／看板の子を選択した場合も、親建物の開口設定を表示する。
+    // 親IDが無い通常建物は従来どおり通常の建物パネルへ戻す。
+    function linkedBuildingParent(o = sel && obOf(sel)) {
+        const candidate = o?.linkedRole === "child" && o.attachment?.parentId ? obOf(o.attachment.parentId) : o;
+        return candidate &&
+            candidate.type === "asset" &&
+            candidate.asset === "building" &&
+            ["buildingAwning", "buildingSign"].includes(candidate.linkedAsset)
+            ? candidate
+            : null;
+    }
+    function buildingPanelObject(o = sel && obOf(sel)) {
+        return linkedBuildingParent(o) || (o?.type === "asset" && o.asset === "building" ? o : null);
+    }
     // 建物・階層建物・開口設定の入力欄を、選択中オブジェクトへ同期する。
     function syncBuildingPanel() {
         const panel = el("buildingP"),
-            o = sel && obOf(sel),
-            isBuilding = !!(o && o.type === "asset" && o.asset === "building");
+            selected = sel && obOf(sel),
+            o = buildingPanelObject(selected),
+            linked = !!linkedBuildingParent(selected),
+            isBuilding = !!o;
         if (!panel) return;
         panel.style.display = isBuilding ? "" : "none";
+        const openingRow = el("linkedBuildingOpeningRow"),
+            openingCheck = el("linkedBuildingOpening");
+        if (openingRow) openingRow.style.display = linked ? "" : "none";
         if (!isBuilding) return;
+        if (openingCheck && linked) openingCheck.checked = o.openingEnabled !== false;
         const g = buildingGeometry(o);
         [
             ["ov_openingW", g.openingW],
@@ -10642,6 +10769,21 @@ window.cityGridInstallAssetUI = function (bridge) {
             if (n && document.activeElement !== n) n.value = Number(v).toFixed(3);
         });
     }
+    function applyLinkedBuildingOpening(value) {
+        const o = linkedBuildingParent();
+        if (!o) return;
+        if (!buildingEditSession) {
+            HU.push(S);
+            RD = [];
+            buildingEditSession = true;
+        }
+        setOb(o.id, { openingEnabled: !!value });
+        buildingEditSession = false;
+        render();
+    }
+    const linkedBuildingOpening = el("linkedBuildingOpening");
+    if (linkedBuildingOpening)
+        linkedBuildingOpening.onchange = () => applyLinkedBuildingOpening(linkedBuildingOpening.checked);
     let stackedEditSession = false;
     function stackFloorHeight(o) {
         const floors = Array.isArray(o?.floors) ? o.floors : [];
@@ -10976,7 +11118,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     if (stackCopy) stackCopy.onclick = copyFirstFloorToAll;
 
     function applyBuildingProp(name, v) {
-        const o = sel && obOf(sel);
+        const o = buildingPanelObject();
         if (!o || o.type !== "asset" || o.asset !== "building" || !Number.isFinite(v)) return;
         if (!buildingEditSession) {
             HU.push(S);
@@ -10987,7 +11129,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             max = name === "openingW" ? g.w - 0.1 : g.h - 0.1,
             patch = {};
         patch[name] = clamp(v, 0.1, Math.max(0.1, max));
-        setOb(sel, patch);
+        setOb(o.id, patch);
         render();
     }
     [
@@ -11279,11 +11421,28 @@ window.cityGridInstallAssetUI = function (bridge) {
         viewKeys.forEach((k) => (v[k] = P[k]));
         return v;
     };
+    // 接続テント／看板を選択したまま正面・横・上へ切り替えた場合は、
+    // 3方向の寸法・開口ハンドルを持つ親建物へ編集対象を移す。
+    // 子アセットは3D視点やシーン一覧から引き続き個別編集できる。
+    function focusLinkedBuildingParentForOrtho() {
+        const selected = sel && obOf(sel),
+            parent =
+                selected?.linkedRole === "child" && selected.attachment?.parentId
+                    ? obOf(selected.attachment.parentId)
+                    : null;
+        if (
+            parent?.type === "asset" &&
+            parent.asset === "building" &&
+            ["buildingAwning", "buildingSign"].includes(parent.linkedAsset)
+        )
+            setSelection(parent.id, false);
+    }
     function applyStandardView(kind) {
         standardApplying = true;
         // 正面・横・上は表示用の正投影だけを切り替える。
         // yaw／pitch／高さ／位置／レンズ／魚眼画角／ロールは一切変更しない。
         orthView = kind === "front" || kind === "side" || kind === "top" ? kind : null;
+        if (orthView) focusLinkedBuildingParentForOrtho();
         standardApplying = false;
         sync();
         // 0=3Dは視点プリセットだけを切り替える。編集ツールを選択中なら、
@@ -11300,6 +11459,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         // レンズ、カメラ位置、高さ、回転、傾き、ロールは変更しない。
         standardApplying = true;
         orthView = kind === "side" ? "side" : kind === "front" ? "front" : "top";
+        focusLinkedBuildingParentForOrtho();
         standardApplying = false;
         sync();
         setMode("draw");
@@ -11499,6 +11659,18 @@ window.cityGridInstallAssetUI = function (bridge) {
         floorTouchMax = 0,
         floorTouchMoved = false,
         floorTouchPan = null;
+    const FLOOR_TOUCH_MIN_SCALE = 12,
+        FLOOR_TOUCH_MAX_SCALE = 640;
+
+    function floorTouchCanvasPoint(x, y) {
+        const r = cv.getBoundingClientRect(),
+            sx = r.width > 0 ? W / r.width : 1,
+            sy = r.height > 0 ? H / r.height : 1;
+        return { x: (x - r.left) * sx, y: (y - r.top) * sy };
+    }
+    function floorTouchDistance(a, b) {
+        return Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+    }
     function floorTouchDown(e) {
         if (e.pointerType !== "touch") return false;
         if (!floorTouchIds.size) {
@@ -11531,7 +11703,24 @@ window.cityGridInstallAssetUI = function (bridge) {
                 mx = pts.reduce((a, t) => a + t.x, 0) / pts.length,
                 my = pts.reduce((a, t) => a + t.y, 0) / pts.length;
             if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
-            floorTouchPan = { mx0: mx, my0: my, center0: [...(window.cityFloorPlanCenter || [0, 0])] };
+            const center0 = [...(window.cityFloorPlanCenter || [0, 0])],
+                scale0 = clamp(
+                    Number(window.cityFloorPlanScale) || Number(orthScale()) || 1,
+                    FLOOR_TOUCH_MIN_SCALE,
+                    FLOOR_TOUCH_MAX_SCALE,
+                ),
+                mid0 = floorTouchCanvasPoint(mx, my),
+                anchor0 = [center0[0] + (mid0.x - W / 2) / scale0, center0[1] - (mid0.y - H / 2) / scale0];
+            // 2本指の中心を基準に、同じワールド位置が指の間に残るようにする。
+            // これでピンチ中の表示移動とズームが自然につながる。
+            floorTouchPan = {
+                mx0: mx,
+                my0: my,
+                center0,
+                anchor0,
+                dist0: floorTouchDistance(pts[0], pts[1]),
+                scale0,
+            };
             e.preventDefault();
             e.stopImmediatePropagation();
             try {
@@ -11550,11 +11739,21 @@ window.cityGridInstallAssetUI = function (bridge) {
         if (floorTouchMax >= 2 && floorTouchPan) {
             const pts = [...floorTouchIds.values()],
                 mx = pts.reduce((a, t) => a + t.x, 0) / pts.length,
-                my = pts.reduce((a, t) => a + t.y, 0) / pts.length;
-            const sc = Math.max(1, Number(orthScale()) || 1),
-                dx = mx - floorTouchPan.mx0,
-                dy = my - floorTouchPan.my0;
-            window.cityFloorPlanCenter = [floorTouchPan.center0[0] - dx / sc, floorTouchPan.center0[1] + dy / sc];
+                my = pts.reduce((a, t) => a + t.y, 0) / pts.length,
+                dist = floorTouchDistance(pts[0], pts[1]),
+                scale = clamp(
+                    floorTouchPan.scale0 * (dist / floorTouchPan.dist0),
+                    FLOOR_TOUCH_MIN_SCALE,
+                    FLOOR_TOUCH_MAX_SCALE,
+                ),
+                mid = floorTouchCanvasPoint(mx, my);
+            // ピンチアウト＝scaleを大きくしてズームイン、ピンチイン＝ズームアウト。
+            // 初期の指間にあったワールド座標を現在の指の中心へ固定する。
+            window.cityFloorPlanScale = scale;
+            window.cityFloorPlanCenter = [
+                floorTouchPan.anchor0[0] - (mid.x - W / 2) / scale,
+                floorTouchPan.anchor0[1] + (mid.y - H / 2) / scale,
+            ];
             floorTouchMoved = true;
             render();
         }
@@ -11596,7 +11795,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     const floorPlanDock = document.createElement("div");
     floorPlanDock.id = "floorPlanDock";
     floorPlanDock.innerHTML =
-        '<div class="floorPlanDockInner"><div class="floorPlanDockHeader"><div id="floorPlanDockStatus" class="floorPlanDockStatus">オブジェクトを選択すると、移動・回転・サイズ変更ができます。<small>カメラ本体：位置　／　先端の丸：向き</small></div><div class="floorHistoryButtons"><button type="button" id="floorUndo" class="floorHistoryButton" title="間取りの操作を元に戻す">↶ 元に戻す</button><button type="button" id="floorRedo" class="floorHistoryButton" title="間取りの操作をやり直す">↷ やり直す</button></div><button type="button" class="dockCollapse" data-floor-dock-action="collapse" title="操作バーを折りたたむ">−</button></div><button type="button" data-floor-dock-action="left">↺ 15°</button><button type="button" data-floor-dock-action="right">↻ 15°</button><button type="button" data-floor-dock-action="rot30">30°</button><button type="button" data-floor-dock-action="rot45">45°</button><button type="button" data-floor-dock-action="90">90°回す</button><label class="floorLensTools">レンズ <input id="floorLensInput" type="number" min="14" max="200" step="1"> mm</label><div class="floorPlanPanTools"><span>表示移動</span><button type="button" data-floor-dock-action="pan-up" title="表示を上へ">↑</button><button type="button" data-floor-dock-action="pan-down" title="表示を下へ">↓</button><button type="button" data-floor-dock-action="pan-left" title="表示を左へ">←</button><button type="button" data-floor-dock-action="pan-right" title="表示を右へ">→</button></div><button type="button" data-floor-dock-action="assets">＋アセット</button><button type="button" data-floor-dock-action="delete">片付ける</button><span class="dockHint">中／右ドラッグ：表示移動　・　表示移動ボタン／Alt＋矢印／WASD：キャンバス移動　・　磁石ON：家具移動と幅／奥行の面編集をエッジへ吸着　・　2本指タップ：元に戻す／3本指タップ：やり直す</span></div>';
+        '<div class="floorPlanDockInner"><div class="floorPlanDockHeader"><div id="floorPlanDockStatus" class="floorPlanDockStatus">オブジェクトを選択すると、移動・回転・サイズ変更ができます。<small>カメラ本体：位置　／　先端の丸：向き</small></div><div class="floorHistoryButtons"><button type="button" id="floorUndo" class="floorHistoryButton" title="間取りの操作を元に戻す">↶ 元に戻す</button><button type="button" id="floorRedo" class="floorHistoryButton" title="間取りの操作をやり直す">↷ やり直す</button></div><button type="button" class="dockCollapse" data-floor-dock-action="collapse" title="操作バーを折りたたむ">−</button></div><button type="button" data-floor-dock-action="left">↺ 15°</button><button type="button" data-floor-dock-action="right">↻ 15°</button><button type="button" data-floor-dock-action="rot30">30°</button><button type="button" data-floor-dock-action="rot45">45°</button><button type="button" data-floor-dock-action="90">90°回す</button><label class="floorLensTools">レンズ <input id="floorLensInput" type="number" min="14" max="200" step="1"> mm</label><div class="floorPlanPanTools"><span>表示移動</span><button type="button" data-floor-dock-action="pan-up" title="表示を上へ">↑</button><button type="button" data-floor-dock-action="pan-down" title="表示を下へ">↓</button><button type="button" data-floor-dock-action="pan-left" title="表示を左へ">←</button><button type="button" data-floor-dock-action="pan-right" title="表示を右へ">→</button></div><button type="button" data-floor-dock-action="assets">＋アセット</button><button type="button" data-floor-dock-action="delete">片付ける</button><span class="dockHint">中／右ドラッグ：表示移動　・　表示移動ボタン／Alt＋矢印／WASD：キャンバス移動　・　2本指ピンチ：ズームイン／ズームアウト（正面・横・上のまま）　・　磁石ON：家具移動と幅／奥行の面編集をエッジへ吸着　・　2本指タップ：元に戻す／3本指タップ：やり直す</span></div>';
     stage.appendChild(floorPlanDock);
     // アセット棚を開いたときは、間取り操作バーを棚の上へ逃がす。棚と操作バーを重ねないためのレイアウト調整。
     function syncFloorPlanDockLayout() {
@@ -12049,6 +12248,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         };
     }
     function floorBuildingInnerHandles(o) {
+        if (o?.openingEnabled === false) return [];
         const g = buildingGeometry(o),
             handles = [],
             near = buildingFaceDepth(o),
@@ -12330,7 +12530,10 @@ window.cityGridInstallAssetUI = function (bridge) {
             zc = (z0 + z1) / 2,
             center = scrW(L2W(o, 0, 0, zc)),
             handles = [],
-            panel = o.type === "asset" && o.asset === "building" ? floorBuildingBackPanel(o) : null,
+            panel =
+                o.type === "asset" && o.asset === "building" && o.openingEnabled !== false
+                    ? floorBuildingBackPanel(o)
+                    : null,
             // 積層建物とパスパイプは、単一のra/rb/hではなく floors/path[] を
             // 持つため、間取り用の汎用ハンドルを出すと別の古い寸法を編集してしまう。
             // 専用ギズモを同じ座標へ描き、pointerdownも通常のギズモ経路へ渡す。

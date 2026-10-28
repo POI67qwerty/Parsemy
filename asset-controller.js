@@ -188,15 +188,30 @@ window.cityGridInstallAssetUI = function (bridge) {
     function placeLinkedAsset(kind, p) {
         const childKind = kind === "buildingAwning" ? "awning" : "rect",
             q = p ? groundAt(p) : assetGroundPoint(),
-            parent = newAsset(kind === "buildingAwning" ? "rect" : "building", null, q),
+            parent = newAsset("building", null, q),
             child = newAsset(childKind, null, q),
             groupId = "linked-" + uid();
+        // テント／看板付き建物は、親建物を必ずY面（地面に立つ向き）で作る。
+        // assetAxisがX/Zでも親まで壁面向きにすると、parent.rbが高さ扱いになり、
+        // 子テントの接着計算が建物の中央へ入り込むため、ここで座標系を固定する。
+        if (kind === "buildingAwning" || kind === "buildingSign") {
+            parent.k = 1;
+            parent.d = -1;
+            parent.ca = Number(q[0]) || 0;
+            parent.cb = Number(q[2]) || 0;
+            parent.lift = 0;
+            parent.off = [0, 0, 0];
+        }
         if (kind === "buildingAwning") {
             parent.ra = ASSETS.building.w / 2;
             parent.rb = ASSETS.building.d / 2;
             parent.h = ASSETS.building.h;
             parent.extrude = true;
+            parent.openingEnabled = false;
             parent.accent = "#d98b68";
+        } else {
+            // 看板付き建物は従来どおり開口ありを初期状態にする。
+            parent.openingEnabled = true;
         }
         parent.groupId = child.groupId = groupId;
         parent.linkedAsset = child.linkedAsset = kind;
@@ -465,6 +480,30 @@ window.cityGridInstallAssetUI = function (bridge) {
             groupId = "linked-" + uid(),
             p = { ...parent, id: uid(), groupId, linkedAsset: kind, linkedRole: "parent" },
             q = { ...child, id: uid(), groupId, linkedAsset: kind, linkedRole: "child" };
+        // 旧テント付きcompoundの親はrectで保存されているため、現在の建物アセットへ移行する。
+        // これで新しい開口チェックボックスと、開口建物の線画・面表示を共通利用できる。
+        if (kind === "buildingAwning") {
+            p.type = "asset";
+            p.asset = "building";
+            p.assetId = "building-awning";
+            p.assetName = ASSETS.buildingAwning.label;
+            p.openingEnabled = false;
+            p.openingW = Number(p.openingW) || Math.abs(Number(p.ra) || 2) * 2 * 0.56;
+            p.openingH = Number(p.openingH) || Math.max(0.1, Number(p.h) || 3.6) * 0.66;
+        } else {
+            p.openingEnabled = p.openingEnabled !== false;
+        }
+        // 旧compound JSONにX/Z面の親が残っていても、接続建物は地面に立つY面へ戻す。
+        // これにより、読み込み後のテント／看板も親の高さ・奥行き基準で接着できる。
+        if (p.k !== 1) {
+            const center = L2W(p, 0, 0, 0);
+            p.k = 1;
+            p.d = -1;
+            p.ca = Number(center[0]) || 0;
+            p.cb = Number(center[2]) || 0;
+            p.lift = 0;
+            p.off = [0, 0, 0];
+        }
         const pb = L2W(p, 0, 0, 0),
             cb = L2W(q, 0, 0, 0),
             dx = cb[0] - pb[0],

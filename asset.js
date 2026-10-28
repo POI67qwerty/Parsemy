@@ -448,6 +448,32 @@ function buildingParams(o) {
         topT: Math.max(0.05, h - openingH),
     };
 }
+// 開口OFF時の建物を、通常の閉じた箱として線画化する。
+// openingEnabledが未指定の通常建物は従来どおり開口ありとして扱う。
+function closedBuildingLines(o, w, d, h, color = o.c || "#222222") {
+    const x = w / 2,
+        y = d / 2,
+        front = [
+            [-x, -y, 0],
+            [x, -y, 0],
+            [x, -y, h],
+            [-x, -y, h],
+        ],
+        back = [
+            [-x, y, 0],
+            [x, y, 0],
+            [x, y, h],
+            [-x, y, h],
+        ];
+    return [
+        polyA(o, [...front, front[0]], color),
+        polyA(o, [...back, back[0]], color),
+        lineA(o, [front[0], back[0]], color),
+        lineA(o, [front[1], back[1]], color),
+        lineA(o, [front[2], back[2]], color),
+        lineA(o, [front[3], back[3]], color),
+    ];
+}
 // ===== 5. アセットごとの線画生成本体 =====
 // kind（asset名）を見て、必要な輪郭線・補助線を返す。
 // ここではオブジェクトの値を変更しない。形状データを作るだけ。
@@ -1323,6 +1349,8 @@ function assetLines(o) {
         // --- 開口のある建物 ---
         // 外枠に加え、開口の左右柱・上梁・内側面・奥面を描く。
     } else if (kind === "building") {
+        // チェックを外したリンク建物は、開口のない通常の閉じた箱へ戻す。
+        if (o.openingEnabled === false) return closedBuildingLines(o, w, d, h, c);
         // 外側は直方体の輪郭を保ちながら、正面から背面まで抜ける開口を作る。
         // 左右の柱＋上梁として分けて描くので、開口の左右・上面・奥行きも編集対象になる。
         const bp = buildingParams(o),

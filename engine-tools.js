@@ -328,7 +328,7 @@ function buildingFaceDepth(o) {
     return (V.dot(rel, axis) >= 0 ? 1 : -1) * (half + 0.025);
 }
 function buildingGizmo(o) {
-    if (!o || o.type !== "asset" || o.asset !== "building") return null;
+    if (!o || o.type !== "asset" || o.asset !== "building" || o.openingEnabled === false) return null;
     const g = buildingGeometry(o),
         half = Math.abs(Number(o.rb) || 0.1),
         near = buildingFaceDepth(o) >= 0 ? half : -half,
@@ -543,12 +543,12 @@ function stackedBevelHandle(o, f, index) {
         s: !raw?.ok
             ? raw
             : hidden
-                ? {
+              ? {
                     x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
                     y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
                     ok: true,
                 }
-                : raw,
+              : raw,
         anchor,
         dir: projected && length > 0.0001 ? { x: dx / length, y: dy / length } : fallback,
         scale:
@@ -585,8 +585,8 @@ function stackedOpeningGizmo(o) {
                     kind === "stacked-opening-h"
                         ? { x: 0, y: -1 }
                         : kind.endsWith("left")
-                            ? { x: -1, y: 0 }
-                            : { x: 1, y: 0 },
+                          ? { x: -1, y: 0 }
+                          : { x: 1, y: 0 },
                 gap = Math.max(30 / Z, Math.min(54 / Z, 0.34 * Math.max(1, Number(orthScale()) || 1))),
                 display = hidden ? { ...s, x: s.x + fallback.x * gap, y: s.y + fallback.y * gap, ok: true } : s;
             return {
@@ -709,8 +709,8 @@ function stackedBuildingGizmo(o) {
                     axis === "w"
                         ? pr(px + step * sign, py, pz)
                         : axis === "d"
-                            ? pr(px, py + step * sign, pz)
-                            : pr(px, py, pz + step),
+                          ? pr(px, py + step * sign, pz)
+                          : pr(px, py, pz + step),
                 dx = q.x - s.x,
                 dy = q.y - s.y,
                 pxLen = Math.hypot(dx, dy),
@@ -830,10 +830,10 @@ function pathPipeGizmo(o) {
         radiusGap = Math.max(34 / Z, Math.min(58 / Z, 0.38 * Math.max(1, Number(orthScale()) || 1))),
         radiusDisplay = radiusHidden
             ? {
-                x: radiusAnchor.x + radiusFallback.x * radiusGap,
-                y: radiusAnchor.y + radiusFallback.y * radiusGap,
-                ok: true,
-            }
+                  x: radiusAnchor.x + radiusFallback.x * radiusGap,
+                  y: radiusAnchor.y + radiusFallback.y * radiusGap,
+                  ok: true,
+              }
             : radiusPoint;
     return {
         o,
@@ -878,12 +878,12 @@ function beveledBoxGizmo(o) {
         displayS = !raw?.ok
             ? raw
             : hidden
-                ? {
+              ? {
                     x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
                     y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
                     ok: true,
                 }
-                : {
+              : {
                     x: raw.x - visibleDir.x * displayGap,
                     y: raw.y - visibleDir.y * displayGap,
                     ok: true,
@@ -907,20 +907,20 @@ function specialGizmo(o) {
     return o && o.type === "asset" && o.asset === "beveledBox"
         ? beveledBoxGizmo(o)
         : o && o.type === "asset" && o.asset === "pathPipe"
-            ? pathPipeGizmo(o)
-            : isStackedBuildingAsset(o)
-                ? stackedBuildingGizmo(o)
-                : o && o.type === "asset" && o.asset === "building"
-                    ? buildingGizmo(o)
-                    : o && o.type === "asset" && o.asset === "awning"
-                        ? awningGizmo(o)
-                        : o && o.type === "asset" && o.asset === "sign"
-                            ? signGizmo(o)
-                            : o && o.type === "asset" && o.asset === "cone"
-                                ? coneGizmo(o)
-                                : o && o.type === "asset" && o.asset === "sphere"
-                                    ? sphereGizmo(o)
-                                    : null;
+          ? pathPipeGizmo(o)
+          : isStackedBuildingAsset(o)
+            ? stackedBuildingGizmo(o)
+            : o && o.type === "asset" && o.asset === "building"
+              ? buildingGizmo(o)
+              : o && o.type === "asset" && o.asset === "awning"
+                ? awningGizmo(o)
+                : o && o.type === "asset" && o.asset === "sign"
+                  ? signGizmo(o)
+                  : o && o.type === "asset" && o.asset === "cone"
+                    ? coneGizmo(o)
+                    : o && o.type === "asset" && o.asset === "sphere"
+                      ? sphereGizmo(o)
+                      : null;
 }
 function drawSpecialGizmo(c, o) {
     const sg = specialGizmo(o);
@@ -1359,10 +1359,10 @@ function gizmo() {
     ev[iu] = -sn;
     ev[iv] = cs; // 高さ方向・幅方向・奥行き方向の単位ベクトル
     const F = (id, x, y, z, n) => {
-        const P3 = L2W(o, x, y, z),
-            s = scrW(P3);
-        g.faces.push({ id, n, P3, s });
-    },
+            const P3 = L2W(o, x, y, z),
+                s = scrW(P3);
+            g.faces.push({ id, n, P3, s });
+        },
         neg = (v) => v.map((t) => -t);
     // 外形の6面は、開口のある建物でも編集対象にする。
     // 積層建物だけはfloors[]を持つため、汎用面ハンドルを出さない。
@@ -1847,8 +1847,8 @@ function faceSnap(dl) {
     const halves = isU
         ? [Math.abs(o.rb), outerH / 2]
         : isV
-            ? [Math.abs(o.ra), outerH / 2]
-            : [Math.abs(o.ra), Math.abs(o.rb)];
+          ? [Math.abs(o.ra), outerH / 2]
+          : [Math.abs(o.ra), Math.abs(o.rb)];
     const faceN0 = dot3(ed.Fa, n),
         faceN = faceN0 + dl,
         faceT = tangents.map((t) => dot3(ed.Fa, t)),
@@ -1898,8 +1898,8 @@ function beginGizmo(h, p) {
         };
     if (h.t === "stack-floor") {
         const index = stackedIndividualEdit(o)
-            ? clamp(Math.round(Number(h.floorIndex) || 0), 0, Math.max(0, (o.floors || []).length - 1))
-            : 0,
+                ? clamp(Math.round(Number(h.floorIndex) || 0), 0, Math.max(0, (o.floors || []).length - 1))
+                : 0,
             f = o.floors?.[index],
             q = stackedFloorScreen(o, index);
         if (f && q) {
@@ -2108,8 +2108,8 @@ function dragEdit(p, freeRotation = false) {
             ed.t === "stacked-opening-w-left" || ed.t === "stacked-opening-w-right"
                 ? { openingW: value }
                 : ed.t === "stacked-opening-h"
-                    ? { openingH: value }
-                    : { openingBack: value };
+                  ? { openingH: value }
+                  : { openingBack: value };
     } else if (ed.t.startsWith("stacked-")) {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -2215,8 +2215,8 @@ function dragEdit(p, freeRotation = false) {
                 o.type === "compound"
                     ? compoundFacePatch(o, ed.fid, moved)
                     : o.type === "asset" && o.asset === "building"
-                        ? buildingOuterFacePatch(o, ed.fid, moved)
-                        : facePatch(o, ed.fid, moved);
+                      ? buildingOuterFacePatch(o, ed.fid, moved)
+                      : facePatch(o, ed.fid, moved);
         }
     } // 白い四角＝面の押し引き
     else if (ed.t === "ring") {
@@ -2326,7 +2326,12 @@ function setTool(t) {
     if (HT[tool]) $("hint").textContent = HT[tool] + " ／ ⌘(Ctrl)+ドラッグ＝視点移動";
 }
 $("tE").onclick = () => setTool("erase");
-$("tB").onclick = () => setTool("border");
+// 「範囲」は同じボタンをもう一度押すとOFFに戻せるトグルにする。
+// 指定済みの書き出し範囲(CR)自体は消さず、範囲ドラッグだけを終了する。
+$("tB").onclick = () => {
+    if (mode === "draw" && tool === "border") setMode("view");
+    else setTool("border");
+};
 $("tM").onclick = () => setTool("edit");
 const edge = document.createElement("button");
 edge.id = "edgeTab";
@@ -2340,7 +2345,7 @@ function setSide(h) {
     edge.style.left = h ? "env(safe-area-inset-left,0px)" : sd.getBoundingClientRect().right + "px";
     try {
         localStorage.setItem("pgrid-side", h ? "1" : "0");
-    } catch (e) { }
+    } catch (e) {}
 }
 $("tg").onclick = () => {
     setSide(!$("side").classList.contains("hide"));
@@ -2678,6 +2683,11 @@ function exportSurfaceTriangles(o) {
         return out;
     }
     if (kind === "building") {
+        // 開口OFFでは面表示も通常の閉じた直方体へ戻す。
+        if (o.openingEnabled === false) {
+            boxAt(0, 0, w, d, 0, h);
+            return out;
+        }
         const g = buildingGeometry(o),
             side = Math.max(0.05, (g.w - g.openingW) / 2),
             cx = (g.openingW + side) / 2,
@@ -2862,8 +2872,8 @@ function exportPoint(v, tf) {
     const depth = orthView
         ? dot3(rel, orthBasis().depth)
         : T === "f"
-            ? Math.hypot(rel[0], rel[1], rel[2])
-            : cam(rel)[2];
+          ? Math.hypot(rel[0], rel[1], rel[2])
+          : cam(rel)[2];
     return { x: q.x * tf[0] + tf[4], y: q.y * tf[3] + tf[5], depth };
 }
 function buildExportDepth(cw, ch, tf) {
@@ -3683,7 +3693,7 @@ function endBoxPointer(e, commit) {
     if (e?.pointerType === "pen") lastPen = Date.now();
     try {
         if (cv.hasPointerCapture?.(pointerId)) cv.releasePointerCapture(pointerId);
-    } catch (err) { }
+    } catch (err) {}
     if (!commit) render();
     return true;
 }
@@ -3824,12 +3834,12 @@ cv.onpointerdown = (e) => {
             nav || (!selectGesture && mod)
                 ? "view"
                 : editPointer
+                  ? "draw"
+                  : pn && e.pointerType === "pen" && mode === "draw"
                     ? "draw"
-                    : pn && e.pointerType === "pen" && mode === "draw"
-                        ? "draw"
-                        : touchTool
-                            ? "view"
-                            : mode; // 視点モードでは、残っている編集ツールよりもカメラ操作を優先する。
+                    : touchTool
+                      ? "view"
+                      : mode; // 視点モードでは、残っている編集ツールよりもカメラ操作を優先する。
     if (act === "view") {
         const pan = e.shiftKey || e.altKey || e.button === 2;
         drag = {
@@ -4110,12 +4120,12 @@ function setMode(m) {
 $("mV").onclick = () => setMode("view");
 $("mD").onclick = () => setTool("pen");
 const undo = () => {
-    if (HU.length) {
-        RD.push(S);
-        S = HU.pop();
-        render();
-    }
-},
+        if (HU.length) {
+            RD.push(S);
+            S = HU.pop();
+            render();
+        }
+    },
     redo = () => {
         if (RD.length) {
             HU.push(S);
@@ -4503,13 +4513,13 @@ setInterval(() => {
     dirty = false;
     try {
         localStorage.setItem(AK, JSON.stringify(pack(false)));
-    } catch (e) { }
+    } catch (e) {}
 }, 3000);
 $("rst").onclick = () => {
     if (confirm("自動保存を消して初期化します。よろしいですか？")) {
         try {
             localStorage.removeItem(AK);
-        } catch (e) { }
+        } catch (e) {}
         location.reload();
     }
 };
@@ -4543,4 +4553,4 @@ fit();
 try {
     const t = localStorage.getItem(AK);
     if (t) unpack(JSON.parse(t));
-} catch (e) { } // 前回の自動保存があれば復元
+} catch (e) {} // 前回の自動保存があれば復元

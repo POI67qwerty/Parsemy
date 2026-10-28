@@ -11,7 +11,6 @@
 engine.js / script.js / cyberpunk-city-studio.html は生成物なので、
 直接編集せず、このスクリプトでソースから再生成する。
 """
-
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -52,9 +51,7 @@ def main() -> None:
     # 単体HTMLは、engineとstudio-uiの2ブロックへ同じソースを埋め込む。
     html = read("cyberpunk-city-studio.html")
     html = inject_script(html, '<script id="engine">', engine)
-    html = inject_script(
-        html, '<script id="studio-ui">', asset + "\n" + controller + "\n" + ui
-    )
+    html = inject_script(html, '<script id="studio-ui">', asset + "\n" + controller + "\n" + ui)
     write("cyberpunk-city-studio.html", html)
 
 

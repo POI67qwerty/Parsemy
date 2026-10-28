@@ -509,25 +509,25 @@
         const objects = sceneObjects();
         list.innerHTML = objects.length
             ? objects
-                .map((o, i) => {
-                    const group =
-                        o.type === "compound"
-                            ? `<span class="compoundMark">結合</span>`
-                            : o.groupId
+                  .map((o, i) => {
+                      const group =
+                          o.type === "compound"
+                              ? `<span class="compoundMark">結合</span>`
+                              : o.groupId
                                 ? `<span class="groupMark">グループ</span>`
                                 : "";
-                    const detail =
-                        o.type === "compound"
-                            ? `${Array.isArray(o.parts) ? o.parts.length : 0}パーツ・複合オブジェクト`
-                            : o.type === "asset" && o.asset === "person"
+                      const detail =
+                          o.type === "compound"
+                              ? `${Array.isArray(o.parts) ? o.parts.length : 0}パーツ・複合オブジェクト`
+                              : o.type === "asset" && o.asset === "person"
                                 ? Number(o.h).toFixed(2) + " m"
                                 : o.type === "asset"
-                                    ? "low-poly asset"
-                                    : "vector shape";
-                    const visible = objectVisible(o);
-                    return `<div class="objectRow ${selIds.has(o.id) ? "selected" : ""} ${sel === o.id ? "activeObject" : ""} ${visible ? "" : "hiddenObject"}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? "オブジェクトを非表示" : "オブジェクトを表示"}" aria-label="${visible ? "非表示" : "表示"}">${visible ? "◉" : "○"}</button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? "checked" : ""} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1} ${group}<small>${detail}</small></span></div>`;
-                })
-                .join("")
+                                  ? "low-poly asset"
+                                  : "vector shape";
+                      const visible = objectVisible(o);
+                      return `<div class="objectRow ${selIds.has(o.id) ? "selected" : ""} ${sel === o.id ? "activeObject" : ""} ${visible ? "" : "hiddenObject"}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? "オブジェクトを非表示" : "オブジェクトを表示"}" aria-label="${visible ? "非表示" : "表示"}">${visible ? "◉" : "○"}</button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? "checked" : ""} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1} ${group}<small>${detail}</small></span></div>`;
+                  })
+                  .join("")
             : '<div class="emptyList">まだオブジェクトがありません</div>';
         syncGroupActions();
     }
@@ -565,8 +565,8 @@
             kind === "min"
                 ? Math.min(...units.map((x) => x.b.lo[axis]))
                 : kind === "max"
-                    ? Math.max(...units.map((x) => x.b.hi[axis]))
-                    : (Math.min(...units.map((x) => x.b.lo[axis])) + Math.max(...units.map((x) => x.b.hi[axis]))) / 2;
+                  ? Math.max(...units.map((x) => x.b.hi[axis]))
+                  : (Math.min(...units.map((x) => x.b.lo[axis])) + Math.max(...units.map((x) => x.b.hi[axis]))) / 2;
         HU.push(S);
         RD = [];
         units.forEach(({ objects, b }) => {
@@ -648,13 +648,13 @@
         let hit = null;
         try {
             hit = pickOb(pos({ clientX, clientY }));
-        } catch (e) { }
+        } catch (e) {}
         if (hit) setSelection(hit, false);
         else {
             const curIndex = Math.max(
-                -1,
-                objects.findIndex((o) => o.id === sel),
-            ),
+                    -1,
+                    objects.findIndex((o) => o.id === sel),
+                ),
                 dir = (Math.abs(dx) >= Math.abs(dy) ? dx : dy) < 0 ? 1 : -1;
             setSelection(objects[(curIndex + dir + objects.length) % objects.length].id, false);
         }
@@ -708,6 +708,10 @@
     unpack = function (d) {
         baseUnpack(d);
         migrateLineArt();
+        // 旧保存データの接続建物は親の座標系を補正した後に一度だけ再生成する。
+        // 保存済みの線をそのまま残すと、補正前のテント位置が画面に残るため。
+        if (S.some((s) => s.ob?.linkedAsset === "buildingAwning" || s.ob?.linkedAsset === "buildingSign"))
+            regenObjects();
         el("p3").checked = true;
         el("p3").disabled = true;
         render();
@@ -718,18 +722,38 @@
             P.floorAlpha = 0.24;
             localStorage.setItem("city-grid-v4-floor", "1");
         }
-    } catch (e) { }
+    } catch (e) {}
 
     let signEditSession = false,
         buildingEditSession = false;
+    // テント／看板の子を選択した場合も、親建物の開口設定を表示する。
+    // 親IDが無い通常建物は従来どおり通常の建物パネルへ戻す。
+    function linkedBuildingParent(o = sel && obOf(sel)) {
+        const candidate = o?.linkedRole === "child" && o.attachment?.parentId ? obOf(o.attachment.parentId) : o;
+        return candidate &&
+            candidate.type === "asset" &&
+            candidate.asset === "building" &&
+            ["buildingAwning", "buildingSign"].includes(candidate.linkedAsset)
+            ? candidate
+            : null;
+    }
+    function buildingPanelObject(o = sel && obOf(sel)) {
+        return linkedBuildingParent(o) || (o?.type === "asset" && o.asset === "building" ? o : null);
+    }
     // 建物・階層建物・開口設定の入力欄を、選択中オブジェクトへ同期する。
     function syncBuildingPanel() {
         const panel = el("buildingP"),
-            o = sel && obOf(sel),
-            isBuilding = !!(o && o.type === "asset" && o.asset === "building");
+            selected = sel && obOf(sel),
+            o = buildingPanelObject(selected),
+            linked = !!linkedBuildingParent(selected),
+            isBuilding = !!o;
         if (!panel) return;
         panel.style.display = isBuilding ? "" : "none";
+        const openingRow = el("linkedBuildingOpeningRow"),
+            openingCheck = el("linkedBuildingOpening");
+        if (openingRow) openingRow.style.display = linked ? "" : "none";
         if (!isBuilding) return;
+        if (openingCheck && linked) openingCheck.checked = o.openingEnabled !== false;
         const g = buildingGeometry(o);
         [
             ["ov_openingW", g.openingW],
@@ -739,6 +763,21 @@
             if (n && document.activeElement !== n) n.value = Number(v).toFixed(3);
         });
     }
+    function applyLinkedBuildingOpening(value) {
+        const o = linkedBuildingParent();
+        if (!o) return;
+        if (!buildingEditSession) {
+            HU.push(S);
+            RD = [];
+            buildingEditSession = true;
+        }
+        setOb(o.id, { openingEnabled: !!value });
+        buildingEditSession = false;
+        render();
+    }
+    const linkedBuildingOpening = el("linkedBuildingOpening");
+    if (linkedBuildingOpening)
+        linkedBuildingOpening.onchange = () => applyLinkedBuildingOpening(linkedBuildingOpening.checked);
     let stackedEditSession = false;
     function stackFloorHeight(o) {
         const floors = Array.isArray(o?.floors) ? o.floors : [];
@@ -949,14 +988,14 @@
                 name === "openingEnabled"
                     ? !!value
                     : name === "openingW"
-                        ? clamp(Number(value) || g.openingW, 0.1, Math.max(0.1, g.w - 0.1))
-                        : name === "openingH"
-                            ? clamp(Number(value) || g.openingH, 0.1, Math.max(0.1, g.h - g.rimHeight - 0.01))
-                            : clamp(
-                                Number.isFinite(Number(value)) ? Number(value) : g.openingBack,
-                                -g.d * 0.5 + 0.025,
-                                g.d * 0.5 - 0.025,
-                            );
+                      ? clamp(Number(value) || g.openingW, 0.1, Math.max(0.1, g.w - 0.1))
+                      : name === "openingH"
+                        ? clamp(Number(value) || g.openingH, 0.1, Math.max(0.1, g.h - g.rimHeight - 0.01))
+                        : clamp(
+                              Number.isFinite(Number(value)) ? Number(value) : g.openingBack,
+                              -g.d * 0.5 + 0.025,
+                              g.d * 0.5 - 0.025,
+                          );
         setOb(o.id, {
             openingEnabled: name === "openingEnabled" ? next : stackedOpeningEnabled(o),
             [name]: next,
@@ -966,8 +1005,8 @@
                 name === "openingBack"
                     ? next
                     : Number.isFinite(Number(o.openingBack))
-                        ? Number(o.openingBack)
-                        : g.openingBack,
+                      ? Number(o.openingBack)
+                      : g.openingBack,
         });
         render();
     }
@@ -1073,7 +1112,7 @@
     if (stackCopy) stackCopy.onclick = copyFirstFloorToAll;
 
     function applyBuildingProp(name, v) {
-        const o = sel && obOf(sel);
+        const o = buildingPanelObject();
         if (!o || o.type !== "asset" || o.asset !== "building" || !Number.isFinite(v)) return;
         if (!buildingEditSession) {
             HU.push(S);
@@ -1084,7 +1123,7 @@
             max = name === "openingW" ? g.w - 0.1 : g.h - 0.1,
             patch = {};
         patch[name] = clamp(v, 0.1, Math.max(0.1, max));
-        setOb(sel, patch);
+        setOb(o.id, patch);
         render();
     }
     [
@@ -1376,11 +1415,28 @@
         viewKeys.forEach((k) => (v[k] = P[k]));
         return v;
     };
+    // 接続テント／看板を選択したまま正面・横・上へ切り替えた場合は、
+    // 3方向の寸法・開口ハンドルを持つ親建物へ編集対象を移す。
+    // 子アセットは3D視点やシーン一覧から引き続き個別編集できる。
+    function focusLinkedBuildingParentForOrtho() {
+        const selected = sel && obOf(sel),
+            parent =
+                selected?.linkedRole === "child" && selected.attachment?.parentId
+                    ? obOf(selected.attachment.parentId)
+                    : null;
+        if (
+            parent?.type === "asset" &&
+            parent.asset === "building" &&
+            ["buildingAwning", "buildingSign"].includes(parent.linkedAsset)
+        )
+            setSelection(parent.id, false);
+    }
     function applyStandardView(kind) {
         standardApplying = true;
         // 正面・横・上は表示用の正投影だけを切り替える。
         // yaw／pitch／高さ／位置／レンズ／魚眼画角／ロールは一切変更しない。
         orthView = kind === "front" || kind === "side" || kind === "top" ? kind : null;
+        if (orthView) focusLinkedBuildingParentForOrtho();
         standardApplying = false;
         sync();
         // 0=3Dは視点プリセットだけを切り替える。編集ツールを選択中なら、
@@ -1397,6 +1453,7 @@
         // レンズ、カメラ位置、高さ、回転、傾き、ロールは変更しない。
         standardApplying = true;
         orthView = kind === "side" ? "side" : kind === "front" ? "front" : "top";
+        focusLinkedBuildingParentForOrtho();
         standardApplying = false;
         sync();
         setMode("draw");
@@ -1452,7 +1509,7 @@
                     Number.isFinite(b.hi[2])
                 )
                     bounds.push(b);
-            } catch (e) { }
+            } catch (e) {}
         });
         const fyaw = Number(P.yaw || 0) * DG,
             fpitch = Number(P.pitch || 0) * DG,
@@ -1596,6 +1653,18 @@
         floorTouchMax = 0,
         floorTouchMoved = false,
         floorTouchPan = null;
+    const FLOOR_TOUCH_MIN_SCALE = 12,
+        FLOOR_TOUCH_MAX_SCALE = 640;
+
+    function floorTouchCanvasPoint(x, y) {
+        const r = cv.getBoundingClientRect(),
+            sx = r.width > 0 ? W / r.width : 1,
+            sy = r.height > 0 ? H / r.height : 1;
+        return { x: (x - r.left) * sx, y: (y - r.top) * sy };
+    }
+    function floorTouchDistance(a, b) {
+        return Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+    }
     function floorTouchDown(e) {
         if (e.pointerType !== "touch") return false;
         if (!floorTouchIds.size) {
@@ -1628,12 +1697,29 @@
                 mx = pts.reduce((a, t) => a + t.x, 0) / pts.length,
                 my = pts.reduce((a, t) => a + t.y, 0) / pts.length;
             if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
-            floorTouchPan = { mx0: mx, my0: my, center0: [...(window.cityFloorPlanCenter || [0, 0])] };
+            const center0 = [...(window.cityFloorPlanCenter || [0, 0])],
+                scale0 = clamp(
+                    Number(window.cityFloorPlanScale) || Number(orthScale()) || 1,
+                    FLOOR_TOUCH_MIN_SCALE,
+                    FLOOR_TOUCH_MAX_SCALE,
+                ),
+                mid0 = floorTouchCanvasPoint(mx, my),
+                anchor0 = [center0[0] + (mid0.x - W / 2) / scale0, center0[1] - (mid0.y - H / 2) / scale0];
+            // 2本指の中心を基準に、同じワールド位置が指の間に残るようにする。
+            // これでピンチ中の表示移動とズームが自然につながる。
+            floorTouchPan = {
+                mx0: mx,
+                my0: my,
+                center0,
+                anchor0,
+                dist0: floorTouchDistance(pts[0], pts[1]),
+                scale0,
+            };
             e.preventDefault();
             e.stopImmediatePropagation();
             try {
                 cv.setPointerCapture(e.pointerId);
-            } catch (err) { }
+            } catch (err) {}
             return true;
         }
         return false;
@@ -1647,11 +1733,21 @@
         if (floorTouchMax >= 2 && floorTouchPan) {
             const pts = [...floorTouchIds.values()],
                 mx = pts.reduce((a, t) => a + t.x, 0) / pts.length,
-                my = pts.reduce((a, t) => a + t.y, 0) / pts.length;
-            const sc = Math.max(1, Number(orthScale()) || 1),
-                dx = mx - floorTouchPan.mx0,
-                dy = my - floorTouchPan.my0;
-            window.cityFloorPlanCenter = [floorTouchPan.center0[0] - dx / sc, floorTouchPan.center0[1] + dy / sc];
+                my = pts.reduce((a, t) => a + t.y, 0) / pts.length,
+                dist = floorTouchDistance(pts[0], pts[1]),
+                scale = clamp(
+                    floorTouchPan.scale0 * (dist / floorTouchPan.dist0),
+                    FLOOR_TOUCH_MIN_SCALE,
+                    FLOOR_TOUCH_MAX_SCALE,
+                ),
+                mid = floorTouchCanvasPoint(mx, my);
+            // ピンチアウト＝scaleを大きくしてズームイン、ピンチイン＝ズームアウト。
+            // 初期の指間にあったワールド座標を現在の指の中心へ固定する。
+            window.cityFloorPlanScale = scale;
+            window.cityFloorPlanCenter = [
+                floorTouchPan.anchor0[0] - (mid.x - W / 2) / scale,
+                floorTouchPan.anchor0[1] + (mid.y - H / 2) / scale,
+            ];
             floorTouchMoved = true;
             render();
         }
@@ -1693,7 +1789,7 @@
     const floorPlanDock = document.createElement("div");
     floorPlanDock.id = "floorPlanDock";
     floorPlanDock.innerHTML =
-        '<div class="floorPlanDockInner"><div class="floorPlanDockHeader"><div id="floorPlanDockStatus" class="floorPlanDockStatus">オブジェクトを選択すると、移動・回転・サイズ変更ができます。<small>カメラ本体：位置　／　先端の丸：向き</small></div><div class="floorHistoryButtons"><button type="button" id="floorUndo" class="floorHistoryButton" title="間取りの操作を元に戻す">↶ 元に戻す</button><button type="button" id="floorRedo" class="floorHistoryButton" title="間取りの操作をやり直す">↷ やり直す</button></div><button type="button" class="dockCollapse" data-floor-dock-action="collapse" title="操作バーを折りたたむ">−</button></div><button type="button" data-floor-dock-action="left">↺ 15°</button><button type="button" data-floor-dock-action="right">↻ 15°</button><button type="button" data-floor-dock-action="rot30">30°</button><button type="button" data-floor-dock-action="rot45">45°</button><button type="button" data-floor-dock-action="90">90°回す</button><label class="floorLensTools">レンズ <input id="floorLensInput" type="number" min="14" max="200" step="1"> mm</label><div class="floorPlanPanTools"><span>表示移動</span><button type="button" data-floor-dock-action="pan-up" title="表示を上へ">↑</button><button type="button" data-floor-dock-action="pan-down" title="表示を下へ">↓</button><button type="button" data-floor-dock-action="pan-left" title="表示を左へ">←</button><button type="button" data-floor-dock-action="pan-right" title="表示を右へ">→</button></div><button type="button" data-floor-dock-action="assets">＋アセット</button><button type="button" data-floor-dock-action="delete">片付ける</button><span class="dockHint">中／右ドラッグ：表示移動　・　表示移動ボタン／Alt＋矢印／WASD：キャンバス移動　・　磁石ON：家具移動と幅／奥行の面編集をエッジへ吸着　・　2本指タップ：元に戻す／3本指タップ：やり直す</span></div>';
+        '<div class="floorPlanDockInner"><div class="floorPlanDockHeader"><div id="floorPlanDockStatus" class="floorPlanDockStatus">オブジェクトを選択すると、移動・回転・サイズ変更ができます。<small>カメラ本体：位置　／　先端の丸：向き</small></div><div class="floorHistoryButtons"><button type="button" id="floorUndo" class="floorHistoryButton" title="間取りの操作を元に戻す">↶ 元に戻す</button><button type="button" id="floorRedo" class="floorHistoryButton" title="間取りの操作をやり直す">↷ やり直す</button></div><button type="button" class="dockCollapse" data-floor-dock-action="collapse" title="操作バーを折りたたむ">−</button></div><button type="button" data-floor-dock-action="left">↺ 15°</button><button type="button" data-floor-dock-action="right">↻ 15°</button><button type="button" data-floor-dock-action="rot30">30°</button><button type="button" data-floor-dock-action="rot45">45°</button><button type="button" data-floor-dock-action="90">90°回す</button><label class="floorLensTools">レンズ <input id="floorLensInput" type="number" min="14" max="200" step="1"> mm</label><div class="floorPlanPanTools"><span>表示移動</span><button type="button" data-floor-dock-action="pan-up" title="表示を上へ">↑</button><button type="button" data-floor-dock-action="pan-down" title="表示を下へ">↓</button><button type="button" data-floor-dock-action="pan-left" title="表示を左へ">←</button><button type="button" data-floor-dock-action="pan-right" title="表示を右へ">→</button></div><button type="button" data-floor-dock-action="assets">＋アセット</button><button type="button" data-floor-dock-action="delete">片付ける</button><span class="dockHint">中／右ドラッグ：表示移動　・　表示移動ボタン／Alt＋矢印／WASD：キャンバス移動　・　2本指ピンチ：ズームイン／ズームアウト（正面・横・上のまま）　・　磁石ON：家具移動と幅／奥行の面編集をエッジへ吸着　・　2本指タップ：元に戻す／3本指タップ：やり直す</span></div>';
     stage.appendChild(floorPlanDock);
     // アセット棚を開いたときは、間取り操作バーを棚の上へ逃がす。棚と操作バーを重ねないためのレイアウト調整。
     function syncFloorPlanDockLayout() {
@@ -1791,10 +1887,10 @@
             lensWorld =
                 orthView === "top"
                     ? [
-                        P.cx - Math.sin(yaw - half) * FLOOR_CAMERA_RAY * horiz,
-                        cameraY,
-                        P.cz + Math.cos(yaw - half) * FLOOR_CAMERA_RAY * horiz,
-                    ]
+                          P.cx - Math.sin(yaw - half) * FLOOR_CAMERA_RAY * horiz,
+                          cameraY,
+                          P.cz + Math.cos(yaw - half) * FLOOR_CAMERA_RAY * horiz,
+                      ]
                     : null;
         out.camera = {
             body,
@@ -2146,6 +2242,7 @@
         };
     }
     function floorBuildingInnerHandles(o) {
+        if (o?.openingEnabled === false) return [];
         const g = buildingGeometry(o),
             handles = [],
             near = buildingFaceDepth(o),
@@ -2182,8 +2279,8 @@
                     (kind === "buildingOpeningW"
                         ? Math.max(0.1, g.w - 0.1)
                         : kind === "buildingBackFace"
-                            ? 20
-                            : Math.max(0.1, g.h - 0.1)),
+                          ? 20
+                          : Math.max(0.1, g.h - 0.1)),
                 factor,
                 side,
                 inner: true,
@@ -2298,8 +2395,8 @@
                 param === "ra"
                     ? Math.abs(Number(o.ra) || 0) * 2
                     : param === "rb"
-                        ? Math.abs(Number(o.rb) || 0) * 2
-                        : Math.max(0, Number(o.h) || 0),
+                      ? Math.abs(Number(o.rb) || 0) * 2
+                      : Math.max(0, Number(o.h) || 0),
             delta = (v - old) / 2,
             patch = {};
         if (param === "ra") {
@@ -2427,7 +2524,10 @@
             zc = (z0 + z1) / 2,
             center = scrW(L2W(o, 0, 0, zc)),
             handles = [],
-            panel = o.type === "asset" && o.asset === "building" ? floorBuildingBackPanel(o) : null,
+            panel =
+                o.type === "asset" && o.asset === "building" && o.openingEnabled !== false
+                    ? floorBuildingBackPanel(o)
+                    : null,
             // 積層建物とパスパイプは、単一のra/rb/hではなく floors/path[] を
             // 持つため、間取り用の汎用ハンドルを出すと別の古い寸法を編集してしまう。
             // 専用ギズモを同じ座標へ描き、pointerdownも通常のギズモ経路へ渡す。
@@ -2575,17 +2675,17 @@
         const defs =
             orthView === "top"
                 ? [
-                    { vec: [1, 0, 0], name: "X", col: "#e8743d" },
-                    { vec: [0, 0, 1], name: "Z", col: "#2fb5a5" },
-                    { vec: [0, 1, 0], name: "Y", col: "#4a7be8", screenDir: { x: 0, y: -1 } },
-                ]
+                      { vec: [1, 0, 0], name: "X", col: "#e8743d" },
+                      { vec: [0, 0, 1], name: "Z", col: "#2fb5a5" },
+                      { vec: [0, 1, 0], name: "Y", col: "#4a7be8", screenDir: { x: 0, y: -1 } },
+                  ]
                 : orthView === "side"
-                    ? [
+                  ? [
                         { vec: [0, 0, 1], name: "Z", col: "#2fb5a5" },
                         { vec: [0, 1, 0], name: "Y", col: "#4a7be8" },
                         { vec: [1, 0, 0], name: "X", col: "#e8743d", screenDir: { x: 1, y: 0 } },
                     ]
-                    : [
+                  : [
                         { vec: [1, 0, 0], name: "X", col: "#e8743d" },
                         { vec: [0, 1, 0], name: "Y", col: "#4a7be8" },
                         { vec: [0, 0, 1], name: "Z", col: "#2fb5a5", screenDir: { x: 1, y: 0 } },
@@ -2764,15 +2864,15 @@
                     o.type === "asset" && o.asset === "sign"
                         ? [L2W(o, -o.ra, 0, z0), L2W(o, o.ra, 0, z0), L2W(o, o.ra, 0, z1), L2W(o, -o.ra, 0, z1)]
                         : (() => {
-                            const b = obBounds(o),
-                                z = (b.lo[2] + b.hi[2]) / 2;
-                            return [
-                                [b.lo[0], b.lo[1], z],
-                                [b.hi[0], b.lo[1], z],
-                                [b.hi[0], b.hi[1], z],
-                                [b.lo[0], b.hi[1], z],
-                            ];
-                        })();
+                              const b = obBounds(o),
+                                  z = (b.lo[2] + b.hi[2]) / 2;
+                              return [
+                                  [b.lo[0], b.lo[1], z],
+                                  [b.hi[0], b.lo[1], z],
+                                  [b.hi[0], b.hi[1], z],
+                                  [b.lo[0], b.hi[1], z],
+                              ];
+                          })();
                 c.strokeStyle = "rgba(255,159,104,.75)";
                 c.lineWidth = 1.2 / Z;
                 c.beginPath();
@@ -2891,8 +2991,8 @@
                 orthView === "side"
                     ? "真横：カメラ本体＝位置・高さ　／　先端の丸＝上下の傾き"
                     : orthView === "front"
-                        ? "正面：カメラ本体＝X位置・高さ　／　先端の丸＝上下の傾き"
-                        : "カメラ本体：位置　／　先端の丸＝向き";
+                      ? "正面：カメラ本体＝X位置・高さ　／　先端の丸＝上下の傾き"
+                      : "カメラ本体：位置　／　先端の丸＝向き";
             dockStatus.innerHTML = `${text}<small>幅・奥行ハンドルは反対側の面を固定　／　${cameraHint}</small>`;
         }
         [
@@ -3231,7 +3331,7 @@
         };
         try {
             cv.setPointerCapture(e.pointerId);
-        } catch (err) { }
+        } catch (err) {}
     }
     function beginFloorBoxPending(e, p) {
         if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
@@ -3244,7 +3344,7 @@
         });
         try {
             cv.setPointerCapture(e.pointerId);
-        } catch (err) { }
+        } catch (err) {}
     }
     cv.addEventListener(
         "contextmenu",
@@ -3289,10 +3389,10 @@
                     signBounds = wallPlaneSelection ? obBounds(activeFloorObject) : null,
                     signCenter = signBounds
                         ? scrW([
-                            (signBounds.lo[0] + signBounds.hi[0]) / 2,
-                            (signBounds.lo[1] + signBounds.hi[1]) / 2,
-                            (signBounds.lo[2] + signBounds.hi[2]) / 2,
-                        ])
+                              (signBounds.lo[0] + signBounds.hi[0]) / 2,
+                              (signBounds.lo[1] + signBounds.hi[1]) / 2,
+                              (signBounds.lo[2] + signBounds.hi[2]) / 2,
+                          ])
                         : null,
                     signBodyCenterHit = !!signCenter && Math.hypot(signCenter.x - p.x, signCenter.y - p.y) <= 10 / Z,
                     signHandleClose =
@@ -3310,7 +3410,7 @@
                     beginGizmo(special, p);
                     try {
                         cv.setPointerCapture(e.pointerId);
-                    } catch (err) { }
+                    } catch (err) {}
                     syncSel();
                     render();
                     return;
@@ -3337,7 +3437,7 @@
                     };
                     try {
                         cv.setPointerCapture(e.pointerId);
-                    } catch (err) { }
+                    } catch (err) {}
                     return;
                 }
             }
@@ -3358,7 +3458,7 @@
                 };
                 try {
                     cv.setPointerCapture(e.pointerId);
-                } catch (err) { }
+                } catch (err) {}
                 return;
             }
             const moveHandle = floorMoveHandleAt(p),
@@ -3385,7 +3485,7 @@
                 };
                 try {
                     cv.setPointerCapture(e.pointerId);
-                } catch (err) { }
+                } catch (err) {}
                 return;
             }
             if (orthView === "side" || orthView === "front") {
@@ -3395,14 +3495,14 @@
                 if (
                     verticalHandles.camera &&
                     Math.hypot(verticalHandles.camera.sTarget.x - p.x, verticalHandles.camera.sTarget.y - p.y) <
-                    verticalLim
+                        verticalLim
                 ) {
                     e.preventDefault();
                     e.stopImmediatePropagation();
                     floorPlanDrag = { kind: "aimSide", axis: verticalAxis, pointerId: e.pointerId };
                     try {
                         cv.setPointerCapture(e.pointerId);
-                    } catch (err) { }
+                    } catch (err) {}
                     return;
                 }
                 if (
@@ -3423,7 +3523,7 @@
                     };
                     try {
                         cv.setPointerCapture(e.pointerId);
-                    } catch (err) { }
+                    } catch (err) {}
                     return;
                 }
             }
@@ -3468,7 +3568,7 @@
                     };
                     try {
                         cv.setPointerCapture(e.pointerId);
-                    } catch (err) { }
+                    } catch (err) {}
                     syncSel();
                     render();
                 } else if (e.shiftKey) beginFloorPan(e, p);
@@ -3493,7 +3593,7 @@
                 };
                 try {
                     cv.setPointerCapture(e.pointerId);
-                } catch (err) { }
+                } catch (err) {}
                 return;
             }
             if (h.camera && Math.hypot(h.camera.sTarget.x - p.x, h.camera.sTarget.y - p.y) < lim) {
@@ -3502,7 +3602,7 @@
                 floorPlanDrag = { kind: "aim", pointerId: e.pointerId };
                 try {
                     cv.setPointerCapture(e.pointerId);
-                } catch (err) { }
+                } catch (err) {}
                 return;
             }
             if (h.camera && Math.hypot(h.camera.sBody.x - p.x, h.camera.sBody.y - p.y) < lim) {
@@ -3513,7 +3613,7 @@
                 floorPlanDrag = { kind: "camera", pointerId: e.pointerId, dx: P.cx - w.x, dz: P.cz - w.z };
                 try {
                     cv.setPointerCapture(e.pointerId);
-                } catch (err) { }
+                } catch (err) {}
                 return;
             }
             if (
@@ -3533,7 +3633,7 @@
                 };
                 try {
                     cv.setPointerCapture(e.pointerId);
-                } catch (err) { }
+                } catch (err) {}
                 return;
             }
             const w = floorPlanWorldAt(p),
@@ -3575,7 +3675,7 @@
                 };
                 try {
                     cv.setPointerCapture(e.pointerId);
-                } catch (err) { }
+                } catch (err) {}
                 syncSel();
                 render();
             } else beginFloorBoxPending(e, p);
@@ -3628,15 +3728,15 @@
                     ? h.kind === "buildingOpeningH"
                         ? { openingH: value }
                         : h.kind === "buildingBackFace"
-                            ? { openingBack: value }
-                            : h.kind === "awningEdgeZ"
-                                ? { awningEdgeZ: value, awningFrontBottom: h.frontBottom, awningEdgeEdited: true }
-                                : h.kind === "awningEdgeY"
-                                    ? { awningEdgeY: value, awningEdgeEdited: true }
-                                    : { openingW: value }
+                          ? { openingBack: value }
+                          : h.kind === "awningEdgeZ"
+                            ? { awningEdgeZ: value, awningFrontBottom: h.frontBottom, awningEdgeEdited: true }
+                            : h.kind === "awningEdgeY"
+                              ? { awningEdgeY: value, awningEdgeEdited: true }
+                              : { openingW: value }
                     : h.param
-                        ? floorWallDimensionPatch(o, h.param, value, h.side || 1)
-                        : floorResizeSnap(o, floorDimensionPatch(o, h.kind, value, h.side || 1), h, value);
+                      ? floorWallDimensionPatch(o, h.param, value, h.side || 1)
+                      : floorResizeSnap(o, floorDimensionPatch(o, h.kind, value, h.side || 1), h, value);
                 if (patch) {
                     if (!floorPlanDrag.started) {
                         HU.push(S);
@@ -3737,15 +3837,15 @@
                     const delta =
                         floorPlanDrag.axis === "front"
                             ? [
-                                w.x + floorPlanDrag.dx - floorPlanDrag.base0[0],
-                                w.y + floorPlanDrag.dy - floorPlanDrag.base0[1],
-                                0,
-                            ]
+                                  w.x + floorPlanDrag.dx - floorPlanDrag.base0[0],
+                                  w.y + floorPlanDrag.dy - floorPlanDrag.base0[1],
+                                  0,
+                              ]
                             : [
-                                0,
-                                w.y + floorPlanDrag.dy - floorPlanDrag.base0[1],
-                                w.z + floorPlanDrag.dz - floorPlanDrag.base0[2],
-                            ];
+                                  0,
+                                  w.y + floorPlanDrag.dy - floorPlanDrag.base0[1],
+                                  w.z + floorPlanDrag.dz - floorPlanDrag.base0[2],
+                              ];
                     const axes = floorPlanDrag.axis === "front" ? [0, 1] : [1, 2];
                     const q = $("snp")?.checked
                         ? snapShift(floorPlanDrag.bb, delta, axes, floorPlanDrag.targets, floorPlanDrag.tau)
@@ -4205,11 +4305,11 @@
     // ===== Common lens buttons =====
     quick.querySelectorAll("[data-lens-preset]").forEach(
         (b) =>
-        (b.onclick = () => {
-            setP("lens", Number(b.dataset.lensPreset));
-            sync();
-            render();
-        }),
+            (b.onclick = () => {
+                setP("lens", Number(b.dataset.lensPreset));
+                sync();
+                render();
+            }),
     );
     quick.querySelectorAll("[data-preset]").forEach((b) => (b.onclick = () => preset(b.dataset.preset)));
     el("applyHuman").onclick = () => {
@@ -4294,7 +4394,7 @@
         v2Seen = !!localStorage.getItem("city-grid-v2-seen");
         hasAuto = !!localStorage.getItem("pgrid-autosave-v1");
         sidePref = localStorage.getItem("pgrid-side") || "";
-    } catch (e) { }
+    } catch (e) {}
     if (!v2Seen && !hasAuto) {
         el("bgw").checked = true;
         el("pc").value = "#222222";
@@ -4302,25 +4402,25 @@
         el("ch").value = P.ch;
         try {
             localStorage.setItem("city-grid-v2-seen", "1");
-        } catch (e) { }
+        } catch (e) {}
     }
     // Existing sessions may already have the dark first-run flag. Migrate once to the white drawing background.
     let whiteMigrated = false;
     try {
         whiteMigrated = !!localStorage.getItem("city-grid-v3-white");
-    } catch (e) { }
+    } catch (e) {}
     if (!whiteMigrated) {
         el("bgw").checked = true;
         el("pc").value = "#222222";
         try {
             localStorage.setItem("city-grid-v3-white", "1");
-        } catch (e) { }
+        } catch (e) {}
     }
     // 旧版の初期値2.5pxを、今回の標準1.5pxへ一度だけ移行する。
     let lineWidthMigrated = false;
     try {
         lineWidthMigrated = !!localStorage.getItem("city-grid-v6-line-width");
-    } catch (e) { }
+    } catch (e) {}
     if (!lineWidthMigrated) {
         if (Math.abs(Number(P.pw) - 2.5) < 1e-6) P.pw = MASTER_W;
         const pwEl = el("pw");
@@ -4328,18 +4428,18 @@
         sync();
         try {
             localStorage.setItem("city-grid-v6-line-width", "1");
-        } catch (e) { }
+        } catch (e) {}
     }
     let lensDefaultMigrated = false;
     try {
         lensDefaultMigrated = !!localStorage.getItem("city-grid-v7-lens-50");
-    } catch (e) { }
+    } catch (e) {}
     if (!lensDefaultMigrated) {
         if (Math.abs(Number(P.lens) - 35) < 1e-6) P.lens = 50;
         sync();
         try {
             localStorage.setItem("city-grid-v7-lens-50", "1");
-        } catch (e) { }
+        } catch (e) {}
     }
     if (innerWidth <= 900 && !sidePref) setSide(true);
     window.cityGridStudioBridge = {

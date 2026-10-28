@@ -147,6 +147,7 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>絵枠の高さ</span><input type=number class=nv id=ov_faceH step=0.01 style="width:100px"><span class=un>m</span></label>
 </div>
 <div id=buildingP style="display:none"><h3>建物の開口</h3>
+<label id=linkedBuildingOpeningRow style="display:none"><input type=checkbox id=linkedBuildingOpening> 開口をつける</label>
 <label><span>開口の幅</span><input type=number class=nv id=ov_openingW step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><span>開口の高さ</span><input type=number class=nv id=ov_openingH step=0.05 style="width:100px"><span class=un>m</span></label>
 <div class="note">建物の外形は軸・回転に加え、3Dの白い外側面ハンドルでも幅・奥行き・高さを編集できます。緑のハンドルで開口の幅・高さ、オレンジの「奥の面」で閉じた内壁の奥行きを編集できます。</div>
@@ -238,7 +239,7 @@ ${R("pa", "写真の濃さ", 0, 1, 0.05)}
             localStorage.setItem("city-grid-ui-compact-v1", "1");
         }
         st = JSON.parse(localStorage.getItem("pgrid-sec") || "{}");
-    } catch (e) { }
+    } catch (e) {}
     side.innerHTML =
         '<div class="secbar"><button id=secC>すべて閉じる</button><button id=secO>すべて開く</button></div>';
     kids.forEach((k) => {
@@ -254,7 +255,7 @@ ${R("pa", "写真の濃さ", 0, 1, 0.05)}
                 st[name] = d.open;
                 try {
                     localStorage.setItem("pgrid-sec", JSON.stringify(st));
-                } catch (e) { }
+                } catch (e) {}
             };
             det = d;
         } else if (det) det.appendChild(k);
@@ -330,10 +331,10 @@ for (const k in P) {
 }
 document.querySelectorAll("[data-i]").forEach(
     (el) =>
-    (el.onchange = () => {
-        show[el.dataset.i] = el.checked;
-        render();
-    }),
+        (el.onchange = () => {
+            show[el.dataset.i] = el.checked;
+            render();
+        }),
 );
 ["gon", "hzl", "bgw", "snap", "bin", "gg"].forEach((k) => ($(k).onchange = () => render()));
 $("ar").onchange = () => {
@@ -920,8 +921,8 @@ function syncAttachedPart(o, parentOverride = null) {
         baseZ = Number.isFinite(Number(a.baseRatio))
             ? parentH * clamp(Number(a.baseRatio), 0.02, 0.98)
             : Number.isFinite(Number(a.baseZ))
-                ? Number(a.baseZ)
-                : parentH * 0.5,
+              ? Number(a.baseZ)
+              : parentH * 0.5,
         offsetZ = Number(a.offsetZ) || 0,
         z = clamp(baseZ + offsetZ, 0.02, Math.max(0.02, parentH - 0.02));
     // 看板の直方体・テントの奥側の面を、親の開口側の面へぴったり合わせる。
@@ -1108,6 +1109,31 @@ function fixOb(o) {
             rb = o.rb * f;
         n = { ...o, ra, rb, h: (Math.min(ra, rb) * 2 * (o.hr || 100)) / 100, sc: undefined, hr: undefined };
     }
+    // 旧保存データの接続建物も、現在の建物アセットとY面基準へ移行する。
+    // 以前はテント付き建物の親がrectのまま保存され、開口設定と接着計算を共有できなかった。
+    if (n?.linkedAsset === "buildingAwning" && (n.type === "rect" || n.asset === "rect")) {
+        n = {
+            ...n,
+            type: "asset",
+            asset: "building",
+            assetId: "building-awning",
+            assetName: "テント付き建物",
+            openingEnabled: false,
+            openingW: Number(n.openingW) || Math.abs(Number(n.ra) || 2) * 2 * 0.56,
+            openingH: Number(n.openingH) || Math.max(0.1, Number(n.h) || 3.6) * 0.66,
+        };
+    } else if (n?.linkedAsset === "buildingSign" && n.asset === "building" && n.openingEnabled == null) {
+        n = { ...n, openingEnabled: true };
+    }
+    if (
+        n?.linkedRole === "parent" &&
+        ["buildingAwning", "buildingSign"].includes(n.linkedAsset) &&
+        Number(n.k) !== 1 &&
+        PL[n.k]
+    ) {
+        const center = L2W(n, 0, 0, 0);
+        n = { ...n, k: 1, d: -1, ca: center[0], cb: center[2], lift: 0, off: [0, 0, 0] };
+    }
     if (n?.asset === "awning" && !n.awningEdgeEdited) {
         const hh = Math.max(0.1, Number(n.h) || 1),
             old = Number(n.awningEdgeZ);
@@ -1140,23 +1166,23 @@ function syncSel() {
         P3 = compound ? [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2] : L2W(o, 0, 0, 0);
     const values = compound
         ? [
-            ["rot", Number(o.compoundRot) || 0],
-            ["w", b.hi[0] - b.lo[0]],
-            ["dp", b.hi[2] - b.lo[2]],
-            ["h", b.hi[1] - b.lo[1]],
-            ["px", P3[0]],
-            ["py", P3[1] + 1],
-            ["pz", P3[2]],
-        ]
+              ["rot", Number(o.compoundRot) || 0],
+              ["w", b.hi[0] - b.lo[0]],
+              ["dp", b.hi[2] - b.lo[2]],
+              ["h", b.hi[1] - b.lo[1]],
+              ["px", P3[0]],
+              ["py", P3[1] + 1],
+              ["pz", P3[2]],
+          ]
         : [
-            ["rot", o.rot],
-            ["w", 2 * o.ra],
-            ["dp", 2 * o.rb],
-            ["h", o.h],
-            ["px", P3[0]],
-            ["py", P3[1] + 1],
-            ["pz", P3[2]],
-        ];
+              ["rot", o.rot],
+              ["w", 2 * o.ra],
+              ["dp", 2 * o.rb],
+              ["h", o.h],
+              ["px", P3[0]],
+              ["py", P3[1] + 1],
+              ["pz", P3[2]],
+          ];
     values.forEach(([k, v]) => {
         const n = $("ov_" + k),
             r = $("or_" + k);
