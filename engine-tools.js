@@ -61,6 +61,21 @@ function moveBy(o, vec, keepAttachedOffset = false) {
     const v = [Number(vec?.[0]) || 0, Number(vec?.[1]) || 0, Number(vec?.[2]) || 0];
     if (o?.type === "compound")
         return { tx: (Number(o.tx) || 0) + v[0], ty: (Number(o.ty) || 0) + v[1], tz: (Number(o.tz) || 0) + v[2] };
+    if (o?.attachment?.wallSideSign) {
+        // 横壁看板は上下に加えて、壁に沿う前後方向（親のローカルY）へ動かせる。
+        // 外向きの接着距離は取付金具の長さで管理するため、ここでは壁面上だけを移動する。
+        const basis = o.wallSideBasis || syncAttachedPart(o).wallSideBasis,
+            alongWall = basis?.n ? V.dot(v, basis.n) : 0,
+            up = basis?.u ? V.dot(v, basis.u) : v[1],
+            patch = {};
+        if (Math.abs(alongWall) > 1e-8)
+            patch.attachment = {
+                ...o.attachment,
+                depthOffset: (Number(o.attachment.depthOffset) || 0) + alongWall,
+            };
+        if (Math.abs(up) > 1e-8) patch.lift = (Number(o.lift) || 0) - o.d * up;
+        return patch;
+    }
     if (o?.attachment?.verticalOnly) {
         v[0] = 0;
         v[2] = 0;
@@ -161,6 +176,55 @@ function buildingOuterFacePatch(o, fid, dl) {
     if (Number.isFinite(Number(o.openingBack)))
         patch.openingBack = clamp(Number(o.openingBack), -d / 2 + 0.025, d / 2 - 0.025);
     return patch;
+}
+// 壁横看板の白い外形面ハンドルから寸法を編集する。
+// 看板は親の側壁へ接着されているため、縦方向はcenterRatio、
+// 壁から外へ出る方向は接着面を基準にして変更する。
+function wallSideSignFacePatch(o, fid, dl) {
+    const axis = String(fid || "")[0],
+        plus = String(fid || "").endsWith("+"),
+        minHalf = 0.025,
+        parent = o?.attachment?.parentId ? obOf(o.attachment.parentId) : null;
+    if (!o?.attachment?.wallSideSign) return {};
+    if (axis === "u") {
+        const oldHalf = Math.max(minHalf, Math.abs(Number(o.ra) || 0.9)),
+            nextHalf = Math.max(minHalf, oldHalf + dl * 0.5),
+            deltaHalf = nextHalf - oldHalf,
+            floors = parent && isStackedBuildingAsset(parent) && Array.isArray(parent.floors) ? parent.floors : [],
+            index = clamp(Math.round(Number(o.attachment.floorIndex) || 0), 0, Math.max(0, floors.length - 1)),
+            floor = floors[index],
+            parentHeight = floor
+                ? Math.max(0.05, Math.abs(Number(floor.h) || 2.2))
+                : Math.max(0.1, Math.abs(Number(parent?.h) || 1)),
+            ratio = clamp(
+                (Number(o.attachment.centerRatio) || (floor ? 0.58 : 0.68)) +
+                    ((plus ? 1 : -1) * deltaHalf) / parentHeight,
+                0.06,
+                0.94,
+            );
+        return {
+            ra: nextHalf,
+            attachment: { ...o.attachment, centerRatio: ratio },
+        };
+    }
+    if (axis === "v") {
+        const oldHalf = Math.max(minHalf, Math.abs(Number(o.rb) || 0.75)),
+            nextHalf = Math.max(minHalf, oldHalf + dl * 0.5);
+        return { rb: nextHalf };
+    }
+    if (axis === "n") {
+        const oldThickness = Math.max(0.02, Math.abs(Number(o.h) || 0.12)),
+            nextThickness = Math.max(0.02, oldThickness + dl),
+            delta = nextThickness - oldThickness;
+        return {
+            h: nextThickness,
+            attachment: {
+                ...o.attachment,
+                depthOffset: (Number(o.attachment.depthOffset) || 0) + (plus ? 1 : -1) * delta * 0.5,
+            },
+        };
+    }
+    return {};
 }
 // 看板の黒い外枠を構成する実高さ。全高の上下余白は外形ハンドルの対象にしない。
 function outerZRange(o) {
@@ -904,23 +968,25 @@ function beveledBoxGizmo(o) {
     return { o, C3: L2W(o, 0, 0, z * 0.5), center: scrW(L2W(o, 0, 0, z * 0.5)), handle };
 }
 function specialGizmo(o) {
-    return o && o.type === "asset" && o.asset === "beveledBox"
-        ? beveledBoxGizmo(o)
-        : o && o.type === "asset" && o.asset === "pathPipe"
-          ? pathPipeGizmo(o)
-          : isStackedBuildingAsset(o)
-            ? stackedBuildingGizmo(o)
-            : o && o.type === "asset" && o.asset === "building"
-              ? buildingGizmo(o)
-              : o && o.type === "asset" && o.asset === "awning"
-                ? awningGizmo(o)
-                : o && o.type === "asset" && o.asset === "sign"
-                  ? signGizmo(o)
-                  : o && o.type === "asset" && o.asset === "cone"
-                    ? coneGizmo(o)
-                    : o && o.type === "asset" && o.asset === "sphere"
-                      ? sphereGizmo(o)
-                      : null;
+    return o && o.type === "asset" && o.asset === "wallSideSign" && o.attachment?.wallSideSign
+        ? wallSideSignSpecialGizmo(o)
+        : o && o.type === "asset" && o.asset === "beveledBox"
+          ? beveledBoxGizmo(o)
+          : o && o.type === "asset" && o.asset === "pathPipe"
+            ? pathPipeGizmo(o)
+            : isStackedBuildingAsset(o)
+              ? stackedBuildingGizmo(o)
+              : o && o.type === "asset" && o.asset === "building"
+                ? buildingGizmo(o)
+                : o && o.type === "asset" && o.asset === "awning"
+                  ? awningGizmo(o)
+                  : o && o.type === "asset" && o.asset === "sign"
+                    ? signGizmo(o)
+                    : o && o.type === "asset" && o.asset === "cone"
+                      ? coneGizmo(o)
+                      : o && o.type === "asset" && o.asset === "sphere"
+                        ? sphereGizmo(o)
+                        : null;
 }
 function drawSpecialGizmo(c, o) {
     const sg = specialGizmo(o);
@@ -944,7 +1010,25 @@ function drawSpecialGizmo(c, o) {
         c.fill();
         c.stroke();
     };
-    if (sg.o.asset === "beveledBox") {
+    if (sg.o.asset === "wallSideSign") {
+        const drawHandle = (h, color, label, diamond = false) => {
+            if (!h?.s?.ok || !h?.anchor?.ok) return;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.strokeStyle = color;
+            c.lineWidth = 1.5 / Z;
+            c.beginPath();
+            c.moveTo(h.anchor.x, h.anchor.y);
+            c.lineTo(h.s.x, h.s.y);
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, color, diamond);
+            c.fillStyle = color === "#ff9f68" ? "#ffd0a8" : "#fff0a8";
+            c.font = `bold ${12 / Z}px system-ui`;
+            c.fillText(label, h.s.x + 9 / Z, h.s.y - 8 / Z);
+        };
+        drawHandle(sg.bracketHandle, "#ffd34d", `金具 ${Number(sg.bracketHandle?.start || 0).toFixed(2)}m`, false);
+        drawHandle(sg.handle, "#ff9f68", `ベベル ${Number(sg.handle?.start || 0).toFixed(2)}`, true);
+    } else if (sg.o.asset === "beveledBox") {
         const h = sg.handle;
         if (h?.s?.ok && h?.anchor?.ok) {
             c.setLineDash([5 / Z, 4 / Z]);
@@ -1295,10 +1379,165 @@ function compoundGizmo(o) {
     }
     return g;
 }
-// 選択中の図形のギズモの位置（画面座標つき）
-// 選択オブジェクトの中心、XYZ矢印、6面ハンドル、回転リングを作る。
+// 横壁看板専用のベベルハンドル。オレンジ菱形をドラッグすると、
+// 0なら普通の直方体、0より大きければベベル直方体へ切り替わる。
+// ベベルの分割数は横壁看板では常に4に固定する。
+function wallSideSignBevelHandle(o) {
+    const q = syncAttachedPart(o),
+        boardH = Math.max(0.05, Math.abs(Number(q.ra) || 0.9) * 2),
+        boardW = Math.max(0.05, Math.abs(Number(q.rb) || 0.75) * 2),
+        max = Math.max(0, Math.min(boardH, boardW) * 0.5 - 0.001),
+        start = q.wallSideSignShape === "beveled" ? clamp(Number(q.wallSideSignBevelOffset) || 0, 0, max) : 0,
+        z = 0,
+        pr = (x, y) => scrW(L2W(q, x, y, z)),
+        anchor = pr(boardH * 0.5, boardW * 0.5),
+        step = Math.max(0.05, Math.min(max || 0.25, Math.min(boardH, boardW) * 0.08)),
+        raw = pr(boardH * 0.5 - start * 0.5, boardW * 0.5 - start * 0.5),
+        probe = pr(boardH * 0.5 - Math.min(max, start + step) * 0.5, boardW * 0.5 - Math.min(max, start + step) * 0.5),
+        dx = (probe?.x || 0) - (raw?.x || 0),
+        dy = (probe?.y || 0) - (raw?.y || 0),
+        length = Math.hypot(dx, dy),
+        projected = !!raw?.ok && !!probe?.ok && Number.isFinite(length),
+        hidden = projected && length <= 0.5 / Z,
+        fallback = orthView === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 },
+        visibleDir = hidden ? fallback : { x: dx / (length || 1), y: dy / (length || 1) },
+        displayGap = Math.max(48 / Z, 56 / Z),
+        displayS = !raw?.ok
+            ? raw
+            : hidden
+              ? {
+                    x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
+                    y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
+                    ok: true,
+                }
+              : { x: raw.x - visibleDir.x * displayGap, y: raw.y - visibleDir.y * displayGap, ok: true };
+    return {
+        kind: "wallSideSign-beveled-offset",
+        s: displayS,
+        anchor,
+        dir: visibleDir,
+        scale: hidden
+            ? Math.max(24, orthView ? orthScale() : 24)
+            : length / Math.max(0.0001, Math.min(step, max - start || step)),
+        start,
+        min: 0,
+        max,
+    };
+}
+// 横壁看板専用のギズモ。看板のローカル座標は
+// X=上下、Y=壁から外側、Z=壁に沿う方向。移動用の2軸に加えて、
+// 白い6面ハンドルで高さ・外向き幅・板厚も編集できる。
+// 横壁看板の取付金具長さハンドル。金具が1本以上あるときだけ表示する。
+// 看板内側を基準に、壁方向へ伸びる金具の端をドラッグして長さを変更する。
+function wallSideSignBracketHandle(o) {
+    const q = syncAttachedPart(o),
+        count = clamp(Math.round(Number(q.wallSideSignBracketCount) || 0), 0, 3),
+        lengthValue = clamp(Math.abs(Number(q.wallSideSignBracketLength) || 0.36), 0.05, 5);
+    if (!count || !q?.wallSideBasis) return null;
+    const boardW = Math.max(0.05, Math.abs(Number(q.rb) || 0.75) * 2),
+        clearance = 0.025,
+        span = lengthValue + clearance,
+        step = Math.max(0.05, Math.min(0.5, lengthValue * 0.18)),
+        pr = (y) => scrW(L2W(q, 0, y, 0)),
+        anchor = pr(-boardW * 0.5),
+        raw = pr(-boardW * 0.5 - span),
+        probe = pr(-boardW * 0.5 - span - step),
+        dx = (probe?.x || 0) - (raw?.x || 0),
+        dy = (probe?.y || 0) - (raw?.y || 0),
+        px = Math.hypot(dx, dy),
+        hidden = !raw?.ok || !probe?.ok || px <= 0.5 / Z,
+        fallback = orthView === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 },
+        dir = hidden ? fallback : { x: dx / px, y: dy / px },
+        display = raw?.ok
+            ? hidden
+                ? {
+                      x: raw.x + fallback.x * Math.max(26 / Z, 34 / Z),
+                      y: raw.y + fallback.y * Math.max(26 / Z, 34 / Z),
+                      ok: true,
+                  }
+                : { x: raw.x + dir.x * Math.max(30 / Z, 36 / Z), y: raw.y + dir.y * Math.max(30 / Z, 36 / Z), ok: true }
+            : raw;
+    return {
+        kind: "wallSideSign-bracket-length",
+        s: display,
+        anchor,
+        dir,
+        scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : px / step,
+        start: lengthValue,
+        min: 0.05,
+        max: 5,
+    };
+}
+function wallSideSignGizmo(o) {
+    const q = syncAttachedPart(o),
+        basis = q?.wallSideBasis,
+        C3 = basis?.origin || L2W(q, 0, 0, 0),
+        sC = scrW(C3);
+    if (!sC?.ok) return null;
+    const boardHalfHeight = Math.max(0.025, Math.abs(Number(q.ra) || 0.9)),
+        boardHalfWidth = Math.max(0.025, Math.abs(Number(q.rb) || 0.75)),
+        halfThickness = Math.max(0.01, Math.abs(Number(q.h) || 0.12) * 0.5),
+        g = {
+            o: q,
+            C3,
+            sC,
+            axes: [],
+            faces: [],
+            ring: [],
+            bevelHandle: wallSideSignBevelHandle(q),
+            bracketHandle: wallSideSignBracketHandle(q),
+        },
+        nC = Math.hypot(...V.add(C3, CO())),
+        defs = [
+            [basis?.u || [0, 1, 0], "#4a7be8", "Y"],
+            [basis?.n || [0, 0, 1], "#2fb5a5", "前後"],
+        ],
+        along = (base, axis, amount) => base.map((value, i) => value + axis[i] * amount),
+        neg = (axis) => axis.map((value) => -value),
+        addFace = (id, axis, amount) => {
+            const P3 = along(C3, axis, amount),
+                s = scrW(P3);
+            g.faces.push({ id, n: axis, P3, s, wallSideSign: true });
+        };
+    defs.forEach(([a, col, nm]) => {
+        const axis = V.nrm(a),
+            eps = 0.01 * Math.max(0.1, nC),
+            s1 = scrW(V.add(C3, axis, 1, eps));
+        if (!s1?.ok) return;
+        const pu = Math.hypot(s1.x - sC.x, s1.y - sC.y) / eps;
+        if (pu < 1e-6) return;
+        const length = Math.min(90 / Z / pu, 3 * nC + 1),
+            sT = scrW(V.add(C3, axis, 1, length));
+        if (sT?.ok) g.axes.push({ a: axis, col, nm, sT, wallSideSign: true });
+    });
+    // 壁横看板も、通常の直方体と同じ白い外形面ハンドルを表示する。
+    // u=看板高さ、v=壁から外へ出る幅、n=看板の板厚として、
+    // 3D視点でも看板本体の各面から寸法を編集できるようにする。
+    const u = V.nrm(basis?.u || [0, 1, 0]),
+        v = V.nrm(basis?.v || [1, 0, 0]),
+        n = V.nrm(basis?.n || [0, 0, 1]);
+    addFace("u+", u, boardHalfHeight);
+    addFace("u-", neg(u), boardHalfHeight);
+    addFace("v+", v, boardHalfWidth);
+    addFace("v-", neg(v), boardHalfWidth);
+    addFace("n+", n, halfThickness);
+    addFace("n-", neg(n), halfThickness);
+    return g;
+}
+function wallSideSignSpecialGizmo(o) {
+    const q = syncAttachedPart(o),
+        C3 = q?.wallSideBasis?.origin || L2W(q, 0, 0, 0);
+    return {
+        o: q,
+        C3,
+        handle: wallSideSignBevelHandle(q),
+        bracketHandle: wallSideSignBracketHandle(q),
+    };
+}
 // 描画とヒット判定の両方が同じ座標を使うため、見た目と操作がずれにくい。
 function gizmo() {
+    const selected = sel && obOf(sel);
+    if (selected?.attachment?.wallSideSign) return wallSideSignGizmo(selected);
     const o = sel && obOf(sel);
     if (!o) return null;
     if (o.type === "compound") return compoundGizmo(o);
@@ -1324,6 +1563,7 @@ function gizmo() {
                     o.asset === "awning" ||
                     o.asset === "balcony" ||
                     o.asset === "pathPipe" ||
+                    o.asset === "box" ||
                     o.asset === "beveledBox" ||
                     isStackedBuildingAsset(o))),
         [z0, z1] = outerZRange(o),
@@ -1516,6 +1756,28 @@ function hitGizmo(p) {
         special = active && specialGizmo(active),
         R = 20 / Z;
     if (special) {
+        if (active.asset === "wallSideSign") {
+            const handles = [
+                    { t: "wallSideSign-bracket-length", h: special.bracketHandle },
+                    { t: "wallSideSign-beveled-offset", h: special.handle },
+                ]
+                    .filter((q) => q.h?.s?.ok)
+                    .map((q) => ({ ...q, d: Math.hypot(q.h.s.x - p.x, q.h.s.y - p.y) }))
+                    .filter((q) => q.d < R)
+                    .sort((a, b) => a.d - b.d),
+                faceHits = (wallSideSignGizmo(active)?.faces || [])
+                    .filter((f) => f.s?.ok)
+                    .map((f) => ({ f, d: Math.hypot(f.s.x - p.x, f.s.y - p.y) }))
+                    .filter((q) => q.d < R)
+                    .sort((a, b) => a.d - b.d),
+                nearestHandle = handles[0],
+                nearestFace = faceHits[0];
+            // 黄色／オレンジの専用ハンドルと白い面ハンドルが重なるときは、
+            // 実際に押した位置へ近い方を採用する。
+            if (nearestHandle && (!nearestFace || nearestHandle.d <= nearestFace.d))
+                return { t: nearestHandle.t, sign: nearestHandle.h, g: { o: active, C3: special.C3 } };
+            if (nearestFace) return { t: "wallSideSign-face", f: nearestFace.f, g: { o: active, C3: special.C3 } };
+        }
         if (active.asset === "beveledBox") {
             const h = special.handle;
             if (h?.s?.ok && Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
@@ -1575,9 +1837,25 @@ function hitGizmo(p) {
             if (floor) return { t: "stack-floor", floorIndex: floor.index, floor, g: { o: active, C3: special.C3 } };
         }
         if (active.asset === "building") {
-            for (const h of Object.values(special.handles))
-                if (Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
-                    return { t: "building-" + h.kind, sign: h, g: { o: active, C3: special.C3 } };
+            // 看板付き建物では、開口ハンドルの判定範囲が外形の白い面ハンドルへ
+            // 重なることがある。押した点に近い方を優先し、外形の幅・奥行き・高さ
+            // 編集を開口奥面へ誤配分しない。
+            const openingHits = Object.values(special.handles)
+                    .filter((h) => h?.s?.ok)
+                    .map((h) => ({ h, d: Math.hypot(h.s.x - p.x, h.s.y - p.y) }))
+                    .filter((q) => q.d < R)
+                    .sort((a, b) => a.d - b.d),
+                generic = gizmo(),
+                faceHits = (generic?.faces || [])
+                    .filter((f) => f.s?.ok)
+                    .map((f) => ({ f, d: Math.hypot(f.s.x - p.x, f.s.y - p.y) }))
+                    .filter((q) => q.d < R)
+                    .sort((a, b) => a.d - b.d);
+            if (openingHits.length && (!faceHits.length || openingHits[0].d < faceHits[0].d - 0.5 / Z)) {
+                const h = openingHits[0].h;
+                return { t: "building-" + h.kind, sign: h, g: { o: active, C3: special.C3 } };
+            }
+            if (faceHits.length) return { t: "face", f: faceHits[0].f, g: generic };
             if (special.panelFrame && special.panelFrame.every((q) => q && q.ok) && insidePoly2D(p, special.panelFrame))
                 return { t: "building-backFace", sign: special.handles.backFace, g: { o: active, C3: special.C3 } };
         }
@@ -1604,11 +1882,25 @@ function hitGizmo(p) {
     }
     const g = gizmo();
     if (!g) return null;
-    const Rg = 20 / Z,
-        faceHits = g.faces
-            .filter((f) => f.s.ok)
+    const Rg = 20 / Z;
+    // 壁横看板は白い外形面ハンドルを優先する。看板の上下端が移動軸の
+    // 先端と重なっても、面を押した操作を軸移動へ誤配分しない。
+    if (active.asset === "wallSideSign") {
+        const wallFaceHits = g.faces
+            .filter((f) => f.s?.ok)
             .map((f) => ({ f, d: Math.hypot(f.s.x - p.x, f.s.y - p.y) }))
-            .filter((q) => q.d < Rg);
+            .filter((q) => q.d < Rg)
+            .sort((a, b) => a.d - b.d);
+        if (wallFaceHits.length) return { t: "wallSideSign-face", f: wallFaceHits[0].f, g };
+    }
+    // 軸矢印を面ハンドルより先に判定する。特にY軸の先端は上面の
+    // 白い四角と重なりやすく、面を拾うと移動ではなく拡大へ切り替わる。
+    if (Math.hypot(g.sC.x - p.x, g.sC.y - p.y) > R * 0.8)
+        for (const a of g.axes) if (segd(p, g.sC, a.sT) < R * 0.7) return { t: "axis", a, g };
+    const faceHits = g.faces
+        .filter((f) => f.s.ok)
+        .map((f) => ({ f, d: Math.hypot(f.s.x - p.x, f.s.y - p.y) }))
+        .filter((q) => q.d < Rg);
     if (faceHits.length) {
         // 表裏の面ハンドルが重なるときは、画面に近い面を優先する。
         // 配列の先頭順だけで選ぶと、裏面の法線を拾ってドラッグ方向が反転する。
@@ -1618,10 +1910,12 @@ function hitGizmo(p) {
                 db = Math.hypot(...V.add(b.f.P3, camPos(), 1, -1));
             return da - db;
         });
-        return { t: "face", f: faceHits[0].f, g };
+        return {
+            t: active.asset === "wallSideSign" ? "wallSideSign-face" : "face",
+            f: faceHits[0].f,
+            g,
+        };
     }
-    if (Math.hypot(g.sC.x - p.x, g.sC.y - p.y) > R * 0.8)
-        for (const a of g.axes) if (segd(p, g.sC, a.sT) < R * 0.7) return { t: "axis", a, g };
     for (let i = 1; i < g.ring.length; i++) {
         const a = g.ring[i - 1],
             b = g.ring[i];
@@ -1635,8 +1929,8 @@ function compoundBounds(o) {
     return groupBounds(parts);
 }
 function objectAnchorWorld(o) {
-    if (o?.type === "compound") {
-        const b = compoundBounds(o);
+    if (o?.type === "compound" || (o?.type === "asset" && o.asset === "pathPipe")) {
+        const b = obBounds(o);
         return [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2];
     }
     return L2W(o, 0, 0, 0);
@@ -1922,6 +2216,22 @@ function beginGizmo(h, p) {
                 },
             };
         }
+    } else if (h.t === "wallSideSign-face") {
+        const F0 = V.add(h.f.P3, co),
+            t0 = lineParam(r, F0, h.f.n),
+            faceGuide = faceScreenGuide(h.f);
+        if (t0 != null || faceGuide)
+            ed = {
+                ...base,
+                t: h.t,
+                fid: h.f.id,
+                n: h.f.n,
+                F0,
+                Fa: h.f.P3,
+                t0,
+                faceGuide,
+                p0: p,
+            };
     } else if (
         h.t.startsWith("sign-") ||
         h.t.startsWith("building-") ||
@@ -1931,6 +2241,8 @@ function beginGizmo(h, p) {
         h.t.startsWith("path-point-") ||
         h.t === "path-radius" ||
         h.t === "beveled-offset" ||
+        h.t === "wallSideSign-beveled-offset" ||
+        h.t === "wallSideSign-bracket-length" ||
         h.t === "cone-height" ||
         h.t === "sphere-radius"
     )
@@ -2007,6 +2319,22 @@ function dragEdit(p, freeRotation = false) {
             deltaY = p.y - ed.p0.y,
             offset = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
         patch = { bevelOffset: offset };
+    } else if (ed.t === "wallSideSign-bracket-length") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            length = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { wallSideSignBracketLength: length };
+    } else if (ed.t === "wallSideSign-beveled-offset") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            offset = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = {
+            wallSideSignShape: offset > 0.0001 ? "beveled" : "box",
+            wallSideSignBevelOffset: offset,
+            wallSideSignBevelSegments: 4,
+        };
     } else if (ed.t.startsWith("building-")) {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -2191,14 +2519,29 @@ function dragEdit(p, freeRotation = false) {
             if (t != null && ed.t0 != null) amount = t - ed.t0;
         }
         if (amount != null) {
+            // 壁横看板の前後軸はワールドX/Zの単一軸ではないため、
+            // 回転した建物でも軸方向を保ち、通常のXYZ軸だけスナップする。
+            const snapAxes = Number.isInteger(ed.aj) && ed.aj >= 0 ? [ed.aj] : [];
             ed.moveDelta = snap(
                 ed.a.map((x) => x * amount),
-                [ed.aj],
+                snapAxes,
             );
             patch = moveBy(o, ed.moveDelta);
         }
     } // 矢印＝その軸に沿って移動
-    else if (ed.t === "face") {
+    else if (ed.t === "wallSideSign-face") {
+        let dl = null;
+        if (ed.faceGuide?.hidden) dl = 0;
+        else if (ed.faceGuide) {
+            const dx = p.x - ed.p0.x,
+                dy = p.y - ed.p0.y;
+            dl = (dx * ed.faceGuide.dir.x + dy * ed.faceGuide.dir.y) / (ed.faceGuide.scale || 1);
+        } else {
+            const t = lineParam(r, ed.F0, ed.n);
+            if (t != null && ed.t0 != null) dl = t - ed.t0;
+        }
+        if (dl != null) patch = wallSideSignFacePatch(o, ed.fid, dl);
+    } else if (ed.t === "face") {
         let dl = null;
         if (ed.faceGuide?.hidden) dl = 0;
         else if (ed.faceGuide) {
@@ -2702,6 +3045,34 @@ function exportSurfaceTriangles(o) {
             [g.openingW / 2, panelY, g.openingH],
             [-g.openingW / 2, panelY, g.openingH],
         );
+        return out;
+    }
+    if (kind === "wallSideSign") {
+        const boardW = Math.max(0.05, Math.abs(Number(o.rb) || 0.75) * 2),
+            boardH = Math.max(0.05, Math.abs(Number(o.ra) || 0.9) * 2),
+            thickness = Math.max(0.02, Math.abs(Number(o.h) || 0.12)),
+            count = clamp(Math.round(Number(o.wallSideSignBracketCount) || 0), 0, 3),
+            length = clamp(Math.abs(Number(o.wallSideSignBracketLength) || 0.36), 0.05, 5),
+            clearance = 0.025,
+            span = length + clearance,
+            centerY = -(boardW * 0.5 + span * 0.5),
+            barV = Math.max(0.06, Math.min(0.18, boardH * 0.1)),
+            beveled = o.wallSideSignShape === "beveled",
+            bevelOffset = clamp(
+                Number(o.wallSideSignBevelOffset) || 0.06,
+                0.01,
+                Math.max(0.01, Math.min(boardH, boardW) * 0.45),
+            ),
+            bevelSegments = 4,
+            drawBoard = (cx, cy, bw, bd, z0, z1) =>
+                beveled ? beveledAt(cx, cy, bw, bd, z0, z1, bevelOffset, bevelSegments) : boxAt(cx, cy, bw, bd, z0, z1);
+        // 面表示用も、ベベルは看板本体だけ。取付金具は普通の直方体の面にする。
+        drawBoard(0, 0, boardH, boardW, -thickness * 0.5, thickness * 0.5);
+        for (let i = 0; i < count; i++) {
+            const t = (i + 1) / (count + 1),
+                x = -boardH * 0.5 + boardH * t;
+            boxAt(x, centerY, barV, span, -thickness * 0.5, thickness * 0.5);
+        }
         return out;
     }
     if ((o.type === "rect" || kind === "rect") && !o.extrude) {
@@ -3268,7 +3639,9 @@ function render() {
             }
         }); // くっつき先は桃色
     if (tool === "edit" && selIds.size > 1) drawSelectionFeedback(c);
-    if (sel && tool === "edit" && !window.cityFloorPlanActive) drawGizmo(c); // 3D視点の移動の矢印・面のハンドル・回転の輪
+    const selectedForGizmo = sel && obOf(sel);
+    if (sel && tool === "edit" && (!window.cityFloorPlanActive || selectedForGizmo?.attachment?.wallSideSign))
+        drawGizmo(c); // 3D視点と壁横看板の前／横／上ビューへ、軸・面・専用ハンドルを表示
     if (window.cityFloorPlanOverlay && window.cityFloorPlanActive) window.cityFloorPlanOverlay(c);
     if (boxSelect) drawBoxSelection(c);
     if (er) {
@@ -4154,7 +4527,19 @@ addEventListener("keydown", (e) => {
         redo();
         return;
     }
-    if (e.key === "e" && !window.cityFloorPlanActive && !/INPUT|SELECT/.test(e.target.tagName)) {
+    const key = String(e.key || "").toLowerCase(),
+        tag = String(e.target?.tagName || "");
+    if (key === "x" && !/INPUT|SELECT|TEXTAREA/.test(tag)) {
+        // Xは3D／前／横／上の全表示モードで、選択中オブジェクトを削除する。
+        // floor-plan側のモードガードを置かないことで、正投影中の選択も消せる。
+        e.preventDefault();
+        e.stopPropagation();
+        if (window.cityGridDeleteSelected) window.cityGridDeleteSelected();
+        else if (typeof deleteSelectedObjects === "function") deleteSelectedObjects();
+        return;
+    }
+    if (key === "e" && !window.cityFloorPlanActive && !/INPUT|SELECT|TEXTAREA/.test(tag)) {
+        // Eは従来どおり、線の一部を消す消しゴムを起動する。
         $("tE").click();
         return;
     }
@@ -4225,6 +4610,22 @@ function setExportOpen(open) {
     exportMenu.classList.toggle("open", !!open);
     exportMenu.style.display = open ? "grid" : "none";
 }
+const exportLineWidthInput = $("exportLineWidth");
+function syncExportLineWidth() {
+    if (exportLineWidthInput && document.activeElement !== exportLineWidthInput)
+        exportLineWidthInput.value = Number(P.pw || MASTER_W).toFixed(1);
+}
+if (exportLineWidthInput)
+    exportLineWidthInput.oninput = () => {
+        const value = clamp(Number(exportLineWidthInput.value) || MASTER_W, 0.5, 20);
+        P.pw = value;
+        const mainWidth = $("v_pw");
+        if (mainWidth && document.activeElement !== mainWidth) mainWidth.value = value.toFixed(1);
+        const slider = $("pw");
+        if (slider) slider.value = value;
+        render();
+    };
+syncExportLineWidth();
 exportToggle.onclick = (e) => {
     e.stopPropagation();
     setExportOpen(!exportMenu.classList.contains("open"));
@@ -4407,6 +4808,9 @@ $("pn").onchange = () => setMode(mode);
 
 // ===== 状態の保存・読み込み（プロジェクト） =====
 const AK = "pgrid-autosave-v1";
+// 初期カメラと面表示の既定値を更新したため、旧既定値だけを一度移行する。
+// ユーザーが任意に変更したカメラ位置や面OFFは、移行後の再読み込みでは保持する。
+const DEFAULT_VIEW_MIGRATION_KEY = "city-grid-default-view-v4";
 // 今の状態をまとめる（線は向きのベクトルなので、視点ごと再現できる）
 function pack(withPhoto) {
     const d = {
@@ -4554,3 +4958,22 @@ try {
     const t = localStorage.getItem(AK);
     if (t) unpack(JSON.parse(t));
 } catch (e) {} // 前回の自動保存があれば復元
+function migrateDefaultViewOnce() {
+    try {
+        if (localStorage.getItem(DEFAULT_VIEW_MIGRATION_KEY) === "1") return;
+        const oldCamera =
+            (Math.abs(Number(P.cx) - 2.5) < 1e-6 && Math.abs(Number(P.cz) + 2.5) < 1e-6) ||
+            (Math.abs(Number(P.cx) - 8) < 1e-6 && Math.abs(Number(P.cz) + 8) < 1e-6);
+        if (oldCamera) {
+            P.cx = 0;
+            P.cz = 0;
+        }
+        if (P.surfaceMode === false) P.surfaceMode = true;
+        localStorage.setItem(DEFAULT_VIEW_MIGRATION_KEY, "1");
+        dirty = true;
+        sync();
+        syncSurfaceToggle();
+        render();
+    } catch (e) {}
+}
+migrateDefaultViewOnce();

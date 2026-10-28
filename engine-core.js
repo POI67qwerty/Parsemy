@@ -43,6 +43,7 @@ const P = {
     pa: 0.5,
     ew: 24,
     bt: 128,
+    // 初期カメラは原点へ戻し、アセット側で十分な配置距離を自動計算する。
     ch: 1,
     cx: 0,
     cz: 0,
@@ -50,7 +51,8 @@ const P = {
     gs: 1,
     gn: 30,
     dp: 8,
-    surfaceMode: false,
+    // 面表示は初期状態からONにして、配置した立体を確認しやすくする。
+    surfaceMode: true,
 };
 const show = [true, true, true]; // 軸ごとの補助線表示
 // Sは線画とオブジェクト定義の保存場所。RD/HUはやり直し・元に戻す履歴。
@@ -152,6 +154,17 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>開口の高さ</span><input type=number class=nv id=ov_openingH step=0.05 style="width:100px"><span class=un>m</span></label>
 <div class="note">建物の外形は軸・回転に加え、3Dの白い外側面ハンドルでも幅・奥行き・高さを編集できます。緑のハンドルで開口の幅・高さ、オレンジの「奥の面」で閉じた内壁の奥行きを編集できます。</div>
 </div>
+<div id=wallSideSignP style="display:none"><h3>壁横の看板</h3>
+<label><input type=checkbox id=wallSideSign> 壁横に看板を付ける</label>
+<label><span>取付側</span><select id=wallSideSignSide><option value="-1">左側の横壁</option><option value="1">右側の横壁</option></select></label>
+<label><input type=checkbox id=wallSideSignBrace checked> 取付金具を付ける</label>
+<label><span>取付金具の本数</span><select id=wallSideSignBrackets><option value="0">なし</option><option value="1">1本</option><option value="2">2本</option><option value="3" selected>3本</option></select></label>
+<label><span>看板・金具形状</span><select id=wallSideSignShape><option value="box">普通の直方体</option><option value="beveled">ベベル直方体</option></select></label>
+<label id=wallSideSignScopeRow style="display:none"><span>階層看板</span><select id=wallSideSignScope><option value="first">1Fだけ</option><option value="all">全部の階</option><option value="individual">階ごとに選択</option></select></label>
+<div id=wallSideSignFloorSelect style="display:none"></div>
+<label><span>ベベル幅</span><input type=number class=nv id=wallSideSignBevelOffset min=0 max=1 step=0.01 style="width:100px"><span class=un>m</span></label>
+<div class="note">開口建物・テント付き建物・看板付き開口建物・ベベル階層・縁付き階層の横壁へ外付けします。取付金具は面のある普通の直方体です。金具はなし／1〜3本、看板本体は普通／ベベルを変更できます。階層建物は1Fだけ／全部の階／階ごとに選択を切り替えられます。看板を選択すると、黄色の「金具」ハンドルで長さ、白い面ハンドルで寸法、オレンジ菱形で看板のベベル幅を画面上から編集できます。</div>
+</div>
 <div id=balconyP style="display:none"><h3>壁付けベランダ</h3>
 <label><span>手すり／腰壁の高さ</span><input type=number class=nv id=balconyRailHeight min=0.12 step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><span>床スラブの厚さ</span><input type=number class=nv id=balconyFloorThickness min=0.04 step=0.02 style="width:100px"><span class=un>m</span></label>
@@ -161,6 +174,7 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <div class="note">建物を選択して棚の「壁付けベランダ」を押すと、建物の正面壁へ2階相当の高さで接着します。接着後は親建物の移動・幅・奥行き・高さに追従し、ベランダ単体の幅・奥行き・手すり高さを編集できます。</div>
 </div>
 <div id=pathPipeP style="display:none"><h3>パスパイプ</h3>
+<label><span>パターン</span><select id=pathPipePreset style="width:150px"><option value="custom">手動入力</option><option value="straight">真っ直ぐ</option><option value="l">L字</option><option value="u">U字</option><option value="z">Z字</option><option value="step3d">立体折れ</option></select><button type=button id=pathPipeApplyPreset>適用</button></label>
 <label><span>パイプ半径</span><input type=number class=nv id=pathPipeRadius min=0.02 step=0.02 style="width:100px"><span class=un>m</span></label>
 <label><span>曲がり半径</span><input type=number class=nv id=pathPipeCornerRadius min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><span>円周分割</span><input type=number class=nv id=pathPipeSides min=6 max=24 step=1 style="width:100px"></label>
@@ -188,8 +202,8 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>ベベルセグメント数</span><input type=number class=nv id=stackBevelSegments min=1 max=4 step=1 style="width:100px"><span class=un>分割</span></label>
 <div class="note">通常モードでは1Fのベベル設定を全階へ連動します。個別編集を有効にすると、選択中の階だけを変更できます。</div>
 </div>
-<label><button id=stackAlign class="primary">上方向へ整列</button><button id=stackCopyFirst>1F寸法をコピー</button></label>
-<div class="note">通常は1Fのハンドルと数値だけを編集し、幅・奥行・高さ・縁が全階へ自動連動します。チェックを入れると、選択した階を個別に編集できます。</div>
+<label><button id=stackAlign class="primary">上方向へ整列</button><button id=stackCopyFirst>1F寸法をコピー（看板はなし）</button><button id=stackCopyFirstWithSigns>1F寸法をコピー（看板も）</button></label>
+<div class="note">通常は1Fのハンドルと数値だけを編集し、幅・奥行・高さ・縁が全階へ自動連動します。1F寸法コピーは建物だけ、または看板も含めて選べます。チェックを入れると、選択した階を個別に編集できます。</div>
 <div id=stackFloorRows></div>
 <div class="note">正面・横・上ビューでは、選択中の階にオレンジの面ハンドルが表示されます。1階の幅・奥行き・高さ・縁を変更すると、同期ONの間は全階へ反映されます。下側の縁は全階で作らず、各階の上側だけに配置します。</div>
 </div>
@@ -272,6 +286,7 @@ function sync() {
         if (el && document.activeElement !== el && typeof P[k] === "number") el.value = +(+P[k]).toFixed(3);
     }
     syncSurfaceToggle();
+    if (typeof syncExportLineWidth === "function") syncExportLineWidth();
 } // 入力中の欄は上書きしない
 function syncSurfaceToggle() {
     const b = $("surfaceToggle");
@@ -886,6 +901,65 @@ function syncAttachedPart(o, parentOverride = null) {
     if (!parent) return o;
     const side = Number(a.side) === -1 ? -1 : 1,
         px = Number(a.x) || 0;
+    // 横壁看板は、親のローカルX側面へ縦長の板として接着する。
+    // 通常のL2Wはk軸まわりの回転しか扱えないため、横壁だけは
+    // 「上方向・親の奥行方向・親の横壁法線」の基底を明示して追従させる。
+    if (a.wallSideSign) {
+        const signSide = Number(a.wallSideSignSide ?? a.side) === -1 ? -1 : 1,
+            r = Number(parent.rot || 0) * DG,
+            cs = Math.cos(r),
+            sn = Math.sin(r),
+            localX = [cs, 0, sn],
+            localY = [-sn, 0, cs],
+            up = [0, 1, 0],
+            normal = localX.map((value) => value * signSide),
+            stacked = isStackedBuildingAsset(parent),
+            floors = stacked && Array.isArray(parent.floors) ? parent.floors : [],
+            index = stacked ? clamp(Math.round(Number(a.floorIndex) || 0), 0, Math.max(0, floors.length - 1)) : 0,
+            floor = stacked ? floors[index] || floors[0] : null;
+        if (stacked && (!floor || typeof customPt !== "function")) return o;
+        const parentW = stacked ? Math.abs(Number(floor?.w) || 4) : Math.abs(Number(parent.ra) || 2) * 2,
+            parentD = stacked ? Math.abs(Number(floor?.d) || 3) : Math.abs(Number(parent.rb) || 1.5) * 2,
+            bracketCount = clamp(Math.round(Number(o.wallSideSignBracketCount ?? 3)), 0, 3),
+            bracketLength = clamp(Math.abs(Number(o.wallSideSignBracketLength) || 0.36), 0.05, 5),
+            effectiveBracketLength = bracketCount > 0 ? bracketLength : 0,
+            boardHalfWidth = Math.abs(Number(o.rb) || 0.5),
+            // 看板面を壁に対して垂直にし、看板の半幅＋金具の長さぶん外へ出す。
+            // 0.025は壁面とのクリアランスで、看板が壁へめり込むのを防ぐ。
+            wallOffset = parentW * 0.5 + 0.025 + effectiveBracketLength + boardHalfWidth,
+            depthOffset = clamp(
+                Number(a.depthOffset ?? a.x) || 0,
+                -parentD * 0.5 + Math.abs(Number(o.rb) || 0.1),
+                parentD * 0.5 - Math.abs(Number(o.rb) || 0.1),
+            ),
+            verticalRatio = clamp(Number(a.centerRatio) || 0.68, 0.06, 0.94),
+            verticalCenter = stacked
+                ? (Number(floor?.z) || 0) + Math.abs(Number(floor?.h) || 2.2) * verticalRatio
+                : Math.abs(Number(parent.h) || 1) * verticalRatio,
+            origin = stacked
+                ? customPt(
+                      parent,
+                      Number(floor?.x) + signSide * wallOffset,
+                      Number(floor?.y) + depthOffset,
+                      verticalCenter,
+                  )
+                : L2W(parent, signSide * wallOffset, depthOffset, verticalCenter);
+        return {
+            ...o,
+            attachment: { ...a, side: signSide, floorIndex: index, wallSideSignSide: signSide },
+            // 形状編集UIとの互換のためk/dは残すが、描画座標はwallSideBasisを優先する。
+            k: 1,
+            d: -1,
+            rot: Number(parent.rot || 0),
+            // u=高さ、v=壁から外へ出る看板幅、n=壁に沿う板厚。
+            // これで看板面は横壁へ垂直になり、外形の奥行きが細長く表示される。
+            wallSideBasis: { origin, u: up, v: normal, n: localY },
+            ca: origin[0],
+            cb: origin[2],
+            lift: origin[1] + 1,
+            off: [0, 0, 0],
+        };
+    }
     // 積層建物はgeometryがcustomPt（階ごとのx/y/z）で保持されるため、
     // 標準建物のL2Wとは別に、指定階の壁面へベランダを同期する。
     if (isStackedBuildingAsset(parent) && a.stackedFloor) {
@@ -1033,8 +1107,12 @@ function setOb(id, patch) {
                 wz = (Number(next.cb) || 0) + (next.off?.[2] || 0),
                 dx = wx - pb[0],
                 dz = wz - pb[2],
-                r = Number(parent.rot || 0) * DG;
-            next.attachment = { ...next.attachment, x: dx * Math.cos(r) + dz * Math.sin(r) };
+                r = Number(parent.rot || 0) * DG,
+                localX = dx * Math.cos(r) + dz * Math.sin(r),
+                localY = -dx * Math.sin(r) + dz * Math.cos(r);
+            next.attachment = next.attachment.wallSideSign
+                ? { ...next.attachment, depthOffset: localY }
+                : { ...next.attachment, x: localX };
         }
     }
     if (o.attachment && patch && Object.prototype.hasOwnProperty.call(patch, "lift")) {
@@ -1046,7 +1124,26 @@ function setOb(id, patch) {
                 baseZ = Number.isFinite(Number(next.attachment.baseRatio))
                     ? (Number(parent.h) || 1) * clamp(Number(next.attachment.baseRatio), 0.02, 0.98)
                     : Number(next.attachment.baseZ) || 0;
-            next.attachment = { ...next.attachment, offsetZ: rawBase - parentBase - baseZ };
+            if (next.attachment.wallSideSign) {
+                const floors = isStackedBuildingAsset(parent) && Array.isArray(parent.floors) ? parent.floors : [],
+                    index = clamp(
+                        Math.round(Number(next.attachment.floorIndex) || 0),
+                        0,
+                        Math.max(0, floors.length - 1),
+                    ),
+                    floor = floors[index],
+                    floorBase = floor ? Number(floor.z) || 0 : 0,
+                    floorHeight = floor
+                        ? Math.max(0.05, Math.abs(Number(floor.h) || 2.2))
+                        : Math.max(0.1, Number(parent.h) || 1),
+                    ratio = (rawBase - parentBase - floorBase) / floorHeight;
+                next.attachment = {
+                    ...next.attachment,
+                    floorIndex: index,
+                    centerRatio: clamp(Number.isFinite(ratio) ? ratio : 0.68, 0.06, 0.94),
+                    offsetZ: 0,
+                };
+            } else next.attachment = { ...next.attachment, offsetZ: rawBase - parentBase - baseZ };
         }
     }
     const replace = (def) => {
@@ -1090,6 +1187,16 @@ function pickOb(p) {
 // x=幅、y=面内の奥行き、z=法線方向の押し出しとして、k/rot/d/liftを反映する。
 function L2W(o, x, y, z) {
     if (o?.attachment) o = syncAttachedPart(o);
+    // 横壁看板は、通常の「水平面＋上下押し出し」だけでは表せないため、
+    // 親のローカル横壁に沿う直交基底を使って3D座標へ変換する。
+    // wallSideBasisはsyncAttachedPart()が親の移動・回転・寸法変更ごとに更新する。
+    const wb = o?.wallSideBasis;
+    if (wb?.origin && wb?.u && wb?.v && wb?.n) {
+        const add = (base, axis, scale) => base.map((value, i) => value + axis[i] * scale),
+            p = add(wb.origin, wb.u, Number(x) || 0),
+            q = add(p, wb.v, Number(y) || 0);
+        return add(q, wb.n, Number(z) || 0);
+    }
     const [iu, iv] = PL[o.k],
         cs = Math.cos(o.rot * DG),
         sn = Math.sin(o.rot * DG),
@@ -1124,6 +1231,34 @@ function fixOb(o) {
         };
     } else if (n?.linkedAsset === "buildingSign" && n.asset === "building" && n.openingEnabled == null) {
         n = { ...n, openingEnabled: true };
+    }
+    // 初期実装の横壁看板は、正面Y面のra/rb/hへ寸法を保存していた。
+    // 保存済みデータを新しい横壁基底へ移すときだけ、縦・横・厚みの順へ読み替える。
+    if (n?.wallSideSign && n?.attachment?.wallSideSign && n.attachment.centerRatio == null) {
+        const oldHeight = Math.max(0.05, Math.abs(Number(n.h) || 0.8)),
+            oldWidth = Math.max(0.05, Math.abs(Number(n.ra) || 0.6) * 2),
+            oldThickness = Math.max(0.04, Math.abs(Number(n.rb) || 0.08) * 2);
+        n = {
+            ...n,
+            type: "asset",
+            asset: "wallSideSign",
+            assetId: "wall-side-sign",
+            assetName: "横壁看板",
+            ra: oldHeight * 0.5,
+            rb: oldWidth * 0.5,
+            h: oldThickness,
+            wallSideSignBracketCount: 3,
+            wallSideSignBracketLength: 0.36,
+            wallSideSignShape: "box",
+            wallSideSignBevelOffset: 0.06,
+            wallSideSignBevelSegments: 4,
+            attachment: {
+                ...n.attachment,
+                wallSideSignSide: Number(n.attachment.wallSideSignSide ?? n.attachment.side) < 0 ? -1 : 1,
+                depthOffset: 0,
+                centerRatio: 0.68,
+            },
+        };
     }
     if (
         n?.linkedRole === "parent" &&
@@ -1340,10 +1475,10 @@ $("obDup").onclick = () => {
     normalizeSelection();
     render();
 };
-$("obDel").onclick = () => {
+function deleteSelectedObjects() {
     const objects = selectedObjects(),
         ids = new Set(objects.map((o) => o.id));
-    if (!ids.size) return;
+    if (!ids.size) return false;
     // 接続アセットの親を消すときは子も、子を消すときは親も一緒に消す。
     S.forEach((s) => {
         const q = s && s.ob;
@@ -1360,8 +1495,13 @@ $("obDel").onclick = () => {
     S = S.filter((s) => !(s.ob && ids.has(s.ob.id)));
     RD = [];
     clearSelection();
+    syncSel();
     render();
-};
+    return true;
+}
+// キーボード操作からも同じ削除処理を呼べるよう、分割版／単体HTML版の両方へ公開する。
+window.cityGridDeleteSelected = deleteSelectedObjects;
+$("obDel").onclick = deleteSelectedObjects;
 $("obOff").onclick = () => {
     clearSelection();
     render();

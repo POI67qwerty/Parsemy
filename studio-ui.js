@@ -69,7 +69,7 @@
       <div class="quickRow"><button id="openFloorPlan" class="primary">開く</button><button id="closeFloorPlan">3Dへ戻る</button></div>
       <div id="floorPlanSelectionStatus" class="sceneNote">未選択</div>
       <div class="quickRow floorPlanRotateRow"><button id="floorRotateLeft" disabled>↺</button><button id="floorRotateRight" disabled>↻</button><button id="floorRotate90" disabled>90°</button><button id="floorDelete" disabled>削除</button></div>
-      <div class="sceneNote">間取りでは全ての生成面のオブジェクトをドラッグ移動できます。正面・上・横の移動ギズモ、選択中の前側の丸をドラッグした回転、カメラ本体のドラッグ移動、先端の丸のドラッグで向きの変更ができます。回転は15°刻みで30°・45°・90°も選べ、Shiftを押しながらドラッグすると自由な角度です。矢印キーで移動、Q/Eで15°ずつ回転します。幅・奥行き・高さの編集も生成面に関係なく利用できます。接続テント／看板は接着を保つため上下方向だけに制限されます。</div>
+      <div class="sceneNote">間取りでは全ての生成面のオブジェクトをドラッグ移動できます。正面・上・横の移動ギズモ、選択中の前側の丸をドラッグした回転、カメラ本体のドラッグ移動、先端の丸のドラッグで向きの変更ができます。回転は15°刻みで30°・45°・90°も選べ、Shiftを押しながらドラッグすると自由な角度です。矢印キーで移動、Q/Eで15°ずつ回転します。幅・奥行き・高さの編集も生成面に関係なく利用できます。接続テントは接着を保つため上下方向に制限され、横壁看板は上下＋壁沿いの前後方向へ移動できます。</div>
     </section>
 
     <section class="workspaceScreen" data-workspace-screen="perspective">
@@ -103,7 +103,7 @@
       <div class="quickField"><span>階段の段数</span><input id="stairsSteps" type="number" min="2" max="24" step="1" value="6"><em>段</em></div>
       <label class="quickCheck"><input id="stairsRail" type="checkbox"> 階段に手すりをつける</label>
       <div class="quickRow"><button id="applyStairs" class="primary">選択中の階段に反映</button></div>
-      <div class="quickField"><span>アセット配置距離</span><input id="assetDepth" type="number" min="1" max="20" step="0.5" value="5"><em>m</em></div>
+      <div class="quickField"><span>アセット配置距離（最小）</span><input id="assetDepth" type="number" min="1" max="80" step="0.5" value="5"><em>m</em></div>
       <div class="quickField"><span>生成方向</span><select id="assetAxis"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select><em></em></div>
       <div class="quickRow" style="margin-top:7px"><button id="sampleRef">サンプル参照を表示</button><button id="clearRef">参照を外す</button></div>
       <div class="floorTintBox"><label class="quickCheck"><input id="floorTint" type="checkbox"> 床に透明色をつける</label>
@@ -134,7 +134,9 @@
             screen.hidden = screen.dataset.workspaceScreen !== tab;
         });
         if (tab === "floorplan") window.cityFloorPlanEnter?.();
-        else if (window.cityFloorPlanActive) window.cityFloorPlanExit?.();
+        // 人物・ポーズの設定を開いても、前／横／上の間取り表示は維持する。
+        // 3Dへ戻るときだけ、明示的に間取りを閉じる。
+        else if (window.cityFloorPlanActive && tab === "perspective") window.cityFloorPlanExit?.();
     }
     quick
         .querySelectorAll("[data-workspace-tab]")
@@ -291,7 +293,7 @@
             assetDepthInput.value = Number(P.assetDepth || 5).toFixed(1);
     }
     assetDepthInput.oninput = () => {
-        P.assetDepth = Math.max(1, Math.min(20, parseFloat(assetDepthInput.value) || 5));
+        P.assetDepth = Math.max(1, Math.min(80, parseFloat(assetDepthInput.value) || 5));
         render();
     };
     syncAssetDepth();
@@ -740,6 +742,123 @@
     function buildingPanelObject(o = sel && obOf(sel)) {
         return linkedBuildingParent(o) || (o?.type === "asset" && o.asset === "building" ? o : null);
     }
+    function wallSideSignParent(o = sel && obOf(sel)) {
+        const candidate = o?.attachment?.parentId ? obOf(o.attachment.parentId) : o;
+        return candidate &&
+            candidate.type === "asset" &&
+            (candidate.asset === "building" || isStackedBuildingAsset(candidate))
+            ? candidate
+            : null;
+    }
+    function wallSideSignChildren(parent) {
+        return parent
+            ? sceneObjects()
+                  .filter((o) => o?.attachment?.parentId === parent.id && o.attachment.wallSideSign)
+                  .sort((a, b) => (Number(a.attachment.floorIndex) || 0) - (Number(b.attachment.floorIndex) || 0))
+            : [];
+    }
+    function wallSideSignScopeValue(parent, children = wallSideSignChildren(parent)) {
+        if (!isStackedBuildingAsset(parent)) return "first";
+        if (["first", "all", "individual"].includes(parent?.wallSideSignScope)) return parent.wallSideSignScope;
+        if (children.length > 1 && children.length >= (parent.floors?.length || 0)) return "all";
+        if (children.some((child) => Number(child.attachment?.floorIndex) > 0)) return "individual";
+        return "first";
+    }
+    function wallSideSignFlags(parent, children = wallSideSignChildren(parent)) {
+        const count = Math.max(1, parent?.floors?.length || 1),
+            flags = Array.from({ length: count }, () => false);
+        if (Array.isArray(parent?.wallSideSignFloors))
+            parent.wallSideSignFloors.forEach((value, index) => {
+                if (index < flags.length) flags[index] = !!value;
+            });
+        else
+            children.forEach((child) => {
+                const index = Number(child.attachment?.floorIndex) || 0;
+                if (index >= 0 && index < flags.length) flags[index] = true;
+            });
+        if (!flags.some(Boolean)) flags[0] = true;
+        return flags;
+    }
+    function syncWallSideSignFloorSelect(parent, children, scope) {
+        const box = el("wallSideSignFloorSelect"),
+            stacked = !!parent && isStackedBuildingAsset(parent);
+        if (!box) return;
+        if (!stacked || scope !== "individual") {
+            box.style.display = "none";
+            box.innerHTML = "";
+            box.dataset.signature = "";
+            return;
+        }
+        const floors = Array.isArray(parent.floors) ? parent.floors : [],
+            flags = wallSideSignFlags(parent, children),
+            signature = `${parent.id}:${floors.length}`;
+        box.style.display = "";
+        if (box.dataset.signature !== signature) {
+            box.innerHTML = `<div class="note">看板を付ける階</div>${floors
+                .map(
+                    (_, index) => `<label><input type="checkbox" data-wall-sign-floor="${index}">${index + 1}F</label>`,
+                )
+                .join("")}`;
+            box.dataset.signature = signature;
+            box.querySelectorAll("[data-wall-sign-floor]").forEach((input) => {
+                input.onchange = () => {
+                    const next = wallSideSignFlags(wallSideSignParent()),
+                        index = Number(input.dataset.wallSignFloor);
+                    next[index] = input.checked;
+                    if (!next.some(Boolean)) {
+                        input.checked = true;
+                        return;
+                    }
+                    applyWallSideSignControl(next);
+                };
+            });
+        }
+        box.querySelectorAll("[data-wall-sign-floor]").forEach((input) => {
+            const index = Number(input.dataset.wallSignFloor);
+            if (document.activeElement !== input) input.checked = !!flags[index];
+        });
+    }
+    function syncWallSideSignPanel() {
+        const panel = el("wallSideSignP"),
+            parent = wallSideSignParent(),
+            children = wallSideSignChildren(parent),
+            child = children[0],
+            check = el("wallSideSign"),
+            side = el("wallSideSignSide"),
+            brace = el("wallSideSignBrace"),
+            brackets = el("wallSideSignBrackets"),
+            shape = el("wallSideSignShape"),
+            scope = el("wallSideSignScope"),
+            scopeRow = el("wallSideSignScopeRow"),
+            bevel = el("wallSideSignBevelOffset"),
+            shapeValue = parent?.wallSideSignShape ?? child?.wallSideSignShape ?? "box",
+            bevelValue = clamp(
+                Number(parent?.wallSideSignBevelOffset ?? child?.wallSideSignBevelOffset ?? 0.06),
+                0.01,
+                1,
+            ),
+            count = clamp(
+                Math.round(Number(parent?.wallSideSignBracketCount ?? child?.wallSideSignBracketCount ?? 3)),
+                0,
+                3,
+            ),
+            stacked = !!parent && isStackedBuildingAsset(parent),
+            scopeValue = wallSideSignScopeValue(parent, children);
+        if (!panel) return;
+        panel.style.display = parent ? "" : "none";
+        if (!parent) return;
+        if (scopeRow) scopeRow.style.display = stacked ? "" : "none";
+        if (check && document.activeElement !== check)
+            check.checked = !!(parent.wallSideSignEnabled || children.length);
+        if (side && document.activeElement !== side)
+            side.value = String(Number(parent.wallSideSignSide ?? child?.attachment?.wallSideSignSide) < 0 ? -1 : 1);
+        if (brace && document.activeElement !== brace) brace.checked = count > 0;
+        if (brackets && document.activeElement !== brackets) brackets.value = String(count);
+        if (shape && document.activeElement !== shape) shape.value = shapeValue === "beveled" ? "beveled" : "box";
+        if (scope && document.activeElement !== scope) scope.value = scopeValue;
+        if (bevel && document.activeElement !== bevel) bevel.value = bevelValue.toFixed(2);
+        syncWallSideSignFloorSelect(parent, children, scopeValue);
+    }
     // 建物・階層建物・開口設定の入力欄を、選択中オブジェクトへ同期する。
     function syncBuildingPanel() {
         const panel = el("buildingP"),
@@ -778,6 +897,49 @@
     const linkedBuildingOpening = el("linkedBuildingOpening");
     if (linkedBuildingOpening)
         linkedBuildingOpening.onchange = () => applyLinkedBuildingOpening(linkedBuildingOpening.checked);
+    const wallSideSignCheck = el("wallSideSign"),
+        wallSideSignSide = el("wallSideSignSide"),
+        wallSideSignBrace = el("wallSideSignBrace"),
+        wallSideSignBrackets = el("wallSideSignBrackets"),
+        wallSideSignShape = el("wallSideSignShape"),
+        wallSideSignScope = el("wallSideSignScope"),
+        wallSideSignBevelOffset = el("wallSideSignBevelOffset");
+    function applyWallSideSignControl(floorFlagsOverride = null) {
+        const parent = wallSideSignParent();
+        if (!parent || !window.cityGridWallSideSignToggle) return;
+        const children = wallSideSignChildren(parent),
+            stacked = isStackedBuildingAsset(parent),
+            scope =
+                stacked && ["first", "all", "individual"].includes(wallSideSignScope?.value)
+                    ? wallSideSignScope.value
+                    : wallSideSignScopeValue(parent, children),
+            count = wallSideSignBrace?.checked ? clamp(Math.round(Number(wallSideSignBrackets?.value) || 0), 0, 3) : 0,
+            length = clamp(Math.abs(Number(parent.wallSideSignBracketLength) || 0.36), 0.05, 5),
+            shape = wallSideSignShape?.value === "beveled" ? "beveled" : "box",
+            bevel = clamp(Number(wallSideSignBevelOffset?.value) || 0.06, 0.01, 1),
+            flags = floorFlagsOverride || wallSideSignFlags(parent, children);
+        window.cityGridWallSideSignToggle(
+            parent.id,
+            !!wallSideSignCheck?.checked,
+            Number(wallSideSignSide?.value) || 1,
+            count,
+            length,
+            shape,
+            bevel,
+            scope,
+            flags,
+        );
+    }
+    if (wallSideSignCheck) wallSideSignCheck.onchange = applyWallSideSignControl;
+    if (wallSideSignSide)
+        wallSideSignSide.onchange = () => {
+            if (wallSideSignCheck?.checked) applyWallSideSignControl();
+        };
+    if (wallSideSignBrace) wallSideSignBrace.onchange = applyWallSideSignControl;
+    if (wallSideSignBrackets) wallSideSignBrackets.onchange = applyWallSideSignControl;
+    if (wallSideSignShape) wallSideSignShape.onchange = applyWallSideSignControl;
+    if (wallSideSignScope) wallSideSignScope.onchange = applyWallSideSignControl;
+    if (wallSideSignBevelOffset) wallSideSignBevelOffset.oninput = applyWallSideSignControl;
     let stackedEditSession = false;
     function stackFloorHeight(o) {
         const floors = Array.isArray(o?.floors) ? o.floors : [];
@@ -1077,7 +1239,33 @@
         stackedEditSession = false;
         render();
     }
-    function copyFirstFloorToAll() {
+    function copyWallSideSignFirstToAll(parent) {
+        const children = wallSideSignChildren(parent),
+            first = children.find((child) => Number(child.attachment?.floorIndex) === 0) || children[0];
+        if (!first || children.length < 2) return;
+        children.forEach((child) => {
+            if (child.id === first.id) return;
+            setOb(child.id, {
+                ra: first.ra,
+                rb: first.rb,
+                h: first.h,
+                c: first.c,
+                wallSideSignBracketCount: first.wallSideSignBracketCount,
+                wallSideSignBracketLength: first.wallSideSignBracketLength,
+                wallSideSignShape: first.wallSideSignShape,
+                wallSideSignBevelOffset: first.wallSideSignBevelOffset,
+                wallSideSignBevelSegments: first.wallSideSignBevelSegments,
+                attachment: {
+                    ...child.attachment,
+                    side: first.attachment?.side,
+                    wallSideSignSide: first.attachment?.wallSideSignSide,
+                    centerRatio: first.attachment?.centerRatio,
+                    depthOffset: first.attachment?.depthOffset,
+                },
+            });
+        });
+    }
+    function copyFirstFloorToAll(includeSigns = false) {
         const o = sel && obOf(sel);
         if (!o || !isStackedBuildingAsset(o) || !o.floors?.length) return;
         HU.push(S);
@@ -1095,6 +1283,11 @@
                     : {}),
             }));
         setOb(o.id, { floors, h: stackFloorHeight({ floors }) });
+        if (includeSigns) {
+            // 看板込みを選んだ場合だけ、1F看板の寸法・相対位置を各階へコピーする。
+            // 建物だけのコピーでは、既存看板の個別設定を変更しない。
+            copyWallSideSignFirstToAll(obOf(o.id));
+        }
         render();
     }
     [
@@ -1108,8 +1301,10 @@
     if (stackIndividual) stackIndividual.onchange = () => applyStackMeta("individualEdit", stackIndividual.checked);
     const stackAlign = el("stackAlign");
     if (stackAlign) stackAlign.onclick = alignStackedObject;
-    const stackCopy = el("stackCopyFirst");
-    if (stackCopy) stackCopy.onclick = copyFirstFloorToAll;
+    const stackCopy = el("stackCopyFirst"),
+        stackCopyWithSigns = el("stackCopyFirstWithSigns");
+    if (stackCopy) stackCopy.onclick = () => copyFirstFloorToAll(false);
+    if (stackCopyWithSigns) stackCopyWithSigns.onclick = () => copyFirstFloorToAll(true);
 
     function applyBuildingProp(name, v) {
         const o = buildingPanelObject();
@@ -1282,6 +1477,8 @@
         });
         const points = el("pathPipePoints");
         if (points && document.activeElement !== points) points.value = pathPipeText(o.path);
+        if (pathPipePresetInput && document.activeElement !== pathPipePresetInput)
+            pathPipePresetInput.value = pathPipePresetKey(o.path);
     }
     function applyPathPipeProp(name, value) {
         const o = sel && obOf(sel);
@@ -1321,13 +1518,55 @@
             pathPipeEditSession = false;
         };
     });
-    const pathInput = el("pathPipePoints");
-    if (pathInput) {
-        pathInput.oninput = () => applyPathPipeProp("path", pathInput.value);
-        pathInput.onchange = () => {
-            pathPipeEditSession = false;
-        };
+    const pathPipePresets = {
+        straight: [
+            [-2.8, 0, 1.1],
+            [2.8, 0, 1.1],
+        ],
+        l: [
+            [-2.4, 0, 1.1],
+            [0, 0, 1.1],
+            [0, 2.4, 1.1],
+        ],
+        u: [
+            [-2.4, 0, 1.1],
+            [-2.4, 2.4, 1.1],
+            [2.4, 2.4, 1.1],
+            [2.4, 0, 1.1],
+        ],
+        z: [
+            [-2.4, -1.6, 1.1],
+            [0, -1.6, 1.1],
+            [0, 1.6, 1.1],
+            [2.4, 1.6, 1.1],
+        ],
+        step3d: [
+            [-2.4, 0, 0.55],
+            [-0.8, 0, 0.55],
+            [-0.8, 0, 2.0],
+            [0.8, 0, 2.0],
+            [0.8, 1.8, 2.0],
+            [2.4, 1.8, 2.0],
+        ],
+    };
+    const pathPipePresetInput = el("pathPipePreset"),
+        pathPipeApplyPresetButton = el("pathPipeApplyPreset");
+    function pathPipePresetKey(path) {
+        const text = pathPipeText(path);
+        return Object.entries(pathPipePresets).find(([, points]) => pathPipeText(points) === text)?.[0] || "custom";
     }
+    function applyPathPipePreset() {
+        const o = sel && obOf(sel),
+            key = pathPipePresetInput?.value,
+            preset = pathPipePresets[key];
+        if (!o || o.type !== "asset" || o.asset !== "pathPipe" || !preset) return;
+        HU.push(S);
+        RD = [];
+        pathPipeEditSession = false;
+        setOb(o.id, { path: preset.map((point) => [...point]) });
+        render();
+    }
+    if (pathPipeApplyPresetButton) pathPipeApplyPresetButton.onclick = applyPathPipePreset;
     let beveledBoxEditSession = false;
     function syncBeveledBoxPanel() {
         const panel = el("beveledBoxP"),
@@ -1395,6 +1634,7 @@
         syncAssetControls();
         syncSignPanel();
         syncBuildingPanel();
+        syncWallSideSignPanel();
         syncBalconyPanel();
         syncPathPipePanel();
         syncBeveledBoxPanel();
@@ -1853,11 +2093,12 @@
                         (bounds.lo[1] + bounds.hi[1]) / 2,
                         (bounds.lo[2] + bounds.hi[2]) / 2,
                     ],
-                    base = o.k !== 1 ? boundsCenter : L2W(o, 0, 0, z0),
-                    mid = o.k !== 1 ? boundsCenter : L2W(o, 0, 0, (z0 + z1) / 2),
+                    pathObject = o.type === "asset" && o.asset === "pathPipe",
+                    base = pathObject || o.k !== 1 ? boundsCenter : L2W(o, 0, 0, z0),
+                    mid = pathObject || o.k !== 1 ? boundsCenter : L2W(o, 0, 0, (z0 + z1) / 2),
                     a = (Number(o.rot) || 0) * DG,
                     dist =
-                        o.k !== 1
+                        pathObject || o.k !== 1
                             ? Math.max(bounds.hi[0] - bounds.lo[0], bounds.hi[2] - bounds.lo[2], 0.6) * 0.5 + 0.62
                             : Math.max(Math.abs(Number(o.ra) || 0.3), Math.abs(Number(o.rb) || 0.3)) + 0.42;
                 out.object = {
@@ -1914,7 +2155,14 @@
                 .find((o) => {
                     if (!o || !objectVisible(o)) return false;
                     const b = obBounds(o);
-                    if (o.type === "compound" || o.k !== 1)
+                    // パスパイプは折れ線＋半径で外接範囲が決まるため、
+                    // ra/rbの初期矩形ではなく実メッシュの範囲でヒット判定する。
+                    if (
+                        o.type === "compound" ||
+                        o.k !== 1 ||
+                        (o.type === "asset" && o.asset === "pathPipe") ||
+                        o.attachment?.wallSideSign
+                    )
                         return (
                             w.x >= b.lo[0] - 0.08 &&
                             w.x <= b.hi[0] + 0.08 &&
@@ -2531,7 +2779,9 @@
             // 積層建物とパスパイプは、単一のra/rb/hではなく floors/path[] を
             // 持つため、間取り用の汎用ハンドルを出すと別の古い寸法を編集してしまう。
             // 専用ギズモを同じ座標へ描き、pointerdownも通常のギズモ経路へ渡す。
-            customEdit = o.type === "asset" && (isStackedBuildingAsset(o) || o.asset === "pathPipe");
+            customEdit =
+                o.type === "asset" &&
+                (isStackedBuildingAsset(o) || o.asset === "pathPipe" || o.asset === "wallSideSign");
         if (customEdit) return { o, base, center, handles, panel: null, special: true };
         if (o.k !== 1) return floorWallEditHandles(o);
         const add = (kind, label, point, probe, start, min = 0.01, side = 1) => {
@@ -2817,25 +3067,57 @@
         if (h.object) {
             const o = h.object.o,
                 [z0, z1] = floorPlanObjectZRange(o),
-                corners = [
-                    [-o.ra, -o.rb],
-                    [o.ra, -o.rb],
-                    [o.ra, o.rb],
-                    [-o.ra, o.rb],
-                    [-o.ra, -o.rb],
-                ];
+                pathBounds = o.type === "asset" && o.asset === "pathPipe" ? obBounds(o) : null,
+                boundsCenter = pathBounds
+                    ? [
+                          (pathBounds.lo[0] + pathBounds.hi[0]) / 2,
+                          (pathBounds.lo[1] + pathBounds.hi[1]) / 2,
+                          (pathBounds.lo[2] + pathBounds.hi[2]) / 2,
+                      ]
+                    : null,
+                corners = pathBounds
+                    ? orthView === "top"
+                        ? [
+                              [pathBounds.lo[0], boundsCenter[1], pathBounds.lo[2]],
+                              [pathBounds.hi[0], boundsCenter[1], pathBounds.lo[2]],
+                              [pathBounds.hi[0], boundsCenter[1], pathBounds.hi[2]],
+                              [pathBounds.lo[0], boundsCenter[1], pathBounds.hi[2]],
+                              [pathBounds.lo[0], boundsCenter[1], pathBounds.lo[2]],
+                          ]
+                        : orthView === "side"
+                          ? [
+                                [boundsCenter[0], pathBounds.lo[1], pathBounds.lo[2]],
+                                [boundsCenter[0], pathBounds.lo[1], pathBounds.hi[2]],
+                                [boundsCenter[0], pathBounds.hi[1], pathBounds.hi[2]],
+                                [boundsCenter[0], pathBounds.hi[1], pathBounds.lo[2]],
+                                [boundsCenter[0], pathBounds.lo[1], pathBounds.lo[2]],
+                            ]
+                          : [
+                                [pathBounds.lo[0], pathBounds.lo[1], boundsCenter[2]],
+                                [pathBounds.hi[0], pathBounds.lo[1], boundsCenter[2]],
+                                [pathBounds.hi[0], pathBounds.hi[1], boundsCenter[2]],
+                                [pathBounds.lo[0], pathBounds.hi[1], boundsCenter[2]],
+                                [pathBounds.lo[0], pathBounds.lo[1], boundsCenter[2]],
+                            ]
+                    : [
+                          [-o.ra, -o.rb],
+                          [o.ra, -o.rb],
+                          [o.ra, o.rb],
+                          [-o.ra, o.rb],
+                          [-o.ra, -o.rb],
+                      ];
             c.strokeStyle = "rgba(255,159,104,.9)";
             c.lineWidth = 1.5 / Z;
             c.setLineDash([6 / Z, 4 / Z]);
             c.beginPath();
-            corners.forEach(([x, y], i) => {
-                const p = L2W(o, x, y, z0),
+            corners.forEach((v, i) => {
+                const p = pathBounds ? v : L2W(o, v[0], v[1], z0),
                     q = scrW(p);
                 i ? (q.ok ? c.lineTo(q.x, q.y) : null) : c.moveTo(q.x, q.y);
             });
             c.stroke();
             c.setLineDash([]);
-            if (orthView === "side" && z1 > z0) {
+            if (orthView === "side" && z1 > z0 && !pathBounds) {
                 const baseCorners = [
                     [-o.ra, -o.rb],
                     [o.ra, -o.rb],
@@ -2859,7 +3141,7 @@
                     }
                 });
                 c.stroke();
-            } else if (orthView === "front") {
+            } else if (orthView === "front" && !pathBounds) {
                 const frontCorners =
                     o.type === "asset" && o.asset === "sign"
                         ? [L2W(o, -o.ra, 0, z0), L2W(o, o.ra, 0, z0), L2W(o, o.ra, 0, z1), L2W(o, -o.ra, 0, z1)]
@@ -2901,8 +3183,11 @@
             c.stroke();
             drawFloorMoveGizmo(c, h.object.o);
             const editHandles = floorPlanEditHandles();
-            if (editHandles?.special) drawSpecialGizmo(c, h.object.o);
-            else {
+            if (editHandles?.special) {
+                // 壁横看板はengine-tools側の専用ギズモを描画する。
+                // ここで再描画すると黄色の金具ハンドルが二重になる。
+                if (h.object.o?.asset !== "wallSideSign") drawSpecialGizmo(c, h.object.o);
+            } else {
                 drawFloorPlanEditHandles(c);
                 // ベベル直方体は通常の幅／奥行／高さハンドルに加えて、
                 // 断面オフセット用の専用ハンドルも同じビューへ表示する。
@@ -3381,6 +3666,7 @@
                     customFloorGizmo =
                         ["stackedBuilding", "beveledStackedBuilding"].includes(customAsset) ||
                         customAsset === "pathPipe" ||
+                        customAsset === "wallSideSign" ||
                         (customAsset === "beveledBox" && special?.t === "beveled-offset") ||
                         special?.t?.startsWith("sign-") ||
                         (special?.t === "face" && customAsset === "sign");
@@ -3688,6 +3974,15 @@
             if (floorTouchMove(e)) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
+                return;
+            }
+            // 3Dギズモへ渡した看板・パイプ等はfloorPlanDragを作らず、
+            // ここで通常のdragEditを確実に継続する。正面／横／上ビューの
+            // capture listenerが通常のcanvas pointermoveを先取りするための分岐。
+            if (ed && ptr === e.pointerId && !floorPlanDrag) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                dragEdit(pos(e), !!e.shiftKey);
                 return;
             }
             const boxPendingState = updateBoxPending(pos(e), e.pointerId);

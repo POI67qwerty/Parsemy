@@ -19,6 +19,7 @@
 // 円柱は円の押し出しで作れるため、アセット棚からは外している。
 const ASSETS = {
     rect: { label: "長方形", glyph: "□", w: 1.5, d: 1.0, h: 0, accent: "#66e3c8" },
+    box: { label: "直方体", glyph: "▣", w: 3.2, d: 2.4, h: 1.8, accent: "#7dd8ff" },
     beveledBox: {
         label: "ベベル直方体",
         glyph: "⬡",
@@ -35,6 +36,8 @@ const ASSETS = {
     triPrism: { label: "三角柱", glyph: "△", w: 1.4, d: 1.8, h: 1.25, accent: "#ffb36f" },
     triPyramid: { label: "三角錐", glyph: "▲", w: 1.5, d: 1.5, h: 1.45, accent: "#ff79ba" },
     sign: { label: "看板", glyph: "▤", w: 1.0, d: 0.2, h: 2.15, accent: "#76d9ff" },
+    // 棚には表示しないが、建物横壁へ接着する専用看板の描画・JSON互換用定義。
+    wallSideSign: { label: "横壁看板", glyph: "▥", w: 1.5, d: 0.16, h: 1.8, accent: "#76d9ff" },
     awning: { label: "店舗テント", glyph: "▱", w: 3.8, d: 1.35, h: 0.35, accent: "#d98b68" },
     balcony: { label: "壁付けベランダ", glyph: "▱", w: 3.2, d: 1.8, h: 1.25, accent: "#e6a36f" },
     pathPipe: { label: "パスパイプ", glyph: "◉", w: 4.8, d: 4.2, h: 1.5, accent: "#ff9f68" },
@@ -174,6 +177,37 @@ function boxA(o, w, d, z0, z1, color = o.c || "#e7fff4") {
                 [
                     [a, b, z0],
                     [a, b, z1],
+                ],
+                color,
+            ),
+        ),
+    );
+    return out;
+}
+// ベベル直方体を線画として描く。壁横看板の本体と取付金具で共有する。
+function beveledWireBoxA(o, cx, cy, w, d, z0, z1, offset = 0.06, segments = 3, color = o.c || "#e7fff4") {
+    const footprint = beveledBoxFootprint(w, d, offset, segments),
+        out = [
+            polyA(
+                o,
+                footprint.map(([x, y]) => [x + cx, y + cy, z0]),
+                color,
+            ),
+        ];
+    out.push(
+        polyA(
+            o,
+            footprint.map(([x, y]) => [x + cx, y + cy, z1]),
+            color,
+        ),
+    );
+    footprint.forEach(([x, y]) =>
+        out.push(
+            lineA(
+                o,
+                [
+                    [x + cx, y + cy, z0],
+                    [x + cx, y + cy, z1],
                 ],
                 color,
             ),
@@ -531,6 +565,43 @@ function assetLines(o) {
                     Number(style.width) || width,
                 );
         });
+        // --- 直方体 ---
+        // ベベルなしの基準形状。ベベル直方体とは別アセットとして選べる。
+    } else if (kind === "box") {
+        out.push(...wireBoxA(o, 0, 0, w, d, 0, Math.max(0.01, h), c));
+        // --- 横壁看板 ---
+        // 看板本体を縦長の箱として描き、必要なら壁からの
+        // 面のある取付金具を0〜3本、看板の裏側へ追加する。
+    } else if (kind === "wallSideSign") {
+        const boardH = Math.max(0.05, Math.abs(Number(o.ra) || 0.9) * 2),
+            boardW = Math.max(0.05, Math.abs(Number(o.rb) || 0.75) * 2),
+            thickness = Math.max(0.02, Math.abs(Number(o.h) || 0.12)),
+            bracketCount = clamp(Math.round(Number(o.wallSideSignBracketCount) || 0), 0, 3),
+            bracketLength = clamp(Math.abs(Number(o.wallSideSignBracketLength) || 0.36), 0.05, 5),
+            clearance = 0.025,
+            bracketV = Math.max(0.06, Math.min(0.18, boardH * 0.1)),
+            bracketSpan = bracketLength + clearance,
+            bracketCenter = -(boardW * 0.5 + bracketSpan * 0.5),
+            beveled = o.wallSideSignShape === "beveled",
+            bevelOffset = clamp(
+                Number(o.wallSideSignBevelOffset) || 0.06,
+                0.01,
+                Math.max(0.01, Math.min(boardH, boardW) * 0.45),
+            ),
+            bevelSegments = 4,
+            boardBox = (cx, cy, w0, d0, z0, z1) =>
+                beveled
+                    ? beveledWireBoxA(o, cx, cy, w0, d0, z0, z1, bevelOffset, bevelSegments, c)
+                    : wireBoxA(o, cx, cy, w0, d0, z0, z1, c);
+        // 看板本体は壁に対して垂直。boardW方向が壁から外へ出る幅、
+        // thickness方向が壁に沿う薄い板厚になる。
+        out.push(...boardBox(0, 0, boardH, boardW, -thickness * 0.5, thickness * 0.5));
+        for (let i = 0; i < bracketCount; i++) {
+            const t = (i + 1) / (bracketCount + 1),
+                x = -boardH * 0.5 + boardH * t;
+            // ベベルは看板本体だけに適用し、取付金具は普通の直方体で描く。
+            out.push(...wireBoxA(o, x, bracketCenter, bracketV, bracketSpan, -thickness * 0.5, thickness * 0.5, c));
+        }
         // --- ベベル直方体 ---
         // footprintを底面・上面へ複製し、押し出し後だけ縦辺を追加する。
     } else if (kind === "beveledBox") {
@@ -1702,6 +1773,20 @@ obBounds = function (o) {
             if (Array.isArray(v) && v.length >= 3)
                 pts.push(customPt(q, Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0));
         });
+    } else if (q.asset === "wallSideSign") {
+        const bracketLength = clamp(Math.abs(Number(q.wallSideSignBracketLength) || 0.36), 0.05, 5),
+            clearance = 0.025,
+            bracketCount = clamp(Math.round(Number(q.wallSideSignBracketCount) || 0), 0, 3),
+            boardHalfHeight = Math.abs(Number(q.ra) || 0.5),
+            boardHalfWidth = Math.abs(Number(q.rb) || 0.5),
+            thickness = Math.max(0.02, Math.abs(Number(q.h) || 0.12)),
+            y0 = bracketCount > 0 ? -boardHalfWidth - bracketLength - clearance : -boardHalfWidth,
+            y1 = boardHalfWidth,
+            z0 = -thickness * 0.5,
+            z1 = thickness * 0.5;
+        [y0, y1].forEach((y) =>
+            [-boardHalfHeight, boardHalfHeight].forEach((x) => [z0, z1].forEach((z) => pts.push(pt(q, x, y, z)))),
+        );
     } else if (q.asset === "pathPipe") {
         const mesh = pathPipeMesh(q);
         mesh.rings.forEach((ring) =>

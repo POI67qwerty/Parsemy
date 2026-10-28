@@ -29,11 +29,41 @@ window.cityGridInstallAssetUI = function (bridge) {
         if (q && Number.isFinite(q[0]) && Number.isFinite(q[2])) return q;
         return [0, -1, 4];
     }
-    function assetGroundPoint() {
-        // Asset buttons place objects on the ground a short distance in front of the camera,
-        // rather than at the far intersection of a nearly horizontal ray.
+    // アセット配置に関する値を一か所へ集約する。
+    // カメラから近すぎて画面外へ出ないよう、寸法・レンズ・画面サイズから
+    // 必要距離を見積もり、入力された配置距離は「最小距離」として扱う。
+    const ASSET_PLACEMENT = Object.freeze({
+        minDepth: 1,
+        maxDepth: 80,
+        defaultDepth: 5,
+        screenFill: 0.52,
+        margin: 1.15,
+        fanMin: 0.85,
+        fanMax: 6,
+    });
+    function assetPlacementDepth(info = null) {
+        const w = Math.abs(Number(info?.w) || 1),
+            d = Math.abs(Number(info?.d) || 1),
+            h = Math.abs(Number(info?.h) || 1),
+            span = Math.max(w, d, h, 1),
+            focal = (W * Math.max(14, Number(P.lens) || 50)) / 36,
+            viewport = Math.max(240, Math.min(W, H)),
+            fit = (focal * span * ASSET_PLACEMENT.margin) / (viewport * ASSET_PLACEMENT.screenFill),
+            requested = Number(P.assetDepth);
+        return Math.min(
+            ASSET_PLACEMENT.maxDepth,
+            Math.max(
+                ASSET_PLACEMENT.minDepth,
+                Number.isFinite(requested) ? requested : ASSET_PLACEMENT.defaultDepth,
+                fit,
+            ),
+        );
+    }
+    function assetGroundPoint(info = null) {
+        // アセットボタンは、ほぼ水平なレイとの遠い交点ではなく、
+        // 画面内へ余白を残せる距離の地面へ配置する。
         const yaw = P.yaw * DG,
-            depth = Math.max(1, Math.min(20, Number(P.assetDepth) || 5)),
+            depth = assetPlacementDepth(info),
             f = [-Math.sin(yaw), 0, Math.cos(yaw)];
         return [P.cx + f[0] * depth, -1, P.cz + f[2] * depth];
     }
@@ -43,15 +73,21 @@ window.cityGridInstallAssetUI = function (bridge) {
         const info = ASSETS[kind],
             isDefault = !p && !worldPoint;
         p = p || { x: W * 0.5, y: H * 0.62 };
-        let q = worldPoint || (isDefault ? assetGroundPoint() : groundAt(p));
-        if (!q || !q.every(Number.isFinite)) q = assetGroundPoint();
+        let q = worldPoint || (isDefault ? assetGroundPoint(info) : groundAt(p));
+        if (!q || !q.every(Number.isFinite)) q = assetGroundPoint(info);
         // Repeated clicks are fanned out slightly so a new object cannot hide exactly under the previous one.
         if (isDefault) {
-            const n = sceneObjects().length;
-            q = [q[0] + ((n % 4) - 1.5) * 0.85, q[1], q[2] + Math.floor(n / 4) * 1.05];
+            const n = sceneObjects().length,
+                span = Math.max(
+                    Math.abs(Number(info?.w) || 1),
+                    Math.abs(Number(info?.d) || 1),
+                    Math.abs(Number(info?.h) || 1),
+                ),
+                fan = clamp(span * 0.28, ASSET_PLACEMENT.fanMin, ASSET_PLACEMENT.fanMax);
+            q = [q[0] + ((n % 4) - 1.5) * fan, q[1], q[2] + Math.floor(n / 4) * fan * 1.2];
         }
         // 生成方向は「その軸に立つ面」の法線。Y=地面、X/Z=壁面として配置する。
-        const k = ["balcony", "pathPipe"].includes(kind) ? 1 : clamp(Math.round(Number(P.assetAxis ?? 1)), 0, 2),
+        const k = kind === "balcony" ? 1 : clamp(Math.round(Number(P.assetAxis ?? 1)), 0, 2),
             d = -1,
             [iu, iv] = PL[k],
             off = [0, 0, 0];
@@ -131,6 +167,18 @@ window.cityGridInstallAssetUI = function (bridge) {
                 h: 0,
                 extrude: false,
             };
+        if (kind === "box")
+            return {
+                ...base,
+                type: "asset",
+                asset: kind,
+                assetId: "box",
+                assetName: info.label,
+                ra: info.w / 2,
+                rb: info.d / 2,
+                h: height,
+                extrude: true,
+            };
         if (kind === "beveledBox")
             return {
                 ...base,
@@ -187,7 +235,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     // child.attachment が親の開口側へ追従するため、親の移動・回転・寸法変更に対応できる。
     function placeLinkedAsset(kind, p) {
         const childKind = kind === "buildingAwning" ? "awning" : "rect",
-            q = p ? groundAt(p) : assetGroundPoint(),
+            q = p ? groundAt(p) : assetGroundPoint(ASSETS.building),
             parent = newAsset("building", null, q),
             child = newAsset(childKind, null, q),
             groupId = "linked-" + uid();
@@ -555,13 +603,224 @@ window.cityGridInstallAssetUI = function (bridge) {
         render();
     }
 
+    // 既存建物の左右の横壁へ、小型看板を任意で接着する。
+    // 建物本体の種類を変えず、attachmentで親の移動・回転・寸法変更へ追従させる。
+    function wallSideSignChildren(parentId) {
+        return sceneObjects()
+            .filter((o) => o?.attachment?.parentId === parentId && o.attachment.wallSideSign)
+            .sort((a, b) => (Number(a.attachment.floorIndex) || 0) - (Number(b.attachment.floorIndex) || 0));
+    }
+    function wallSideSignParent(id) {
+        const o = obOf(id),
+            parent = o?.attachment?.parentId ? obOf(o.attachment.parentId) : o;
+        return parent && parent.type === "asset" && (parent.asset === "building" || isStackedBuildingAsset(parent))
+            ? parent
+            : null;
+    }
+    function wallSideSignScopeOf(parent, children = wallSideSignChildren(parent?.id)) {
+        if (!isStackedBuildingAsset(parent)) return "first";
+        if (["first", "all", "individual"].includes(parent?.wallSideSignScope)) return parent.wallSideSignScope;
+        if (children.length > 1 && children.length >= (parent.floors?.length || 0)) return "all";
+        if (children.some((child) => Number(child.attachment?.floorIndex) > 0)) return "individual";
+        return "first";
+    }
+    function wallSideSignFloorIndices(parent, scope, flags, children = wallSideSignChildren(parent?.id)) {
+        if (!isStackedBuildingAsset(parent)) return [0];
+        const count = Math.max(1, Array.isArray(parent.floors) ? parent.floors.length : 1),
+            normalized = ["first", "all", "individual"].includes(scope) ? scope : wallSideSignScopeOf(parent, children);
+        if (normalized === "all") return Array.from({ length: count }, (_, i) => i);
+        if (normalized === "individual") {
+            const source = Array.isArray(flags)
+                    ? flags
+                    : Array.isArray(parent.wallSideSignFloors)
+                      ? parent.wallSideSignFloors
+                      : null,
+                selected = source
+                    ? source.map((value, index) => (value ? index : -1)).filter((index) => index >= 0 && index < count)
+                    : children
+                          .map((child) => Number(child.attachment?.floorIndex) || 0)
+                          .filter((index, i, all) => index >= 0 && index < count && all.indexOf(index) === i);
+            return selected.length ? selected : [0];
+        }
+        return [0];
+    }
+    function newWallSideSign(parent, side = 1, floorIndexOverride = null, template = null) {
+        const stacked = isStackedBuildingAsset(parent),
+            floors = stacked && Array.isArray(parent.floors) ? parent.floors : [],
+            floorIndex = stacked
+                ? clamp(
+                      Math.round(Number(floorIndexOverride ?? parent.activeFloor) || 0),
+                      0,
+                      Math.max(0, floors.length - 1),
+                  )
+                : 0,
+            floor = stacked ? floors[floorIndex] || floors[0] : null,
+            parentW = stacked ? Math.abs(Number(floor?.w) || 4) : Math.abs(Number(parent.ra) || 2) * 2,
+            parentD = stacked ? Math.abs(Number(floor?.d) || 3) : Math.abs(Number(parent.rb) || 1.5) * 2,
+            parentH = stacked ? Math.abs(Number(floor?.h) || 2.2) : Math.abs(Number(parent.h) || 3),
+            width = template
+                ? Math.max(0.05, Math.abs(Number(template.rb) || 0.75) * 2)
+                : clamp(parentD * 0.3, 0.55, 1.5),
+            height = template
+                ? Math.max(0.05, Math.abs(Number(template.ra) || 0.9) * 2)
+                : clamp(parentH * 0.28, 0.45, 1.25),
+            thickness = template
+                ? Math.max(0.02, Math.abs(Number(template.h) || 0.12))
+                : clamp(Math.min(parentD, parentW) * 0.035, 0.08, 0.18),
+            bracketCount = clamp(
+                Math.round(Number(parent.wallSideSignBracketCount ?? template?.wallSideSignBracketCount ?? 3)),
+                0,
+                3,
+            ),
+            bracketLength = clamp(
+                Math.abs(Number(parent.wallSideSignBracketLength ?? template?.wallSideSignBracketLength) || 0.36),
+                0.05,
+                5,
+            ),
+            shape =
+                parent.wallSideSignShape === "beveled"
+                    ? "beveled"
+                    : template?.wallSideSignShape === "beveled"
+                      ? "beveled"
+                      : "box",
+            bevelOffset = clamp(
+                Number(parent.wallSideSignBevelOffset ?? template?.wallSideSignBevelOffset) || 0.06,
+                0.01,
+                1,
+            ),
+            sideValue = side < 0 ? -1 : 1,
+            templateAttachment = template?.attachment,
+            centerRatio = Number.isFinite(Number(templateAttachment?.centerRatio))
+                ? Number(templateAttachment.centerRatio)
+                : stacked
+                  ? 0.58
+                  : 0.68,
+            depthOffset = Number.isFinite(Number(templateAttachment?.depthOffset))
+                ? Number(templateAttachment.depthOffset)
+                : 0,
+            sign = {
+                id: uid(),
+                type: "asset",
+                asset: "wallSideSign",
+                assetId: "wall-side-sign",
+                assetName: "横壁看板",
+                k: 1,
+                d: -1,
+                off: [0, 0, 0],
+                ca: 0,
+                cb: 0,
+                rot: Number(parent.rot) || 0,
+                lift: 0,
+                wf: true,
+                c: template?.c || parent.c || "#222222",
+                w: Math.max(1, Number(parent.w) || MASTER_W),
+                // 横壁ではraを縦方向、rbを壁に沿う奥行方向、hを壁からの厚みに使う。
+                ra: height / 2,
+                rb: width / 2,
+                h: thickness,
+                extrude: true,
+                wallSideSign: true,
+                wallSideSignBracketCount: bracketCount,
+                wallSideSignBracketLength: bracketLength,
+                wallSideSignShape: shape,
+                wallSideSignBevelOffset: bevelOffset,
+                wallSideSignBevelSegments: 4,
+                wallSideSignSide: sideValue,
+            };
+        sign.attachment = {
+            parentId: parent.id,
+            wallSideSign: true,
+            wallSideSignSide: sideValue,
+            ...(stacked ? { stackedFloor: true, floorIndex } : {}),
+            side: sideValue,
+            depthOffset,
+            centerRatio,
+            offsetZ: 0,
+            rotOffset: 0,
+            verticalOnly: true,
+        };
+        return syncAttachedPart(sign, parent);
+    }
+    function toggleWallSideSign(
+        parentId,
+        enabled,
+        side = 1,
+        bracketCount = 3,
+        bracketLength = 0.36,
+        shape = "box",
+        bevelOffset = 0.06,
+        scope = null,
+        floorFlags = null,
+    ) {
+        const parent = wallSideSignParent(parentId);
+        if (!parent) return false;
+        const before = S.slice(),
+            oldChildren = wallSideSignChildren(parent.id),
+            oldIds = new Set(oldChildren.map((child) => child.id)),
+            count = clamp(Math.round(Number(bracketCount) || 0), 0, 3),
+            length = clamp(Math.abs(Number(bracketLength) || 0.36), 0.05, 5),
+            form = shape === "beveled" ? "beveled" : "box",
+            bevel = clamp(Number(bevelOffset) || 0.06, 0.01, 1),
+            stacked = isStackedBuildingAsset(parent),
+            scopeValue = stacked
+                ? ["first", "all", "individual"].includes(scope)
+                    ? scope
+                    : wallSideSignScopeOf(parent, oldChildren)
+                : "first",
+            indices = wallSideSignFloorIndices(parent, scopeValue, floorFlags, oldChildren),
+            floorCount = stacked ? Math.max(1, parent.floors?.length || 1) : 1,
+            signFloors = Array.from({ length: floorCount }, (_, index) => indices.includes(index)),
+            oldByFloor = new Map(oldChildren.map((child) => [Number(child.attachment?.floorIndex) || 0, child]));
+        try {
+            HU.push(S);
+            RD = [];
+            S = S.filter((s) => s?.ob?.id !== parent.id && !oldIds.has(s?.ob?.id));
+            const nextParent = {
+                ...parent,
+                wallSideSignEnabled: !!enabled,
+                wallSideSignSide: side < 0 ? -1 : 1,
+                wallSideSignBracketCount: count,
+                wallSideSignBracketLength: length,
+                wallSideSignShape: form,
+                wallSideSignBevelOffset: bevel,
+                wallSideSignBevelSegments: 4,
+                wallSideSignScope: scopeValue,
+                wallSideSignFloors: signFloors,
+            };
+            S = [...S, ...genShape(nextParent)];
+            if (enabled) {
+                const fallbackTemplate = oldByFloor.get(0) || oldChildren[0] || null;
+                indices.forEach((floorIndex) => {
+                    const template = oldByFloor.get(floorIndex) || fallbackTemplate,
+                        sign = newWallSideSign(nextParent, side, floorIndex, template);
+                    S = [...S, ...genShape(sign)];
+                });
+            }
+            regenObjects();
+            setSelection(parent.id, false);
+            tool = "edit";
+            setMode("draw");
+            render();
+            return true;
+        } catch (err) {
+            S = before;
+            console.error("City Grid wall-side sign error", err);
+            render();
+            return false;
+        }
+    }
+    window.cityGridWallSideSignToggle = toggleWallSideSign;
+
     // ===== アセット棚と配置ボタン =====
     // 棚のボタンはplaceAsset()へ集約し、UIイベント内に形状生成ロジックを重複させない。
     const tray = document.createElement("div");
     tray.id = "assetTray";
     tray.innerHTML =
         '<div class="assetTrayInner"><div class="assetTrayTitle">シーンに追加</div><div class="assetTrayTools"><label>生成面<select id="assetAxisTray"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select></label></div><div class="assetClipboardTools"><button type="button" id="objectCopy">コピー</button><button type="button" id="objectPaste" disabled>貼り付け</button><button type="button" id="objectImportButton">JSON読込</button><input id="objectImportFile" type="file" accept="application/json,.json" hidden></div>' +
+        // 通常の「看板」アセットは、建物へ接着する横壁看板へ統合したため棚から外す。
+        // 既存JSONのasset=signはASSETS定義を残して読み込み・表示できるようにする。
         Object.entries(ASSETS)
+            .filter(([k]) => k !== "sign")
             .map(
                 ([k, v]) =>
                     `<button class="assetCard" data-asset="${k}" title="${v.label}を追加${k === "balcony" ? "（建物選択中は壁へ接着）" : ""}"><span class="assetGlyph">${v.glyph}</span><span>${v.label}</span></button>`,
