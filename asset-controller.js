@@ -193,6 +193,27 @@ window.cityGridInstallAssetUI = function (bridge) {
                 bevelOffset: info.bevelOffset,
                 bevelSegments: info.bevelSegments,
             };
+        if (kind === "cornerCutBox")
+            return {
+                ...base,
+                type: "asset",
+                asset: kind,
+                assetId: "corner-cut-box",
+                assetName: info.label,
+                ra: info.w / 2,
+                rb: info.d / 2,
+                h: Math.max(0.1, height),
+                extrude: true,
+                // 隅切り直方体は、現在の初期向きから垂直軸まわりに90度回した状態で生成する。
+                rot: 90,
+                cornerOffset: info.cornerOffset,
+                cornerCutCorner: info.cornerCutCorner,
+                cornerCutOpeningEnabled: false,
+                cornerCutOpeningW: info.cornerCutOpeningW,
+                cornerCutOpeningH: info.cornerCutOpeningH,
+                cornerCutOpeningDepth: info.cornerCutOpeningDepth,
+                cutColor: info.cutColor,
+            };
         return {
             ...base,
             type: "asset",

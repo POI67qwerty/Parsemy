@@ -30,6 +30,20 @@ const ASSETS = {
         bevelSegments: 4,
         accent: "#ff9f68",
     },
+    cornerCutBox: {
+        label: "隅切り直方体",
+        glyph: "⬟",
+        w: 4.2,
+        d: 3.6,
+        h: 3.6,
+        cornerOffset: 0.8,
+        cornerCutCorner: "front-left",
+        cornerCutOpeningW: 0.7,
+        cornerCutOpeningH: 2.2,
+        cornerCutOpeningDepth: 0.8,
+        cutColor: "#e24b4b",
+        accent: "#8ed7e8",
+    },
     circle: { label: "円", glyph: "○", w: 1.25, d: 1.25, h: 0, accent: "#ad9cff" },
     cone: { label: "円錐", glyph: "△", w: 1.25, d: 1.25, h: 1.45, accent: "#ffb36f" },
     sphere: { label: "球体", glyph: "●", w: 1.3, d: 1.3, h: 1.3, accent: "#ad9cff" },
@@ -215,6 +229,83 @@ function beveledWireBoxA(o, cx, cy, w, d, z0, z1, offset = 0.06, segments = 3, c
     );
     return out;
 }
+// 隅切り直方体の底面・上面と縦辺を描く。切り口の辺だけを赤くして、
+// 図面上でも「どこを隅切りしているか」とオフセット方向を読み取りやすくする。
+function cornerCutWireBoxA(o, w, d, z0, z1, offset, corner, color = o.c || "#e7fff4", cutColor = "#e24b4b") {
+    const footprint = cornerCutFootprint(w, d, offset, corner),
+        out = [],
+        cutStart = footprint.length - 1,
+        edgeColor = (index) => (index === cutStart ? cutColor : color);
+    for (let i = 0; i < footprint.length; i++) {
+        const j = (i + 1) % footprint.length;
+        out.push(
+            lineA(
+                o,
+                [
+                    [footprint[i][0], footprint[i][1], z0],
+                    [footprint[j][0], footprint[j][1], z0],
+                ],
+                edgeColor(i),
+            ),
+            lineA(
+                o,
+                [
+                    [footprint[i][0], footprint[i][1], z1],
+                    [footprint[j][0], footprint[j][1], z1],
+                ],
+                edgeColor(i),
+            ),
+        );
+    }
+    footprint.forEach(([x, y], index) =>
+        out.push(
+            lineA(
+                o,
+                [
+                    [x, y, z0],
+                    [x, y, z1],
+                ],
+                index === 0 || index === cutStart ? cutColor : color,
+            ),
+        ),
+    );
+    return out;
+}
+// 隅切り面の開口を線画で描く。切り口を分割し、開口内部の側面・上面・奥壁を追加する。
+function cornerCutOpeningWireBoxA(o, opening, z1, color = o.c || "#e7fff4", cutColor = "#e24b4b") {
+    const { footprint, cutA, cutB, frontA, frontB, backA, backB, openingH } = opening,
+        out = [],
+        cutIndex = footprint.length - 1,
+        line = (a, b, col = color) => out.push(lineA(o, [a, b], col)),
+        point = (xy, z) => [xy[0], xy[1], z],
+        openingColor = "#ff8b8b";
+    for (let i = 0; i < footprint.length; i++) {
+        const j = (i + 1) % footprint.length;
+        if (i === cutIndex) continue;
+        line(point(footprint[i], 0), point(footprint[j], 0), color);
+        line(point(footprint[i], z1), point(footprint[j], z1), color);
+    }
+    footprint.forEach(([x, y], index) =>
+        line([x, y, 0], [x, y, z1], index === 0 || index === cutIndex ? cutColor : color),
+    );
+    // 切り口外周の底辺は開口部分だけ途切れさせ、上辺は建物の上端として残す。
+    line(point(cutA, 0), point(frontA, 0), cutColor);
+    line(point(frontB, 0), point(cutB, 0), cutColor);
+    line(point(cutA, z1), point(cutB, z1), cutColor);
+    // 開口の手前枠と、内部の左右側面・上面・奥壁。
+    line(point(frontA, 0), point(frontA, openingH), openingColor);
+    line(point(frontB, 0), point(frontB, openingH), openingColor);
+    line(point(frontA, openingH), point(frontB, openingH), openingColor);
+    line(point(frontA, 0), point(backA, 0), openingColor);
+    line(point(frontA, openingH), point(backA, openingH), openingColor);
+    line(point(frontB, 0), point(backB, 0), openingColor);
+    line(point(frontB, openingH), point(backB, openingH), openingColor);
+    line(point(backA, 0), point(backA, openingH), openingColor);
+    line(point(backB, 0), point(backB, openingH), openingColor);
+    line(point(backA, openingH), point(backB, openingH), openingColor);
+    line(point(backA, 0), point(backB, 0), openingColor);
+    return out;
+}
 // ベベル直方体の平面輪郭。四つの縦角を、オフセットを半径とする
 // 1〜4分割の円弧で面取りする。segments=1なら一枚の平面面取り、
 // segments=4なら各角を4枚の小面へ分割した丸みのあるベベルになる。
@@ -257,6 +348,128 @@ function beveledBoxParams(o) {
         bevelOffset = clamp(Number(o?.bevelOffset) || 0, 0, max),
         bevelSegments = beveledBoxSegments(o?.bevelSegments, o?.bevelEdges);
     return { w, d, max, bevelOffset, bevelSegments };
+}
+// 隅切り直方体の平面輪郭。front-leftの角を基準に、隣り合う2辺から
+// 同じ距離だけ内側へ切り込み、5辺の凸多角形へする。回転とは別に
+// cornerCutCornerを保持するため、将来ほかの角や複数角へ拡張できる。
+function cornerCutFootprint(width, depth, offset, corner = "front-left") {
+    const w = Math.max(0.01, Math.abs(Number(width) || 0.01)),
+        d = Math.max(0.01, Math.abs(Number(depth) || 0.01)),
+        hw = w * 0.5,
+        hd = d * 0.5,
+        max = Math.max(0, Math.min(w, d) * 0.5 - 0.001),
+        b = clamp(Number(offset) || 0, 0, max),
+        base = [
+            [-hw + b, -hd],
+            [hw, -hd],
+            [hw, hd],
+            [-hw, hd],
+            [-hw, -hd + b],
+        ],
+        key = ["front-left", "front-right", "back-right", "back-left"].includes(corner) ? corner : "front-left";
+    return base.map(([x, y]) => {
+        if (key === "front-right") return [-x, y];
+        if (key === "back-right") return [-x, -y];
+        if (key === "back-left") return [x, -y];
+        return [x, y];
+    });
+}
+function cornerCutBoxParams(o) {
+    const w = Math.max(0.01, Math.abs(Number(o?.ra) || 0.01) * 2),
+        d = Math.max(0.01, Math.abs(Number(o?.rb) || 0.01) * 2),
+        max = Math.max(0, Math.min(w, d) * 0.5 - 0.001),
+        cornerOffset = clamp(Number(o?.cornerOffset) || 0, 0, max),
+        cornerCutCorner = ["front-left", "front-right", "back-right", "back-left"].includes(o?.cornerCutCorner)
+            ? o.cornerCutCorner
+            : "front-left";
+    return { w, d, max, cornerOffset, cornerCutCorner };
+}
+function cornerCutOpeningRayDistance(origin, direction, polygon) {
+    const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
+    let best = Infinity;
+    for (let i = 0; i < polygon.length; i++) {
+        const a = polygon[i],
+            b = polygon[(i + 1) % polygon.length],
+            edge = [b[0] - a[0], b[1] - a[1]],
+            den = cross(direction, edge);
+        if (Math.abs(den) < 1e-8) continue;
+        const from = [a[0] - origin[0], a[1] - origin[1]],
+            t = cross(from, edge) / den,
+            u = cross(from, direction) / den;
+        if (t > 1e-6 && u >= -1e-6 && u <= 1 + 1e-6) best = Math.min(best, t);
+    }
+    return Number.isFinite(best)
+        ? best
+        : Math.max(0.05, Math.min(2, Math.min(Math.abs(polygon[0][0]), Math.abs(polygon[0][1]))));
+}
+// 隅切り面の開口を、切り口に沿う幅・上下高さ・内側への奥行きへ正規化する。
+// 開口は切り口の中央を基準にした矩形で、奥壁は切り口と平行な面になる。
+function cornerCutOpeningParams(o) {
+    const box = cornerCutBoxParams(o),
+        footprint = cornerCutFootprint(box.w, box.d, box.cornerOffset, box.cornerCutCorner),
+        cutA = footprint[footprint.length - 1],
+        cutB = footprint[0],
+        cutDx = cutB[0] - cutA[0],
+        cutDy = cutB[1] - cutA[1],
+        cutLength = Math.max(0.05, Math.hypot(cutDx, cutDy)),
+        tangent = [cutDx / cutLength, cutDy / cutLength],
+        midpoint = [(cutA[0] + cutB[0]) * 0.5, (cutA[1] + cutB[1]) * 0.5],
+        centroid = footprint
+            .reduce((sum, point) => [sum[0] + point[0], sum[1] + point[1]], [0, 0])
+            .map((value) => value / footprint.length),
+        toInside = [centroid[0] - midpoint[0], centroid[1] - midpoint[1]],
+        // 赤い隅切り面の法線を使い、開口の押し出し方向を面へ必ず直交させる。
+        normalA = [-tangent[1], tangent[0]],
+        normalB = [tangent[1], -tangent[0]],
+        inward = normalA[0] * toInside[0] + normalA[1] * toInside[1] >= 0 ? normalA : normalB,
+        maxWidth = Math.max(0.1, cutLength - 0.08),
+        height = Math.max(0.1, Math.abs(Number(o?.h) || 0.1)),
+        maxHeight = Math.max(0.1, height - 0.1),
+        openingW = clamp(
+            Number.isFinite(Number(o?.cornerCutOpeningW))
+                ? Number(o.cornerCutOpeningW)
+                : Math.min(maxWidth, cutLength * 0.62),
+            0.1,
+            maxWidth,
+        ),
+        openingH = clamp(
+            Number.isFinite(Number(o?.cornerCutOpeningH)) ? Number(o.cornerCutOpeningH) : height * 0.66,
+            0.1,
+            maxHeight,
+        ),
+        maxDepth = Math.max(0.025, cornerCutOpeningRayDistance(midpoint, inward, footprint) - 0.025),
+        openingDepth = clamp(
+            Number.isFinite(Number(o?.cornerCutOpeningDepth))
+                ? Number(o.cornerCutOpeningDepth)
+                : Math.min(0.8, maxDepth * 0.45),
+            0.025,
+            maxDepth,
+        ),
+        frontA = [midpoint[0] - tangent[0] * openingW * 0.5, midpoint[1] - tangent[1] * openingW * 0.5],
+        frontB = [midpoint[0] + tangent[0] * openingW * 0.5, midpoint[1] + tangent[1] * openingW * 0.5],
+        backA = [frontA[0] + inward[0] * openingDepth, frontA[1] + inward[1] * openingDepth],
+        backB = [frontB[0] + inward[0] * openingDepth, frontB[1] + inward[1] * openingDepth];
+    return {
+        ...box,
+        footprint,
+        cutA,
+        cutB,
+        cutLength,
+        tangent,
+        midpoint,
+        inward,
+        maxWidth,
+        maxHeight,
+        maxDepth,
+        openingW,
+        openingH,
+        openingDepth,
+        frontA,
+        frontB,
+        backA,
+        backB,
+        enabled: o?.cornerCutOpeningEnabled === true,
+    };
 }
 // 階層建物の1F開口の初期値・上限値を計算する。
 // 開口はここで値を決めるだけで、実際の線画はassetLines()内で描く。
@@ -569,6 +782,17 @@ function assetLines(o) {
         // ベベルなしの基準形状。ベベル直方体とは別アセットとして選べる。
     } else if (kind === "box") {
         out.push(...wireBoxA(o, 0, 0, w, d, 0, Math.max(0.01, h), c));
+        // --- 横壁看板 ---
+        // 看板本体を縦長の箱として描き、必要なら壁からの
+        // 面のある取付金具を0〜3本、看板の裏側へ追加する。
+    } else if (kind === "cornerCutBox") {
+        const q = cornerCutOpeningParams(o),
+            z1 = Math.max(0.01, Math.abs(Number(h) || 0.01));
+        if (q.enabled) out.push(...cornerCutOpeningWireBoxA(o, q, z1, c, o.cutColor || "#e24b4b"));
+        else
+            out.push(
+                ...cornerCutWireBoxA(o, q.w, q.d, 0, z1, q.cornerOffset, q.cornerCutCorner, c, o.cutColor || "#e24b4b"),
+            );
         // --- 横壁看板 ---
         // 看板本体を縦長の箱として描き、必要なら壁からの
         // 面のある取付金具を0〜3本、看板の裏側へ追加する。
@@ -1636,6 +1860,19 @@ function assetLines(o) {
 // ここでは見た目を作らず、後段のassetLines()が安全に読める形へ変換する。
 function normalizedAsset(o) {
     let q = o?.attachment ? syncAttachedPart(o) : o;
+    if (q && q.asset === "cornerCutBox") {
+        const params = cornerCutOpeningParams(q);
+        return {
+            ...q,
+            cornerOffset: params.cornerOffset,
+            cornerCutCorner: params.cornerCutCorner,
+            cornerCutOpeningEnabled: q.cornerCutOpeningEnabled === true,
+            cornerCutOpeningW: params.openingW,
+            cornerCutOpeningH: params.openingH,
+            cornerCutOpeningDepth: params.openingDepth,
+            h: Math.max(0.01, Math.abs(Number(q.h) || 0.01)),
+        };
+    }
     if (q && q.asset === "beveledBox") {
         const width = Math.max(0.01, Math.abs(Number(q.ra) || 0.01) * 2),
             depth = Math.max(0.01, Math.abs(Number(q.rb) || 0.01) * 2),
@@ -1773,6 +2010,19 @@ obBounds = function (o) {
             if (Array.isArray(v) && v.length >= 3)
                 pts.push(customPt(q, Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0));
         });
+    } else if (q.asset === "cornerCutBox") {
+        const params = cornerCutOpeningParams(q),
+            footprint = params.footprint,
+            h = Math.max(0.01, Math.abs(Number(q.h) || 0.01));
+        footprint.forEach(([x, y]) => {
+            pts.push(pt(q, x, y, 0));
+            pts.push(pt(q, x, y, h));
+        });
+        if (params.enabled)
+            [params.frontA, params.frontB, params.backA, params.backB].forEach((xy) => {
+                pts.push(pt(q, xy[0], xy[1], 0));
+                pts.push(pt(q, xy[0], xy[1], params.openingH));
+            });
     } else if (q.asset === "wallSideSign") {
         const bracketLength = clamp(Math.abs(Number(q.wallSideSignBracketLength) || 0.36), 0.05, 5),
             clearance = 0.025,

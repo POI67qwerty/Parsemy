@@ -1616,6 +1616,92 @@
             beveledBoxEditSession = false;
         };
     });
+    let cornerCutEditSession = false;
+    function syncCornerCutPanel() {
+        const panel = el("cornerCutP"),
+            o = sel && obOf(sel),
+            isCornerCut = !!(o && o.type === "asset" && o.asset === "cornerCutBox");
+        if (!panel) return;
+        panel.style.display = isCornerCut ? "" : "none";
+        if (!isCornerCut) {
+            cornerCutEditSession = false;
+            return;
+        }
+        const params = typeof cornerCutOpeningParams === "function" ? cornerCutOpeningParams(o) : null,
+            offsetInput = el("cornerCutOffset"),
+            openingEnabled = el("cornerCutOpeningEnabled"),
+            controls = el("cornerCutOpeningControls"),
+            values = [
+                ["cornerCutOpeningW", params?.openingW ?? o.cornerCutOpeningW ?? 0.7],
+                ["cornerCutOpeningH", params?.openingH ?? o.cornerCutOpeningH ?? 2.2],
+                ["cornerCutOpeningDepth", params?.openingDepth ?? o.cornerCutOpeningDepth ?? 0.8],
+            ];
+        if (offsetInput && document.activeElement !== offsetInput)
+            offsetInput.value = Number(params?.cornerOffset ?? o.cornerOffset ?? 0).toFixed(3);
+        if (openingEnabled) openingEnabled.checked = o.cornerCutOpeningEnabled === true;
+        if (controls) controls.style.display = o.cornerCutOpeningEnabled === true ? "" : "none";
+        values.forEach(([id, value]) => {
+            const input = el(id);
+            if (input && document.activeElement !== input) input.value = Number(value).toFixed(3);
+        });
+    }
+    function applyCornerCutProp(name, rawValue) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || o.asset !== "cornerCutBox") return;
+        const params = typeof cornerCutOpeningParams === "function" ? cornerCutOpeningParams(o) : null,
+            patch = {};
+        if (name === "cornerOffset") {
+            const max = params?.max ?? 0,
+                value = Number(rawValue);
+            if (!Number.isFinite(value)) return;
+            patch.cornerOffset = clamp(value, 0, max);
+        } else if (name === "cornerCutOpeningEnabled") patch.cornerCutOpeningEnabled = rawValue === true;
+        else {
+            const limits = {
+                    cornerCutOpeningW: [0.1, params?.maxWidth ?? 20],
+                    cornerCutOpeningH: [0.1, params?.maxHeight ?? 20],
+                    cornerCutOpeningDepth: [0.025, params?.maxDepth ?? 20],
+                }[name],
+                value = Number(rawValue);
+            if (!limits || !Number.isFinite(value)) return;
+            patch[name] = clamp(value, limits[0], limits[1]);
+        }
+        if (!cornerCutEditSession) {
+            HU.push(S);
+            RD = [];
+            cornerCutEditSession = true;
+        }
+        setOb(o.id, patch);
+        render();
+    }
+    const cornerCutOffsetInput = el("cornerCutOffset"),
+        cornerCutOpeningEnabledInput = el("cornerCutOpeningEnabled"),
+        cornerCutOpeningInputs = [
+            ["cornerCutOpeningW", "cornerCutOpeningW"],
+            ["cornerCutOpeningH", "cornerCutOpeningH"],
+            ["cornerCutOpeningDepth", "cornerCutOpeningDepth"],
+        ];
+    if (cornerCutOffsetInput) {
+        cornerCutOffsetInput.oninput = () => applyCornerCutProp("cornerOffset", cornerCutOffsetInput.value);
+        cornerCutOffsetInput.onchange = () => {
+            cornerCutEditSession = false;
+        };
+    }
+    if (cornerCutOpeningEnabledInput) {
+        cornerCutOpeningEnabledInput.onchange = () => {
+            cornerCutEditSession = false;
+            applyCornerCutProp("cornerCutOpeningEnabled", cornerCutOpeningEnabledInput.checked);
+            cornerCutEditSession = false;
+        };
+    }
+    cornerCutOpeningInputs.forEach(([id, name]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => applyCornerCutProp(name, input.value);
+        input.onchange = () => {
+            cornerCutEditSession = false;
+        };
+    });
     function syncAssetControls() {
         const o = sel && obOf(sel);
         if (o && o.type === "asset" && o.asset === "stairs") {
@@ -1638,6 +1724,7 @@
         syncBalconyPanel();
         syncPathPipePanel();
         syncBeveledBoxPanel();
+        syncCornerCutPanel();
         syncStackedPanel();
         syncFloorControls();
         syncAssetDepth();
@@ -2754,6 +2841,16 @@
                 addScreen(param, label, p, dir, param === "ra" ? ra * 2 : param === "rb" ? rb * 2 : h);
             }
         });
+        if (o.type === "asset" && o.asset === "cornerCutBox" && typeof cornerCutGizmo === "function") {
+            const special = cornerCutGizmo(o),
+                h = special?.handle;
+            if (h?.s?.ok) handles.push({ ...h, kind: "cornerCut-offset", label: "隅切り" });
+            if (special?.opening)
+                Object.values(special.opening.handles).forEach((openingHandle) => {
+                    if (openingHandle?.s?.ok)
+                        handles.push({ ...openingHandle, kind: openingHandle.kind, opening: true });
+                });
+        }
         if (o.type === "asset" && o.asset === "building") handles.push(...floorBuildingInnerHandles(o));
         if (o.type === "asset" && o.asset === "awning") {
             const edge = floorAwningEdgeHandle(o);
@@ -2896,6 +2993,16 @@
                 screen: true,
             });
         }
+        if (o.type === "asset" && o.asset === "cornerCutBox" && typeof cornerCutGizmo === "function") {
+            const special = cornerCutGizmo(o),
+                h = special?.handle;
+            if (h?.s?.ok) handles.push({ ...h, kind: "cornerCut-offset", label: "隅切り" });
+            if (special?.opening)
+                Object.values(special.opening.handles).forEach((openingHandle) => {
+                    if (openingHandle?.s?.ok)
+                        handles.push({ ...openingHandle, kind: openingHandle.kind, opening: true });
+                });
+        }
         if (o.type === "asset" && o.asset === "building") handles.push(...floorBuildingInnerHandles(o));
         if (o.type === "asset" && o.asset === "awning") {
             const edge = floorAwningEdgeHandle(o);
@@ -3027,15 +3134,22 @@
             c.stroke();
         }
         g.handles.forEach((h) => {
-            const orange = h.kind === "buildingBackFace" || h.kind === "awningEdgeZ" || h.kind === "awningEdgeY",
-                col = orange ? "#ffb36f" : "#66e3c8",
-                fill = orange ? "#ffd0a8" : "#d9fff6";
-            c.strokeStyle = orange ? "rgba(255,179,111,.88)" : "rgba(102,227,200,.85)";
+            const opening = !!h.opening,
+                orange =
+                    opening ||
+                    h.kind === "buildingBackFace" ||
+                    h.kind === "awningEdgeZ" ||
+                    h.kind === "awningEdgeY" ||
+                    h.kind === "cornerCut-offset",
+                col = opening ? h.color || "#ffd34d" : orange ? "#ffb36f" : "#66e3c8",
+                fill = opening ? "#fff0b0" : orange ? "#ffd0a8" : "#d9fff6";
+            c.strokeStyle = opening ? `${col}dd` : orange ? "rgba(255,179,111,.88)" : "rgba(102,227,200,.85)";
             c.fillStyle = col;
             c.lineWidth = 1.2 / Z;
             c.setLineDash([4 / Z, 3 / Z]);
             c.beginPath();
-            c.moveTo(g.center.x, g.center.y);
+            const lineAnchor = opening && h.anchor?.ok ? h.anchor : g.center;
+            c.moveTo(lineAnchor.x, lineAnchor.y);
             c.lineTo(h.s.x, h.s.y);
             c.stroke();
             c.setLineDash([]);
@@ -3099,13 +3213,19 @@
                                 [pathBounds.lo[0], pathBounds.hi[1], boundsCenter[2]],
                                 [pathBounds.lo[0], pathBounds.lo[1], boundsCenter[2]],
                             ]
-                    : [
-                          [-o.ra, -o.rb],
-                          [o.ra, -o.rb],
-                          [o.ra, o.rb],
-                          [-o.ra, o.rb],
-                          [-o.ra, -o.rb],
-                      ];
+                    : o.type === "asset" && o.asset === "cornerCutBox" && typeof cornerCutBoxParams === "function"
+                      ? (() => {
+                            const q = cornerCutBoxParams(o),
+                                footprint = cornerCutFootprint(q.w, q.d, q.cornerOffset, q.cornerCutCorner);
+                            return [...footprint, footprint[0]];
+                        })()
+                      : [
+                            [-o.ra, -o.rb],
+                            [o.ra, -o.rb],
+                            [o.ra, o.rb],
+                            [-o.ra, o.rb],
+                            [-o.ra, -o.rb],
+                        ];
             c.strokeStyle = "rgba(255,159,104,.9)";
             c.lineWidth = 1.5 / Z;
             c.setLineDash([6 / Z, 4 / Z]);
@@ -3385,6 +3505,14 @@
         // 地面オブジェクトは回転後の実際の四隅を使う。壁・天井の図形は
         // L2W(o, ..., ..., 0)だけだと床面上の外周が退化するため、3D外周箱を
         // X/Zへ投影して、間取り上で隣接判定できるようにする。
+        if (o.type === "asset" && o.asset === "cornerCutBox" && typeof cornerCutBoxParams === "function") {
+            const q = cornerCutBoxParams(o),
+                footprint = cornerCutFootprint(q.w, q.d, q.cornerOffset, q.cornerCutCorner);
+            return footprint.map(([x, y]) => {
+                const p = L2W(o, x, y, 0);
+                return { x: p[0], z: p[2] };
+            });
+        }
         if (o.k === 1) {
             const out = [];
             for (const x of [-Math.abs(Number(o.ra) || 0), Math.abs(Number(o.ra) || 0)])
@@ -4019,19 +4147,32 @@
                         ((p.x - floorPlanDrag.p0.x) * h.dir.x + (p.y - floorPlanDrag.p0.y) * h.dir.y) / (h.scale || 1),
                     value = clamp(h.start + (h.factor || 1) * amount, h.min, h.max ?? 20);
                 snapHit = null;
-                const patch = h.inner
-                    ? h.kind === "buildingOpeningH"
-                        ? { openingH: value }
-                        : h.kind === "buildingBackFace"
-                          ? { openingBack: value }
-                          : h.kind === "awningEdgeZ"
-                            ? { awningEdgeZ: value, awningFrontBottom: h.frontBottom, awningEdgeEdited: true }
-                            : h.kind === "awningEdgeY"
-                              ? { awningEdgeY: value, awningEdgeEdited: true }
-                              : { openingW: value }
-                    : h.param
-                      ? floorWallDimensionPatch(o, h.param, value, h.side || 1)
-                      : floorResizeSnap(o, floorDimensionPatch(o, h.kind, value, h.side || 1), h, value);
+                const patch =
+                    h.kind === "cornerCut-offset"
+                        ? { cornerOffset: value }
+                        : h.kind === "cornerCut-opening-width-left" || h.kind === "cornerCut-opening-width-right"
+                          ? { cornerCutOpeningW: value }
+                          : h.kind === "cornerCut-opening-height"
+                            ? { cornerCutOpeningH: value }
+                            : h.kind === "cornerCut-opening-depth"
+                              ? { cornerCutOpeningDepth: value }
+                              : h.inner
+                                ? h.kind === "buildingOpeningH"
+                                    ? { openingH: value }
+                                    : h.kind === "buildingBackFace"
+                                      ? { openingBack: value }
+                                      : h.kind === "awningEdgeZ"
+                                        ? {
+                                              awningEdgeZ: value,
+                                              awningFrontBottom: h.frontBottom,
+                                              awningEdgeEdited: true,
+                                          }
+                                        : h.kind === "awningEdgeY"
+                                          ? { awningEdgeY: value, awningEdgeEdited: true }
+                                          : { openingW: value }
+                                : h.param
+                                  ? floorWallDimensionPatch(o, h.param, value, h.side || 1)
+                                  : floorResizeSnap(o, floorDimensionPatch(o, h.kind, value, h.side || 1), h, value);
                 if (patch) {
                     if (!floorPlanDrag.started) {
                         HU.push(S);

@@ -1795,6 +1795,17 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>ベベルセグメント数</span><input type=number class=nv id=beveledBoxSegments min=1 max=4 step=1 style="width:100px"><span class=un>分割</span></label>
 <div class="note">四つの縦角を面取りします。オフセットは面取り幅、セグメント数は角の丸みを分割する数です。1は一枚面、4は4分割です。オフセットはキャンバス上のオレンジのベベルハンドルからも変更できます。幅・奥行き・高さは共通の面ハンドルまたは上の数値欄で編集できます。初期状態は面で、上面を押し出すと高さができます。</div>
 </div>
+<div id=cornerCutP style="display:none"><h3>隅切り直方体</h3>
+<label><span>隅切りオフセット</span><input type=number class=nv id=cornerCutOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><input type=checkbox id=cornerCutOpeningEnabled> 赤い隅切り面に開口</label>
+<div id=cornerCutOpeningControls style="display:none">
+<label><span>開口の幅</span><input type=number class=nv id=cornerCutOpeningW min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>開口の高さ</span><input type=number class=nv id=cornerCutOpeningH min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>開口の奥行き</span><input type=number class=nv id=cornerCutOpeningDepth min=0.025 step=0.05 style="width:100px"><span class=un>m</span></label>
+<div class="note">開口は赤い斜め隅切り面を分割し、内部の左右側面・上面・奥壁を持つ形状として描画します。幅・高さ・奥行きは数値欄または画面上のハンドルで、3D・正面・横・上ビューから編集できます。</div>
+</div>
+<div class="note">赤い切り口のオレンジ菱形ハンドルを、3D・正面・横・上ビューでドラッグして編集できます。</div>
+</div>
 <div id=stackedP style="display:none"><h3 id=stackedPanelTitle>縁付き階層建物</h3>
 <label><span>階数</span><input type=number class=nv id=stackFloorCount min=1 max=30 step=1 style="width:100px"></label>
 <label><input type=checkbox id=stackIndividualEdit> 各階を個別編集（チェック時のみ）</label>
@@ -4085,26 +4096,194 @@ function beveledBoxGizmo(o) {
         };
     return { o, C3: L2W(o, 0, 0, z * 0.5), center: scrW(L2W(o, 0, 0, z * 0.5)), handle };
 }
+// 隅切り開口の幅・高さ・奥行き用ハンドル。
+// 3D投影で方向がつぶれる直交ビューでは画面上のフォールバック方向を使い、
+// すべてのビューで同じ数値を編集できるようにする。
+function cornerCutOpeningGizmo(o, opening) {
+    if (!opening?.enabled) return null;
+    const pr = (xy, z) => scrW(pt(o, xy[0], xy[1], z)),
+        mid = opening.midpoint,
+        midZ = opening.openingH * 0.5,
+        frontMid = [(opening.frontA[0] + opening.frontB[0]) * 0.5, (opening.frontA[1] + opening.frontB[1]) * 0.5],
+        backMid = [(opening.backA[0] + opening.backB[0]) * 0.5, (opening.backA[1] + opening.backB[1]) * 0.5],
+        projected = (xy, z, vector, fallback) => {
+            const a = pr(xy, z),
+                b = pr([xy[0] + vector[0], xy[1] + vector[1]], z + (vector[2] || 0)),
+                dx = (b?.x || 0) - (a?.x || 0),
+                dy = (b?.y || 0) - (a?.y || 0),
+                px = Math.hypot(dx, dy),
+                hidden = !a?.ok || !b?.ok || px <= 0.5 / Z,
+                f = fallback || { x: 1, y: 0 },
+                fl = Math.hypot(f.x, f.y) || 1;
+            return {
+                anchor: a,
+                dir: hidden ? { x: f.x / fl, y: f.y / fl } : { x: dx / px, y: dy / px },
+                scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : px,
+                hidden,
+            };
+        },
+        handle = (kind, xy, z, vector, start, min, max, label, color, fallback) => {
+            const p = projected(xy, z, vector, fallback),
+                raw = pr(xy, z),
+                gap = Math.max(34 / Z, 46 / Z),
+                s =
+                    p.hidden && p.anchor?.ok
+                        ? { x: p.anchor.x + p.dir.x * gap, y: p.anchor.y + p.dir.y * gap, ok: true }
+                        : raw;
+            return {
+                kind,
+                s,
+                anchor: p.anchor,
+                dir: p.dir,
+                scale: p.scale,
+                start,
+                min,
+                max,
+                label,
+                color,
+            };
+        },
+        left = handle(
+            "cornerCut-opening-width-left",
+            opening.frontA,
+            midZ,
+            [-opening.tangent[0], -opening.tangent[1], 0],
+            opening.openingW,
+            0.1,
+            opening.maxWidth,
+            "開口幅",
+            "#ffd34d",
+            { x: -1, y: 0 },
+        ),
+        right = handle(
+            "cornerCut-opening-width-right",
+            opening.frontB,
+            midZ,
+            [opening.tangent[0], opening.tangent[1], 0],
+            opening.openingW,
+            0.1,
+            opening.maxWidth,
+            "開口幅",
+            "#ffd34d",
+            { x: 1, y: 0 },
+        ),
+        height = handle(
+            "cornerCut-opening-height",
+            frontMid,
+            0,
+            [0, 0, 1],
+            opening.openingH,
+            0.1,
+            opening.maxHeight,
+            "開口高",
+            "#ff9f68",
+            { x: 0, y: -1 },
+        ),
+        depth = handle(
+            "cornerCut-opening-depth",
+            frontMid,
+            midZ,
+            [opening.inward[0], opening.inward[1], 0],
+            opening.openingDepth,
+            0.025,
+            opening.maxDepth,
+            "開口奥行",
+            "#ad9cff",
+            { x: 1, y: -0.5 },
+        );
+    if (!depth.hidden) depth.s = pr(backMid, midZ);
+    if (!height.hidden) height.s = pr(frontMid, opening.openingH);
+    left.anchor = pr(frontMid, midZ);
+    right.anchor = pr(frontMid, midZ);
+    height.anchor = pr(frontMid, 0);
+    return {
+        C3: L2W(o, mid[0], mid[1], midZ),
+        handles: { left, right, height, depth },
+        panelFrame: [
+            pr(opening.frontA, 0),
+            pr(opening.frontB, 0),
+            pr(opening.frontB, opening.openingH),
+            pr(opening.frontA, opening.openingH),
+        ],
+        backFrame: [
+            pr(opening.backA, 0),
+            pr(opening.backB, 0),
+            pr(opening.backB, opening.openingH),
+            pr(opening.backA, opening.openingH),
+        ],
+    };
+}
+// 隅切り直方体の切り口オフセット用ハンドル。
+// 切り口の中央を基準に、オフセットが増える方向を画面へ投影する。
+// 正面／横／上で片方の成分がつぶれても、残った成分または表示用の
+// フォールバック方向を使うため、どの直交ビューでも操作対象が見える。
+function cornerCutGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "cornerCutBox" || typeof cornerCutBoxParams !== "function") return null;
+    const q = cornerCutBoxParams(o),
+        footprint = cornerCutFootprint(q.w, q.d, q.cornerOffset, q.cornerCutCorner),
+        a = footprint[footprint.length - 1],
+        b = footprint[0],
+        z = Math.max(0.01, Math.abs(Number(o.h) || 0.01)) * 0.5,
+        mid = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5],
+        pr = (x, y, zz = z) => scrW(pt(o, x, y, zz)),
+        anchor = pr(mid[0], mid[1]),
+        step = Math.max(0.05, Math.min(Math.max(0.001, q.max - q.cornerOffset), Math.min(q.w, q.d) * 0.08)),
+        probeFootprint = cornerCutFootprint(q.w, q.d, q.cornerOffset + step, q.cornerCutCorner),
+        probeA = probeFootprint[probeFootprint.length - 1],
+        probeB = probeFootprint[0],
+        probe = pr((probeA[0] + probeB[0]) * 0.5, (probeA[1] + probeB[1]) * 0.5),
+        dx = (probe?.x || 0) - (anchor?.x || 0),
+        dy = (probe?.y || 0) - (anchor?.y || 0),
+        px = Math.hypot(dx, dy),
+        hidden = !anchor?.ok || !probe?.ok || px <= 0.5 / Z,
+        fallback = orthView === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 },
+        dir = hidden ? fallback : { x: dx / px, y: dy / px },
+        gap = Math.max(32 / Z, 48 / Z),
+        display = anchor?.ok
+            ? hidden
+                ? { x: anchor.x + fallback.x * gap, y: anchor.y + fallback.y * gap, ok: true }
+                : { x: anchor.x + dir.x * gap, y: anchor.y + dir.y * gap, ok: true }
+            : anchor;
+    const opening = typeof cornerCutOpeningParams === "function" ? cornerCutOpeningParams(o) : null;
+    return {
+        o,
+        C3: L2W(o, 0, 0, z),
+        opening: cornerCutOpeningGizmo(o, opening),
+        handle: {
+            kind: "cornerCut-offset",
+            s: display,
+            anchor,
+            dir,
+            scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : px / step,
+            start: q.cornerOffset,
+            min: 0,
+            max: q.max,
+            label: "隅切り",
+        },
+    };
+}
 function specialGizmo(o) {
     return o && o.type === "asset" && o.asset === "wallSideSign" && o.attachment?.wallSideSign
         ? wallSideSignSpecialGizmo(o)
-        : o && o.type === "asset" && o.asset === "beveledBox"
-          ? beveledBoxGizmo(o)
-          : o && o.type === "asset" && o.asset === "pathPipe"
-            ? pathPipeGizmo(o)
-            : isStackedBuildingAsset(o)
-              ? stackedBuildingGizmo(o)
-              : o && o.type === "asset" && o.asset === "building"
-                ? buildingGizmo(o)
-                : o && o.type === "asset" && o.asset === "awning"
-                  ? awningGizmo(o)
-                  : o && o.type === "asset" && o.asset === "sign"
-                    ? signGizmo(o)
-                    : o && o.type === "asset" && o.asset === "cone"
-                      ? coneGizmo(o)
-                      : o && o.type === "asset" && o.asset === "sphere"
-                        ? sphereGizmo(o)
-                        : null;
+        : o && o.type === "asset" && o.asset === "cornerCutBox"
+          ? cornerCutGizmo(o)
+          : o && o.type === "asset" && o.asset === "beveledBox"
+            ? beveledBoxGizmo(o)
+            : o && o.type === "asset" && o.asset === "pathPipe"
+              ? pathPipeGizmo(o)
+              : isStackedBuildingAsset(o)
+                ? stackedBuildingGizmo(o)
+                : o && o.type === "asset" && o.asset === "building"
+                  ? buildingGizmo(o)
+                  : o && o.type === "asset" && o.asset === "awning"
+                    ? awningGizmo(o)
+                    : o && o.type === "asset" && o.asset === "sign"
+                      ? signGizmo(o)
+                      : o && o.type === "asset" && o.asset === "cone"
+                        ? coneGizmo(o)
+                        : o && o.type === "asset" && o.asset === "sphere"
+                          ? sphereGizmo(o)
+                          : null;
 }
 function drawSpecialGizmo(c, o) {
     const sg = specialGizmo(o);
@@ -4146,6 +4325,44 @@ function drawSpecialGizmo(c, o) {
         };
         drawHandle(sg.bracketHandle, "#ffd34d", `金具 ${Number(sg.bracketHandle?.start || 0).toFixed(2)}m`, false);
         drawHandle(sg.handle, "#ff9f68", `ベベル ${Number(sg.handle?.start || 0).toFixed(2)}`, true);
+    } else if (sg.o.asset === "cornerCutBox") {
+        const h = sg.handle;
+        if (h?.s?.ok && h?.anchor?.ok) {
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.strokeStyle = "rgba(226,75,75,.95)";
+            c.lineWidth = 1.5 / Z;
+            c.beginPath();
+            c.moveTo(h.anchor.x, h.anchor.y);
+            c.lineTo(h.s.x, h.s.y);
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, "#e24b4b", true);
+            c.fillStyle = "#ffd0d0";
+            c.font = `bold ${12 / Z}px system-ui`;
+            c.fillText(`隅切り ${Number(h.start || 0).toFixed(2)}m`, h.s.x + 9 / Z, h.s.y - 8 / Z);
+        }
+        const opening = sg.opening;
+        if (opening) {
+            Object.values(opening.handles).forEach((handle) => {
+                if (!handle?.s?.ok || !handle?.anchor?.ok) return;
+                c.setLineDash([4 / Z, 3 / Z]);
+                c.strokeStyle = handle.color;
+                c.lineWidth = 1.4 / Z;
+                c.beginPath();
+                c.moveTo(handle.anchor.x, handle.anchor.y);
+                c.lineTo(handle.s.x, handle.s.y);
+                c.stroke();
+                c.setLineDash([]);
+                sq(handle.s, handle.color, true);
+                c.fillStyle = "#fff0b0";
+                c.font = `bold ${11 / Z}px system-ui`;
+                c.fillText(
+                    `${handle.label} ${Number(handle.start || 0).toFixed(2)}m`,
+                    handle.s.x + 8 / Z,
+                    handle.s.y - 7 / Z,
+                );
+            });
+        }
     } else if (sg.o.asset === "beveledBox") {
         const h = sg.handle;
         if (h?.s?.ok && h?.anchor?.ok) {
@@ -4683,6 +4900,7 @@ function gizmo() {
                     o.asset === "pathPipe" ||
                     o.asset === "box" ||
                     o.asset === "beveledBox" ||
+                    o.asset === "cornerCutBox" ||
                     isStackedBuildingAsset(o))),
         [z0, z1] = outerZRange(o),
         zc = solid ? (z0 + z1) / 2 : 0;
@@ -4895,6 +5113,34 @@ function hitGizmo(p) {
             if (nearestHandle && (!nearestFace || nearestHandle.d <= nearestFace.d))
                 return { t: nearestHandle.t, sign: nearestHandle.h, g: { o: active, C3: special.C3 } };
             if (nearestFace) return { t: "wallSideSign-face", f: nearestFace.f, g: { o: active, C3: special.C3 } };
+        }
+        if (active.asset === "cornerCutBox") {
+            const opening = special.opening;
+            if (opening) {
+                const openingHits = [
+                    ["cornerCut-opening-width-left", opening.handles.left],
+                    ["cornerCut-opening-width-right", opening.handles.right],
+                    ["cornerCut-opening-height", opening.handles.height],
+                    ["cornerCut-opening-depth", opening.handles.depth],
+                ]
+                    .filter(([, handle]) => handle?.s?.ok)
+                    .map(([t, handle]) => ({ t, handle, d: Math.hypot(handle.s.x - p.x, handle.s.y - p.y) }))
+                    .filter((q) => q.d < R)
+                    .sort((a, b) => a.d - b.d);
+                if (openingHits.length) {
+                    const hit = openingHits[0];
+                    return { t: hit.t, sign: hit.handle, g: { o: active, C3: opening.C3 } };
+                }
+                if (opening.panelFrame?.every((q) => q?.ok) && insidePoly2D(p, opening.panelFrame))
+                    return {
+                        t: "cornerCut-opening-depth",
+                        sign: opening.handles.depth,
+                        g: { o: active, C3: opening.C3 },
+                    };
+            }
+            const h = special.handle;
+            if (h?.s?.ok && Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
+                return { t: "cornerCut-offset", sign: h, g: { o: active, C3: special.C3 } };
         }
         if (active.asset === "beveledBox") {
             const h = special.handle;
@@ -5359,6 +5605,8 @@ function beginGizmo(h, p) {
         h.t.startsWith("path-point-") ||
         h.t === "path-radius" ||
         h.t === "beveled-offset" ||
+        h.t === "cornerCut-offset" ||
+        h.t.startsWith("cornerCut-opening-") ||
         h.t === "wallSideSign-beveled-offset" ||
         h.t === "wallSideSign-bracket-length" ||
         h.t === "cone-height" ||
@@ -5415,7 +5663,22 @@ function dragEdit(p, freeRotation = false) {
         if (q.hit.size) snapHit = q.hit;
         return q.d;
     };
-    if (ed.t.startsWith("path-point-")) {
+    if (ed.t === "cornerCut-offset") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            offset = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { cornerOffset: offset };
+    } else if (ed.t.startsWith("cornerCut-opening-")) {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1),
+            value = clamp(h.start + amount, h.min, h.max);
+        if (ed.t.includes("width")) patch = { cornerCutOpeningW: value };
+        else if (ed.t.includes("height")) patch = { cornerCutOpeningH: value };
+        else patch = { cornerCutOpeningDepth: value };
+    } else if (ed.t.startsWith("path-point-")) {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
             deltaY = p.y - ed.p0.y,
@@ -5922,6 +6185,34 @@ function exportSurfaceTriangles(o) {
             quad(a, b, c, d0);
         }
     };
+    const cornerCutOpeningAt = (z0, z1, opening) => {
+        const footprint = opening.footprint,
+            cutIndex = footprint.length - 1,
+            center0 = [0, 0, z0],
+            center1 = [0, 0, z1],
+            point = (xy, z) => [xy[0], xy[1], z];
+        for (let i = 0; i < footprint.length; i++) {
+            const j = (i + 1) % footprint.length,
+                a = point(footprint[i], z0),
+                b = point(footprint[j], z0),
+                c = point(footprint[j], z1),
+                d0 = point(footprint[i], z1);
+            tri(center0, b, a);
+            tri(center1, d0, c);
+            if (i !== cutIndex) quad(a, b, c, d0);
+        }
+        const { cutA, cutB, frontA, frontB, backA, backB, openingH } = opening;
+        // 赤い隅切り面を開口幅で分割する。開口は床から始まるため、
+        // 左右の残り面と上部だけを外周面として残す。
+        quad(point(cutA, z0), point(frontA, z0), point(frontA, z1), point(cutA, z1));
+        quad(point(frontB, z0), point(cutB, z0), point(cutB, z1), point(frontB, z1));
+        quad(point(frontA, openingH), point(frontB, openingH), point(cutB, z1), point(cutA, z1));
+        // 開口内部の左右側面・上面・奥壁。
+        quad(point(frontA, z0), point(backA, z0), point(backA, openingH), point(frontA, openingH));
+        quad(point(frontB, z0), point(frontB, openingH), point(backB, openingH), point(backB, z0));
+        quad(point(frontA, openingH), point(backA, openingH), point(backB, openingH), point(frontB, openingH));
+        quad(point(backA, z0), point(backB, z0), point(backB, openingH), point(backA, openingH));
+    };
     const openingBoxAt = (cx, cy, bw, bd, z0, z1, opening) => {
         const x = bw / 2,
             y = bd / 2,
@@ -6050,6 +6341,30 @@ function exportSurfaceTriangles(o) {
         }
     };
     const kind = o.asset || o.type;
+    if (kind === "cornerCutBox" && typeof cornerCutFootprint === "function") {
+        const opening = typeof cornerCutOpeningParams === "function" ? cornerCutOpeningParams(o) : null,
+            z0 = 0,
+            z1 = Math.max(0.01, Math.abs(Number(o.h) || 0.01));
+        if (opening?.enabled) cornerCutOpeningAt(z0, z1, opening);
+        else {
+            const params = cornerCutBoxParams(o),
+                footprint = cornerCutFootprint(params.w, params.d, params.cornerOffset, params.cornerCutCorner),
+                center0 = [0, 0, z0],
+                center1 = [0, 0, z1];
+            // 隅切りした凸多角形を、上下の扇形と5枚の側面へ分解する。
+            for (let i = 0; i < footprint.length; i++) {
+                const j = (i + 1) % footprint.length,
+                    a = [footprint[i][0], footprint[i][1], z0],
+                    b = [footprint[j][0], footprint[j][1], z0],
+                    c = [footprint[j][0], footprint[j][1], z1],
+                    d0 = [footprint[i][0], footprint[i][1], z1];
+                tri(center0, b, a);
+                tri(center1, d0, c);
+                quad(a, b, c, d0);
+            }
+        }
+        return out;
+    }
     if (kind === "beveledBox" && typeof beveledBoxFootprint === "function") {
         const q = beveledBoxParams(o),
             footprint = beveledBoxFootprint(q.w, q.d, q.bevelOffset, q.bevelSegments),
@@ -8130,6 +8445,20 @@ const ASSETS = {
         bevelSegments: 4,
         accent: "#ff9f68",
     },
+    cornerCutBox: {
+        label: "隅切り直方体",
+        glyph: "⬟",
+        w: 4.2,
+        d: 3.6,
+        h: 3.6,
+        cornerOffset: 0.8,
+        cornerCutCorner: "front-left",
+        cornerCutOpeningW: 0.7,
+        cornerCutOpeningH: 2.2,
+        cornerCutOpeningDepth: 0.8,
+        cutColor: "#e24b4b",
+        accent: "#8ed7e8",
+    },
     circle: { label: "円", glyph: "○", w: 1.25, d: 1.25, h: 0, accent: "#ad9cff" },
     cone: { label: "円錐", glyph: "△", w: 1.25, d: 1.25, h: 1.45, accent: "#ffb36f" },
     sphere: { label: "球体", glyph: "●", w: 1.3, d: 1.3, h: 1.3, accent: "#ad9cff" },
@@ -8315,6 +8644,83 @@ function beveledWireBoxA(o, cx, cy, w, d, z0, z1, offset = 0.06, segments = 3, c
     );
     return out;
 }
+// 隅切り直方体の底面・上面と縦辺を描く。切り口の辺だけを赤くして、
+// 図面上でも「どこを隅切りしているか」とオフセット方向を読み取りやすくする。
+function cornerCutWireBoxA(o, w, d, z0, z1, offset, corner, color = o.c || "#e7fff4", cutColor = "#e24b4b") {
+    const footprint = cornerCutFootprint(w, d, offset, corner),
+        out = [],
+        cutStart = footprint.length - 1,
+        edgeColor = (index) => (index === cutStart ? cutColor : color);
+    for (let i = 0; i < footprint.length; i++) {
+        const j = (i + 1) % footprint.length;
+        out.push(
+            lineA(
+                o,
+                [
+                    [footprint[i][0], footprint[i][1], z0],
+                    [footprint[j][0], footprint[j][1], z0],
+                ],
+                edgeColor(i),
+            ),
+            lineA(
+                o,
+                [
+                    [footprint[i][0], footprint[i][1], z1],
+                    [footprint[j][0], footprint[j][1], z1],
+                ],
+                edgeColor(i),
+            ),
+        );
+    }
+    footprint.forEach(([x, y], index) =>
+        out.push(
+            lineA(
+                o,
+                [
+                    [x, y, z0],
+                    [x, y, z1],
+                ],
+                index === 0 || index === cutStart ? cutColor : color,
+            ),
+        ),
+    );
+    return out;
+}
+// 隅切り面の開口を線画で描く。切り口を分割し、開口内部の側面・上面・奥壁を追加する。
+function cornerCutOpeningWireBoxA(o, opening, z1, color = o.c || "#e7fff4", cutColor = "#e24b4b") {
+    const { footprint, cutA, cutB, frontA, frontB, backA, backB, openingH } = opening,
+        out = [],
+        cutIndex = footprint.length - 1,
+        line = (a, b, col = color) => out.push(lineA(o, [a, b], col)),
+        point = (xy, z) => [xy[0], xy[1], z],
+        openingColor = "#ff8b8b";
+    for (let i = 0; i < footprint.length; i++) {
+        const j = (i + 1) % footprint.length;
+        if (i === cutIndex) continue;
+        line(point(footprint[i], 0), point(footprint[j], 0), color);
+        line(point(footprint[i], z1), point(footprint[j], z1), color);
+    }
+    footprint.forEach(([x, y], index) =>
+        line([x, y, 0], [x, y, z1], index === 0 || index === cutIndex ? cutColor : color),
+    );
+    // 切り口外周の底辺は開口部分だけ途切れさせ、上辺は建物の上端として残す。
+    line(point(cutA, 0), point(frontA, 0), cutColor);
+    line(point(frontB, 0), point(cutB, 0), cutColor);
+    line(point(cutA, z1), point(cutB, z1), cutColor);
+    // 開口の手前枠と、内部の左右側面・上面・奥壁。
+    line(point(frontA, 0), point(frontA, openingH), openingColor);
+    line(point(frontB, 0), point(frontB, openingH), openingColor);
+    line(point(frontA, openingH), point(frontB, openingH), openingColor);
+    line(point(frontA, 0), point(backA, 0), openingColor);
+    line(point(frontA, openingH), point(backA, openingH), openingColor);
+    line(point(frontB, 0), point(backB, 0), openingColor);
+    line(point(frontB, openingH), point(backB, openingH), openingColor);
+    line(point(backA, 0), point(backA, openingH), openingColor);
+    line(point(backB, 0), point(backB, openingH), openingColor);
+    line(point(backA, openingH), point(backB, openingH), openingColor);
+    line(point(backA, 0), point(backB, 0), openingColor);
+    return out;
+}
 // ベベル直方体の平面輪郭。四つの縦角を、オフセットを半径とする
 // 1〜4分割の円弧で面取りする。segments=1なら一枚の平面面取り、
 // segments=4なら各角を4枚の小面へ分割した丸みのあるベベルになる。
@@ -8357,6 +8763,128 @@ function beveledBoxParams(o) {
         bevelOffset = clamp(Number(o?.bevelOffset) || 0, 0, max),
         bevelSegments = beveledBoxSegments(o?.bevelSegments, o?.bevelEdges);
     return { w, d, max, bevelOffset, bevelSegments };
+}
+// 隅切り直方体の平面輪郭。front-leftの角を基準に、隣り合う2辺から
+// 同じ距離だけ内側へ切り込み、5辺の凸多角形へする。回転とは別に
+// cornerCutCornerを保持するため、将来ほかの角や複数角へ拡張できる。
+function cornerCutFootprint(width, depth, offset, corner = "front-left") {
+    const w = Math.max(0.01, Math.abs(Number(width) || 0.01)),
+        d = Math.max(0.01, Math.abs(Number(depth) || 0.01)),
+        hw = w * 0.5,
+        hd = d * 0.5,
+        max = Math.max(0, Math.min(w, d) * 0.5 - 0.001),
+        b = clamp(Number(offset) || 0, 0, max),
+        base = [
+            [-hw + b, -hd],
+            [hw, -hd],
+            [hw, hd],
+            [-hw, hd],
+            [-hw, -hd + b],
+        ],
+        key = ["front-left", "front-right", "back-right", "back-left"].includes(corner) ? corner : "front-left";
+    return base.map(([x, y]) => {
+        if (key === "front-right") return [-x, y];
+        if (key === "back-right") return [-x, -y];
+        if (key === "back-left") return [x, -y];
+        return [x, y];
+    });
+}
+function cornerCutBoxParams(o) {
+    const w = Math.max(0.01, Math.abs(Number(o?.ra) || 0.01) * 2),
+        d = Math.max(0.01, Math.abs(Number(o?.rb) || 0.01) * 2),
+        max = Math.max(0, Math.min(w, d) * 0.5 - 0.001),
+        cornerOffset = clamp(Number(o?.cornerOffset) || 0, 0, max),
+        cornerCutCorner = ["front-left", "front-right", "back-right", "back-left"].includes(o?.cornerCutCorner)
+            ? o.cornerCutCorner
+            : "front-left";
+    return { w, d, max, cornerOffset, cornerCutCorner };
+}
+function cornerCutOpeningRayDistance(origin, direction, polygon) {
+    const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
+    let best = Infinity;
+    for (let i = 0; i < polygon.length; i++) {
+        const a = polygon[i],
+            b = polygon[(i + 1) % polygon.length],
+            edge = [b[0] - a[0], b[1] - a[1]],
+            den = cross(direction, edge);
+        if (Math.abs(den) < 1e-8) continue;
+        const from = [a[0] - origin[0], a[1] - origin[1]],
+            t = cross(from, edge) / den,
+            u = cross(from, direction) / den;
+        if (t > 1e-6 && u >= -1e-6 && u <= 1 + 1e-6) best = Math.min(best, t);
+    }
+    return Number.isFinite(best)
+        ? best
+        : Math.max(0.05, Math.min(2, Math.min(Math.abs(polygon[0][0]), Math.abs(polygon[0][1]))));
+}
+// 隅切り面の開口を、切り口に沿う幅・上下高さ・内側への奥行きへ正規化する。
+// 開口は切り口の中央を基準にした矩形で、奥壁は切り口と平行な面になる。
+function cornerCutOpeningParams(o) {
+    const box = cornerCutBoxParams(o),
+        footprint = cornerCutFootprint(box.w, box.d, box.cornerOffset, box.cornerCutCorner),
+        cutA = footprint[footprint.length - 1],
+        cutB = footprint[0],
+        cutDx = cutB[0] - cutA[0],
+        cutDy = cutB[1] - cutA[1],
+        cutLength = Math.max(0.05, Math.hypot(cutDx, cutDy)),
+        tangent = [cutDx / cutLength, cutDy / cutLength],
+        midpoint = [(cutA[0] + cutB[0]) * 0.5, (cutA[1] + cutB[1]) * 0.5],
+        centroid = footprint
+            .reduce((sum, point) => [sum[0] + point[0], sum[1] + point[1]], [0, 0])
+            .map((value) => value / footprint.length),
+        toInside = [centroid[0] - midpoint[0], centroid[1] - midpoint[1]],
+        // 赤い隅切り面の法線を使い、開口の押し出し方向を面へ必ず直交させる。
+        normalA = [-tangent[1], tangent[0]],
+        normalB = [tangent[1], -tangent[0]],
+        inward = normalA[0] * toInside[0] + normalA[1] * toInside[1] >= 0 ? normalA : normalB,
+        maxWidth = Math.max(0.1, cutLength - 0.08),
+        height = Math.max(0.1, Math.abs(Number(o?.h) || 0.1)),
+        maxHeight = Math.max(0.1, height - 0.1),
+        openingW = clamp(
+            Number.isFinite(Number(o?.cornerCutOpeningW))
+                ? Number(o.cornerCutOpeningW)
+                : Math.min(maxWidth, cutLength * 0.62),
+            0.1,
+            maxWidth,
+        ),
+        openingH = clamp(
+            Number.isFinite(Number(o?.cornerCutOpeningH)) ? Number(o.cornerCutOpeningH) : height * 0.66,
+            0.1,
+            maxHeight,
+        ),
+        maxDepth = Math.max(0.025, cornerCutOpeningRayDistance(midpoint, inward, footprint) - 0.025),
+        openingDepth = clamp(
+            Number.isFinite(Number(o?.cornerCutOpeningDepth))
+                ? Number(o.cornerCutOpeningDepth)
+                : Math.min(0.8, maxDepth * 0.45),
+            0.025,
+            maxDepth,
+        ),
+        frontA = [midpoint[0] - tangent[0] * openingW * 0.5, midpoint[1] - tangent[1] * openingW * 0.5],
+        frontB = [midpoint[0] + tangent[0] * openingW * 0.5, midpoint[1] + tangent[1] * openingW * 0.5],
+        backA = [frontA[0] + inward[0] * openingDepth, frontA[1] + inward[1] * openingDepth],
+        backB = [frontB[0] + inward[0] * openingDepth, frontB[1] + inward[1] * openingDepth];
+    return {
+        ...box,
+        footprint,
+        cutA,
+        cutB,
+        cutLength,
+        tangent,
+        midpoint,
+        inward,
+        maxWidth,
+        maxHeight,
+        maxDepth,
+        openingW,
+        openingH,
+        openingDepth,
+        frontA,
+        frontB,
+        backA,
+        backB,
+        enabled: o?.cornerCutOpeningEnabled === true,
+    };
 }
 // 階層建物の1F開口の初期値・上限値を計算する。
 // 開口はここで値を決めるだけで、実際の線画はassetLines()内で描く。
@@ -8669,6 +9197,17 @@ function assetLines(o) {
         // ベベルなしの基準形状。ベベル直方体とは別アセットとして選べる。
     } else if (kind === "box") {
         out.push(...wireBoxA(o, 0, 0, w, d, 0, Math.max(0.01, h), c));
+        // --- 横壁看板 ---
+        // 看板本体を縦長の箱として描き、必要なら壁からの
+        // 面のある取付金具を0〜3本、看板の裏側へ追加する。
+    } else if (kind === "cornerCutBox") {
+        const q = cornerCutOpeningParams(o),
+            z1 = Math.max(0.01, Math.abs(Number(h) || 0.01));
+        if (q.enabled) out.push(...cornerCutOpeningWireBoxA(o, q, z1, c, o.cutColor || "#e24b4b"));
+        else
+            out.push(
+                ...cornerCutWireBoxA(o, q.w, q.d, 0, z1, q.cornerOffset, q.cornerCutCorner, c, o.cutColor || "#e24b4b"),
+            );
         // --- 横壁看板 ---
         // 看板本体を縦長の箱として描き、必要なら壁からの
         // 面のある取付金具を0〜3本、看板の裏側へ追加する。
@@ -9736,6 +10275,19 @@ function assetLines(o) {
 // ここでは見た目を作らず、後段のassetLines()が安全に読める形へ変換する。
 function normalizedAsset(o) {
     let q = o?.attachment ? syncAttachedPart(o) : o;
+    if (q && q.asset === "cornerCutBox") {
+        const params = cornerCutOpeningParams(q);
+        return {
+            ...q,
+            cornerOffset: params.cornerOffset,
+            cornerCutCorner: params.cornerCutCorner,
+            cornerCutOpeningEnabled: q.cornerCutOpeningEnabled === true,
+            cornerCutOpeningW: params.openingW,
+            cornerCutOpeningH: params.openingH,
+            cornerCutOpeningDepth: params.openingDepth,
+            h: Math.max(0.01, Math.abs(Number(q.h) || 0.01)),
+        };
+    }
     if (q && q.asset === "beveledBox") {
         const width = Math.max(0.01, Math.abs(Number(q.ra) || 0.01) * 2),
             depth = Math.max(0.01, Math.abs(Number(q.rb) || 0.01) * 2),
@@ -9873,6 +10425,19 @@ obBounds = function (o) {
             if (Array.isArray(v) && v.length >= 3)
                 pts.push(customPt(q, Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0));
         });
+    } else if (q.asset === "cornerCutBox") {
+        const params = cornerCutOpeningParams(q),
+            footprint = params.footprint,
+            h = Math.max(0.01, Math.abs(Number(q.h) || 0.01));
+        footprint.forEach(([x, y]) => {
+            pts.push(pt(q, x, y, 0));
+            pts.push(pt(q, x, y, h));
+        });
+        if (params.enabled)
+            [params.frontA, params.frontB, params.backA, params.backB].forEach((xy) => {
+                pts.push(pt(q, xy[0], xy[1], 0));
+                pts.push(pt(q, xy[0], xy[1], params.openingH));
+            });
     } else if (q.asset === "wallSideSign") {
         const bracketLength = clamp(Math.abs(Number(q.wallSideSignBracketLength) || 0.36), 0.05, 5),
             clearance = 0.025,
@@ -10129,6 +10694,27 @@ window.cityGridInstallAssetUI = function (bridge) {
                 extrude: false,
                 bevelOffset: info.bevelOffset,
                 bevelSegments: info.bevelSegments,
+            };
+        if (kind === "cornerCutBox")
+            return {
+                ...base,
+                type: "asset",
+                asset: kind,
+                assetId: "corner-cut-box",
+                assetName: info.label,
+                ra: info.w / 2,
+                rb: info.d / 2,
+                h: Math.max(0.1, height),
+                extrude: true,
+                // 隅切り直方体は、現在の初期向きから垂直軸まわりに90度回した状態で生成する。
+                rot: 90,
+                cornerOffset: info.cornerOffset,
+                cornerCutCorner: info.cornerCutCorner,
+                cornerCutOpeningEnabled: false,
+                cornerCutOpeningW: info.cornerCutOpeningW,
+                cornerCutOpeningH: info.cornerCutOpeningH,
+                cornerCutOpeningDepth: info.cornerCutOpeningDepth,
+                cutColor: info.cutColor,
             };
         return {
             ...base,
@@ -12557,6 +13143,92 @@ window.cityGridInstallAssetUI = function (bridge) {
             beveledBoxEditSession = false;
         };
     });
+    let cornerCutEditSession = false;
+    function syncCornerCutPanel() {
+        const panel = el("cornerCutP"),
+            o = sel && obOf(sel),
+            isCornerCut = !!(o && o.type === "asset" && o.asset === "cornerCutBox");
+        if (!panel) return;
+        panel.style.display = isCornerCut ? "" : "none";
+        if (!isCornerCut) {
+            cornerCutEditSession = false;
+            return;
+        }
+        const params = typeof cornerCutOpeningParams === "function" ? cornerCutOpeningParams(o) : null,
+            offsetInput = el("cornerCutOffset"),
+            openingEnabled = el("cornerCutOpeningEnabled"),
+            controls = el("cornerCutOpeningControls"),
+            values = [
+                ["cornerCutOpeningW", params?.openingW ?? o.cornerCutOpeningW ?? 0.7],
+                ["cornerCutOpeningH", params?.openingH ?? o.cornerCutOpeningH ?? 2.2],
+                ["cornerCutOpeningDepth", params?.openingDepth ?? o.cornerCutOpeningDepth ?? 0.8],
+            ];
+        if (offsetInput && document.activeElement !== offsetInput)
+            offsetInput.value = Number(params?.cornerOffset ?? o.cornerOffset ?? 0).toFixed(3);
+        if (openingEnabled) openingEnabled.checked = o.cornerCutOpeningEnabled === true;
+        if (controls) controls.style.display = o.cornerCutOpeningEnabled === true ? "" : "none";
+        values.forEach(([id, value]) => {
+            const input = el(id);
+            if (input && document.activeElement !== input) input.value = Number(value).toFixed(3);
+        });
+    }
+    function applyCornerCutProp(name, rawValue) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || o.asset !== "cornerCutBox") return;
+        const params = typeof cornerCutOpeningParams === "function" ? cornerCutOpeningParams(o) : null,
+            patch = {};
+        if (name === "cornerOffset") {
+            const max = params?.max ?? 0,
+                value = Number(rawValue);
+            if (!Number.isFinite(value)) return;
+            patch.cornerOffset = clamp(value, 0, max);
+        } else if (name === "cornerCutOpeningEnabled") patch.cornerCutOpeningEnabled = rawValue === true;
+        else {
+            const limits = {
+                    cornerCutOpeningW: [0.1, params?.maxWidth ?? 20],
+                    cornerCutOpeningH: [0.1, params?.maxHeight ?? 20],
+                    cornerCutOpeningDepth: [0.025, params?.maxDepth ?? 20],
+                }[name],
+                value = Number(rawValue);
+            if (!limits || !Number.isFinite(value)) return;
+            patch[name] = clamp(value, limits[0], limits[1]);
+        }
+        if (!cornerCutEditSession) {
+            HU.push(S);
+            RD = [];
+            cornerCutEditSession = true;
+        }
+        setOb(o.id, patch);
+        render();
+    }
+    const cornerCutOffsetInput = el("cornerCutOffset"),
+        cornerCutOpeningEnabledInput = el("cornerCutOpeningEnabled"),
+        cornerCutOpeningInputs = [
+            ["cornerCutOpeningW", "cornerCutOpeningW"],
+            ["cornerCutOpeningH", "cornerCutOpeningH"],
+            ["cornerCutOpeningDepth", "cornerCutOpeningDepth"],
+        ];
+    if (cornerCutOffsetInput) {
+        cornerCutOffsetInput.oninput = () => applyCornerCutProp("cornerOffset", cornerCutOffsetInput.value);
+        cornerCutOffsetInput.onchange = () => {
+            cornerCutEditSession = false;
+        };
+    }
+    if (cornerCutOpeningEnabledInput) {
+        cornerCutOpeningEnabledInput.onchange = () => {
+            cornerCutEditSession = false;
+            applyCornerCutProp("cornerCutOpeningEnabled", cornerCutOpeningEnabledInput.checked);
+            cornerCutEditSession = false;
+        };
+    }
+    cornerCutOpeningInputs.forEach(([id, name]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => applyCornerCutProp(name, input.value);
+        input.onchange = () => {
+            cornerCutEditSession = false;
+        };
+    });
     function syncAssetControls() {
         const o = sel && obOf(sel);
         if (o && o.type === "asset" && o.asset === "stairs") {
@@ -12579,6 +13251,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         syncBalconyPanel();
         syncPathPipePanel();
         syncBeveledBoxPanel();
+        syncCornerCutPanel();
         syncStackedPanel();
         syncFloorControls();
         syncAssetDepth();
@@ -13695,6 +14368,16 @@ window.cityGridInstallAssetUI = function (bridge) {
                 addScreen(param, label, p, dir, param === "ra" ? ra * 2 : param === "rb" ? rb * 2 : h);
             }
         });
+        if (o.type === "asset" && o.asset === "cornerCutBox" && typeof cornerCutGizmo === "function") {
+            const special = cornerCutGizmo(o),
+                h = special?.handle;
+            if (h?.s?.ok) handles.push({ ...h, kind: "cornerCut-offset", label: "隅切り" });
+            if (special?.opening)
+                Object.values(special.opening.handles).forEach((openingHandle) => {
+                    if (openingHandle?.s?.ok)
+                        handles.push({ ...openingHandle, kind: openingHandle.kind, opening: true });
+                });
+        }
         if (o.type === "asset" && o.asset === "building") handles.push(...floorBuildingInnerHandles(o));
         if (o.type === "asset" && o.asset === "awning") {
             const edge = floorAwningEdgeHandle(o);
@@ -13837,6 +14520,16 @@ window.cityGridInstallAssetUI = function (bridge) {
                 screen: true,
             });
         }
+        if (o.type === "asset" && o.asset === "cornerCutBox" && typeof cornerCutGizmo === "function") {
+            const special = cornerCutGizmo(o),
+                h = special?.handle;
+            if (h?.s?.ok) handles.push({ ...h, kind: "cornerCut-offset", label: "隅切り" });
+            if (special?.opening)
+                Object.values(special.opening.handles).forEach((openingHandle) => {
+                    if (openingHandle?.s?.ok)
+                        handles.push({ ...openingHandle, kind: openingHandle.kind, opening: true });
+                });
+        }
         if (o.type === "asset" && o.asset === "building") handles.push(...floorBuildingInnerHandles(o));
         if (o.type === "asset" && o.asset === "awning") {
             const edge = floorAwningEdgeHandle(o);
@@ -13968,15 +14661,22 @@ window.cityGridInstallAssetUI = function (bridge) {
             c.stroke();
         }
         g.handles.forEach((h) => {
-            const orange = h.kind === "buildingBackFace" || h.kind === "awningEdgeZ" || h.kind === "awningEdgeY",
-                col = orange ? "#ffb36f" : "#66e3c8",
-                fill = orange ? "#ffd0a8" : "#d9fff6";
-            c.strokeStyle = orange ? "rgba(255,179,111,.88)" : "rgba(102,227,200,.85)";
+            const opening = !!h.opening,
+                orange =
+                    opening ||
+                    h.kind === "buildingBackFace" ||
+                    h.kind === "awningEdgeZ" ||
+                    h.kind === "awningEdgeY" ||
+                    h.kind === "cornerCut-offset",
+                col = opening ? h.color || "#ffd34d" : orange ? "#ffb36f" : "#66e3c8",
+                fill = opening ? "#fff0b0" : orange ? "#ffd0a8" : "#d9fff6";
+            c.strokeStyle = opening ? `${col}dd` : orange ? "rgba(255,179,111,.88)" : "rgba(102,227,200,.85)";
             c.fillStyle = col;
             c.lineWidth = 1.2 / Z;
             c.setLineDash([4 / Z, 3 / Z]);
             c.beginPath();
-            c.moveTo(g.center.x, g.center.y);
+            const lineAnchor = opening && h.anchor?.ok ? h.anchor : g.center;
+            c.moveTo(lineAnchor.x, lineAnchor.y);
             c.lineTo(h.s.x, h.s.y);
             c.stroke();
             c.setLineDash([]);
@@ -14040,13 +14740,19 @@ window.cityGridInstallAssetUI = function (bridge) {
                                 [pathBounds.lo[0], pathBounds.hi[1], boundsCenter[2]],
                                 [pathBounds.lo[0], pathBounds.lo[1], boundsCenter[2]],
                             ]
-                    : [
-                          [-o.ra, -o.rb],
-                          [o.ra, -o.rb],
-                          [o.ra, o.rb],
-                          [-o.ra, o.rb],
-                          [-o.ra, -o.rb],
-                      ];
+                    : o.type === "asset" && o.asset === "cornerCutBox" && typeof cornerCutBoxParams === "function"
+                      ? (() => {
+                            const q = cornerCutBoxParams(o),
+                                footprint = cornerCutFootprint(q.w, q.d, q.cornerOffset, q.cornerCutCorner);
+                            return [...footprint, footprint[0]];
+                        })()
+                      : [
+                            [-o.ra, -o.rb],
+                            [o.ra, -o.rb],
+                            [o.ra, o.rb],
+                            [-o.ra, o.rb],
+                            [-o.ra, -o.rb],
+                        ];
             c.strokeStyle = "rgba(255,159,104,.9)";
             c.lineWidth = 1.5 / Z;
             c.setLineDash([6 / Z, 4 / Z]);
@@ -14326,6 +15032,14 @@ window.cityGridInstallAssetUI = function (bridge) {
         // 地面オブジェクトは回転後の実際の四隅を使う。壁・天井の図形は
         // L2W(o, ..., ..., 0)だけだと床面上の外周が退化するため、3D外周箱を
         // X/Zへ投影して、間取り上で隣接判定できるようにする。
+        if (o.type === "asset" && o.asset === "cornerCutBox" && typeof cornerCutBoxParams === "function") {
+            const q = cornerCutBoxParams(o),
+                footprint = cornerCutFootprint(q.w, q.d, q.cornerOffset, q.cornerCutCorner);
+            return footprint.map(([x, y]) => {
+                const p = L2W(o, x, y, 0);
+                return { x: p[0], z: p[2] };
+            });
+        }
         if (o.k === 1) {
             const out = [];
             for (const x of [-Math.abs(Number(o.ra) || 0), Math.abs(Number(o.ra) || 0)])
@@ -14960,19 +15674,32 @@ window.cityGridInstallAssetUI = function (bridge) {
                         ((p.x - floorPlanDrag.p0.x) * h.dir.x + (p.y - floorPlanDrag.p0.y) * h.dir.y) / (h.scale || 1),
                     value = clamp(h.start + (h.factor || 1) * amount, h.min, h.max ?? 20);
                 snapHit = null;
-                const patch = h.inner
-                    ? h.kind === "buildingOpeningH"
-                        ? { openingH: value }
-                        : h.kind === "buildingBackFace"
-                          ? { openingBack: value }
-                          : h.kind === "awningEdgeZ"
-                            ? { awningEdgeZ: value, awningFrontBottom: h.frontBottom, awningEdgeEdited: true }
-                            : h.kind === "awningEdgeY"
-                              ? { awningEdgeY: value, awningEdgeEdited: true }
-                              : { openingW: value }
-                    : h.param
-                      ? floorWallDimensionPatch(o, h.param, value, h.side || 1)
-                      : floorResizeSnap(o, floorDimensionPatch(o, h.kind, value, h.side || 1), h, value);
+                const patch =
+                    h.kind === "cornerCut-offset"
+                        ? { cornerOffset: value }
+                        : h.kind === "cornerCut-opening-width-left" || h.kind === "cornerCut-opening-width-right"
+                          ? { cornerCutOpeningW: value }
+                          : h.kind === "cornerCut-opening-height"
+                            ? { cornerCutOpeningH: value }
+                            : h.kind === "cornerCut-opening-depth"
+                              ? { cornerCutOpeningDepth: value }
+                              : h.inner
+                                ? h.kind === "buildingOpeningH"
+                                    ? { openingH: value }
+                                    : h.kind === "buildingBackFace"
+                                      ? { openingBack: value }
+                                      : h.kind === "awningEdgeZ"
+                                        ? {
+                                              awningEdgeZ: value,
+                                              awningFrontBottom: h.frontBottom,
+                                              awningEdgeEdited: true,
+                                          }
+                                        : h.kind === "awningEdgeY"
+                                          ? { awningEdgeY: value, awningEdgeEdited: true }
+                                          : { openingW: value }
+                                : h.param
+                                  ? floorWallDimensionPatch(o, h.param, value, h.side || 1)
+                                  : floorResizeSnap(o, floorDimensionPatch(o, h.kind, value, h.side || 1), h, value);
                 if (patch) {
                     if (!floorPlanDrag.started) {
                         HU.push(S);
@@ -15695,5 +16422,5 @@ window.cityGridInstallAssetUI = function (bridge) {
 })();
 
 </script>
-    <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a51a7bfa6cadfca2',t:'MTc5MzE5NjIxMA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+    <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a51ab479ffc0dd96',t:'MTc5MzE5ODUyNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
