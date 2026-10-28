@@ -25,7 +25,7 @@ const cv = $("cv"),
 let W = 1600,
     H = 900; // キャンバスの内部サイズ（比率変更でHが変わる）
 
-// ===== パラメータ（初期値の水平回転は参考サイトのy=39.912） =====
+// ===== 1. パラメータ（初期値の水平回転は参考サイトのy=39.912） =====
 const MASTER_W = 1.5;
 // P: カメラ、投影、描画設定をまとめたアプリ全体のパラメータ。
 // UIから変更された値は sync() でHTMLの入力欄と同期する。
@@ -85,7 +85,7 @@ let S = [],
 let orthView = null,
     standardApplying = false; // Blender風の正面・真横・真上では正投影を使う
 
-// ===== 操作パネルの組み立て =====
+// ===== 2. 操作パネルの組み立て =====
 const R = (k, t, min, max, st, u = "") =>
     `<label><span>${t}</span><input type=range id=${k} min=${min} max=${max} step=${st}><input type=number class=nv id=v_${k} step=${st}><span class=un>${u}</span></label>`; // スライダー＋数値入力
 const RO = (k, t, min, max, st, u = "") =>
@@ -181,6 +181,15 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label class=full><span>パス点（x,y,z）</span><textarea id=pathPipePoints rows=4 placeholder="-2,0,1.1; 0,0,1.1; 0,2.2,1.1"></textarea></label>
 <div class="note">キャンバス上の各パス点にあるX／Y／Zハンドルをドラッグすると経路を編集できます。オレンジの「半径」ハンドルで太さを変更できます。曲がり半径を0にすると角が直線になります。</div>
 </div>
+<div id=wallSignP style="display:none"><h3>壁付け看板（単体）</h3>
+<label><input type=checkbox id=wallSignBrace checked> 取付金具を付ける</label>
+<label><span>取付金具の本数</span><select id=wallSignBrackets><option value="1">1本</option><option value="2">2本</option><option value="3" selected>3本</option></select></label>
+<label><span>取付金具の長さ</span><input type=number class=nv id=wallSignBracketLength min=0.05 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>看板の形状</span><select id=wallSignShape><option value="box">普通の直方体</option><option value="beveled">ベベル（角丸）</option></select></label>
+<label><span>ベベル幅</span><input type=number class=nv id=wallSignBevelOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>ベベル分割数</span><input type=number class=nv id=wallSignBevelSegments min=1 max=4 step=1 style="width:100px"><span class="un">分割</span></label>
+<div class="note">看板は板を立てた形状で、取付金具は裏側の壁へ向かって出ます。幅・奥行き（板厚）・高さは共通の面ハンドルまたは数値欄で編集できます。金具の長さとベベル幅は画面上のハンドルからも変更できます。</div>
+</div>
 <div id=beveledBoxP style="display:none"><h3>ベベル直方体</h3>
 <label><span>ベベルオフセット</span><input type=number class=nv id=beveledBoxOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
 <label><span>ベベルセグメント数</span><input type=number class=nv id=beveledBoxSegments min=1 max=4 step=1 style="width:100px"><span class=un>分割</span></label>
@@ -196,6 +205,23 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <div class="note">開口は赤い斜め隅切り面を分割し、内部の左右側面・上面・奥壁を持つ形状として描画します。幅・高さ・奥行きは数値欄または画面上のハンドルで、3D・正面・横・上ビューから編集できます。</div>
 </div>
 <div class="note">赤い切り口のオレンジ菱形ハンドルを、3D・正面・横・上ビューでドラッグして編集できます。</div>
+</div>
+<div id=recessedStackedP style="display:none"><h3>凹窓階層建物</h3>
+<label><button id=recessedAlign class="primary">上方向へ整列</button></label>
+<label><span>階数</span><input type=number class=nv id=recessedFloorCount min=1 max=30 step=1 style="width:100px"></label>
+<label><span>階高（上階）</span><input type=number class=nv id=recessedFloorHeight min=0.5 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>1階の高さ（追加分）</span><input type=number class=nv id=recessedFirstFloorExtra min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>階接合部の高さ</span><input type=number class=nv id=recessedFloorGap min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>前右角のベベル</span><input type=number class=nv id=recessedCornerBevel min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>ベベル分割数</span><input type=number class=nv id=recessedCornerBevelSegments min=1 max=8 step=1 style="width:100px"><span class=un>分割</span></label>
+<label><span>窓枚数（各階）</span><input type=number class=nv id=recessedWindowCount min=1 max=12 step=1 style="width:100px"><span class=un>枚</span></label>
+<label><span>窓端の壁幅（左手前）</span><input type=number class=nv id=recessedWindowMarginLeft min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>窓の凹み奥行き</span><input type=number class=nv id=recessedWindowDepth min=0.025 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>梁／庇の高さ</span><input type=number class=nv id=recessedBeamHeight min=0 max=0.6 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>梁／庇の張り出し</span><input type=number class=nv id=recessedBeamProjection min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>窓端の壁幅（右奥）</span><input type=number class=nv id=recessedWindowMarginEnd min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><input type=checkbox id=recessedSideWindows checked> 右側面にも窓を作る</label>
+<div class="note">各階に同じ窓帯を反復します。1Fだけ追加高さを持たせ、前右角を初期4分割のベベルにして、正面から右側面まで凹みを連続させます。窓帯は階と階の接合部に配置され、接合部の高さと窓の高さは常に同じです。窓帯の幅は建物全体の寸法に追従し、編集するのは両端の壁幅（左手前・右奥）だけです。画面上の「階高」「1階の高さ」「階接合部の高さ」「端の壁幅」ハンドルは、3D・正面・横・上ビューのどこからでもドラッグできます。腰壁高さと各階上端の梁／庇も数値で調整できます。</div>
 </div>
 <div id=stackedP style="display:none"><h3 id=stackedPanelTitle>縁付き階層建物</h3>
 <label><span>階数</span><input type=number class=nv id=stackFloorCount min=1 max=30 step=1 style="width:100px"></label>
@@ -240,7 +266,7 @@ ${R("pa", "写真の濃さ", 0, 1, 0.05)}
 <label><button id=rst>自動保存を消して初期化</button></label>
 <h3>読み取り</h3><div id=info class="note"></div>`;
 
-// ===== 見出しごとに折りたためるようにする（開閉の状態は覚える） =====
+// ===== 3. 見出しごとに折りたためるようにする（開閉の状態は覚える） =====
 (function () {
     const side = $("side"),
         kids = [...side.children],
@@ -289,7 +315,7 @@ ${R("pa", "写真の濃さ", 0, 1, 0.05)}
     $("secC").onclick = () => side.querySelectorAll("details").forEach((d) => (d.open = false));
     $("secO").onclick = () => side.querySelectorAll("details").forEach((d) => (d.open = true));
 })();
-// ===== 値の同期 =====
+// ===== 4. 値の同期 =====
 // 画面上の入力欄からPへ値を反映し、表示を更新する共通入口。
 function sync() {
     for (const k in P) {
@@ -370,7 +396,7 @@ $("ar").onchange = () => {
     fit();
 };
 
-// ===== 画面サイズに合わせて表示 =====
+// ===== 5. 画面サイズに合わせて表示 =====
 function fit() {
     const st = $("stage"),
         s = Math.min((st.clientWidth - 12) / W, (st.clientHeight - 12) / H);
@@ -380,7 +406,7 @@ function fit() {
 }
 addEventListener("resize", fit);
 
-// ===== 消失点の計算（カメラ→VP） =====
+// ===== 6. 消失点の計算（カメラ→VP） =====
 // 軸: 0=X方向, 1=Z方向, 2=垂直。VPが無限遠なら dir(平行線の向き) を返す
 // 通常の透視投影で、現在のカメラから消失点と補助軸を計算する。
 function calc() {
@@ -418,7 +444,7 @@ function dirAt(a, i) {
     return l < 1e-6 ? { x: 1, y: 0 } : { x: dx / l, y: dy / l };
 }
 
-// ===== 魚眼（5点・6点）：視線の球面上で考える。直線は「大円」＝画面では曲線になる =====
+// ===== 7. 魚眼（5点・6点）：視線の球面上で考える。直線は「大円」＝画面では曲線になる =====
 const V = {
     dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
     crs: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
@@ -568,7 +594,7 @@ function markF(c) {
     $("info").innerHTML = `魚眼 画角 ${P.fov}°<br>表示中のVP ${n}個（軸ごとに＋と−）<br>円の半径＝画角の半分`;
 }
 
-// ===== 線画の保存と再投影：画面の点→ワールドの向き(単位ベクトル)で持つので、視点を変えても追従する =====
+// ===== 8. 線画の保存と再投影：画面の点→ワールドの向き(単位ベクトル)で持つので、視点を変えても追従する =====
 // カメラ座標→ワールド（camの逆変換）
 function wld(v) {
     const th = P.yaw * DG,
@@ -707,7 +733,7 @@ function drawCur(x) {
 } // 描いている途中の線
 const sp = (s, v) => scr3(s.d3 ? V.add(v, CO()) : v); // 線の点の画面位置
 
-// ===== 図形：パースに沿った 長方形・円・立方体・円柱（3Dで作って視線の向きの線にする） =====
+// ===== 9. 図形：パースに沿った 長方形・円・立方体・円柱（3Dで作って視線の向きの線にする） =====
 const PL = { 0: [2, 1], 1: [0, 2], 2: [0, 1] }; // 面の法線k → 面内の2軸 (0=X,1=Y,2=Z)
 // 複数の定義を「結合」した複合オブジェクト用の座標変換。
 // 子パーツは元の定義を保持し、複合オブジェクトのtx/ty/tzだけを動かす。
@@ -897,7 +923,7 @@ function genShape(ob) {
     }
     return L.map((pl) => ({ c: ob.c, w: ob.w, ob, d3: true, cs: sigNow(), p: dens3(pl) }));
 }
-// ===== 図形の編集（選択・移動・回転・大きさ・浮かせる） =====
+// ===== 10. 図形の編集（選択・移動・回転・大きさ・浮かせる） =====
 const obOf = (id) => {
     const s = S.find((s) => s.ob && s.ob.id === id);
     return s && s.ob;
@@ -1369,6 +1395,27 @@ function fieldPatch(o, name, v) {
             ]);
         }
         return {};
+    }
+    if (
+        o.type === "asset" &&
+        o.asset === "recessedStackedBuilding" &&
+        ["w", "dp", "h"].includes(name) &&
+        typeof recessedStackedBuildingParams === "function"
+    ) {
+        const q = recessedStackedBuildingParams(o),
+            value = Number(v);
+        if (!Number.isFinite(value)) return {};
+        if (name === "w") return { ra: Math.max(0.25, value * 0.5) };
+        if (name === "dp") return { rb: Math.max(0.25, value * 0.5) };
+        return {
+            floorHeight: clamp(
+                (Math.max(0.5, value) - q.firstFloorExtra - Math.max(0, q.floorCount - 1) * q.floorGap) /
+                    q.floorCount,
+                0.5,
+                30,
+            ),
+            h: Math.max(0.5, value),
+        };
     }
     if (o.type === "asset" && o.asset === "building" && ["w", "dp", "h"].includes(name)) {
         const g = buildingGeometry(o);

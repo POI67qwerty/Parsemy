@@ -14,6 +14,17 @@
     const el = (id) => document.getElementById(id);
     const side = el("side"),
         stage = el("stage");
+    // ポインタを捕まえてドラッグを継続する。未対応ブラウザでも操作は続けたいので、
+    // 失敗しても例外は投げない（各ドラッグ処理で共通に使う）。
+    const capturePointer = (pointerId) => {
+        try {
+            document.getElementById("cv").setPointerCapture(pointerId);
+        } catch (err) {}
+    };
+    // 正投影ビューで、オブジェクトの外側へ寸法ハンドルを離す距離。
+    // 形の大きさに比例させつつ、画面のピクセル基準で上下限を決める。
+    const orthHandleGap = (span, factor = 0.35) =>
+        Math.max(48 / Z, Math.min(88 / Z, Math.max(0, span) * orthScale() * factor));
 
     // ===== 1. クイック操作パネルと作業画面 =====
     // HTMLの既存サイドバーへ、人物・ポーズ・間取り・視点の操作UIを追加する。
@@ -265,7 +276,7 @@
     poseButtons.forEach((b) => (b.onclick = () => applyPersonPose(b.dataset.personPose)));
     syncPersonControls();
 
-    // ===== Transparent floor tint =====
+    // ===== 2.1 床の半透明表示 =====
     // ===== 3. 床・生成方向・シーン一覧 =====
     const floorToggle = el("floorTint"),
         floorColor = el("floorTintColor"),
@@ -333,7 +344,7 @@
     // Asset catalog and geometry generator are provided by asset.js.
 
     // Asset placement, asset tray, object JSON and primitive menu are installed by asset.js.
-    // ===== Scene outliner / object groups =====
+    // ===== 3.1 シーン一覧（オブジェクトグループ） =====
     const list = el("objectList");
     // Sに同じオブジェクトの線が複数あるため、ob.idごとに1件へまとめる。
     function sceneObjects() {
@@ -1018,6 +1029,136 @@
             n.disabled = !individualEdit && Number(n.dataset.stackFloorSelect) !== 0;
         });
     }
+    let recessedEditSession = false;
+    function syncRecessedStackedPanel() {
+        const panel = el("recessedStackedP"),
+            o = sel && obOf(sel),
+            active = !!(o && o.type === "asset" && o.asset === "recessedStackedBuilding");
+        if (!panel) return;
+        panel.style.display = active ? "" : "none";
+        if (!active) {
+            recessedEditSession = false;
+            return;
+        }
+        const q = recessedStackedBuildingParams(o),
+            values = [
+                ["recessedFloorCount", q.floorCount],
+                ["recessedFloorHeight", q.floorHeight],
+                ["recessedFirstFloorExtra", q.firstFloorExtra],
+                ["recessedFloorGap", q.floorGap],
+                ["recessedCornerBevel", q.cornerBevel],
+                ["recessedCornerBevelSegments", q.cornerBevelSegments],
+                ["recessedWindowCount", q.windowCount],
+                ["recessedWindowMarginLeft", q.marginLeft],
+                ["recessedWindowMarginEnd", q.marginEnd],
+                ["recessedWindowDepth", q.windowDepth],
+                ["recessedBeamHeight", q.beamHeight],
+                ["recessedBeamProjection", q.beamProjection],
+            ];
+        values.forEach(([id, value]) => {
+            const input = el(id);
+            if (input && document.activeElement !== input) input.value = Number(value).toFixed(3);
+        });
+        const side = el("recessedSideWindows");
+        if (side) side.checked = q.sideWindows;
+    }
+    function applyRecessedStackedProp(name, rawValue) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || o.asset !== "recessedStackedBuilding") return;
+        const q = recessedStackedBuildingParams(o),
+            patch = {};
+        if (name === "recessedSideWindows") patch[name] = rawValue === true;
+        else {
+            const limits = {
+                    recessedFloorCount: [1, 30],
+                    recessedFloorHeight: [0.5, 30],
+                    recessedFirstFloorExtra: [0, 5],
+                    recessedFloorGap: [0, 5],
+                    recessedCornerBevel: [0, recessedMaxInset(q.w, q.d)],
+                    recessedCornerBevelSegments: [1, 8],
+                    recessedWindowCount: [1, 12],
+                    recessedWindowMarginLeft: [0, Math.max(0, q.w - q.cornerBevel - 0.2)],
+                    recessedWindowMarginEnd: [0, Math.max(0, q.d - q.cornerBevel - 0.2)],
+                    recessedWindowDepth: [0.025, Math.max(0.025, recessedMaxInset(q.w, q.d))],
+                    recessedBeamHeight: [0, Math.min(0.6, q.floorHeight * 0.35)],
+                    recessedBeamProjection: [0, Math.max(0, Math.min(q.w - q.cornerBevel, q.d) * 0.25)],
+                }[name],
+                value = Number(rawValue);
+            if (!limits || !Number.isFinite(value)) return;
+            patch[name] = clamp(
+                name === "recessedFloorCount" || name === "recessedWindowCount" ? Math.round(value) : value,
+                limits[0],
+                limits[1],
+            );
+        }
+        const next = { ...o, ...patch },
+            nextParams = recessedStackedBuildingParams(next);
+        patch.ra = nextParams.w * 0.5;
+        patch.rb = nextParams.d * 0.5;
+        patch.h = nextParams.totalH;
+        if (!recessedEditSession) {
+            HU.push(S);
+            RD = [];
+            recessedEditSession = true;
+        }
+        setOb(o.id, patch);
+        render();
+    }
+    [
+        ["recessedFloorCount", "recessedFloorCount"],
+        ["recessedFloorHeight", "recessedFloorHeight"],
+        ["recessedFirstFloorExtra", "recessedFirstFloorExtra"],
+        ["recessedFloorGap", "recessedFloorGap"],
+        ["recessedCornerBevel", "recessedCornerBevel"],
+        ["recessedCornerBevelSegments", "recessedCornerBevelSegments"],
+        ["recessedWindowCount", "recessedWindowCount"],
+        ["recessedWindowMarginLeft", "recessedWindowMarginLeft"],
+        ["recessedWindowMarginEnd", "recessedWindowMarginEnd"],
+        ["recessedWindowDepth", "recessedWindowDepth"],
+        ["recessedBeamHeight", "recessedBeamHeight"],
+        ["recessedBeamProjection", "recessedBeamProjection"],
+    ].forEach(([id, name]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => applyRecessedStackedProp(name, input.value);
+        input.onchange = () => {
+            recessedEditSession = false;
+        };
+    });
+    // 縁付き階層建物と同じ「上方向へ整列」。階を地面から積み直し、
+    // 高さと外形の寸法を現在の設定へそろえる。
+    const recessedAlign = el("recessedAlign");
+    if (recessedAlign)
+        recessedAlign.onclick = () => {
+            const o = sel && obOf(sel);
+            if (!o || o.type !== "asset" || o.asset !== "recessedStackedBuilding") return;
+            HU.push(S);
+            RD = [];
+            const q = recessedStackedBuildingParams(o),
+                floors = recessedStackedBuildingFloors(o, q);
+            let z = 0;
+            floors.forEach((floor) => {
+                z += floor.h + (floor.index < q.floorCount - 1 ? q.floorGap : 0);
+            });
+            setOb(o.id, {
+                ra: q.w * 0.5,
+                rb: q.d * 0.5,
+                h: z,
+                activeFloor: 0,
+                recessedFloorCount: q.floorCount,
+                recessedFloorHeight: q.floorHeight,
+                recessedFloorGap: q.floorGap,
+            });
+            recessedEditSession = false;
+            render();
+        };
+    const recessedSideWindows = el("recessedSideWindows");
+    if (recessedSideWindows)
+        recessedSideWindows.onchange = () => {
+            recessedEditSession = false;
+            applyRecessedStackedProp("recessedSideWindows", recessedSideWindows.checked);
+            recessedEditSession = false;
+        };
     function syncStackedPanel() {
         const panel = el("stackedP"),
             o = sel && obOf(sel),
@@ -1567,6 +1708,101 @@
         render();
     }
     if (pathPipeApplyPresetButton) pathPipeApplyPresetButton.onclick = applyPathPipePreset;
+    // ===== 3.2 壁付け看板（単体）のパネル =====
+    // 数値欄・チェック・選択はすべてsetOb()経由で反映し、生成処理を重複させない。
+    let wallSignEditSession = false;
+    function wallSignPanelObject() {
+        const o = sel && obOf(sel);
+        return o && o.type === "asset" && o.asset === "wallSign" ? o : null;
+    }
+    function syncWallSignPanel() {
+        const panel = el("wallSignP"),
+            o = wallSignPanelObject();
+        if (!panel) return;
+        panel.style.display = o ? "" : "none";
+        if (!o) {
+            wallSignEditSession = false;
+            return;
+        }
+        const params = wallSignParams(o),
+            values = [
+                ["wallSignBracketLength", params.bracketLength],
+                ["wallSignBevelOffset", params.bevelOffset],
+                ["wallSignBevelSegments", params.bevelSegments],
+            ];
+        values.forEach(([id, value]) => {
+            const input = el(id);
+            if (input && document.activeElement !== input) input.value = Number(value).toFixed(3);
+        });
+        const brace = el("wallSignBrace"),
+            brackets = el("wallSignBrackets"),
+            shape = el("wallSignShape");
+        if (brace) brace.checked = params.bracketCount > 0;
+        if (brackets) {
+            brackets.disabled = params.bracketCount === 0;
+            if (document.activeElement !== brackets)
+                brackets.value = String(clamp(params.bracketCount || 3, 1, 3));
+        }
+        if (shape && document.activeElement !== shape) shape.value = params.beveled ? "beveled" : "box";
+    }
+    function applyWallSignPatch(patch) {
+        const o = wallSignPanelObject();
+        if (!o || !patch || !Object.keys(patch).length) return;
+        if (!wallSignEditSession) {
+            HU.push(S);
+            RD = [];
+            wallSignEditSession = true;
+        }
+        setOb(o.id, patch);
+        render();
+    }
+    function applyWallSignProp(name, rawValue) {
+        const o = wallSignPanelObject();
+        if (!o) return;
+        const params = wallSignParams(o),
+            value = Number(rawValue),
+            patch = {};
+        if (!Number.isFinite(value)) return;
+        if (name === "wallSignBracketLength") patch.wallSignBracketLength = clamp(value, 0.05, 5);
+        else if (name === "wallSignBevelOffset")
+            // ベベルは板厚方向の稜線へ付くため、上限は板厚で決まる。
+            patch.wallSignBevelOffset = clamp(value, 0, params.bevelMax);
+        else if (name === "wallSignBevelSegments") patch.wallSignBevelSegments = clamp(Math.round(value), 1, 4);
+        applyWallSignPatch(patch);
+    }
+    [
+        ["wallSignBracketLength", "wallSignBracketLength"],
+        ["wallSignBevelOffset", "wallSignBevelOffset"],
+        ["wallSignBevelSegments", "wallSignBevelSegments"],
+    ].forEach(([id, name]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => applyWallSignProp(name, input.value);
+        input.onchange = () => {
+            wallSignEditSession = false;
+        };
+    });
+    const wallSignBrace = el("wallSignBrace"),
+        wallSignBrackets = el("wallSignBrackets"),
+        wallSignShape = el("wallSignShape");
+    if (wallSignBrace)
+        wallSignBrace.onchange = () => {
+            applyWallSignPatch({ wallSignBracketCount: wallSignBrace.checked ? 3 : 0 });
+            wallSignEditSession = false;
+        };
+    if (wallSignBrackets)
+        wallSignBrackets.onchange = () => {
+            applyWallSignPatch({ wallSignBracketCount: clamp(Math.round(Number(wallSignBrackets.value) || 1), 0, 3) });
+            wallSignEditSession = false;
+        };
+    if (wallSignShape)
+        wallSignShape.onchange = () => {
+            applyWallSignPatch({
+                wallSignShape: wallSignShape.value === "beveled" ? "beveled" : "box",
+                wallSignBevelSegments: 4,
+            });
+            wallSignEditSession = false;
+        };
     let beveledBoxEditSession = false;
     function syncBeveledBoxPanel() {
         const panel = el("beveledBoxP"),
@@ -1723,8 +1959,10 @@
         syncWallSideSignPanel();
         syncBalconyPanel();
         syncPathPipePanel();
+        syncWallSignPanel();
         syncBeveledBoxPanel();
         syncCornerCutPanel();
+        syncRecessedStackedPanel();
         syncStackedPanel();
         syncFloorControls();
         syncAssetDepth();
@@ -1734,7 +1972,7 @@
         syncFloorPlanSelection?.();
     };
 
-    // ===== 標準ビューと間取りショートカット（8=間取り横 / 9=間取り真上 / 0=元の視点） =====
+    // ===== 4.1 標準ビューと間取りショートカット（8=間取り横 / 9=間取り真上 / 0=元の視点） =====
     // 標準ビューだけは透視ではなく正投影にし、真横90°・真上90°を正確に扱う。
     const viewKeys = ["lens", "yaw", "hz", "pitch", "fov", "roll", "ch", "cx", "cz"];
     const captureHomeView = () => {
@@ -1800,7 +2038,7 @@
     el("viewFloorTop").onclick = () => showFloorPlan("top");
     el("viewHome").onclick = () => (window.cityFloorPlanActive ? exitFloorPlan(true) : applyStandardView("home"));
 
-    // ===== 間取りモード：真上／真横の正投影でシーンを確認する =====
+    // ===== 4.2 間取りモード：真上／真横の正投影でシーンを確認する =====
     let floorPlanView = null,
         floorPlanSideWasHidden = null,
         floorPlanAutoHidSide = false;
@@ -2044,9 +2282,7 @@
             };
             e.preventDefault();
             e.stopImmediatePropagation();
-            try {
-                cv.setPointerCapture(e.pointerId);
-            } catch (err) {}
+            capturePointer(e.pointerId);
             return true;
         }
         return false;
@@ -2374,10 +2610,7 @@
                 0.01,
                 -1,
             );
-            const gap = Math.max(
-                48 / Z,
-                Math.min(88 / Z, Math.max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], 0.6) * orthScale() * 0.35),
-            );
+            const gap = orthHandleGap(Math.max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], 0.6));
             addScreen(
                 "h",
                 "高さ",
@@ -2465,7 +2698,7 @@
                     -1,
                 );
             } else addScreen("h", "高さ", { x: center.x, y: center.y - 52 / Z, ok: true }, { x: 0, y: -1 }, 0);
-            const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(b.hi[0] - b.lo[0], 0.6) * orthScale() * 0.35));
+            const gap = orthHandleGap(Math.max(b.hi[0] - b.lo[0], 0.6));
             addScreen(
                 "d",
                 "奥行き",
@@ -2488,7 +2721,7 @@
             yMin = -g.d / 2 + 0.025,
             yMax = g.d / 2 - 0.025;
         if (orthView === "top") {
-            const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(g.w, g.d, 0.6) * orthScale() * 0.35));
+            const gap = orthHandleGap(Math.max(g.w, g.d, 0.6));
             out.push({
                 kind: "awningEdgeZ",
                 label: "前縁Y",
@@ -2525,7 +2758,7 @@
         }
         if (!o.attachment?.verticalOnly) {
             if (orthView === "front") {
-                const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(g.w, g.d, 0.6) * orthScale() * 0.35));
+                const gap = orthHandleGap(Math.max(g.w, g.d, 0.6));
                 out.push({
                     kind: "awningEdgeY",
                     label: "前後",
@@ -2851,6 +3084,12 @@
                         handles.push({ ...openingHandle, kind: openingHandle.kind, opening: true });
                 });
         }
+        if (o.type === "asset" && o.asset === "recessedStackedBuilding" && typeof recessedStackedGizmo === "function") {
+            const special = recessedStackedGizmo(o);
+            Object.values(special?.handles || {}).forEach((h) => {
+                if (h?.s?.ok) handles.push({ ...h, opening: true });
+            });
+        }
         if (o.type === "asset" && o.asset === "building") handles.push(...floorBuildingInnerHandles(o));
         if (o.type === "asset" && o.asset === "awning") {
             const edge = floorAwningEdgeHandle(o);
@@ -2898,13 +3137,7 @@
             add("d", "奥行＋", L2W(o, 0, o.rb, 0), L2W(o, 0, o.rb + 0.1, 0), Math.abs(o.rb) * 2, 0.01, 1);
             add("d", "奥行−", L2W(o, 0, -o.rb, 0), L2W(o, 0, -o.rb - 0.1, 0), Math.abs(o.rb) * 2, 0.01, -1);
             // 真上ではY方向が投影されないため、画面上へ高さハンドルを逃がして表示する。
-            const gap = Math.max(
-                48 / Z,
-                Math.min(
-                    88 / Z,
-                    Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)) * orthScale() * 0.65,
-                ),
-            );
+            const gap = orthHandleGap(Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)), 0.65);
             handles.push({
                 kind: "h",
                 label: "高さ",
@@ -2923,13 +3156,7 @@
             // ベベル直方体は初期状態が厚み0の面なので、下端と上端が
             // 同じ位置に重なって移動を奪わないよう、高さハンドルを上へ逃がす。
             if (Math.max(0, Number(o.h) || 0) <= 1e-6) {
-                const gap = Math.max(
-                    48 / Z,
-                    Math.min(
-                        88 / Z,
-                        Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)) * orthScale() * 0.65,
-                    ),
-                );
+                const gap = orthHandleGap(Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)), 0.65);
                 handles.push({
                     kind: "h",
                     label: "高さ",
@@ -2953,13 +3180,7 @@
             // 初期の厚み0では上下端が同じ画面点になり、クリックが高さ編集へ
             // 吸われる。高さハンドルを上へ逃がして面の移動を残す。
             if (Math.max(0, Number(o.h) || 0) <= 1e-6) {
-                const gap = Math.max(
-                    48 / Z,
-                    Math.min(
-                        88 / Z,
-                        Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)) * orthScale() * 0.65,
-                    ),
-                );
+                const gap = orthHandleGap(Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)), 0.65);
                 handles.push({
                     kind: "h",
                     label: "高さ",
@@ -2974,13 +3195,7 @@
                 add("h", "上端", L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + 0.1), Math.max(0, Number(o.h) || 0), 0, 1);
                 add("h", "下端", L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - 0.1), Math.max(0, Number(o.h) || 0), 0, -1);
             }
-            const gap = Math.max(
-                48 / Z,
-                Math.min(
-                    88 / Z,
-                    Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.h) || 0.6)) * orthScale() * 0.65,
-                ),
-            );
+            const gap = orthHandleGap(Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.h) || 0.6)), 0.65);
             handles.push({
                 kind: "d",
                 label: "奥行き",
@@ -3002,6 +3217,12 @@
                     if (openingHandle?.s?.ok)
                         handles.push({ ...openingHandle, kind: openingHandle.kind, opening: true });
                 });
+        }
+        if (o.type === "asset" && o.asset === "recessedStackedBuilding" && typeof recessedStackedGizmo === "function") {
+            const special = recessedStackedGizmo(o);
+            Object.values(special?.handles || {}).forEach((h) => {
+                if (h?.s?.ok) handles.push({ ...h, opening: true });
+            });
         }
         if (o.type === "asset" && o.asset === "building") handles.push(...floorBuildingInnerHandles(o));
         if (o.type === "asset" && o.asset === "awning") {
@@ -3166,7 +3387,8 @@
             c.fill();
             c.stroke();
             c.fillStyle = fill;
-            c.fillText(h.label, h.s.x + 8 / Z, h.s.y - 7 / Z);
+            const handleLabel = h.kind === "recessed-window-count" ? `${h.label} ${Math.round(h.start)}枚` : h.kind === "recessed-floor-gap" ? `${h.label} ${Number(h.start).toFixed(2)}m` : h.label;
+            c.fillText(handleLabel, h.s.x + 8 / Z, h.s.y - 7 / Z);
         });
         c.restore();
     }
@@ -3311,7 +3533,11 @@
                 drawFloorPlanEditHandles(c);
                 // ベベル直方体は通常の幅／奥行／高さハンドルに加えて、
                 // 断面オフセット用の専用ハンドルも同じビューへ表示する。
-                if (tool === "edit" && h.object.o.asset === "beveledBox") drawSpecialGizmo(c, h.object.o);
+                if (
+                    tool === "edit" &&
+                    (h.object.o.asset === "beveledBox" || h.object.o.asset === "wallSign")
+                )
+                    drawSpecialGizmo(c, h.object.o);
             }
         }
         // カメラ：本体をドラッグして位置、先端の丸をドラッグして向き
@@ -3426,6 +3652,34 @@
     function floorDimensionPatch(o, name, value, side = 1) {
         const v = Math.max(name === "h" ? 0 : 0.01, Number(value));
         if (!Number.isFinite(v)) return null;
+        if (o.type === "asset" && o.asset === "recessedStackedBuilding" && typeof recessedStackedBuildingParams === "function") {
+            const q = recessedStackedBuildingParams(o),
+                cs = Math.cos(Number(o.rot || 0) * DG),
+                sn = Math.sin(Number(o.rot || 0) * DG),
+                patch = {};
+            if (name === "w" || name === "d") {
+                const old = name === "w" ? q.w : q.d,
+                    delta = (v - old) / 2;
+                if (name === "w") {
+                    patch.ca = (Number(o.ca) || 0) + side * delta * cs;
+                    patch.cb = (Number(o.cb) || 0) + side * delta * sn;
+                    patch.ra = Math.max(0.25, v / 2);
+                } else {
+                    patch.ca = (Number(o.ca) || 0) - side * delta * sn;
+                    patch.cb = (Number(o.cb) || 0) + side * delta * cs;
+                    patch.rb = Math.max(0.25, v / 2);
+                }
+                return patch;
+            }
+            if (name === "h") {
+                const nextFloorHeight = clamp(
+                    (v - q.firstFloorExtra - Math.max(0, q.floorCount - 1) * q.floorGap) / q.floorCount,
+                    0.5,
+                    30,
+                );
+                return { floorHeight: nextFloorHeight, h: v };
+            }
+        }
         if (o.type === "compound") {
             const b = obBounds(o),
                 axis = { w: 0, d: 2, h: 1 }[name];
@@ -3742,9 +3996,7 @@
             tapClear,
             moved: false,
         };
-        try {
-            cv.setPointerCapture(e.pointerId);
-        } catch (err) {}
+        capturePointer(e.pointerId);
     }
     function beginFloorBoxPending(e, p) {
         if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
@@ -3755,9 +4007,7 @@
             center0: [...(window.cityFloorPlanCenter || [0, 0])],
             tapClear: true,
         });
-        try {
-            cv.setPointerCapture(e.pointerId);
-        } catch (err) {}
+        capturePointer(e.pointerId);
     }
     cv.addEventListener(
         "contextmenu",
@@ -3796,6 +4046,7 @@
                         customAsset === "pathPipe" ||
                         customAsset === "wallSideSign" ||
                         (customAsset === "beveledBox" && special?.t === "beveled-offset") ||
+                        (customAsset === "wallSign" && special?.t?.startsWith("wall-sign-")) ||
                         special?.t?.startsWith("sign-") ||
                         (special?.t === "face" && customAsset === "sign");
                 const activeFloorObject = sel && obOf(sel),
@@ -3822,9 +4073,7 @@
                     ptr = e.pointerId;
                     ptrType = e.pointerType;
                     beginGizmo(special, p);
-                    try {
-                        cv.setPointerCapture(e.pointerId);
-                    } catch (err) {}
+                    capturePointer(e.pointerId);
                     syncSel();
                     render();
                     return;
@@ -3849,9 +4098,7 @@
                         p0: p,
                         started: false,
                     };
-                    try {
-                        cv.setPointerCapture(e.pointerId);
-                    } catch (err) {}
+                    capturePointer(e.pointerId);
                     return;
                 }
             }
@@ -3870,9 +4117,7 @@
                     p0: p,
                     started: false,
                 };
-                try {
-                    cv.setPointerCapture(e.pointerId);
-                } catch (err) {}
+                capturePointer(e.pointerId);
                 return;
             }
             const moveHandle = floorMoveHandleAt(p),
@@ -3897,9 +4142,7 @@
                     p0: p,
                     started: false,
                 };
-                try {
-                    cv.setPointerCapture(e.pointerId);
-                } catch (err) {}
+                capturePointer(e.pointerId);
                 return;
             }
             if (orthView === "side" || orthView === "front") {
@@ -3914,9 +4157,7 @@
                     e.preventDefault();
                     e.stopImmediatePropagation();
                     floorPlanDrag = { kind: "aimSide", axis: verticalAxis, pointerId: e.pointerId };
-                    try {
-                        cv.setPointerCapture(e.pointerId);
-                    } catch (err) {}
+                    capturePointer(e.pointerId);
                     return;
                 }
                 if (
@@ -3935,9 +4176,7 @@
                         dz: orthView === "side" ? P.cz - w.z : 0,
                         dy: P.ch - 1 - w.y,
                     };
-                    try {
-                        cv.setPointerCapture(e.pointerId);
-                    } catch (err) {}
+                    capturePointer(e.pointerId);
                     return;
                 }
             }
@@ -3980,9 +4219,7 @@
                         dy: base[1] - w.y,
                         started: false,
                     };
-                    try {
-                        cv.setPointerCapture(e.pointerId);
-                    } catch (err) {}
+                    capturePointer(e.pointerId);
                     syncSel();
                     render();
                 } else if (e.shiftKey) beginFloorPan(e, p);
@@ -4005,18 +4242,14 @@
                     angle0,
                     started: false,
                 };
-                try {
-                    cv.setPointerCapture(e.pointerId);
-                } catch (err) {}
+                capturePointer(e.pointerId);
                 return;
             }
             if (h.camera && Math.hypot(h.camera.sTarget.x - p.x, h.camera.sTarget.y - p.y) < lim) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 floorPlanDrag = { kind: "aim", pointerId: e.pointerId };
-                try {
-                    cv.setPointerCapture(e.pointerId);
-                } catch (err) {}
+                capturePointer(e.pointerId);
                 return;
             }
             if (h.camera && Math.hypot(h.camera.sBody.x - p.x, h.camera.sBody.y - p.y) < lim) {
@@ -4025,9 +4258,7 @@
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 floorPlanDrag = { kind: "camera", pointerId: e.pointerId, dx: P.cx - w.x, dz: P.cz - w.z };
-                try {
-                    cv.setPointerCapture(e.pointerId);
-                } catch (err) {}
+                capturePointer(e.pointerId);
                 return;
             }
             if (
@@ -4045,9 +4276,7 @@
                     lens0: Number(P.lens) || 35,
                     started: false,
                 };
-                try {
-                    cv.setPointerCapture(e.pointerId);
-                } catch (err) {}
+                capturePointer(e.pointerId);
                 return;
             }
             const w = floorPlanWorldAt(p),
@@ -4087,9 +4316,7 @@
                     dz: base[2] - w.z,
                     started: false,
                 };
-                try {
-                    cv.setPointerCapture(e.pointerId);
-                } catch (err) {}
+                capturePointer(e.pointerId);
                 syncSel();
                 render();
             } else beginFloorBoxPending(e, p);
@@ -4147,10 +4374,19 @@
                         ((p.x - floorPlanDrag.p0.x) * h.dir.x + (p.y - floorPlanDrag.p0.y) * h.dir.y) / (h.scale || 1),
                     value = clamp(h.start + (h.factor || 1) * amount, h.min, h.max ?? 20);
                 snapHit = null;
-                const patch =
-                    h.kind === "cornerCut-offset"
+                // 凹窓階層建物のハンドルは、3Dドラッグと同じ変換を共有する。
+                const recessedPatch = typeof recessedHandlePatch === "function"
+                        ? recessedHandlePatch(o, h.kind, value)
+                        : null,
+                    patch = recessedPatch
+                        ? recessedPatch
+                        : h.kind === "cornerCut-offset"
                         ? { cornerOffset: value }
-                        : h.kind === "cornerCut-opening-width-left" || h.kind === "cornerCut-opening-width-right"
+                        : h.kind === "wall-sign-bracket-length"
+                          ? { wallSignBracketLength: value }
+                          : h.kind === "wall-sign-bevel"
+                            ? { wallSignBevelOffset: value }
+                          : h.kind === "cornerCut-opening-width-left" || h.kind === "cornerCut-opening-width-right"
                           ? { cornerCutOpeningW: value }
                           : h.kind === "cornerCut-opening-height"
                             ? { cornerCutOpeningH: value }
@@ -4503,7 +4739,7 @@
     });
     addEventListener("blur", () => (floorPlanPanMode = false));
 
-    // ===== Camera / scale presets =====
+    // ===== 5.1 カメラ・スケールのプリセット =====
     function setValues(values) {
         Object.entries(values).forEach(([k, v]) => {
             if (k in P) setP(k, v);
@@ -4534,7 +4770,7 @@
         render();
     }
 
-    // ===== User camera / settings presets =====
+    // ===== 5.2 視点・設定のプリセット =====
     const STUDIO_PRESET_KEY = "city-grid-studio-presets-v1";
     const studioPresetNameInput = el("studioPresetName"),
         studioPresetSelect = el("studioPresetSelect");
@@ -4738,7 +4974,7 @@
     };
     refreshStudioPresetList();
 
-    // ===== Common lens buttons =====
+    // ===== 5.3 レンズのボタン =====
     quick.querySelectorAll("[data-lens-preset]").forEach(
         (b) =>
             (b.onclick = () => {
@@ -4801,7 +5037,7 @@
     };
     el("clearRef").onclick = () => el("phx").click();
 
-    // ===== Compact export / help UI =====
+    // ===== 5.4 書き出し・ヘルプのUI =====
     el("exportToggle").onclick = (e) => {
         e.stopPropagation();
         setExportOpen(!el("exportMenu").classList.contains("open"));

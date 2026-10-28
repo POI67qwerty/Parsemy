@@ -2,6 +2,7 @@
    アセットの配置・接続・JSON入出力・棚UIを担当する。
 
    処理の流れ
+   0. ASSETS               : asset.js の定義表（棚の並び順もここに従う）
    1. newAsset             : 初期位置、生成面、寸法、固有値を持つ定義を作る
    2. placeAsset           : 線画を生成してSへ登録し、選択状態を更新する
    3. placeLinkedAsset     : 建物とテント／看板などの親子接続を作る
@@ -24,6 +25,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         syncFloorPlanDockLayout,
         sceneObjects,
     } = bridge;
+    // ===== 1. 接地と配置位置 =====
     function groundAt(p) {
         const q = hit3(unscr(p), 1, -1, camPos());
         if (q && Number.isFinite(q[0]) && Number.isFinite(q[2])) return q;
@@ -69,6 +71,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     }
     // アセット棚での1回の追加に対応する定義を作る。
     // 生成面（P.assetAxis）をkへ変換し、アセット固有の初期値もここで付ける。
+    // ===== 2. アセットの初期値（形状・寸法・固有名） =====
     function newAsset(kind, p, worldPoint = null) {
         const info = ASSETS[kind],
             isDefault = !p && !worldPoint;
@@ -108,6 +111,50 @@ window.cityGridInstallAssetUI = function (bridge) {
             accent: info.accent,
         };
         const height = kind === "person" ? Number(P.hm) || 1.7 : info.h;
+        if (kind === "recessedStackedBuilding") {
+            const floorCount = Math.max(1, Math.min(30, Math.round(Number(info.recessedFloorCount) || 4))),
+                floorHeight = Math.max(0.5, Number(info.recessedFloorHeight) || 2.1),
+                firstFloorExtra = Math.max(
+                    0,
+                    Number.isFinite(Number(info.recessedFirstFloorExtra)) ? Number(info.recessedFirstFloorExtra) : 0.35,
+                ),
+                floorGap = Math.max(0, Number.isFinite(Number(info.recessedFloorGap)) ? Number(info.recessedFloorGap) : 1.25),
+                totalH = floorCount * floorHeight + firstFloorExtra + Math.max(0, floorCount - 1) * floorGap;
+            return {
+                ...base,
+                type: "asset",
+                asset: kind,
+                assetId: "recessed-stacked-building",
+                assetName: info.label,
+                k: 1,
+                d: -1,
+                off: [q[0], 0, q[2]],
+                ca: 0,
+                cb: 0,
+                ra: info.w / 2,
+                rb: info.d / 2,
+                h: totalH,
+                recessedFloorCount: floorCount,
+                recessedFloorHeight: floorHeight,
+                recessedFirstFloorExtra: firstFloorExtra,
+                recessedFloorGap: floorGap,
+                recessedCornerBevel: info.recessedCornerBevel,
+                recessedCornerBevelSegments: info.recessedCornerBevelSegments,
+                recessedWindowW: info.recessedWindowW,
+                recessedWindowCount: info.recessedWindowCount,
+                recessedWindowH: info.recessedWindowH,
+                recessedWindowDepth: info.recessedWindowDepth,
+                recessedWindowBottom: info.recessedWindowBottom,
+                recessedSillHeight: info.recessedSillHeight ?? info.recessedWindowBottom,
+                recessedBeamHeight: info.recessedBeamHeight,
+                recessedBeamProjection: info.recessedBeamProjection,
+                recessedSideWindowW: info.recessedSideWindowW,
+                recessedWindowMarginLeft: info.recessedWindowMarginLeft,
+                recessedWindowMarginEnd: info.recessedWindowMarginEnd,
+                recessedJunctionOffset: info.recessedJunctionOffset || 0,
+                recessedSideWindows: info.recessedSideWindows !== false,
+            };
+        }
         if (kind === "stackedBuilding" || kind === "beveledStackedBuilding") {
             const beveled = kind === "beveledStackedBuilding",
                 floorHeight = 2.2,
@@ -214,6 +261,31 @@ window.cityGridInstallAssetUI = function (bridge) {
                 cornerCutOpeningDepth: info.cornerCutOpeningDepth,
                 cutColor: info.cutColor,
             };
+        // 壁付け看板（単体）は、板を立てて地面に置き、取付金具を裏側へ出す。
+        // 取付金具の本数・長さ・ベベル形状は配置後に画面と数値の両方から編集できる。
+        if (kind === "wallSign")
+            return {
+                ...base,
+                type: "asset",
+                asset: kind,
+                assetId: "wall-sign",
+                assetName: info.label,
+                k: 1,
+                d: -1,
+                off: [q[0], 0, q[2]],
+                ca: 0,
+                cb: 0,
+                ra: info.w / 2,
+                rb: info.d / 2,
+                h: height,
+                // 初期の向きは正面。回転はほかのアセットと同じく画面から変えられる。
+                rot: 0,
+                wallSignBracketCount: 3,
+                wallSignBracketLength: 0.36,
+                wallSignShape: "beveled",
+                wallSignBevelOffset: 0.18,
+                wallSignBevelSegments: 4,
+            };
         return {
             ...base,
             type: "asset",
@@ -254,6 +326,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     }
     // 建物とテント／看板を親子として作る。
     // child.attachment が親の開口側へ追従するため、親の移動・回転・寸法変更に対応できる。
+    // ===== 3. 連結パーツと配置（ベランダ・建物付属） =====
     function placeLinkedAsset(kind, p) {
         const childKind = kind === "buildingAwning" ? "awning" : "rect",
             q = p ? groundAt(p) : assetGroundPoint(ASSETS.building),
@@ -471,6 +544,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     // 図形／アセット定義だけをコピーし、貼り付け時に新しいIDで再生成する。
     let objectClipboard = [];
     // 線画ではなく、選択中オブジェクトの定義をJSONとしてクリップボードへ保持する。
+    // ===== 4. コピー・貼り付け・読み込み =====
     function copySelectedObjects() {
         const objects = selectedObjects();
         if (!objects.length) return false;
@@ -626,6 +700,7 @@ window.cityGridInstallAssetUI = function (bridge) {
 
     // 既存建物の左右の横壁へ、小型看板を任意で接着する。
     // 建物本体の種類を変えず、attachmentで親の移動・回転・寸法変更へ追従させる。
+    // ===== 5. 横壁看板の取り付け =====
     function wallSideSignChildren(parentId) {
         return sceneObjects()
             .filter((o) => o?.attachment?.parentId === parentId && o.attachment.wallSideSign)
@@ -832,7 +907,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     }
     window.cityGridWallSideSignToggle = toggleWallSideSign;
 
-    // ===== アセット棚と配置ボタン =====
+    // ===== 6. アセット棚と配置方向 =====
     // 棚のボタンはplaceAsset()へ集約し、UIイベント内に形状生成ロジックを重複させない。
     const tray = document.createElement("div");
     tray.id = "assetTray";
@@ -841,7 +916,10 @@ window.cityGridInstallAssetUI = function (bridge) {
         // 通常の「看板」アセットは、建物へ接着する横壁看板へ統合したため棚から外す。
         // 既存JSONのasset=signはASSETS定義を残して読み込み・表示できるようにする。
         Object.entries(ASSETS)
-            .filter(([k]) => k !== "sign")
+            // 看板は「壁付け看板（単体）」へ統合した。
+            // asset=sign と asset=wallSideSign（建物へ接着する専用形状）は
+            // 既存JSONの読み込み・表示用に定義だけ残し、棚からは外す。
+            .filter(([k]) => k !== "sign" && k !== "wallSideSign")
             .map(
                 ([k, v]) =>
                     `<button class="assetCard" data-asset="${k}" title="${v.label}を追加${k === "balcony" ? "（建物選択中は壁へ接着）" : ""}"><span class="assetGlyph">${v.glyph}</span><span>${v.label}</span></button>`,
@@ -901,6 +979,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     // 線そのものではなく定義を保存するので、寸法・向き・ポーズ・アセット固有値を保てる。
     const objectInfoCopyButton = el("objectInfoCopy"),
         objectInfoSaveButton = el("objectInfoSave");
+    // ===== 7. オブジェクト情報のコピー =====
     function objectInfoPayload() {
         const objects = selectedObjects().map((o) => {
             const q = JSON.parse(JSON.stringify(o));
@@ -989,7 +1068,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         requestAnimationFrame(syncFloorPlanDockLayout);
     };
 
-    // ===== 4本指プリミティブクイックメニュー =====
+    // ===== 8. 4本指プリミティブクイックメニュー =====
     // 基本6種だけを小さなメニューから追加できる。実体の生成は通常のplaceAsset()へ委譲する。
     // 4本指タップで開く、長方形・円・円錐・球体・三角柱・三角錐専用の小型メニュー。
     const primitiveKinds = ["rect", "circle", "cone", "sphere", "triPrism", "triPyramid"];

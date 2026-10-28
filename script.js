@@ -25,7 +25,7 @@ const cv = $("cv"),
 let W = 1600,
     H = 900; // キャンバスの内部サイズ（比率変更でHが変わる）
 
-// ===== パラメータ（初期値の水平回転は参考サイトのy=39.912） =====
+// ===== 1. パラメータ（初期値の水平回転は参考サイトのy=39.912） =====
 const MASTER_W = 1.5;
 // P: カメラ、投影、描画設定をまとめたアプリ全体のパラメータ。
 // UIから変更された値は sync() でHTMLの入力欄と同期する。
@@ -85,7 +85,7 @@ let S = [],
 let orthView = null,
     standardApplying = false; // Blender風の正面・真横・真上では正投影を使う
 
-// ===== 操作パネルの組み立て =====
+// ===== 2. 操作パネルの組み立て =====
 const R = (k, t, min, max, st, u = "") =>
     `<label><span>${t}</span><input type=range id=${k} min=${min} max=${max} step=${st}><input type=number class=nv id=v_${k} step=${st}><span class=un>${u}</span></label>`; // スライダー＋数値入力
 const RO = (k, t, min, max, st, u = "") =>
@@ -181,6 +181,15 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label class=full><span>パス点（x,y,z）</span><textarea id=pathPipePoints rows=4 placeholder="-2,0,1.1; 0,0,1.1; 0,2.2,1.1"></textarea></label>
 <div class="note">キャンバス上の各パス点にあるX／Y／Zハンドルをドラッグすると経路を編集できます。オレンジの「半径」ハンドルで太さを変更できます。曲がり半径を0にすると角が直線になります。</div>
 </div>
+<div id=wallSignP style="display:none"><h3>壁付け看板（単体）</h3>
+<label><input type=checkbox id=wallSignBrace checked> 取付金具を付ける</label>
+<label><span>取付金具の本数</span><select id=wallSignBrackets><option value="1">1本</option><option value="2">2本</option><option value="3" selected>3本</option></select></label>
+<label><span>取付金具の長さ</span><input type=number class=nv id=wallSignBracketLength min=0.05 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>看板の形状</span><select id=wallSignShape><option value="box">普通の直方体</option><option value="beveled">ベベル（角丸）</option></select></label>
+<label><span>ベベル幅</span><input type=number class=nv id=wallSignBevelOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>ベベル分割数</span><input type=number class=nv id=wallSignBevelSegments min=1 max=4 step=1 style="width:100px"><span class="un">分割</span></label>
+<div class="note">看板は板を立てた形状で、取付金具は裏側の壁へ向かって出ます。幅・奥行き（板厚）・高さは共通の面ハンドルまたは数値欄で編集できます。金具の長さとベベル幅は画面上のハンドルからも変更できます。</div>
+</div>
 <div id=beveledBoxP style="display:none"><h3>ベベル直方体</h3>
 <label><span>ベベルオフセット</span><input type=number class=nv id=beveledBoxOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
 <label><span>ベベルセグメント数</span><input type=number class=nv id=beveledBoxSegments min=1 max=4 step=1 style="width:100px"><span class=un>分割</span></label>
@@ -196,6 +205,23 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <div class="note">開口は赤い斜め隅切り面を分割し、内部の左右側面・上面・奥壁を持つ形状として描画します。幅・高さ・奥行きは数値欄または画面上のハンドルで、3D・正面・横・上ビューから編集できます。</div>
 </div>
 <div class="note">赤い切り口のオレンジ菱形ハンドルを、3D・正面・横・上ビューでドラッグして編集できます。</div>
+</div>
+<div id=recessedStackedP style="display:none"><h3>凹窓階層建物</h3>
+<label><button id=recessedAlign class="primary">上方向へ整列</button></label>
+<label><span>階数</span><input type=number class=nv id=recessedFloorCount min=1 max=30 step=1 style="width:100px"></label>
+<label><span>階高（上階）</span><input type=number class=nv id=recessedFloorHeight min=0.5 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>1階の高さ（追加分）</span><input type=number class=nv id=recessedFirstFloorExtra min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>階接合部の高さ</span><input type=number class=nv id=recessedFloorGap min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>前右角のベベル</span><input type=number class=nv id=recessedCornerBevel min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>ベベル分割数</span><input type=number class=nv id=recessedCornerBevelSegments min=1 max=8 step=1 style="width:100px"><span class=un>分割</span></label>
+<label><span>窓枚数（各階）</span><input type=number class=nv id=recessedWindowCount min=1 max=12 step=1 style="width:100px"><span class=un>枚</span></label>
+<label><span>窓端の壁幅（左手前）</span><input type=number class=nv id=recessedWindowMarginLeft min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>窓の凹み奥行き</span><input type=number class=nv id=recessedWindowDepth min=0.025 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>梁／庇の高さ</span><input type=number class=nv id=recessedBeamHeight min=0 max=0.6 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>梁／庇の張り出し</span><input type=number class=nv id=recessedBeamProjection min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>窓端の壁幅（右奥）</span><input type=number class=nv id=recessedWindowMarginEnd min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><input type=checkbox id=recessedSideWindows checked> 右側面にも窓を作る</label>
+<div class="note">各階に同じ窓帯を反復します。1Fだけ追加高さを持たせ、前右角を初期4分割のベベルにして、正面から右側面まで凹みを連続させます。窓帯は階と階の接合部に配置され、接合部の高さと窓の高さは常に同じです。窓帯の幅は建物全体の寸法に追従し、編集するのは両端の壁幅（左手前・右奥）だけです。画面上の「階高」「1階の高さ」「階接合部の高さ」「端の壁幅」ハンドルは、3D・正面・横・上ビューのどこからでもドラッグできます。腰壁高さと各階上端の梁／庇も数値で調整できます。</div>
 </div>
 <div id=stackedP style="display:none"><h3 id=stackedPanelTitle>縁付き階層建物</h3>
 <label><span>階数</span><input type=number class=nv id=stackFloorCount min=1 max=30 step=1 style="width:100px"></label>
@@ -240,7 +266,7 @@ ${R("pa", "写真の濃さ", 0, 1, 0.05)}
 <label><button id=rst>自動保存を消して初期化</button></label>
 <h3>読み取り</h3><div id=info class="note"></div>`;
 
-// ===== 見出しごとに折りたためるようにする（開閉の状態は覚える） =====
+// ===== 3. 見出しごとに折りたためるようにする（開閉の状態は覚える） =====
 (function () {
     const side = $("side"),
         kids = [...side.children],
@@ -289,7 +315,7 @@ ${R("pa", "写真の濃さ", 0, 1, 0.05)}
     $("secC").onclick = () => side.querySelectorAll("details").forEach((d) => (d.open = false));
     $("secO").onclick = () => side.querySelectorAll("details").forEach((d) => (d.open = true));
 })();
-// ===== 値の同期 =====
+// ===== 4. 値の同期 =====
 // 画面上の入力欄からPへ値を反映し、表示を更新する共通入口。
 function sync() {
     for (const k in P) {
@@ -370,7 +396,7 @@ $("ar").onchange = () => {
     fit();
 };
 
-// ===== 画面サイズに合わせて表示 =====
+// ===== 5. 画面サイズに合わせて表示 =====
 function fit() {
     const st = $("stage"),
         s = Math.min((st.clientWidth - 12) / W, (st.clientHeight - 12) / H);
@@ -380,7 +406,7 @@ function fit() {
 }
 addEventListener("resize", fit);
 
-// ===== 消失点の計算（カメラ→VP） =====
+// ===== 6. 消失点の計算（カメラ→VP） =====
 // 軸: 0=X方向, 1=Z方向, 2=垂直。VPが無限遠なら dir(平行線の向き) を返す
 // 通常の透視投影で、現在のカメラから消失点と補助軸を計算する。
 function calc() {
@@ -418,7 +444,7 @@ function dirAt(a, i) {
     return l < 1e-6 ? { x: 1, y: 0 } : { x: dx / l, y: dy / l };
 }
 
-// ===== 魚眼（5点・6点）：視線の球面上で考える。直線は「大円」＝画面では曲線になる =====
+// ===== 7. 魚眼（5点・6点）：視線の球面上で考える。直線は「大円」＝画面では曲線になる =====
 const V = {
     dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
     crs: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
@@ -568,7 +594,7 @@ function markF(c) {
     $("info").innerHTML = `魚眼 画角 ${P.fov}°<br>表示中のVP ${n}個（軸ごとに＋と−）<br>円の半径＝画角の半分`;
 }
 
-// ===== 線画の保存と再投影：画面の点→ワールドの向き(単位ベクトル)で持つので、視点を変えても追従する =====
+// ===== 8. 線画の保存と再投影：画面の点→ワールドの向き(単位ベクトル)で持つので、視点を変えても追従する =====
 // カメラ座標→ワールド（camの逆変換）
 function wld(v) {
     const th = P.yaw * DG,
@@ -707,7 +733,7 @@ function drawCur(x) {
 } // 描いている途中の線
 const sp = (s, v) => scr3(s.d3 ? V.add(v, CO()) : v); // 線の点の画面位置
 
-// ===== 図形：パースに沿った 長方形・円・立方体・円柱（3Dで作って視線の向きの線にする） =====
+// ===== 9. 図形：パースに沿った 長方形・円・立方体・円柱（3Dで作って視線の向きの線にする） =====
 const PL = { 0: [2, 1], 1: [0, 2], 2: [0, 1] }; // 面の法線k → 面内の2軸 (0=X,1=Y,2=Z)
 // 複数の定義を「結合」した複合オブジェクト用の座標変換。
 // 子パーツは元の定義を保持し、複合オブジェクトのtx/ty/tzだけを動かす。
@@ -897,7 +923,7 @@ function genShape(ob) {
     }
     return L.map((pl) => ({ c: ob.c, w: ob.w, ob, d3: true, cs: sigNow(), p: dens3(pl) }));
 }
-// ===== 図形の編集（選択・移動・回転・大きさ・浮かせる） =====
+// ===== 10. 図形の編集（選択・移動・回転・大きさ・浮かせる） =====
 const obOf = (id) => {
     const s = S.find((s) => s.ob && s.ob.id === id);
     return s && s.ob;
@@ -1370,6 +1396,27 @@ function fieldPatch(o, name, v) {
         }
         return {};
     }
+    if (
+        o.type === "asset" &&
+        o.asset === "recessedStackedBuilding" &&
+        ["w", "dp", "h"].includes(name) &&
+        typeof recessedStackedBuildingParams === "function"
+    ) {
+        const q = recessedStackedBuildingParams(o),
+            value = Number(v);
+        if (!Number.isFinite(value)) return {};
+        if (name === "w") return { ra: Math.max(0.25, value * 0.5) };
+        if (name === "dp") return { rb: Math.max(0.25, value * 0.5) };
+        return {
+            floorHeight: clamp(
+                (Math.max(0.5, value) - q.firstFloorExtra - Math.max(0, q.floorCount - 1) * q.floorGap) /
+                    q.floorCount,
+                0.5,
+                30,
+            ),
+            h: Math.max(0.5, value),
+        };
+    }
     if (o.type === "asset" && o.asset === "building" && ["w", "dp", "h"].includes(name)) {
         const g = buildingGeometry(o);
         if (name === "w")
@@ -1530,12 +1577,15 @@ $("obOff").onclick = () => {
 
    アセット形状は asset.js、棚・パネル・間取り専用操作は
    asset-controller.js / studio-ui.js が担当する。 */
-// ===== ブレンダー風ギズモ：矢印(XYZ軸の移動)・白い四角(面の押し引き)・点線の輪(回転) =====
+// ===== 1. ブレンダー風ギズモ：矢印(XYZ軸の移動)・白い四角(面の押し引き)・点線の輪(回転) =====
 // 3Dビューでは透視／魚眼、間取りでは正投影へ自動的に振り分ける。
 const scr3 = (p) => (orthView ? scr(p) : scr(V.nrm(p)));
 const scrW = (p) => scr3(V.add(p, CO())); // ワールド座標の点の画面位置
 const cloc = (o) => V.add(camPos(), o.off || [0, 0, 0], 1, -1); // 図形の座標系で見たカメラ位置
 const wrap180 = (a) => ((((a + 180) % 360) + 360) % 360) - 180;
+// カメラの向きで裏へ回り込んだハンドルは、輪郭の外側へ逃がして描く。
+// 逃がす距離は画面のピクセル基準なので、ズーム倍率Zで割って座標系に合わせる。
+const hiddenHandleGap = () => Math.max(30 / Z, 42 / Z);
 const segd = (p, a, b) => {
     const dx = b.x - a.x,
         dy = b.y - a.y,
@@ -2128,8 +2178,8 @@ function stackedBevelHandle(o, f, index) {
             ? raw
             : hidden
               ? {
-                    x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
-                    y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
+                    x: raw.x + fallback.x * hiddenHandleGap(),
+                    y: raw.y + fallback.y * hiddenHandleGap(),
                     ok: true,
                 }
               : raw,
@@ -2328,6 +2378,187 @@ function stackedBuildingGizmo(o) {
         opening = stackedOpeningGizmo(o);
     return { o, C3: p3(x, y, z + h * 0.5), center, frame, handles, bevelHandle, opening, floorIndex: index };
 }
+// 凹窓階層建物の窓寸法用ギズモ。正面窓の幅・高さ・凹み奥行きを
+// 1つのハンドル群へまとめ、変更値は全階へ反復して適用する。
+function recessedStackedGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "recessedStackedBuilding") return null;
+    const q = recessedStackedBuildingParams(o),
+        paths = recessedStackedBuildingWindowPaths(q),
+        // 開口は各階の下端ではなく、階と階の接合部の中央に置く。
+        junctions = recessedStackedBuildingJunctionWindows(o, q),
+        firstJunction = junctions[0] || { bottom: q.windowH * 0.5, top: q.windowH * 1.5 },
+        z0 = firstJunction.bottom,
+        z1 = firstJunction.top,
+        frontY = -q.d * 0.5,
+        frontStart = paths.outer[0],
+        frontEnd = paths.outer[1],
+        innerStart = paths.inner[0],
+        innerEnd = paths.inner[1],
+        windowCenterX = (frontStart[0] + frontEnd[0]) * 0.5,
+        midZ = (z0 + z1) * 0.5,
+        pr = (x, y, z) => scrW(customPt(o, x, y, z)),
+        project = (kind, anchor3, screen3, probe3, start, min, max, label, color, fallback) => {
+            const anchor = pr(...anchor3),
+                s0 = pr(...screen3),
+                probe = pr(...probe3),
+                dx = (probe?.x || 0) - (s0?.x || 0),
+                dy = (probe?.y || 0) - (s0?.y || 0),
+                px = Math.hypot(dx, dy),
+                hidden = !s0?.ok || !probe?.ok || px <= 0.5 / Z,
+                fl = Math.hypot(fallback.x, fallback.y) || 1,
+                dir = hidden ? { x: fallback.x / fl, y: fallback.y / fl } : { x: dx / px, y: dy / px },
+                gap = Math.max(34 / Z, 48 / Z),
+                s = hidden && anchor?.ok ? { x: anchor.x + dir.x * gap, y: anchor.y + dir.y * gap, ok: true } : s0;
+            return {
+                kind,
+                s,
+                anchor,
+                dir,
+                scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : px,
+                start,
+                min,
+                max,
+                label,
+                color,
+            };
+        },
+        // 窓帯は建物全体に追従する。編集するのは両端の壁幅だけ。
+        marginLeft = project(
+            "recessed-window-margin-left",
+            [frontStart[0], frontY, midZ],
+            [frontStart[0], frontY, midZ],
+            [frontStart[0] - 0.1, frontY, midZ],
+            q.marginLeft,
+            0,
+            Math.max(0, q.w - q.cornerBevel - 0.2),
+            "端の壁幅（手前）",
+            "#ffd34d",
+            { x: -1, y: 0 },
+        ),
+        marginEnd = project(
+            "recessed-window-margin-end",
+            [q.w * 0.5, paths.sideEnd, midZ],
+            [q.w * 0.5, paths.sideEnd, midZ],
+            [q.w * 0.5, paths.sideEnd + 0.1, midZ],
+            q.marginEnd,
+            0,
+            Math.max(0, q.d - q.cornerBevel - 0.2),
+            "端の壁幅（奥）",
+            "#ffd34d",
+            { x: 1, y: 0 },
+        ),
+        floorHeight = project(
+            "recessed-floor-height",
+            [-q.w * 0.5 + 0.45, frontY, q.firstFloorHeight],
+            [-q.w * 0.5 + 0.45, frontY, q.firstFloorHeight],
+            [-q.w * 0.5 + 0.45, frontY, q.firstFloorHeight + 0.1],
+            q.floorHeight,
+            0.5,
+            30,
+            "階高",
+            "#ffd8a8",
+            { x: 0, y: -1 },
+        ),
+        firstFloorH = project(
+            "recessed-first-floor-height",
+            [-q.w * 0.5 + 0.12, frontY, 0.05],
+            [-q.w * 0.5 + 0.12, frontY, 0.05],
+            [-q.w * 0.5 + 0.12, frontY, 0.15],
+            q.firstFloorHeight,
+            0.5,
+            30,
+            "1階の高さ",
+            "#ffb3ff",
+            { x: 0, y: -1 },
+        ),
+        floorGap = project(
+            "recessed-floor-gap",
+            [frontEnd[0] - 0.25, frontY, q.firstFloorHeight],
+            [frontEnd[0] - 0.25, frontY, q.firstFloorHeight],
+            [frontEnd[0] - 0.25, frontY, q.firstFloorHeight + 0.1],
+            q.floorGap,
+            0.05,
+            5,
+            "階接合部の高さ（＝窓高）",
+            "#8ef7ff",
+            { x: 0, y: -1 },
+        ),
+        depth = project(
+            "recessed-window-depth",
+            [(innerStart[0] + innerEnd[0]) * 0.5, innerStart[1], midZ],
+            [(innerStart[0] + innerEnd[0]) * 0.5, innerStart[1], midZ],
+            [(innerStart[0] + innerEnd[0]) * 0.5, innerStart[1] + 0.1, midZ],
+            q.windowDepth,
+            0.025,
+            Math.max(0.025, Math.min(q.w - q.cornerBevel, q.d) * 0.45),
+            "凹み奥行",
+            "#ad9cff",
+            { x: 1, y: -0.5 },
+        ),
+        bevelCenter = [q.w * 0.5 - q.cornerBevel, -q.d * 0.5 + q.cornerBevel],
+        bevelDir = { x: Math.SQRT1_2, y: -Math.SQRT1_2 },
+        bevelPoint = [
+            bevelCenter[0] + q.cornerBevel * bevelDir.x,
+            bevelCenter[1] + q.cornerBevel * bevelDir.y,
+            midZ,
+        ],
+        bevelProbe = [
+            bevelCenter[0] + (q.cornerBevel + 0.1) * bevelDir.x,
+            bevelCenter[1] + (q.cornerBevel + 0.1) * bevelDir.y,
+            midZ,
+        ],
+        bevel = project(
+            "recessed-corner-bevel",
+            bevelPoint,
+            bevelPoint,
+            bevelProbe,
+            q.cornerBevel,
+            0,
+            recessedMaxInset(q.w, q.d),
+            "ベベルオフセット",
+            "#ff6b7c",
+            { x: -1, y: -1 },
+        ),
+        count = project(
+            "recessed-window-count",
+            [windowCenterX, frontY, z0 - 0.12],
+            [windowCenterX, frontY, z0 - 0.12],
+            [windowCenterX + 0.1, frontY, z0 - 0.12],
+            q.windowCount,
+            1,
+            12,
+            "窓枚数",
+            "#56d8ff",
+            { x: 1, y: 1 },
+        );
+    count.scale = 20 / Z;
+    // projectの試点は0.1m先。端の壁幅ハンドルの移動量をmへ換算する。
+    [
+        [marginLeft, frontStart[0] - 0.1, frontY],
+        [marginEnd, q.w * 0.5, paths.sideEnd + 0.1],
+    ].forEach(([handle, px, py]) => {
+        const probe = pr(px, py, midZ),
+            delta = probe?.ok && handle.anchor?.ok ? Math.hypot(probe.x - handle.anchor.x, probe.y - handle.anchor.y) : 0;
+        if (delta > 0.5 / Z) handle.scale = delta / 0.1;
+    });
+    return {
+        o,
+        C3: customPt(o, windowCenterX, frontY, midZ),
+        handles: { floorHeight, firstFloorH, floorGap, marginLeft, marginEnd, depth, bevel, count },
+        frame: [
+            pr(frontStart[0], frontY, z0),
+            pr(frontEnd[0], frontY, z0),
+            pr(frontEnd[0], frontY, z1),
+            pr(frontStart[0], frontY, z1),
+        ],
+        backFrame: [
+            pr(innerStart[0], innerStart[1], z0),
+            pr(innerEnd[0], innerEnd[1], z0),
+            pr(innerEnd[0], innerEnd[1], z1),
+            pr(innerStart[0], innerStart[1], z1),
+        ],
+    };
+}
 function pathPipeGizmo(o) {
     if (
         !o ||
@@ -2463,8 +2694,8 @@ function beveledBoxGizmo(o) {
             ? raw
             : hidden
               ? {
-                    x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
-                    y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
+                    x: raw.x + fallback.x * hiddenHandleGap(),
+                    y: raw.y + fallback.y * hiddenHandleGap(),
                     ok: true,
                 }
               : {
@@ -2653,13 +2884,87 @@ function cornerCutGizmo(o) {
         },
     };
 }
+// 壁付け看板（単体）のギズモ。
+// 金具の長さとベベル幅を、3D・正面・横・上のどこからでも同じ手順で編集できる。
+// 幅・奥行き（板厚）・高さは標準の面ハンドルへ任せる。
+function wallSignGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "wallSign" || typeof wallSignParams !== "function") return null;
+    const params = wallSignParams(o),
+        half = params.thickness * 0.5,
+        pr = (x, y, z) => scrW(pt(o, x, y, z)),
+        project = (kind, anchor3, sample3, probe3, start, min, max, label, fallback, color) => {
+            const anchor = pr(...anchor3),
+                from = pr(...sample3),
+                to = pr(...probe3),
+                dx = (to?.x || 0) - (from?.x || 0),
+                dy = (to?.y || 0) - (from?.y || 0),
+                length = Math.hypot(dx, dy),
+                hidden = !from?.ok || !to?.ok || length <= 0.5 / Z,
+                fl = Math.hypot(fallback.x, fallback.y) || 1,
+                dir = hidden ? { x: fallback.x / fl, y: fallback.y / fl } : { x: dx / length, y: dy / length },
+                gap = Math.max(40 / Z, 50 / Z);
+            return {
+                kind,
+                s: hidden && from?.ok ? { x: from.x + dir.x * gap, y: from.y + dir.y * gap, ok: true } : from,
+                anchor,
+                dir,
+                scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : length,
+                start,
+                min,
+                max,
+                label,
+                color,
+            };
+        },
+        // 金具は板の左側面（-x）から横へ伸びる。ハンドルは先端（外側）へ置く。
+        bracketInner = [-params.width * 0.5, 0, 0],
+        bracketOuter = [-params.width * 0.5 - params.bracketLength, 0, 0],
+        bracket = project(
+            "wall-sign-bracket-length",
+            bracketInner,
+            bracketOuter,
+            [bracketOuter[0] - 0.1, 0, bracketOuter[2]],
+            params.bracketLength,
+            0.05,
+            5,
+            "金具の長さ",
+            { x: -1, y: 0 },
+            "#ffd34d",
+        ),
+        // ベベルは板の表裏の輪郭の角へ付くので、右前上の角にハンドルを置く。
+        bevelCorner = [params.width * 0.5, -half, params.height * 0.5],
+        bevelInset = params.beveled ? params.bevelOffset : 0,
+        bevel = project(
+            "wall-sign-bevel",
+            bevelCorner,
+            [bevelCorner[0] - bevelInset, bevelCorner[1], bevelCorner[2] - bevelInset],
+            [bevelCorner[0] - bevelInset - 0.1, bevelCorner[1], bevelCorner[2] - bevelInset - 0.1],
+            params.bevelOffset,
+            0,
+            params.bevelMax,
+            "ベベル幅",
+            { x: -1, y: 1 },
+            "#ff6b7c",
+        );
+    return {
+        o,
+        C3: L2W(o, 0, half, params.height * 0.5),
+        handles: { bracket, bevel },
+        frame: wallSignFacePoints(params).map(([x, z]) => pr(x, -half, z)),
+        backFrame: wallSignFacePoints(params).map(([x, z]) => pr(x, half, z)),
+    };
+}
 function specialGizmo(o) {
     return o && o.type === "asset" && o.asset === "wallSideSign" && o.attachment?.wallSideSign
         ? wallSideSignSpecialGizmo(o)
         : o && o.type === "asset" && o.asset === "cornerCutBox"
           ? cornerCutGizmo(o)
+          : o && o.type === "asset" && o.asset === "wallSign"
+          ? wallSignGizmo(o)
           : o && o.type === "asset" && o.asset === "beveledBox"
-            ? beveledBoxGizmo(o)
+          ? beveledBoxGizmo(o)
+          : o && o.type === "asset" && o.asset === "recessedStackedBuilding"
+            ? recessedStackedGizmo(o)
             : o && o.type === "asset" && o.asset === "pathPipe"
               ? pathPipeGizmo(o)
               : isStackedBuildingAsset(o)
@@ -2754,6 +3059,27 @@ function drawSpecialGizmo(c, o) {
                 );
             });
         }
+    } else if (sg.o.asset === "wallSign") {
+        // 金具の長さとベベル幅の2本を、同じ見た目（破線＋菱形）で描く。
+        Object.values(sg.handles || {}).forEach((handle) => {
+            if (!handle?.s?.ok || !handle?.anchor?.ok) return;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.strokeStyle = handle.color;
+            c.lineWidth = 1.5 / Z;
+            c.beginPath();
+            c.moveTo(handle.anchor.x, handle.anchor.y);
+            c.lineTo(handle.s.x, handle.s.y);
+            c.stroke();
+            c.setLineDash([]);
+            sq(handle.s, handle.color, true);
+            c.fillStyle = "#fff0b0";
+            c.font = `bold ${12 / Z}px system-ui`;
+            c.fillText(
+                `${handle.label} ${Number(handle.start || 0).toFixed(2)}m`,
+                handle.s.x + 8 / Z,
+                handle.s.y - 7 / Z,
+            );
+        });
     } else if (sg.o.asset === "beveledBox") {
         const h = sg.handle;
         if (h?.s?.ok && h?.anchor?.ok) {
@@ -2770,6 +3096,34 @@ function drawSpecialGizmo(c, o) {
             c.font = `bold ${12 / Z}px system-ui`;
             c.fillText(`ベベル ${Number(h.start || 0).toFixed(2)}`, h.s.x + 9 / Z, h.s.y - 8 / Z);
         }
+    } else if (sg.o.asset === "recessedStackedBuilding") {
+        const drawFrame = (frame, color) => {
+            if (!frame?.every((q) => q && q.ok)) return;
+            c.strokeStyle = color;
+            c.lineWidth = 1.25 / Z;
+            c.beginPath();
+            frame.forEach((q, i) => (i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)));
+            c.closePath();
+            c.stroke();
+        };
+        drawFrame(sg.frame, "#8aaeb5");
+        drawFrame(sg.backFrame, "#42616b");
+        Object.values(sg.handles || {}).forEach((handle) => {
+            if (!handle?.s?.ok || !handle?.anchor?.ok) return;
+            c.setLineDash([4 / Z, 3 / Z]);
+            c.strokeStyle = handle.color;
+            c.lineWidth = 1.4 / Z;
+            c.beginPath();
+            c.moveTo(handle.anchor.x, handle.anchor.y);
+            c.lineTo(handle.s.x, handle.s.y);
+            c.stroke();
+            c.setLineDash([]);
+            sq(handle.s, handle.color, true);
+            c.fillStyle = "#fff0b0";
+            c.font = `bold ${11 / Z}px system-ui`;
+            const valueLabel = handle.kind === "recessed-window-count" ? `${Math.round(handle.start)}枚` : `${Number(handle.start || 0).toFixed(2)}m`;
+            c.fillText(`${handle.label} ${valueLabel}`, handle.s.x + 8 / Z, handle.s.y - 7 / Z);
+        });
     } else if (sg.o.asset === "pathPipe") {
         const h = sg.radiusHandle;
         c.setLineDash([5 / Z, 4 / Z]);
@@ -3132,8 +3486,8 @@ function wallSideSignBevelHandle(o) {
             ? raw
             : hidden
               ? {
-                    x: raw.x + fallback.x * Math.max(30 / Z, 42 / Z),
-                    y: raw.y + fallback.y * Math.max(30 / Z, 42 / Z),
+                    x: raw.x + fallback.x * hiddenHandleGap(),
+                    y: raw.y + fallback.y * hiddenHandleGap(),
                     ok: true,
                 }
               : { x: raw.x - visibleDir.x * displayGap, y: raw.y - visibleDir.y * displayGap, ok: true };
@@ -3292,6 +3646,7 @@ function gizmo() {
                     o.asset === "box" ||
                     o.asset === "beveledBox" ||
                     o.asset === "cornerCutBox" ||
+                    o.asset === "recessedStackedBuilding" ||
                     isStackedBuildingAsset(o))),
         [z0, z1] = outerZRange(o),
         zc = solid ? (z0 + z1) / 2 : 0;
@@ -3532,6 +3887,34 @@ function hitGizmo(p) {
             const h = special.handle;
             if (h?.s?.ok && Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
                 return { t: "cornerCut-offset", sign: h, g: { o: active, C3: special.C3 } };
+        }
+        if (active.asset === "recessedStackedBuilding") {
+            const hits = Object.entries(special.handles || {})
+                .filter(([, handle]) => handle?.s?.ok)
+                .map(([, handle]) => ({ handle, d: Math.hypot(handle.s.x - p.x, handle.s.y - p.y) }))
+                .filter((q) => q.d < R)
+                .sort((a, b) => a.d - b.d);
+            if (hits.length) {
+                const hit = hits[0].handle;
+                return { t: hit.kind, sign: hit, g: { o: active, C3: special.C3 } };
+            }
+            if (special.frame?.every((q) => q?.ok) && insidePoly2D(p, special.frame))
+                return {
+                    t: "recessed-window-depth",
+                    sign: special.handles.depth,
+                    g: { o: active, C3: special.C3 },
+                };
+        }
+        if (active.asset === "wallSign") {
+            const hits = Object.entries(special.handles || {})
+                .filter(([, handle]) => handle?.s?.ok)
+                .map(([key, handle]) => ({ key, handle, d: Math.hypot(handle.s.x - p.x, handle.s.y - p.y) }))
+                .filter((q) => q.d < R)
+                .sort((a, b) => a.d - b.d);
+            if (hits.length) {
+                const hit = hits[0].handle;
+                return { t: hit.kind, sign: hit, g: { o: active, C3: special.C3 } };
+            }
         }
         if (active.asset === "beveledBox") {
             const h = special.handle;
@@ -3998,6 +4381,13 @@ function beginGizmo(h, p) {
         h.t === "beveled-offset" ||
         h.t === "cornerCut-offset" ||
         h.t.startsWith("cornerCut-opening-") ||
+        h.t.startsWith("recessed-window-") ||
+        h.t === "recessed-corner-bevel" ||
+        h.t === "recessed-first-floor-height" ||
+        h.t === "recessed-floor-height" ||
+        h.t === "recessed-floor-gap" ||
+        h.t === "wall-sign-bracket-length" ||
+        h.t === "wall-sign-bevel" ||
         h.t === "wallSideSign-beveled-offset" ||
         h.t === "wallSideSign-bracket-length" ||
         h.t === "cone-height" ||
@@ -4069,6 +4459,19 @@ function dragEdit(p, freeRotation = false) {
         if (ed.t.includes("width")) patch = { cornerCutOpeningW: value };
         else if (ed.t.includes("height")) patch = { cornerCutOpeningH: value };
         else patch = { cornerCutOpeningDepth: value };
+    } else if (
+        ed.t.startsWith("recessed-window-") ||
+        ed.t === "recessed-corner-bevel" ||
+        ed.t === "recessed-first-floor-height" ||
+        ed.t === "recessed-floor-height" ||
+        ed.t === "recessed-floor-gap"
+    ) {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1),
+            value = clamp(h.start + amount, h.min, h.max);
+        patch = recessedHandlePatch(o, ed.t, value);
     } else if (ed.t.startsWith("path-point-")) {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -4085,6 +4488,12 @@ function dragEdit(p, freeRotation = false) {
             deltaY = p.y - ed.p0.y,
             radius = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
         patch = { pipeRadius: radius };
+    } else if (ed.t === "wall-sign-bracket-length" || ed.t === "wall-sign-bevel") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = ed.t === "wall-sign-bevel" ? { wallSignBevelOffset: value } : { wallSignBracketLength: value };
     } else if (ed.t === "beveled-offset") {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -4366,7 +4775,7 @@ function dragEdit(p, freeRotation = false) {
     render();
 }
 
-// ===== 書き出し範囲（ブレンダーのレンダー範囲のような枠） =====
+// ===== 2. 書き出し範囲（ブレンダーのレンダー範囲のような枠） =====
 function crect() {
     return {
         x: Math.min(CR.x0, CR.x1),
@@ -4418,7 +4827,7 @@ $("crF").onclick = () => {
     render();
 };
 
-// ===== ツール切り替え（消しゴム・図形・範囲）と設定パネルの開閉 =====
+// ===== 3. ツール切り替え（消しゴム・図形・範囲）と設定パネルの開閉 =====
 function syncInteractionButtons() {
     // 視点／鉛筆と、編集／消しゴム／図形／範囲を同じ「ON」表示にしない。
     // 視点中はツールボタンをすべてOFF、描画中は選択した1ツールだけをONにする。
@@ -4469,7 +4878,7 @@ $("tg").onclick = () => {
 edge.onclick = $("tg").onclick;
 addEventListener("resize", () => setSide($("side").classList.contains("hide")));
 
-// ===== 書き出し用の隠れ線除去 =====
+// ===== 4. 書き出し用の隠れ線除去 =====
 // オブジェクトの面を簡易Zバッファへ rasterize し、ビューから遮られる線分だけを切る。
 // 通常表示は従来どおり全線を描き、PNGの「背面線除去」項目だけでこの処理を使う。
 function addExportBoxFaces(out, o, w, d, z0, z1) {
@@ -4497,6 +4906,34 @@ function addExportBoxFaces(out, o, w, d, z0, z1) {
         const a = q.map((i) => L2W(o, ...v[i]));
         out.push([a[0], a[1], a[2]], [a[0], a[2], a[3]]);
     });
+}
+// 面メッシュはオブジェクトを編集しない限り変わらない。カメラを動かすたびに
+// 作り直すのは重いので、オブジェクトごとに結果を保持して使い回す。
+// キーはオブジェクトの現在値（数値・文字列・配列）をそのまま文字列にしたもの。
+// 値が1つでも変われば作り直すので、編集結果が古いまま残ることはない。
+const surfaceTriCache = new WeakMap();
+function surfaceCacheKey(o) {
+    const seen = new Set();
+    return JSON.stringify(o, (key, value) => {
+        if (typeof value === "function") return undefined;
+        if (value && typeof value === "object") {
+            if (seen.has(value)) return undefined;
+            seen.add(value);
+        }
+        return value;
+    });
+}
+function surfaceTriangles(o) {
+    if (!o || typeof o !== "object") return exportSurfaceTriangles(o);
+    // 親へ接着しているパーツは、親の移動・回転が o 側の基準（wallSideBasis）へ
+    // 反映されてから値を見る。反映前のキーで照合すると古い面が残る。
+    if (o.attachment && typeof syncAttachedPart === "function") syncAttachedPart(o);
+    const key = surfaceCacheKey(o),
+        hit = surfaceTriCache.get(o);
+    if (hit && hit.key === key) return hit.tris;
+    const tris = exportSurfaceTriangles(o);
+    surfaceTriCache.set(o, { key, tris });
+    return tris;
 }
 function exportSurfaceTriangles(o) {
     const out = [];
@@ -4732,6 +5169,164 @@ function exportSurfaceTriangles(o) {
         }
     };
     const kind = o.asset || o.type;
+    if (kind === "recessedStackedBuilding" && typeof recessedStackedBuildingParams === "function") {
+        const q = recessedStackedBuildingParams(o),
+            ctri = (a, b, c) => out.push([customPt(o, ...a), customPt(o, ...b), customPt(o, ...c)]),
+            cquad = (a, b, c, d) => {
+                ctri(a, b, c);
+                ctri(a, c, d);
+            },
+            // 窓の切り欠きで凹んだ面も、輪郭の外へはみ出さないよう
+            // 耳切り法で三角形分割する。
+            cface = (points, z) => {
+                polygonEarClip(points).forEach(([a, b, c]) => {
+                    ctri([a[0], a[1], z], [b[0], b[1], z], [c[0], c[1], z]);
+                });
+            },
+            prism = (points, z0, z1) => {
+                cface(points, z0);
+                cface([...points].reverse(), z1);
+                for (let i = 0; i < points.length; i++) {
+                    const j = (i + 1) % points.length;
+                    cquad(
+                        [points[i][0], points[i][1], z0],
+                        [points[j][0], points[j][1], z0],
+                        [points[j][0], points[j][1], z1],
+                        [points[i][0], points[i][1], z1],
+                    );
+                }
+            },
+            x = q.w * 0.5,
+            y = q.d * 0.5,
+            frontY = -y,
+            footprint = recessedStackedBuildingFootprint(q),
+            // 壁ブロックの範囲(z0..z1)へ窓帯(band)を切り欠く。
+            // 接合部をまたぐ窓はブロックの上端・下端で途切れず続く。
+            drawWindowBand = (z0, z1, band) => {
+                const paths = recessedStackedBuildingWindowPaths(q),
+                    outer = q.sideWindows ? paths.outer : paths.outer.slice(0, 2),
+                    inner = q.sideWindows ? paths.inner : paths.inner.slice(0, 2),
+                    fillWall = () => {
+                        // 窓帯を持たない階（最上階など）は、窓帯の外周に沿う面を
+                        // 床から天井まで塞ぐ。塞がないと背面線の除去が効かない。
+                        for (let i = 0; i < outer.length - 1; i++) {
+                            const a = outer[i],
+                                b = outer[i + 1];
+                            quad([a[0], a[1], z0], [b[0], b[1], z0], [b[0], b[1], z1], [a[0], a[1], z1]);
+                        }
+                    },
+                    za = band ? Math.max(z0, band.bottom) : z0,
+                    zb = band ? Math.min(z1, band.top) : z0;
+                if (!band || zb - za <= 0.0005) {
+                    fillWall();
+                    return { outer, inner };
+                }
+                // 凹みの下端・上端・奥壁を、正面→ベベル→側面の1本の帯として作る。
+                for (let i = 0; i < outer.length - 1; i++) {
+                    const a = outer[i],
+                        b = outer[i + 1],
+                        ia = inner[i],
+                        ib = inner[i + 1];
+                    if (za > z0 + 0.0005)
+                        cquad([a[0], a[1], z0], [b[0], b[1], z0], [b[0], b[1], za], [a[0], a[1], za]);
+                    if (zb < z1 - 0.0005)
+                        cquad([a[0], a[1], zb], [b[0], b[1], zb], [b[0], b[1], z1], [a[0], a[1], z1]);
+                    cquad([ia[0], ia[1], za], [ib[0], ib[1], za], [ib[0], ib[1], zb], [ia[0], ia[1], zb]);
+                    cquad([a[0], a[1], za], [ia[0], ia[1], za], [ib[0], ib[1], za], [b[0], b[1], za]);
+                    cquad([a[0], a[1], zb], [b[0], b[1], zb], [ib[0], ib[1], zb], [ia[0], ia[1], zb]);
+                }
+                const start = outer[0],
+                    startInner = inner[0],
+                    end = outer[outer.length - 1],
+                    endInner = inner[inner.length - 1];
+                cquad(
+                    [start[0], start[1], za],
+                    [startInner[0], startInner[1], za],
+                    [startInner[0], startInner[1], zb],
+                    [start[0], start[1], zb],
+                );
+                cquad(
+                    [end[0], end[1], za],
+                    [end[0], end[1], zb],
+                    [endInner[0], endInner[1], zb],
+                    [endInner[0], endInner[1], za],
+                );
+                return { outer, inner };
+            },
+            drawBeam = (z1) => {
+                if (q.beamHeight <= 0 || q.beamProjection <= 0) return;
+                prism(recessedStackedBuildingBeamFootprint(q), z1 - q.beamHeight, z1);
+            },
+            // 階の壁と、階の間を埋める壁の両方を同じ処理で作る。
+            // capsをfalseにすると接合部の壁だけを描く。
+            drawFloor = (z0, floorHeight, band, caps = true) => {
+                const z1 = z0 + floorHeight,
+                    paths = recessedStackedBuildingWindowPaths(q),
+                    outer = q.sideWindows ? paths.outer : paths.outer.slice(0, 2),
+                    frontStart = outer[0],
+                    sideEnd = outer[outer.length - 1],
+                    // 窓帯が床面をまたぐ階では、スラブの輪郭を切り欠く。
+                    lowerNotch = !!band && band.bottom < z0 + 0.0001 && band.top > z0 + 0.0001,
+                    upperNotch = !!band && band.bottom < z1 - 0.0001 && band.top > z1 - 0.0001;
+                // 底面・上面をベベル付き外周で閉じる。
+                if (caps) {
+                    cface(recessedStackedBuildingCapPath(q, lowerNotch), z0);
+                    cface([...recessedStackedBuildingCapPath(q, upperNotch)].reverse(), z1);
+                }
+                // 開口帯の左側、帯の後ろ側、背面、左面。
+                cquad([-x, frontY, z0], [frontStart[0], frontStart[1], z0], [frontStart[0], frontStart[1], z1], [-x, frontY, z1]);
+                if (q.sideWindows) {
+                    cquad([sideEnd[0], sideEnd[1], z0], [x, y, z0], [x, y, z1], [sideEnd[0], sideEnd[1], z1]);
+                } else {
+                    const frontRight = x - q.cornerBevel,
+                        sideStart = -y + q.cornerBevel;
+                    cquad([frontRight, -y, z0], [x, sideStart, z0], [x, sideStart, z1], [frontRight, -y, z1]);
+                    cquad([x, sideStart, z0], [x, y, z0], [x, y, z1], [x, sideStart, z1]);
+                }
+                cquad([x, y, z0], [-x, y, z0], [-x, y, z1], [x, y, z1]);
+                cquad([-x, y, z0], [-x, -y, z0], [-x, -y, z1], [-x, y, z1]);
+                drawWindowBand(z0, z1, band);
+                // 屋根になる最上階には梁／庇を上端へ作る。
+                if (caps) drawBeam(band ? band.top : z1);
+            };
+        const junctions = recessedStackedBuildingJunctionWindows(o, q);
+        recessedStackedBuildingFloors(o, q).forEach((floor) => {
+            // 開口は各階の下端ではなく、階と階の接合部中央に作る。
+            drawFloor(floor.z, floor.h, junctions[floor.index]);
+            // 階同士の間も空洞ではなく壁でつなぎ、接合部の窓はそこを貫通させる。
+            if (floor.index < q.floorCount - 1 && q.floorGap > 0)
+                drawFloor(floor.z + floor.h, q.floorGap, junctions[floor.index], false);
+        });
+        return out;
+    }
+    if (kind === "wallSign" && typeof wallSignParams === "function") {
+        const params = wallSignParams(o),
+            face = wallSignFacePoints(params),
+            half = params.thickness * 0.5;
+        // 板の表裏は凹みの無い凸多角形なので耳切りで分割し、
+        // 側面は輪郭の辺を板厚方向へつないだ4角形にする。
+        polygonEarClip(face).forEach(([a, b, c]) => {
+            tri([a[0], -half, a[1]], [b[0], -half, b[1]], [c[0], -half, c[1]]);
+            tri([a[0], half, a[1]], [c[0], half, c[1]], [b[0], half, b[1]]);
+        });
+        for (let i = 0; i < face.length; i++) {
+            const a = face[i],
+                b = face[(i + 1) % face.length];
+            quad([a[0], -half, a[1]], [b[0], -half, b[1]], [b[0], half, b[1]], [a[0], half, a[1]]);
+        }
+        // 取付金具は板の左側面から横へ伸びる単純な直方体。
+        wallSignBrackets(params).forEach((bracket) => {
+            const z0 = bracket.z - bracket.h * 0.5,
+                z1 = bracket.z + bracket.h * 0.5;
+            quad([bracket.x0, bracket.y0, z0], [bracket.x1, bracket.y0, z0], [bracket.x1, bracket.y0, z1], [bracket.x0, bracket.y0, z1]);
+            quad([bracket.x0, bracket.y1, z1], [bracket.x1, bracket.y1, z1], [bracket.x1, bracket.y1, z0], [bracket.x0, bracket.y1, z0]);
+            quad([bracket.x0, bracket.y0, z1], [bracket.x1, bracket.y0, z1], [bracket.x1, bracket.y1, z1], [bracket.x0, bracket.y1, z1]);
+            quad([bracket.x0, bracket.y1, z0], [bracket.x1, bracket.y1, z0], [bracket.x1, bracket.y0, z0], [bracket.x0, bracket.y0, z0]);
+            quad([bracket.x0, bracket.y0, z0], [bracket.x0, bracket.y1, z0], [bracket.x0, bracket.y1, z1], [bracket.x0, bracket.y0, z1]);
+            quad([bracket.x1, bracket.y0, z1], [bracket.x1, bracket.y1, z1], [bracket.x1, bracket.y1, z0], [bracket.x1, bracket.y0, z0]);
+        });
+        return out;
+    }
     if (kind === "cornerCutBox" && typeof cornerCutFootprint === "function") {
         const opening = typeof cornerCutOpeningParams === "function" ? cornerCutOpeningParams(o) : null,
             z0 = 0,
@@ -5079,7 +5674,7 @@ function buildExportDepth(cw, ch, tf) {
     S.forEach((s) => {
         if (s.ob && objectVisible(s.ob) && !seen.has(s.ob.id)) {
             seen.add(s.ob.id);
-            tris.push(...exportSurfaceTriangles(s.ob));
+            tris.push(...surfaceTriangles(s.ob));
         }
     });
     const putTri = (tr) => {
@@ -5152,7 +5747,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     c.stroke();
 }
 
-// ===== 線画レイヤー：線だけ別キャンバスに描き、アンチエイリアスを消して二値化する =====
+// ===== 5. 線画レイヤー：線だけ別キャンバスに描き、アンチエイリアスを消して二値化する =====
 let LC = null;
 // 書き出し用の線だけを別キャンバスへ描く。
 // hidden=trueでは面の深度情報を使って、背面に隠れる線を除去する。
@@ -5187,7 +5782,7 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     return LC;
 }
 
-// ===== 地面のグリッド：床(y=-1)の格子。カメラの高さ・位置・向きを変えるとちゃんと見え方が変わる =====
+// ===== 6. 地面のグリッド：床(y=-1)の格子。カメラの高さ・位置・向きを変えるとちゃんと見え方が変わる =====
 function floorGrid(c) {
     const n = Math.round(P.gn),
         cell = P.gs,
@@ -5270,7 +5865,7 @@ function orthGuides(c) {
     c.restore();
 }
 
-// ===== 補助線（キャンバスに入る角度範囲にだけ本数を割り振る＝密に出来る） =====
+// ===== 7. 補助線（キャンバスに入る角度範囲にだけ本数を割り振る＝密に出来る） =====
 function guides(c) {
     const col = ["#e8743d", "#2fb5a5", "#4a7be8"],
         diag = Math.hypot(W, H),
@@ -5340,7 +5935,7 @@ function guides(c) {
     c.globalAlpha = 1;
 }
 
-// ===== 描画 =====
+// ===== 8. 描画 =====
 function stroke(c, s) {
     c.strokeStyle = s.c;
     c.lineWidth = effectiveLineWidth(s);
@@ -5367,7 +5962,7 @@ function drawObjectSurfaces(c) {
         const o = s && s.ob;
         if (!o || !objectVisible(o) || seen.has(o.id)) return;
         seen.add(o.id);
-        exportSurfaceTriangles(o).forEach((tr) => {
+        surfaceTriangles(o).forEach((tr) => {
             const p = tr.map((v) => exportPoint(v, [1, 0, 0, 1, 0, 0]));
             if (p.some((q) => !q || !Number.isFinite(q.x) || !Number.isFinite(q.y) || !Number.isFinite(q.depth)))
                 return;
@@ -5504,7 +6099,7 @@ function render() {
         `画角 ${((2 * Math.atan(18 / P.lens) * 180) / Math.PI).toFixed(1)}°<br>VP1 ${q(AX[0].vp)}<br>VP2 ${q(AX[1].vp)}<br>垂直 ${AX[2].vp ? "VP3 " + q(AX[2].vp) : "平行（垂直）"}<br>地平線 ${((AX.hy / H) * 100).toFixed(1)}%`;
 }
 
-// ===== マウス/タッチ操作 =====
+// ===== 9. マウス/タッチ操作 =====
 let ptr = null,
     lastPen = 0; // 操作中のポインタID／最後にペンを離した時刻（手のひら誤タッチ対策）
 const rawOf = (cx, cy) => {
@@ -5552,7 +6147,7 @@ cv.addEventListener(
     { passive: false },
 ); // ビューではレンズ、描画ではキャンバスズーム
 
-// ===== 二本指/三本指：ピンチでズーム・移動、タップで元に戻す/やり直し =====
+// ===== 10. 二本指/三本指：ピンチでズーム・移動、タップで元に戻す/やり直し =====
 function multiStart() {
     cancelBoxPending();
     boxSelect = null;
@@ -5636,7 +6231,7 @@ function multiMove(tc) {
     }
 }
 
-// ===== 消しゴム（線は向きの点列で持っているので、点を消して線を分割する） =====
+// ===== 11. 消しゴム（線は向きの点列で持っているので、点を消して線を分割する） =====
 // 点列を細かくする（部分消しの精度のため）
 function dens(a) {
     const o = [a[0]];
@@ -6300,7 +6895,7 @@ addEventListener("blur", () => {
     }
 });
 
-// ===== モード・ボタン =====
+// ===== 12. モード・ボタン =====
 function setMode(m) {
     mode = m;
     syncInteractionButtons();
@@ -6454,7 +7049,7 @@ exportToggle.onclick = (e) => {
     e.stopPropagation();
     setExportOpen(!exportMenu.classList.contains("open"));
 };
-// ===== 書き出し（透過PNG） =====
+// ===== 13. 書き出し（透過PNG） =====
 // m: 'line'=描画のみ / 'guide'=補助線のみ / 'both'=補助線＋描画（どれも背景透過・写真なし）
 // 面表示がONなら、PNGにも面と背面処理を反映する。
 function out(m, hidden = false) {
@@ -6539,13 +7134,13 @@ $("pngLH").onclick = () => save("line", "perspective-line-visible.png", true);
 $("pngGH").onclick = () => save("guide", "perspective-guide-visible.png", true);
 // 線画・補助線・合成画像を、いずれも透過PNGとしてクリップボードへコピーする。
 // 未対応ブラウザでは各ボタンに状態を表示する。
-async function copyExportToClipboard(kind, id, label) {
+async function copyExportToClipboard(kind, id, label, hidden = false) {
     const button = $(id);
     if (!button) return;
     try {
         if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined")
             throw new Error("Clipboard image API is unavailable");
-        const blob = await new Promise((resolve) => out(kind).toBlob(resolve, "image/png"));
+        const blob = await new Promise((resolve) => out(kind, hidden).toBlob(resolve, "image/png"));
         if (!blob) throw new Error("PNG blob was not created");
         await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
         button.textContent = "コピー済み";
@@ -6557,10 +7152,11 @@ async function copyExportToClipboard(kind, id, label) {
     setTimeout(() => (button.textContent = label), 1500);
 }
 $("cpyL").onclick = () => copyExportToClipboard("line", "cpyL", "線画（透過）をクリップボードにコピー");
+$("cpyLH").onclick = () => copyExportToClipboard("line", "cpyLH", "線画（透過・背面処理）をクリップボードにコピー", true);
 $("cpyG").onclick = () => copyExportToClipboard("guide", "cpyG", "補助線（透過）をクリップボードにコピー");
 $("cpyB").onclick = () => copyExportToClipboard("both", "cpyB", "描画＋補助線（透過）をクリップボードにコピー");
 
-// ===== 参考写真 =====
+// ===== 14. 参考写真 =====
 let IMGsrc = null,
     dirty = false; // IMGsrc=保存用の写真データ(dataURL)
 function loadImg(f) {
@@ -6598,7 +7194,7 @@ cv.ondrop = (e) => {
     f && f.type.startsWith("image/") && loadImg(f);
 };
 
-// ===== グリッド種類の切り替え（1/2/3点は通常の透視、5/6点は魚眼） =====
+// ===== 15. グリッド種類の切り替え（1/2/3点は通常の透視、5/6点は魚眼） =====
 function applyType(v) {
     v = +v;
     T = v >= 5 ? "f" : "r";
@@ -6630,7 +7226,7 @@ $("gt").onchange = (e) => {
 };
 $("pn").onchange = () => setMode(mode);
 
-// ===== 状態の保存・読み込み（プロジェクト） =====
+// ===== 16. 状態の保存・読み込み（プロジェクト） =====
 const AK = "pgrid-autosave-v1";
 // 初期カメラと面表示の既定値を更新したため、旧既定値だけを一度移行する。
 // ユーザーが任意に変更したカメラ位置や面OFFは、移行後の再読み込みでは保持する。
@@ -6765,7 +7361,7 @@ addEventListener("keyup", (e) => {
 addEventListener("blur", curs);
 cv.oncontextmenu = (e) => e.preventDefault();
 
-// ===== 起動 =====
+// ===== 17. 起動 =====
 cv.width = W;
 cv.height = H;
 sync();
@@ -6854,6 +7450,8 @@ const ASSETS = {
     triPrism: { label: "三角柱", glyph: "△", w: 1.4, d: 1.8, h: 1.25, accent: "#ffb36f" },
     triPyramid: { label: "三角錐", glyph: "▲", w: 1.5, d: 1.5, h: 1.45, accent: "#ff79ba" },
     sign: { label: "看板", glyph: "▤", w: 1.0, d: 0.2, h: 2.15, accent: "#76d9ff" },
+    // 単体で置ける壁付け看板。取付金具・ベベル形状を画面と数値の両方から編集できる。
+    wallSign: { label: "壁付け看板（単体）", glyph: "▤", w: 1.6, d: 0.26, h: 1.8, accent: "#76d9ff" },
     // 棚には表示しないが、建物横壁へ接着する専用看板の描画・JSON互換用定義。
     wallSideSign: { label: "横壁看板", glyph: "▥", w: 1.5, d: 0.16, h: 1.8, accent: "#76d9ff" },
     awning: { label: "店舗テント", glyph: "▱", w: 3.8, d: 1.35, h: 0.35, accent: "#d98b68" },
@@ -6865,6 +7463,33 @@ const ASSETS = {
     buildingAwning: { label: "テント付き建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#d98b68" },
     buildingSign: { label: "看板付き開口建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#76d9ff" },
     stackedBuilding: { label: "縁付き階層建物", glyph: "▥", w: 4, d: 3, h: 8.98, accent: "#8ce6c2" },
+    recessedStackedBuilding: {
+        label: "凹窓階層建物",
+        glyph: "▤",
+        w: 5,
+        d: 3.6,
+        h: 9.11,
+        recessedFloorCount: 4,
+        recessedFloorHeight: 2.1,
+        recessedFirstFloorExtra: 0.35,
+        recessedFloorGap: 1.25,
+        recessedCornerBevel: 0.45,
+        recessedCornerBevelSegments: 4,
+        recessedWindowW: 3.7,
+        recessedWindowCount: 5,
+        recessedWindowH: 1.25,
+        recessedWindowDepth: 0.32,
+        recessedWindowBottom: 0.48,
+        recessedSillHeight: 0.48,
+        recessedBeamHeight: 0.12,
+        recessedBeamProjection: 0.1,
+        recessedSideWindowW: 2.4,
+        recessedWindowMarginLeft: 0.85,
+        recessedWindowMarginEnd: 0.75,
+        recessedJunctionOffset: 0,
+        recessedSideWindows: true,
+        accent: "#b6d9d5",
+    },
     beveledStackedBuilding: {
         label: "ベベル直方体の縁付き階層建物",
         glyph: "▥",
@@ -7145,6 +7770,68 @@ function beveledBoxFootprint(width, depth, offset, segmentCount) {
     });
     return out;
 }
+// ===== 壁付け看板（単体）=====
+// 看板は板を立てた形状で、ローカル座標は x=板の幅、y=板厚、z=高さ。
+// 取付金具は板の裏側（+y）へ張り出し、先端の取付板で壁へ当たる形にする。
+// 座標系を通常アセットと同じ向きにしているため、幅・奥行き・高さの
+// 標準ハンドルをそのまま使える。
+function wallSignParams(o) {
+    const width = Math.max(0.1, Math.abs(Number(o?.ra) || 0.8) * 2),
+        height = Math.max(0.1, Math.abs(Number(o?.h) || 1.8)),
+        thickness = clamp(Math.abs(Number(o?.rb) || 0.13) * 2, 0.02, 2),
+        bracketCount = clamp(Math.round(Number(o?.wallSignBracketCount ?? 3)), 0, 3),
+        bracketLength = clamp(Math.abs(Number(o?.wallSignBracketLength) || 0.36), 0.05, 5),
+        bracketArm = clamp(Math.min(width, height) * 0.07, 0.04, 0.16),
+        plateThickness = 0.03,
+        beveled = o?.wallSignShape === "beveled",
+        // ベベルは板の表裏の輪郭（幅×高さ）の4隅へ付ける。
+        // 輪郭を丸めた多角形を板厚方向へ押し出した形になる。
+        bevelMax = Math.max(0, Math.min(width, height) * 0.45 - 0.001),
+        bevelOffset = clamp(
+            Number.isFinite(Number(o?.wallSignBevelOffset))
+                ? Number(o.wallSignBevelOffset)
+                : Math.min(width, height) * 0.4,
+            0,
+            bevelMax,
+        ),
+        bevelSegments = beveledBoxSegments(o?.wallSignBevelSegments, null, 4);
+    return {
+        width,
+        height,
+        thickness,
+        bracketCount,
+        bracketLength,
+        bracketArm,
+        plateThickness,
+        beveled,
+        bevelOffset,
+        bevelMax,
+        bevelSegments,
+    };
+}
+// 看板の表裏の輪郭（幅×高さ）。ベベル時は4隅を丸めた多角形になる。
+// 表裏・側面・面メッシュ・外接範囲のすべてでこの点列を共有する。
+function wallSignFacePoints(params) {
+    const offset = params.beveled ? params.bevelOffset : 0;
+    return beveledBoxFootprint(params.width, params.height, offset, params.bevelSegments);
+}
+// 取付金具1本ぶんの箱を返す。金具は板の左側面（-x）から横へまっすぐ
+// 伸びる単純な直方体だけにし、板の手前・奥へは何も出さない。
+// 板の厚み方向をz軸回りに90度回した向きで、板の幅方向（-x）へ張り出す。
+function wallSignBrackets(params) {
+    const half = params.thickness * 0.5,
+        edge = -params.width * 0.5,
+        armH = clamp(params.height * 0.05, 0.06, 0.14),
+        count = params.bracketCount,
+        out = [];
+    for (let i = 0; i < count; i++) {
+        // 板の高さは中心基準なので、金具も中心から上下へ振り分ける。
+        const z = (params.height * (i + 1)) / (count + 1) - params.height * 0.5;
+        // x1が板の左側面、x0が壁側の先端。太さは板厚に収めて面からはみ出させない。
+        out.push({ x0: edge - params.bracketLength, x1: edge, y0: -half, y1: half, z, h: armH });
+    }
+    return out;
+}
 function beveledBoxParams(o) {
     const w = Math.max(0.01, Math.abs(Number(o?.ra) || 0.01) * 2),
         d = Math.max(0.01, Math.abs(Number(o?.rb) || 0.01) * 2),
@@ -7292,6 +7979,350 @@ function stackedOpeningParams(o, f = o?.floors?.[0]) {
             d * 0.5 - 0.025,
         );
     return { w, d, h, rimHeight, openingW, openingH, openingBack };
+}
+// 凹窓階層建物の共通パラメータ。各階へ同じ窓帯を反復し、
+// 正面からベベルを経て右側面へ連続する凹みとして扱う。
+// 凹窓階層建物で共通に使う上限値。ベベル・窓の凹み奥行きは
+// 同じ「短辺の45%」を上限にしており、3か所で式を書き分けない。
+function recessedMaxInset(width, depth) {
+    return Math.max(0, Math.min(Math.abs(width), Math.abs(depth)) * 0.45);
+}
+function recessedStackedBuildingParams(o) {
+    const finite = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback),
+        w = Math.max(0.5, Math.abs(finite(o?.ra, 2.5)) * 2),
+        d = Math.max(0.5, Math.abs(finite(o?.rb, 1.8)) * 2),
+        floorCount = clamp(Math.round(finite(o?.recessedFloorCount, 4)), 1, 30),
+        floorHeight = clamp(finite(o?.recessedFloorHeight, 2.1), 0.5, 30),
+        firstFloorExtra = clamp(finite(o?.recessedFirstFloorExtra, 0.35), 0, 5),
+        firstFloorHeight = clamp(floorHeight + firstFloorExtra, 0.5, 30),
+        floorGap = clamp(finite(o?.recessedFloorGap, 0.12), 0, 5),
+        insetMax = recessedMaxInset(w, d),
+        cornerBevel = clamp(finite(o?.recessedCornerBevel, 0.45), 0, insetMax),
+        cornerBevelSegments = clamp(Math.round(finite(o?.recessedCornerBevelSegments, 4)), 1, 8),
+        totalH = firstFloorHeight + Math.max(0, floorCount - 1) * (floorHeight + floorGap),
+        frontWindowMax = Math.max(0.2, w - cornerBevel - 0.3),
+        sideWindowMax = Math.max(0.2, d - cornerBevel - 0.3),
+        // 窓帯は建物全体の寸法に追従させ、編集するのは両端の壁幅だけにする。
+        // 古いデータ（窓の幅・側面窓の幅）からは端の幅を逆算して引き継ぐ。
+        marginLeft = clamp(
+            finite(o?.recessedWindowMarginLeft, w - cornerBevel - clamp(finite(o?.recessedWindowW, w * 0.74), 0.2, frontWindowMax)),
+            0,
+            Math.max(0, w - cornerBevel - 0.2),
+        ),
+        marginEnd = clamp(
+            finite(o?.recessedWindowMarginEnd, d - cornerBevel - clamp(finite(o?.recessedSideWindowW, d * 0.66), 0.2, sideWindowMax)),
+            0,
+            Math.max(0, d - cornerBevel - 0.2),
+        ),
+        windowW = clamp(w - cornerBevel - marginLeft, 0.2, frontWindowMax),
+        windowCount = clamp(Math.round(finite(o?.recessedWindowCount, 5)), 1, 12),
+        // 窓の高さは階接合部の高さと常に一致する（旧データは接合部の高さを優先）。
+        windowH = Math.max(0.05, floorGap),
+        windowDepth = clamp(finite(o?.recessedWindowDepth, 0.32), 0.025, Math.max(0.025, insetMax)),
+        sillHeight = clamp(
+            finite(o?.recessedSillHeight, finite(o?.recessedWindowBottom, floorHeight * 0.22)),
+            0.05,
+            Math.max(0.05, floorHeight - windowH - 0.05),
+        ),
+        windowBottom = sillHeight,
+        // 接合部の高さと窓の高さは常に同じ。窓は接合部の中に収まる。
+        junctionHeight = Math.max(0.05, floorGap),
+        // 窓は接合部いっぱいに収まるため、上下のずれは持たない。
+        junctionOffset = 0,
+        beamHeight = clamp(finite(o?.recessedBeamHeight, 0.12), 0, Math.min(0.6, floorHeight * 0.35)),
+        beamProjection = clamp(
+            finite(o?.recessedBeamProjection, 0.1),
+            0,
+            Math.max(0, Math.min(w - cornerBevel, d) * 0.25),
+        ),
+        sideWindowW = clamp(d - cornerBevel - marginEnd, 0.2, sideWindowMax);
+    return {
+        w,
+        d,
+        floorCount,
+        floorHeight,
+        firstFloorExtra,
+        firstFloorHeight,
+        floorGap,
+        cornerBevel,
+        cornerBevelSegments,
+        totalH,
+        windowW,
+        windowCount,
+        windowH,
+        windowDepth,
+        windowBottom,
+        marginLeft,
+        marginEnd,
+        junctionHeight,
+        junctionOffset,
+        sillHeight,
+        beamHeight,
+        beamProjection,
+        sideWindowW,
+        sideWindows: o?.recessedSideWindows !== false,
+    };
+}
+function recessedStackedBuildingFloors(o, params = recessedStackedBuildingParams(o)) {
+    let z = 0;
+    return Array.from({ length: params.floorCount }, (_, index) => {
+        const h = index === 0 ? params.firstFloorHeight : params.floorHeight,
+            floor = { index, z, h };
+        z += h;
+        if (index < params.floorCount - 1) z += params.floorGap;
+        return floor;
+    });
+}
+// 凹窓階層建物のハンドル種別を、オブジェクト定義の差分へ変換する。
+// 3Dドラッグと直交ビューのドラッグで同じ対応を使い、片方だけ更新が
+// 抜ける（ハンドルによっては反応しない）状態を防ぐ。
+function recessedHandlePatch(o, kind, value) {
+    const q = recessedStackedBuildingParams(o);
+    if (!Number.isFinite(value)) return null;
+    switch (kind) {
+        case "recessed-window-count":
+            return { recessedWindowCount: Math.round(value) };
+        case "recessed-window-margin-left":
+            return { recessedWindowMarginLeft: value };
+        case "recessed-window-margin-end":
+            return { recessedWindowMarginEnd: value };
+        case "recessed-window-depth":
+            return { recessedWindowDepth: value };
+        case "recessed-corner-bevel":
+            return { recessedCornerBevel: value };
+        case "recessed-floor-height":
+            return { recessedFloorHeight: value };
+        case "recessed-floor-gap":
+            // 接合部の高さ＝窓の高さなので、ここだけで両方が決まる。
+            return { recessedFloorGap: value };
+        case "recessed-first-floor-height":
+            // ハンドルは1Fの実寸。差分だけを格納する。
+            return { recessedFirstFloorExtra: Math.max(0, value - q.floorHeight) };
+        default:
+            return null;
+    }
+}
+// 各階の接合部の中央に窓帯を置く。最上階上には開口を作らない。
+function recessedStackedBuildingJunctionWindows(o, params = recessedStackedBuildingParams(o)) {
+    // 窓の高さは接合部の高さと同じ。接合部の中に窓帯を収める。
+    // 「接合部窓の上下ずれ」で接合部内の位置だけを微調整できる。
+    const floors = recessedStackedBuildingFloors(o, params),
+        band = (bottom) => ({ center: bottom + params.windowH * 0.5, bottom, top: bottom + params.windowH });
+    // 階が1つだけのときは接合部が無いため、最上階の上端（屋根の直下）に置く。
+    if (floors.length === 1) return [band(floors[0].z + floors[0].h - params.windowH)];
+    return floors.slice(0, -1).map((floor) => band(floor.z + floor.h + params.junctionOffset));
+}
+function recessedStackedBuildingFootprint(params) {
+    const x = params.w * 0.5,
+        y = params.d * 0.5,
+        b = params.cornerBevel,
+        segments = params.cornerBevelSegments;
+    if (b <= 0.0001) return [[-x, -y], [x, -y], [x, y], [-x, y]];
+    const center = [x - b, -y + b],
+        points = [[-x, -y], [x - b, -y]];
+    for (let i = 1; i <= segments; i++) {
+        const angle = -Math.PI * 0.5 + (Math.PI * 0.5 * i) / segments;
+        points.push([center[0] + b * Math.cos(angle), center[1] + b * Math.sin(angle)]);
+    }
+    points.push([x, y], [-x, y]);
+    return points;
+}
+// 凹んだ多角形（窓の切り欠き付きの床面など）を正しく三角形分割する。
+// 重心からの扇状分割では凹みをまたいで図形の外へはみ出し、上ビューで
+// 輪郭から飛び出した尖りに見えるため、耳切り法で分割する。
+function polygonEarClip(points) {
+    const n = points.length,
+        area = points.reduce((sum, point, index) => {
+            const next = points[(index + 1) % n];
+            return sum + point[0] * next[1] - next[0] * point[1];
+        }, 0);
+    const order = points.map((_, index) => index);
+    if (area < 0) order.reverse();
+    const cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]),
+        inside = (a, b, c, p) =>
+            cross(a, b, p) >= -1e-9 && cross(b, c, p) >= -1e-9 && cross(c, a, p) >= -1e-9,
+        tris = [];
+    let guard = 0;
+    while (order.length > 3 && guard++ < 4000) {
+        let clipped = false;
+        for (let i = 0; i < order.length; i++) {
+            const a = points[order[(i + order.length - 1) % order.length]],
+                b = points[order[i]],
+                c = points[order[(i + 1) % order.length]];
+            if (cross(a, b, c) <= 1e-9) continue;
+            const blocked = order.some((index) => {
+                const p = points[index];
+                if (p === a || p === b || p === c) return false;
+                return inside(a, b, c, p);
+            });
+            if (blocked) continue;
+            tris.push([a, b, c]);
+            order.splice(i, 1);
+            clipped = true;
+            break;
+        }
+        if (!clipped) break;
+    }
+    if (order.length === 3) tris.push(order.map((index) => points[index]));
+    return tris;
+}
+// 窓帯が階の接合部をまたぐとき、上下の面（スラブ）の輪郭から
+// 窓の幅だけを切り欠いた多角形を返す。切り欠きが無ければ外周をそのまま返す。
+function recessedStackedBuildingCapPath(params, notch) {
+    const footprint = recessedStackedBuildingFootprint(params);
+    if (!notch) return footprint;
+    // 切り欠きは窓帯の外周と奥壁の間の帯だけを取り除く。
+    // 隅のベベル弧を外周側の折れ線としてそのまま使い、角を尖らせない。
+    const paths = recessedStackedBuildingWindowPaths(params),
+        outer = params.sideWindows ? paths.outer : paths.outer.slice(0, 2),
+        inner = params.sideWindows ? paths.inner : paths.inner.slice(0, 2),
+        points = [...outer, ...[...inner].reverse()].map((point) => [point[0], point[1]]);
+    return points;
+}
+function recessedStackedBuildingBeamFootprint(params) {
+    const x = params.w * 0.5,
+        y = params.d * 0.5,
+        b = params.cornerBevel,
+        p = params.beamProjection,
+        segments = params.cornerBevelSegments;
+    if (b <= 0.0001) return [[-x, -y - p], [x, -y - p], [x + p, -y], [x + p, y], [-x, y]];
+    const center = [x - b, -y + b],
+        radius = b + p,
+        points = [[-x, -y - p], [x - b, -y - p]];
+    for (let i = 1; i <= segments; i++) {
+        const angle = -Math.PI * 0.5 + (Math.PI * 0.5 * i) / segments;
+        points.push([center[0] + radius * Math.cos(angle), center[1] + radius * Math.sin(angle)]);
+    }
+    points.push([x + p, y], [-x, y]);
+    return points;
+}
+function recessedStackedBuildingWindowPaths(params) {
+    const x = params.w * 0.5,
+        y = params.d * 0.5,
+        b = params.cornerBevel,
+        depth = params.windowDepth,
+        segments = params.cornerBevelSegments,
+        frontRight = x - b,
+        sideStart = -y + b,
+        sideEnd = sideStart + params.sideWindowW,
+        frontStart = frontRight - params.windowW,
+        outer = [[frontStart, -y], [frontRight, -y]],
+        inner = [[frontStart, -y + depth], [frontRight, -y + depth]];
+    if (b > 0.0001) {
+        const center = [frontRight, sideStart],
+            innerRadius = Math.max(0.025, b - depth);
+        for (let i = 1; i <= segments; i++) {
+            const angle = -Math.PI * 0.5 + (Math.PI * 0.5 * i) / segments;
+            outer.push([center[0] + b * Math.cos(angle), center[1] + b * Math.sin(angle)]);
+            inner.push([center[0] + innerRadius * Math.cos(angle), center[1] + innerRadius * Math.sin(angle)]);
+        }
+        outer.push([x, sideEnd]);
+        inner.push([x - depth, sideEnd]);
+    } else {
+        // ベベル0では角が直角になる。奥壁も直角に折れ、正面の奥壁と
+        // 側面の奥壁が斜めの線でつながらないよう頂点数を外周と揃える。
+        outer.push([x, sideEnd]);
+        inner[1] = [x - depth, -y + depth];
+        inner.push([x - depth, sideEnd]);
+    }
+    return { outer, inner, frontStart, frontRight, sideStart, sideEnd };
+}
+function recessedStackedBuildingWindowMullionPoints(params) {
+    const paths = recessedStackedBuildingWindowPaths(params),
+        outer = params.sideWindows ? paths.outer : paths.outer.slice(0, 2),
+        inner = params.sideWindows ? paths.inner : paths.inner.slice(0, 2),
+        lengths = [],
+        total = outer.slice(0, -1).reduce((sum, point, index) => {
+            const next = outer[index + 1],
+                length = Math.hypot(next[0] - point[0], next[1] - point[1]);
+            lengths.push(length);
+            return sum + length;
+        }, 0),
+        out = [];
+    for (let n = 1; n < params.windowCount; n++) {
+        let distance = (total * n) / params.windowCount,
+            segment = 0;
+        while (segment < lengths.length - 1 && distance > lengths[segment]) {
+            distance -= lengths[segment++];
+        }
+        const a = outer[segment],
+            b = outer[segment + 1],
+            ia = inner[segment],
+            ib = inner[segment + 1],
+            t = lengths[segment] > 1e-6 ? distance / lengths[segment] : 0;
+        out.push({
+            outer: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t],
+            inner: [ia[0] + (ib[0] - ia[0]) * t, ia[1] + (ib[1] - ia[1]) * t],
+        });
+    }
+    return out;
+}
+// 凹窓階層建物の線画。窓の手前枠・左右の側面・上面・奥枠を
+// 同じローカル座標から作るため、3Dと直交ビューで奥行きがずれない。
+function recessedStackedBuildingLines(o) {
+    const q = recessedStackedBuildingParams(o),
+        out = [],
+        c = o.c || "#222222",
+        frame = "#8aaeb5",
+        dark = "#42616b",
+        detailWidth = Math.max(1.7, (Number(o.w) || 1.5) * 1.15),
+        line = (points, color = c, width = o.w || 2) => out.push(customLineA(o, points, color, width)),
+        closed = (points, color = c, width = o.w || 2) => line([...points, points[0]], color, width),
+        x = q.w * 0.5,
+        y = q.d * 0.5,
+        footprint = recessedStackedBuildingFootprint(q),
+        beamFootprint = recessedStackedBuildingBeamFootprint(q),
+        drawOpening = (band) => {
+            const paths = recessedStackedBuildingWindowPaths(q),
+                outer = q.sideWindows ? paths.outer : paths.outer.slice(0, 2),
+                inner = q.sideWindows ? paths.inner : paths.inner.slice(0, 2),
+                zA = band.bottom,
+                zB = band.top,
+                to3 = (point, z) => [point[0], point[1], z];
+            // 正面からベベルを経て右側面へ連続する凹みの輪郭。
+            line(outer.map((point) => to3(point, zA)), frame, detailWidth);
+            line(outer.map((point) => to3(point, zB)), frame, detailWidth);
+            line(inner.map((point) => to3(point, zA)), dark, detailWidth);
+            line(inner.map((point) => to3(point, zB)), dark, detailWidth);
+            [0, outer.length - 1].forEach((index) => {
+                line([to3(outer[index], zA), to3(inner[index], zA)], frame, detailWidth);
+                line([to3(outer[index], zB), to3(inner[index], zB)], frame, detailWidth);
+                line([to3(outer[index], zA), to3(outer[index], zB)], frame, detailWidth);
+                line([to3(inner[index], zA), to3(inner[index], zB)], dark, detailWidth);
+            });
+            recessedStackedBuildingWindowMullionPoints(q).forEach(({ inner: back }) => {
+                line([to3(back, zA), to3(back, zB)], dark, detailWidth);
+            });
+        },
+        drawBeam = (z1) => {
+            if (q.beamHeight <= 0 || q.beamProjection <= 0) return;
+            const z0 = z1 - q.beamHeight;
+            closed(beamFootprint.map(([px, py]) => [px, py, z0]), frame, detailWidth);
+            closed(beamFootprint.map(([px, py]) => [px, py, z1]), frame, detailWidth);
+        };
+    const junctions = recessedStackedBuildingJunctionWindows(o, q);
+    recessedStackedBuildingFloors(o, q).forEach(({ index, z, h }) => {
+        const z1 = z + h,
+            band = junctions[index],
+            // 窓帯が床面をまたぐときは、スラブの輪郭を切り欠いて窓を塞がない。
+            lowerCap = band && band.bottom < z + 0.0001 && band.top > z + 0.0001,
+            upperCap = band && band.bottom < z1 - 0.0001 && band.top > z1 - 0.0001;
+        closed(recessedStackedBuildingCapPath(q, lowerCap).map(([px, py]) => [px, py, z]));
+        closed(recessedStackedBuildingCapPath(q, upperCap).map(([px, py]) => [px, py, z1]));
+        footprint.forEach(([px, py], index) => {
+            const inBevelArc = q.cornerBevel > 0.0001 && index >= 1 && index <= q.cornerBevelSegments + 1;
+            if (!inBevelArc) line([[px, py, z], [px, py, z1]]);
+        });
+        // 窓帯は各階の接合部の中央へ置き、最上階の上には開口を作らない。
+        if (band) {
+            drawOpening(band);
+            drawBeam(band.top);
+        } else {
+            // 屋根になる最上階には梁／庇を上端へ描く。
+            drawBeam(z1);
+        }
+    });
+    return out;
 }
 // ベランダや小部品用の「ワイヤー直方体」。
 // 中心(cx,cy)をずらして、1つのアセット内に複数部品を配置する。
@@ -7472,6 +8503,28 @@ function pathPipeMesh(o) {
     return { centerline, rings, triangles, radius, sides };
 }
 // 楕円リングを作る。円柱・円錐・ランタンの輪郭に使う。
+// 楕円リング2つの対応する頂点を結ぶ縦の補助線。半径・中心・高さは
+// それぞれ違ってよいので、円柱の胴・テーパー部・頭部の縦線に使える。
+function spokesA(o, c0, r0, z0, c1, r1, z1, n = 8, color = o.c, width = o.w || 1) {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+        const t = (i / n) * Math.PI * 2,
+            cos = Math.cos(t),
+            sin = Math.sin(t);
+        out.push(
+            lineA(
+                o,
+                [
+                    [c0[0] + r0[0] * cos, c0[1] + r0[1] * sin, z0],
+                    [c1[0] + r1[0] * cos, c1[1] + r1[1] * sin, z1],
+                ],
+                color,
+                width,
+            ),
+        );
+    }
+    return out;
+}
 function ringA(o, rx, ry, z, n = 8, color = o.c || "#e7fff4") {
     const a = [];
     for (let i = 0; i < n; i++) {
@@ -7525,1140 +8578,1258 @@ function closedBuildingLines(o, w, d, h, color = o.c || "#222222") {
         lineA(o, [front[3], back[3]], color),
     ];
 }
-// ===== 5. アセットごとの線画生成本体 =====
-// kind（asset名）を見て、必要な輪郭線・補助線を返す。
-// ここではオブジェクトの値を変更しない。形状データを作るだけ。
+// 形ごとの処理は ASSET_LINE_BUILDERS の表から呼び出す。1形状=1関数にして、
+// 追加・修正するときに触る範囲をその形の中だけに閉じ込める。
 function assetLines(o) {
     const kind = o.asset,
         w = o.ra * 2,
         d = o.rb * 2,
         h = o.h,
         c = o.c || "#222222",
-        a = c,
-        out = []; // アセットも線画と同じ色で描く
+        // a はアセットも線画と同じ色で描くための別名。
+        ctx = { o, kind, w, d, h, c, a: c, out: [] };
+    const build = ASSET_LINE_BUILDERS[kind];
+    if (build) build(ctx);
+    return ctx.out;
+}
+const ASSET_LINE_BUILDERS = {
+    custom: linesCustom,
+    box: linesBox,
+    wallSign: linesWallSign,
+    cornerCutBox: linesCornerCutBox,
+    wallSideSign: linesWallSideSign,
+    beveledBox: linesBeveledBox,
+    pathPipe: linesPathPipe,
+    recessedStackedBuilding: linesRecessedStackedBuilding,
+    stackedBuilding: linesStackedBuilding,
+    beveledStackedBuilding: linesStackedBuilding,
+    balcony: linesBalcony,
+    stairs: linesStairs,
+    crosswalk: linesCrosswalk,
+    cylinder: linesCylinder,
+    cone: linesCone,
+    sphere: linesSphere,
+    triPrism: linesTriPrism,
+    triPyramid: linesTriPyramid,
+    lantern: linesLantern,
+    sign: linesSign,
+    person: linesPerson,
+    building: linesBuilding,
+    awning: linesAwning,
+};
+
     // --- 作成サイトから読み込んだ任意形状 ---
-    // geometry.vertices / edges / loops を、そのまま3D線画へ変換する。
-    if (kind === "custom") {
-        // アセット作成サイトから読み込んだ任意形状。頂点と辺／ループを
-        // 3D線画へ変換する。頂点はx=幅、y=奥行、z=高さのローカル座標。
-        const g = o.geometry || {},
-            vertices = Array.isArray(g.vertices) ? g.vertices : [],
-            edges = Array.isArray(g.edges) ? g.edges : [],
-            loops = Array.isArray(g.loops) ? g.loops : [],
-            edgeStyles = Array.isArray(g.edgeStyles) ? g.edgeStyles : [],
-            loopStyles = Array.isArray(g.loopStyles) ? g.loopStyles : [],
-            width = Number(o.w) || MASTER_W;
-        const customLine = (points, color = c, lineWidth = width) =>
-                out.push({
-                    c: color,
-                    w: lineWidth,
-                    ob: o,
-                    d3: true,
-                    cs: sigNow(),
-                    p: dens3(points.map((q) => customPt(o, q[0], q[1], q[2]))),
-                }),
-            addEdge = (ia, ib, color = c, lineWidth = width) => {
-                const u = vertices[ia],
-                    v = vertices[ib];
-                if (!Array.isArray(u) || !Array.isArray(v) || u.length < 3 || v.length < 3) return;
-                const a3 = u.slice(0, 3).map(Number),
-                    b3 = v.slice(0, 3).map(Number);
-                if (!a3.every(Number.isFinite) || !b3.every(Number.isFinite)) return;
-                customLine([a3, b3], color, lineWidth);
-            };
-        edges.forEach((e, i) => {
-            if (!Array.isArray(e) || e.length < 2) return;
-            const style = edgeStyles[i] || {};
-            addEdge(Number(e[0]), Number(e[1]), style.color || c, Number(style.width) || width);
-        });
-        loops.forEach((loop, li) => {
-            if (!Array.isArray(loop) || loop.length < 2) return;
-            const style = loopStyles[li] || {};
-            for (let i = 0; i < loop.length; i++)
-                addEdge(
-                    Number(loop[i]),
-                    Number(loop[(i + 1) % loop.length]),
-                    style.color || c,
-                    Number(style.width) || width,
-                );
-        });
-        // --- 直方体 ---
-        // ベベルなしの基準形状。ベベル直方体とは別アセットとして選べる。
-    } else if (kind === "box") {
-        out.push(...wireBoxA(o, 0, 0, w, d, 0, Math.max(0.01, h), c));
-        // --- 横壁看板 ---
-        // 看板本体を縦長の箱として描き、必要なら壁からの
-        // 面のある取付金具を0〜3本、看板の裏側へ追加する。
-    } else if (kind === "cornerCutBox") {
-        const q = cornerCutOpeningParams(o),
-            z1 = Math.max(0.01, Math.abs(Number(h) || 0.01));
-        if (q.enabled) out.push(...cornerCutOpeningWireBoxA(o, q, z1, c, o.cutColor || "#e24b4b"));
-        else
-            out.push(
-                ...cornerCutWireBoxA(o, q.w, q.d, 0, z1, q.cornerOffset, q.cornerCutCorner, c, o.cutColor || "#e24b4b"),
+// geometry.vertices / edges / loops を、そのまま3D線画へ変換する。
+function linesCustom(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    // アセット作成サイトから読み込んだ任意形状。頂点と辺／ループを
+    // 3D線画へ変換する。頂点はx=幅、y=奥行、z=高さのローカル座標。
+    const g = o.geometry || {},
+        vertices = Array.isArray(g.vertices) ? g.vertices : [],
+        edges = Array.isArray(g.edges) ? g.edges : [],
+        loops = Array.isArray(g.loops) ? g.loops : [],
+        edgeStyles = Array.isArray(g.edgeStyles) ? g.edgeStyles : [],
+        loopStyles = Array.isArray(g.loopStyles) ? g.loopStyles : [],
+        width = Number(o.w) || MASTER_W;
+    const customLine = (points, color = c, lineWidth = width) =>
+            out.push({
+                c: color,
+                w: lineWidth,
+                ob: o,
+                d3: true,
+                cs: sigNow(),
+                p: dens3(points.map((q) => customPt(o, q[0], q[1], q[2]))),
+            }),
+        addEdge = (ia, ib, color = c, lineWidth = width) => {
+            const u = vertices[ia],
+                v = vertices[ib];
+            if (!Array.isArray(u) || !Array.isArray(v) || u.length < 3 || v.length < 3) return;
+            const a3 = u.slice(0, 3).map(Number),
+                b3 = v.slice(0, 3).map(Number);
+            if (!a3.every(Number.isFinite) || !b3.every(Number.isFinite)) return;
+            customLine([a3, b3], color, lineWidth);
+        };
+    edges.forEach((e, i) => {
+        if (!Array.isArray(e) || e.length < 2) return;
+        const style = edgeStyles[i] || {};
+        addEdge(Number(e[0]), Number(e[1]), style.color || c, Number(style.width) || width);
+    });
+    loops.forEach((loop, li) => {
+        if (!Array.isArray(loop) || loop.length < 2) return;
+        const style = loopStyles[li] || {};
+        for (let i = 0; i < loop.length; i++)
+            addEdge(
+                Number(loop[i]),
+                Number(loop[(i + 1) % loop.length]),
+                style.color || c,
+                Number(style.width) || width,
             );
-        // --- 横壁看板 ---
-        // 看板本体を縦長の箱として描き、必要なら壁からの
-        // 面のある取付金具を0〜3本、看板の裏側へ追加する。
-    } else if (kind === "wallSideSign") {
-        const boardH = Math.max(0.05, Math.abs(Number(o.ra) || 0.9) * 2),
-            boardW = Math.max(0.05, Math.abs(Number(o.rb) || 0.75) * 2),
-            thickness = Math.max(0.02, Math.abs(Number(o.h) || 0.12)),
-            bracketCount = clamp(Math.round(Number(o.wallSideSignBracketCount) || 0), 0, 3),
-            bracketLength = clamp(Math.abs(Number(o.wallSideSignBracketLength) || 0.36), 0.05, 5),
-            clearance = 0.025,
-            bracketV = Math.max(0.06, Math.min(0.18, boardH * 0.1)),
-            bracketSpan = bracketLength + clearance,
-            bracketCenter = -(boardW * 0.5 + bracketSpan * 0.5),
-            beveled = o.wallSideSignShape === "beveled",
-            bevelOffset = clamp(
-                Number(o.wallSideSignBevelOffset) || 0.06,
-                0.01,
-                Math.max(0.01, Math.min(boardH, boardW) * 0.45),
+    });
+    // --- 直方体 ---
+    // ベベルなしの基準形状。ベベル直方体とは別アセットとして選べる。
+}
+
+
+function linesBox(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    out.push(...wireBoxA(o, 0, 0, w, d, 0, Math.max(0.01, h), c));
+    // --- 壁付け看板（単体）---
+    // 板の表裏の輪郭を同じ点列から作り、対応する頂点を結んで板厚を出す。
+    // 取付金具は板の左側面から横へ伸びる直方体として並べる。
+}
+
+
+function linesWallSign(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    const params = wallSignParams(o),
+        face = wallSignFacePoints(params),
+        half = params.thickness * 0.5,
+        front = face.map(([x, z]) => [x, -half, z]),
+        back = face.map(([x, z]) => [x, half, z]);
+    out.push(polyA(o, front, c), polyA(o, back, c));
+    face.forEach(([x, z]) => out.push(lineA(o, [[x, -half, z], [x, half, z]], c)));
+    wallSignBrackets(params).forEach((bracket) =>
+        out.push(
+            ...wireBoxA(
+                o,
+                (bracket.x0 + bracket.x1) * 0.5,
+                (bracket.y0 + bracket.y1) * 0.5,
+                bracket.x1 - bracket.x0,
+                bracket.y1 - bracket.y0,
+                bracket.z - bracket.h * 0.5,
+                bracket.z + bracket.h * 0.5,
+                c,
             ),
-            bevelSegments = 4,
-            boardBox = (cx, cy, w0, d0, z0, z1) =>
-                beveled
-                    ? beveledWireBoxA(o, cx, cy, w0, d0, z0, z1, bevelOffset, bevelSegments, c)
-                    : wireBoxA(o, cx, cy, w0, d0, z0, z1, c);
-        // 看板本体は壁に対して垂直。boardW方向が壁から外へ出る幅、
-        // thickness方向が壁に沿う薄い板厚になる。
-        out.push(...boardBox(0, 0, boardH, boardW, -thickness * 0.5, thickness * 0.5));
-        for (let i = 0; i < bracketCount; i++) {
-            const t = (i + 1) / (bracketCount + 1),
-                x = -boardH * 0.5 + boardH * t;
-            // ベベルは看板本体だけに適用し、取付金具は普通の直方体で描く。
-            out.push(...wireBoxA(o, x, bracketCenter, bracketV, bracketSpan, -thickness * 0.5, thickness * 0.5, c));
-        }
-        // --- ベベル直方体 ---
-        // footprintを底面・上面へ複製し、押し出し後だけ縦辺を追加する。
-    } else if (kind === "beveledBox") {
-        const q = beveledBoxParams(o),
-            footprint = beveledBoxFootprint(q.w, q.d, q.bevelOffset, q.bevelSegments),
-            z0 = 0,
-            z1 = Math.max(0, Number(h) || 0);
-        // 初期状態は長方形と同じく一枚の面。押し出し後は面取りした
-        // 底面・上面と、各頂点をつなぐ縦辺を線画にする。
+        ),
+    );
+}
+
+
+function linesCornerCutBox(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    const q = cornerCutOpeningParams(o),
+        z1 = Math.max(0.01, Math.abs(Number(h) || 0.01));
+    if (q.enabled) out.push(...cornerCutOpeningWireBoxA(o, q, z1, c, o.cutColor || "#e24b4b"));
+    else
+        out.push(
+            ...cornerCutWireBoxA(o, q.w, q.d, 0, z1, q.cornerOffset, q.cornerCutCorner, c, o.cutColor || "#e24b4b"),
+        );
+    // --- 横壁看板 ---
+    // 看板本体を縦長の箱として描き、必要なら壁からの
+    // 面のある取付金具を0〜3本、看板の裏側へ追加する。
+}
+
+
+function linesWallSideSign(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    const boardH = Math.max(0.05, Math.abs(Number(o.ra) || 0.9) * 2),
+        boardW = Math.max(0.05, Math.abs(Number(o.rb) || 0.75) * 2),
+        thickness = Math.max(0.02, Math.abs(Number(o.h) || 0.12)),
+        bracketCount = clamp(Math.round(Number(o.wallSideSignBracketCount) || 0), 0, 3),
+        bracketLength = clamp(Math.abs(Number(o.wallSideSignBracketLength) || 0.36), 0.05, 5),
+        clearance = 0.025,
+        bracketV = Math.max(0.06, Math.min(0.18, boardH * 0.1)),
+        bracketSpan = bracketLength + clearance,
+        bracketCenter = -(boardW * 0.5 + bracketSpan * 0.5),
+        beveled = o.wallSideSignShape === "beveled",
+        bevelOffset = clamp(
+            Number(o.wallSideSignBevelOffset) || 0.06,
+            0.01,
+            Math.max(0.01, Math.min(boardH, boardW) * 0.45),
+        ),
+        bevelSegments = 4,
+        boardBox = (cx, cy, w0, d0, z0, z1) =>
+            beveled
+                ? beveledWireBoxA(o, cx, cy, w0, d0, z0, z1, bevelOffset, bevelSegments, c)
+                : wireBoxA(o, cx, cy, w0, d0, z0, z1, c);
+    // 看板本体は壁に対して垂直。boardW方向が壁から外へ出る幅、
+    // thickness方向が壁に沿う薄い板厚になる。
+    out.push(...boardBox(0, 0, boardH, boardW, -thickness * 0.5, thickness * 0.5));
+    for (let i = 0; i < bracketCount; i++) {
+        const t = (i + 1) / (bracketCount + 1),
+            x = -boardH * 0.5 + boardH * t;
+        // ベベルは看板本体だけに適用し、取付金具は普通の直方体で描く。
+        out.push(...wireBoxA(o, x, bracketCenter, bracketV, bracketSpan, -thickness * 0.5, thickness * 0.5, c));
+    }
+    // --- ベベル直方体 ---
+    // footprintを底面・上面へ複製し、押し出し後だけ縦辺を追加する。
+}
+
+
+function linesBeveledBox(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    const q = beveledBoxParams(o),
+        footprint = beveledBoxFootprint(q.w, q.d, q.bevelOffset, q.bevelSegments),
+        z0 = 0,
+        z1 = Math.max(0, Number(h) || 0);
+    // 初期状態は長方形と同じく一枚の面。押し出し後は面取りした
+    // 底面・上面と、各頂点をつなぐ縦辺を線画にする。
+    out.push(
+        polyA(
+            o,
+            footprint.map(([x, y]) => [x, y, z0]),
+            c,
+        ),
+    );
+    if (z1 > 0.000001) {
         out.push(
             polyA(
                 o,
-                footprint.map(([x, y]) => [x, y, z0]),
+                footprint.map(([x, y]) => [x, y, z1]),
                 c,
             ),
         );
-        if (z1 > 0.000001) {
-            out.push(
-                polyA(
-                    o,
-                    footprint.map(([x, y]) => [x, y, z1]),
-                    c,
-                ),
-            );
-            footprint.forEach(([x, y]) =>
-                out.push(
-                    lineA(
-                        o,
-                        [
-                            [x, y, z0],
-                            [x, y, z1],
-                        ],
-                        c,
-                    ),
-                ),
-            );
-        }
-        // --- パスパイプ ---
-        // 丸めた中心線のリングを描き、リング間の縦線でパイプらしさを出す。
-    } else if (kind === "pathPipe") {
-        const mesh = pathPipeMesh(o);
-        mesh.rings.forEach((ring) => out.push(polyA(o, ring, c, 0.95)));
-        for (let j = 0; j < mesh.sides; j++)
+        footprint.forEach(([x, y]) =>
             out.push(
                 lineA(
                     o,
-                    mesh.rings.map((ring) => ring[j]),
+                    [
+                        [x, y, z0],
+                        [x, y, z1],
+                    ],
                     c,
-                    0.85,
                 ),
-            );
-        // --- 階層建物／ベベル階層建物 ---
-        // floors配列を階ごとに描く。開口はopeningEnabledがtrueの1Fだけへ追加する。
-    } else if (kind === "stackedBuilding" || kind === "beveledStackedBuilding") {
-        const floors =
-            Array.isArray(o.floors) && o.floors.length
-                ? o.floors
-                : [
-                      {
-                          x: 0,
-                          y: 0,
-                          z: 0,
-                          w: o.ra * 2 || 4,
-                          d: o.rb * 2 || 3,
-                          h: o.h || 2.2,
-                          rimHeight: 0.16,
-                          rimOverhang: 0.18,
-                      },
-                  ];
-        const addBox = (f, w, d, z, h, color = c, caps = { bottom: true, top: true }) => {
-            const x = w / 2,
-                y = d / 2,
-                ox = Number(f.x || 0),
-                oy = Number(f.y || 0),
-                oz = Number(f.z || 0),
-                v = [
-                    [-x, -y, z],
-                    [x, -y, z],
-                    [x, y, z],
-                    [-x, y, z],
-                    [-x, -y, z + h],
-                    [x, -y, z + h],
-                    [x, y, z + h],
-                    [-x, y, z + h],
-                ],
-                toWorld = (q) => [q[0] + ox, q[1] + oy, q[2] + oz];
-            // 面ごとに輪郭を足すと共有辺が2回描かれるため、箱の12辺を一度だけ描く。
+            ),
+        );
+    }
+    // --- パスパイプ ---
+    // 丸めた中心線のリングを描き、リング間の縦線でパイプらしさを出す。
+}
+
+
+function linesPathPipe(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    const mesh = pathPipeMesh(o);
+    mesh.rings.forEach((ring) => out.push(polyA(o, ring, c, 0.95)));
+    for (let j = 0; j < mesh.sides; j++)
+        out.push(
+            lineA(
+                o,
+                mesh.rings.map((ring) => ring[j]),
+                c,
+                0.85,
+            ),
+        );
+    // --- 凹窓階層建物 ---
+    // 各階に同じ矩形凹窓を反復し、正面・右側面のファサードを描く。
+}
+
+
+function linesRecessedStackedBuilding(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    out.push(...recessedStackedBuildingLines(o));
+    // --- 階層建物／ベベル階層建物 ---
+    // floors配列を階ごとに描く。開口はopeningEnabledがtrueの1Fだけへ追加する。
+}
+
+
+function linesStackedBuilding(ctx) {
+    const { o, w, d, h, c, a, out, kind } = ctx;
+    const floors =
+        Array.isArray(o.floors) && o.floors.length
+            ? o.floors
+            : [
+                  {
+                      x: 0,
+                      y: 0,
+                      z: 0,
+                      w: o.ra * 2 || 4,
+                      d: o.rb * 2 || 3,
+                      h: o.h || 2.2,
+                      rimHeight: 0.16,
+                      rimOverhang: 0.18,
+                  },
+              ];
+    const addBox = (f, w, d, z, h, color = c, caps = { bottom: true, top: true }) => {
+        const x = w / 2,
+            y = d / 2,
+            ox = Number(f.x || 0),
+            oy = Number(f.y || 0),
+            oz = Number(f.z || 0),
+            v = [
+                [-x, -y, z],
+                [x, -y, z],
+                [x, y, z],
+                [-x, y, z],
+                [-x, -y, z + h],
+                [x, -y, z + h],
+                [x, y, z + h],
+                [-x, y, z + h],
+            ],
+            toWorld = (q) => [q[0] + ox, q[1] + oy, q[2] + oz];
+        // 面ごとに輪郭を足すと共有辺が2回描かれるため、箱の12辺を一度だけ描く。
+        [
+            ...(caps.bottom ? [[0, 1, 2, 3, 0]] : []),
+            ...(caps.top ? [[4, 5, 6, 7, 4]] : []),
+            [0, 4],
+            [1, 5],
+            [2, 6],
+            [3, 7],
+        ].forEach((edge) =>
+            out.push(
+                customLineA(
+                    o,
+                    edge.map((i) => toWorld(v[i])),
+                    color,
+                ),
+            ),
+        );
+    };
+    const addBeveledBox = (
+        f,
+        w,
+        d,
+        z,
+        h,
+        bevelOffset,
+        bevelSegments,
+        color = c,
+        caps = { bottom: true, top: true },
+    ) => {
+        const footprint = beveledBoxFootprint(w, d, bevelOffset, bevelSegments),
+            ox = Number(f.x || 0),
+            oy = Number(f.y || 0),
+            oz = Number(f.z || 0),
+            bottom = footprint.map(([x, y]) => [x + ox, y + oy, z + oz]),
+            top = footprint.map(([x, y]) => [x + ox, y + oy, z + h + oz]);
+        if (caps.bottom) out.push(customLineA(o, [...bottom, bottom[0]], color));
+        if (caps.top) out.push(customLineA(o, [...top, top[0]], color));
+        footprint.forEach(([x, y]) =>
+            out.push(
+                customLineA(
+                    o,
+                    [
+                        [x + ox, y + oy, z + oz],
+                        [x + ox, y + oy, z + h + oz],
+                    ],
+                    color,
+                ),
+            ),
+        );
+    };
+    // 開口ON/OFFの判定はここで一度だけ行う。OFFなら通常の閉じた建物になる。
+    const openingEnabled = stackedOpeningEnabled(o);
+    const addOpeningWire = (f, w, d, h, opening) => {
+        const ox = Number(f.x || 0),
+            oy = Number(f.y || 0),
+            oz = Number(f.z || 0),
+            near = -d * 0.5,
+            far = d * 0.5,
+            panelY = opening.openingBack,
+            ow = opening.openingW,
+            oh = opening.openingH,
+            toWorld = (p) => [p[0] + ox, p[1] + oy, p[2] + oz],
+            line = (points, color = a, width = 1.1) => out.push(customLineA(o, points.map(toWorld), color, width));
+        // 開口を持つ1Fの外周・開口枠・内側底辺／奥面を、既存の開口建物と同じ順で描く。
+        line([
+            [-w / 2, near, h],
+            [w / 2, near, h],
+        ]);
+        line([
+            [-w / 2, far, h],
+            [w / 2, far, h],
+        ]);
+        line([
+            [-ow / 2, near, 0],
+            [-ow / 2, near, oh],
+            [ow / 2, near, oh],
+            [ow / 2, near, 0],
+        ]);
+        line([
+            [-ow / 2, far, 0],
+            [-ow / 2, far, oh],
+            [ow / 2, far, oh],
+            [ow / 2, far, 0],
+        ]);
+        if (Math.abs(panelY - far) > 0.01)
+            line([
+                [-ow / 2, panelY, 0],
+                [-ow / 2, panelY, oh],
+                [ow / 2, panelY, oh],
+                [ow / 2, panelY, 0],
+            ]);
+        // 開口の床面／奥面の下辺は省略しない。正面側と閉じた内壁側の両方へ描く。
+        line(
             [
-                ...(caps.bottom ? [[0, 1, 2, 3, 0]] : []),
-                ...(caps.top ? [[4, 5, 6, 7, 4]] : []),
-                [0, 4],
-                [1, 5],
-                [2, 6],
-                [3, 7],
-            ].forEach((edge) =>
-                out.push(
-                    customLineA(
-                        o,
-                        edge.map((i) => toWorld(v[i])),
-                        color,
-                    ),
-                ),
-            );
-        };
-        const addBeveledBox = (
-            f,
-            w,
-            d,
-            z,
-            h,
-            bevelOffset,
-            bevelSegments,
-            color = c,
-            caps = { bottom: true, top: true },
-        ) => {
-            const footprint = beveledBoxFootprint(w, d, bevelOffset, bevelSegments),
-                ox = Number(f.x || 0),
-                oy = Number(f.y || 0),
-                oz = Number(f.z || 0),
-                bottom = footprint.map(([x, y]) => [x + ox, y + oy, z + oz]),
-                top = footprint.map(([x, y]) => [x + ox, y + oy, z + h + oz]);
-            if (caps.bottom) out.push(customLineA(o, [...bottom, bottom[0]], color));
-            if (caps.top) out.push(customLineA(o, [...top, top[0]], color));
-            footprint.forEach(([x, y]) =>
-                out.push(
-                    customLineA(
-                        o,
-                        [
-                            [x + ox, y + oy, z + oz],
-                            [x + ox, y + oy, z + h + oz],
-                        ],
-                        color,
-                    ),
-                ),
-            );
-        };
-        // 開口ON/OFFの判定はここで一度だけ行う。OFFなら通常の閉じた建物になる。
-        const openingEnabled = stackedOpeningEnabled(o);
-        const addOpeningWire = (f, w, d, h, opening) => {
-            const ox = Number(f.x || 0),
-                oy = Number(f.y || 0),
-                oz = Number(f.z || 0),
-                near = -d * 0.5,
-                far = d * 0.5,
-                panelY = opening.openingBack,
-                ow = opening.openingW,
-                oh = opening.openingH,
-                toWorld = (p) => [p[0] + ox, p[1] + oy, p[2] + oz],
-                line = (points, color = a, width = 1.1) => out.push(customLineA(o, points.map(toWorld), color, width));
-            // 開口を持つ1Fの外周・開口枠・内側底辺／奥面を、既存の開口建物と同じ順で描く。
-            line([
-                [-w / 2, near, h],
-                [w / 2, near, h],
-            ]);
-            line([
-                [-w / 2, far, h],
-                [w / 2, far, h],
-            ]);
-            line([
+                [-ow / 2, near, 0.012],
+                [ow / 2, near, 0.012],
+            ],
+            a,
+            1.05,
+        );
+        line(
+            [
+                [-ow / 2, panelY, 0.012],
+                [ow / 2, panelY, 0.012],
+            ],
+            a,
+            1.15,
+        );
+        line(
+            [
                 [-ow / 2, near, 0],
+                [-ow / 2, panelY, 0],
+                [-ow / 2, panelY, oh],
+                [-ow / 2, near, oh],
+                [-ow / 2, near, 0],
+            ],
+            a,
+            1.0,
+        );
+        line(
+            [
+                [ow / 2, near, 0],
+                [ow / 2, near, oh],
+                [ow / 2, panelY, oh],
+                [ow / 2, panelY, 0],
+                [ow / 2, near, 0],
+            ],
+            a,
+            1.0,
+        );
+        line(
+            [
                 [-ow / 2, near, oh],
                 [ow / 2, near, oh],
-                [ow / 2, near, 0],
-            ]);
-            line([
-                [-ow / 2, far, 0],
-                [-ow / 2, far, oh],
-                [ow / 2, far, oh],
-                [ow / 2, far, 0],
-            ]);
-            if (Math.abs(panelY - far) > 0.01)
-                line([
-                    [-ow / 2, panelY, 0],
-                    [-ow / 2, panelY, oh],
-                    [ow / 2, panelY, oh],
-                    [ow / 2, panelY, 0],
-                ]);
-            // 開口の床面／奥面の下辺は省略しない。正面側と閉じた内壁側の両方へ描く。
-            line(
-                [
-                    [-ow / 2, near, 0.012],
-                    [ow / 2, near, 0.012],
-                ],
-                a,
-                1.05,
-            );
-            line(
-                [
-                    [-ow / 2, panelY, 0.012],
-                    [ow / 2, panelY, 0.012],
-                ],
-                a,
-                1.15,
-            );
-            line(
-                [
-                    [-ow / 2, near, 0],
-                    [-ow / 2, panelY, 0],
-                    [-ow / 2, panelY, oh],
-                    [-ow / 2, near, oh],
-                    [-ow / 2, near, 0],
-                ],
-                a,
-                1.0,
-            );
-            line(
-                [
-                    [ow / 2, near, 0],
-                    [ow / 2, near, oh],
-                    [ow / 2, panelY, oh],
-                    [ow / 2, panelY, 0],
-                    [ow / 2, near, 0],
-                ],
-                a,
-                1.0,
-            );
-            line(
-                [
-                    [-ow / 2, near, oh],
-                    [ow / 2, near, oh],
-                    [ow / 2, panelY, oh],
-                    [-ow / 2, panelY, oh],
-                    [-ow / 2, near, oh],
-                ],
-                a,
-                1.0,
-            );
-        };
-        floors.forEach((f, i) => {
-            const w = Math.max(0.05, Math.abs(Number(f.w) || Number(o.ra || 2) * 2)),
-                d = Math.max(0.05, Math.abs(Number(f.d) || Number(o.rb || 1.5) * 2)),
-                h = Math.max(0.05, Math.abs(Number(f.h) || 2.2)),
-                opening = i === 0 && openingEnabled ? stackedOpeningParams(o, f) : null,
-                rh = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, h),
-                ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18)),
-                bevelOffset = Number.isFinite(Number(f.bevelOffset))
-                    ? Number(f.bevelOffset)
-                    : Number(o.bevelOffset) || 0.28,
-                bevelSegments = beveledBoxSegments(
-                    f.bevelSegments,
-                    f.bevelEdges,
-                    beveledBoxSegments(o.bevelSegments, o.bevelEdges),
-                );
-            // 本体の上辺は上側の縁に隠れるため描かず、下側の縁は全階で作らない。
-            // 開口をONにした場合だけ、1F本体へ開口枠・内側面を追加する。
-            if (kind === "beveledStackedBuilding") {
-                addBeveledBox(f, w, d, 0, h, bevelOffset, bevelSegments, f.c || c, { bottom: i === 0, top: false });
-                if (opening) addOpeningWire(f, w, d, h, opening);
-                // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
-                addBeveledBox(f, w + ro * 2, d + ro * 2, h - rh, rh, bevelOffset, bevelSegments, f.rimColor || a);
-            } else {
-                addBox(f, w, d, 0, h, f.c || c, { bottom: i === 0, top: false });
-                if (opening) addOpeningWire(f, w, d, h, opening);
-                // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
-                addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
-            }
-        });
-        // --- 壁付けベランダ ---
-        // 床スラブ、前面の腰壁、左右の腰壁、支持ブラケットを別々に描く。
-    } else if (kind === "balcony") {
-        // 壁側（+Y）を建物外壁へ合わせ、床を外側（-Y）へ張り出すU字型のベランダ。
-        // 床スラブ＋左右の腰壁＋前面の腰壁を別箱として描くため、面編集後も形状が崩れない。
-        const floorT = clamp(Number(o.balconyFloorThickness) || 0.16, 0.04, Math.max(0.05, h * 0.7)),
-            railH = clamp(Number(o.balconyRailHeight) || Math.max(0.18, h - floorT), 0.12, Math.max(0.12, h - 0.01)),
-            railT = clamp(Number(o.balconyRailThickness) || 0.12, 0.035, Math.min(w, d) * 0.35),
-            frontRail = o.balconyFrontRail !== false,
-            sideRail = o.balconySideRail !== false;
-        out.push(...wireBoxA(o, 0, 0, w, d, 0, floorT, c));
-        if (frontRail) out.push(...wireBoxA(o, 0, -d / 2 + railT / 2, w, railT, floorT, floorT + railH, c));
-        if (sideRail) {
-            out.push(...wireBoxA(o, -w / 2 + railT / 2, 0, railT, d, floorT, floorT + railH, c));
-            out.push(...wireBoxA(o, w / 2 - railT / 2, 0, railT, d, floorT, floorT + railH, c));
-        }
-        // 壁付け面の床下に短い支持ブラケットを入れ、正面／3D線画で張り出し方向を読み取りやすくする。
-        const bracketZ = Math.max(0.02, floorT * 0.18),
-            wallY = d / 2 - railT * 0.5,
-            frontY = -d / 2 + railT * 0.5;
-        [-w * 0.34, w * 0.34].forEach((x) =>
-            out.push(
-                lineA(
-                    o,
-                    [
-                        [x, wallY, bracketZ],
-                        [x, frontY, 0],
-                    ],
-                    c,
-                    0.85,
-                ),
-            ),
+                [ow / 2, panelY, oh],
+                [-ow / 2, panelY, oh],
+                [-ow / 2, near, oh],
+            ],
+            a,
+            1.0,
         );
-        // --- 階段 ---
-        // stepsの数だけ段板と蹴上げを作り、必要なら手すりも追加する。
-    } else if (kind === "stairs") {
-        const n = Math.max(2, Math.min(24, Math.round(o.steps || 6))),
-            sd = d / n,
-            sh = h / n;
-        // 段板・蹴上げ・左右側面の輪郭を、実際の階段断面に沿って描く。
-        for (let i = 0; i < n; i++) {
-            const y0 = -d / 2 + i * sd,
-                y1 = y0 + sd,
-                z = (i + 1) * sh,
-                z0 = i * sh;
-            out.push(
-                polyA(
-                    o,
-                    [
-                        [-w / 2, y0, z],
-                        [w / 2, y0, z],
-                        [w / 2, y1, z],
-                        [-w / 2, y1, z],
-                    ],
-                    c,
-                ),
+    };
+    floors.forEach((f, i) => {
+        const w = Math.max(0.05, Math.abs(Number(f.w) || Number(o.ra || 2) * 2)),
+            d = Math.max(0.05, Math.abs(Number(f.d) || Number(o.rb || 1.5) * 2)),
+            h = Math.max(0.05, Math.abs(Number(f.h) || 2.2)),
+            opening = i === 0 && openingEnabled ? stackedOpeningParams(o, f) : null,
+            rh = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, h),
+            ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18)),
+            bevelOffset = Number.isFinite(Number(f.bevelOffset))
+                ? Number(f.bevelOffset)
+                : Number(o.bevelOffset) || 0.28,
+            bevelSegments = beveledBoxSegments(
+                f.bevelSegments,
+                f.bevelEdges,
+                beveledBoxSegments(o.bevelSegments, o.bevelEdges),
             );
-            out.push(
-                lineA(
-                    o,
-                    [
-                        [-w / 2, y0, z0],
-                        [-w / 2, y0, z],
-                        [w / 2, y0, z],
-                    ],
-                    a,
-                    0.9,
-                ),
-            );
-            out.push(
-                lineA(
-                    o,
-                    [
-                        [w / 2, y0, z0],
-                        [w / 2, y0, z],
-                    ],
-                    a,
-                    0.9,
-                ),
-            );
-            out.push(
-                lineA(
-                    o,
-                    [
-                        [-w / 2, y0, z],
-                        [-w / 2, y1, z],
-                    ],
-                    a,
-                    0.9,
-                ),
-            );
-            out.push(
-                lineA(
-                    o,
-                    [
-                        [w / 2, y0, z],
-                        [w / 2, y1, z],
-                    ],
-                    a,
-                    0.9,
-                ),
-            );
+        // 本体の上辺は上側の縁に隠れるため描かず、下側の縁は全階で作らない。
+        // 開口をONにした場合だけ、1F本体へ開口枠・内側面を追加する。
+        if (kind === "beveledStackedBuilding") {
+            addBeveledBox(f, w, d, 0, h, bevelOffset, bevelSegments, f.c || c, { bottom: i === 0, top: false });
+            if (opening) addOpeningWire(f, w, d, h, opening);
+            // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
+            addBeveledBox(f, w + ro * 2, d + ro * 2, h - rh, rh, bevelOffset, bevelSegments, f.rimColor || a);
+        } else {
+            addBox(f, w, d, 0, h, f.c || c, { bottom: i === 0, top: false });
+            if (opening) addOpeningWire(f, w, d, h, opening);
+            // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
+            addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
         }
+    });
+    // --- 壁付けベランダ ---
+    // 床スラブ、前面の腰壁、左右の腰壁、支持ブラケットを別々に描く。
+}
+
+
+function linesBalcony(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    // 壁側（+Y）を建物外壁へ合わせ、床を外側（-Y）へ張り出すU字型のベランダ。
+    // 床スラブ＋左右の腰壁＋前面の腰壁を別箱として描くため、面編集後も形状が崩れない。
+    const floorT = clamp(Number(o.balconyFloorThickness) || 0.16, 0.04, Math.max(0.05, h * 0.7)),
+        railH = clamp(Number(o.balconyRailHeight) || Math.max(0.18, h - floorT), 0.12, Math.max(0.12, h - 0.01)),
+        railT = clamp(Number(o.balconyRailThickness) || 0.12, 0.035, Math.min(w, d) * 0.35),
+        frontRail = o.balconyFrontRail !== false,
+        sideRail = o.balconySideRail !== false;
+    out.push(...wireBoxA(o, 0, 0, w, d, 0, floorT, c));
+    if (frontRail) out.push(...wireBoxA(o, 0, -d / 2 + railT / 2, w, railT, floorT, floorT + railH, c));
+    if (sideRail) {
+        out.push(...wireBoxA(o, -w / 2 + railT / 2, 0, railT, d, floorT, floorT + railH, c));
+        out.push(...wireBoxA(o, w / 2 - railT / 2, 0, railT, d, floorT, floorT + railH, c));
+    }
+    // 壁付け面の床下に短い支持ブラケットを入れ、正面／3D線画で張り出し方向を読み取りやすくする。
+    const bracketZ = Math.max(0.02, floorT * 0.18),
+        wallY = d / 2 - railT * 0.5,
+        frontY = -d / 2 + railT * 0.5;
+    [-w * 0.34, w * 0.34].forEach((x) =>
+        out.push(
+            lineA(
+                o,
+                [
+                    [x, wallY, bracketZ],
+                    [x, frontY, 0],
+                ],
+                c,
+                0.85,
+            ),
+        ),
+    );
+    // --- 階段 ---
+    // stepsの数だけ段板と蹴上げを作り、必要なら手すりも追加する。
+}
+
+
+function linesStairs(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    const n = Math.max(2, Math.min(24, Math.round(o.steps || 6))),
+        sd = d / n,
+        sh = h / n;
+    // 段板・蹴上げ・左右側面の輪郭を、実際の階段断面に沿って描く。
+    for (let i = 0; i < n; i++) {
+        const y0 = -d / 2 + i * sd,
+            y1 = y0 + sd,
+            z = (i + 1) * sh,
+            z0 = i * sh;
         out.push(
             polyA(
                 o,
                 [
-                    [-w / 2, -d / 2, 0],
-                    [w / 2, -d / 2, 0],
-                    [w / 2, d / 2, 0],
-                    [-w / 2, d / 2, 0],
-                ],
-                a,
-                0.9,
-            ),
-        );
-        out.push(
-            lineA(
-                o,
-                [
-                    [-w / 2, d / 2, 0],
-                    [w / 2, d / 2, 0],
-                    [w / 2, d / 2, h],
-                    [-w / 2, d / 2, h],
-                    [-w / 2, d / 2, 0],
-                ],
-                a,
-                1.1,
-            ),
-        );
-        // Rail posts and handrail. The quick setting can hide the whole rail.
-        if (o.handrail === true)
-            [-w / 2, w / 2].forEach((x) => {
-                const p1 = [x, -d / 2, 0.48 * h],
-                    p2 = [x, d / 2, h + 0.35];
-                out.push(lineA(o, [p1, p2], a, 1.1));
-                for (let i = 0; i <= 3; i++) {
-                    const t = i / 3;
-                    out.push(
-                        lineA(
-                            o,
-                            [
-                                [x, -d / 2 + d * t, 0.48 * h + (h + 0.35 - 0.48 * h) * t],
-                                [x, -d / 2 + d * t, 0.48 * h + (h + 0.35 - 0.48 * h) * t + 0.22],
-                            ],
-                            a,
-                            0.8,
-                        ),
-                    );
-                }
-            });
-        // --- 横断歩道 ---
-        // 道路の面へ白いストライプを並べる。
-    } else if (kind === "crosswalk") {
-        const n = Math.max(3, Math.min(16, Math.round(o.stripes || 7))),
-            gap = d / (n + 1),
-            stripeD = gap * 0.6;
-        for (let i = 0; i < n; i++) {
-            const y = -d / 2 + gap * (i + 1);
-            out.push(
-                polyA(
-                    o,
-                    [
-                        [-w / 2, y - stripeD / 2, 0.012],
-                        [w / 2, y - stripeD / 2, 0.012],
-                        [w / 2, y + stripeD / 2, 0.012],
-                        [-w / 2, y + stripeD / 2, 0.012],
-                    ],
-                    c,
-                    1.1,
-                ),
-            );
-        }
-        out.push(
-            lineA(
-                o,
-                [
-                    [-w / 2, -d / 2, 0.014],
-                    [w / 2, -d / 2, 0.014],
-                ],
-                a,
-                0.9,
-            ),
-        );
-        out.push(
-            lineA(
-                o,
-                [
-                    [-w / 2, d / 2, 0.014],
-                    [w / 2, d / 2, 0.014],
-                ],
-                a,
-                0.9,
-            ),
-        );
-        // --- 円柱・円錐・球 ---
-        // 円柱は上下輪郭、円錐は底面とシルエット、球は正面向きの円だけを描く。
-    } else if (kind === "cylinder") {
-        // 円柱は上下の輪郭だけ。側面の縦エッジは描かない。
-        out.push(ringA(o, w * 0.5, d * 0.5, 0, 12, c));
-        out.push(ringA(o, w * 0.5, d * 0.5, h, 12, c));
-    } else if (kind === "cone") {
-        // 円錐も円柱と同じく、底面の輪郭と現在の視点から見える
-        // 左右2本のシルエット母線だけを描く。全周の放射線は描かない。
-        const rx = w * 0.5,
-            ry = d * 0.5,
-            base = [];
-        for (let i = 0; i < 16; i++) {
-            const t = (i / 16) * Math.PI * 2;
-            base.push([rx * Math.cos(t), ry * Math.sin(t), 0]);
-        }
-        out.push(polyA(o, base, c));
-        const cen = L2W(o, 0, 0, 0),
-            rel = V.add(camPos(), cen, 1, -1),
-            [iu, iv] = PL[o.k],
-            cs = Math.cos(o.rot * DG),
-            sn = Math.sin(o.rot * DG),
-            eu = [0, 0, 0],
-            ev = [0, 0, 0];
-        eu[iu] = cs;
-        eu[iv] = sn;
-        ev[iu] = -sn;
-        ev[iv] = cs;
-        const ph = Math.atan2(V.dot(rel, ev), V.dot(rel, eu));
-        [ph + Math.PI / 2, ph - Math.PI / 2].forEach((t) =>
-            out.push(
-                lineA(
-                    o,
-                    [
-                        [rx * Math.cos(t), ry * Math.sin(t), 0],
-                        [0, 0, h],
-                    ],
-                    a,
-                    1.0,
-                ),
-            ),
-        );
-    } else if (kind === "sphere") {
-        // 球は緯度線・経線を描かず、円形の外周輪郭だけを描く。
-        // 視点方向に合わせた「正面向きの円」を3D線として置くため、
-        // カメラを回転・パンしても画面上の輪郭はつぶれず、常に円のままになる。
-        const r = Math.min(w, d, h) * 0.5,
-            zc = h * 0.5,
-            center = L2W(o, 0, 0, zc),
-            eu = [0, 0, 0],
-            ev = [0, 0, 0],
-            ez = [0, 0, 0];
-        const [iu, iv] = PL[o.k],
-            cs = Math.cos(o.rot * DG),
-            sn = Math.sin(o.rot * DG);
-        eu[iu] = cs;
-        eu[iv] = sn;
-        ev[iu] = -sn;
-        ev[iv] = cs;
-        ez[o.k] = -o.d;
-        const right = V.nrm(wld([1, 0, 0])),
-            up = V.nrm(wld([0, 1, 0])),
-            pts = [],
-            toLocal = (world) => {
-                const rel = V.add(world, center, 1, -1);
-                return [V.dot(rel, eu), V.dot(rel, ev), zc + V.dot(rel, ez)];
-            };
-        for (let i = 0; i <= 48; i++) {
-            const t = (i / 48) * Math.PI * 2,
-                co = Math.cos(t),
-                si = Math.sin(t);
-            pts.push(toLocal(V.add(center, V.add(right, up, r * co, r * si))));
-        }
-        out.push(lineA(o, pts, c, 1.1));
-    } else if (kind === "triPrism") {
-        const x = w / 2,
-            y = d / 2,
-            front = [
-                [-x, -y, 0],
-                [x, -y, 0],
-                [0, -y, h],
-            ],
-            back = [
-                [-x, y, 0],
-                [x, y, 0],
-                [0, y, h],
-            ];
-        out.push(polyA(o, front, c));
-        out.push(polyA(o, back, c));
-        for (let i = 0; i < 3; i++) out.push(lineA(o, [front[i], back[i]], a, 1.1));
-    } else if (kind === "triPyramid") {
-        const x = w / 2,
-            y = d / 2,
-            base = [
-                [-x, -y, 0],
-                [x, -y, 0],
-                [0, y, 0],
-            ],
-            apex = [0, 0, h];
-        out.push(polyA(o, base, c));
-        base.forEach((v) => out.push(lineA(o, [v, apex], a, 1.1)));
-    } else if (kind === "lantern") {
-        const body0 = 0.22 * h,
-            body1 = 0.7 * h,
-            rx = w * 0.48,
-            ry = d * 0.48;
-        out.push(ringA(o, rx, ry, body0, 8, c));
-        out.push(ringA(o, rx, ry, body1, 8, c));
-        for (let i = 0; i < 8; i++) {
-            const t = (i / 8) * Math.PI * 2;
-            out.push(
-                lineA(
-                    o,
-                    [
-                        [rx * Math.cos(t), ry * Math.sin(t), body0],
-                        [rx * Math.cos(t), ry * Math.sin(t), body1],
-                    ],
-                    c,
-                ),
-            );
-        }
-        out.push(ringA(o, rx * 0.82, ry * 0.82, 0.78 * h, 8, a));
-        for (let i = 0; i < 8; i++) {
-            const t = (i / 8) * Math.PI * 2;
-            out.push(
-                lineA(
-                    o,
-                    [
-                        [rx * Math.cos(t), ry * Math.sin(t), body1],
-                        [rx * 0.82 * Math.cos(t), ry * 0.82 * Math.sin(t), 0.78 * h],
-                    ],
-                    a,
-                    0.9,
-                ),
-            );
-        }
-        out.push(
-            lineA(
-                o,
-                [
-                    [0, 0, 0.78 * h],
-                    [0, 0, 0.94 * h],
-                ],
-                a,
-                1.3,
-            ),
-        );
-        out.push(
-            lineA(
-                o,
-                [
-                    [0, 0, 0.94 * h],
-                    [-0.1 * w, 0, h],
-                    [0.1 * w, 0, h],
-                    [0, 0, 0.94 * h],
-                ],
-                a,
-                1.1,
-            ),
-        );
-        // Two inner bands suggest a glowing paper lantern without requiring a texture.
-        [0.36, 0.56].forEach((z) => out.push(ringA(o, rx * 1.02, ry * 1.02, z * h, 8, a, 0.8)));
-        // --- 看板 ---
-        // 外枠と、faceW / faceHで編集できる内側の絵枠を描く。
-    } else if (kind === "sign") {
-        // 看板外側は通常の直方体。内側の絵枠だけを追加編集できる。
-        const board0 = 0.08 * h,
-            board1 = 0.82 * h,
-            fy = signFaceDepth(o, 0.009);
-        const faceW = Math.max(0.08, Math.min(Number(o.faceW) || w * 0.7, w * 0.9));
-        const faceH = Math.max(0.08, Math.min(Number(o.faceH) || h * 0.34, (board1 - board0) * 0.84));
-        out.push(...boxA(o, w, d, board0, board1, c));
-        // adjustable inner illustration frame; no lettering strokes inside.
-        const ix = faceW / 2,
-            iz0 = (board0 + board1 - faceH) / 2,
-            iz1 = iz0 + faceH;
-        const q = [
-            [-ix, fy, iz0],
-            [ix, fy, iz0],
-            [ix, fy, iz1],
-            [-ix, fy, iz1],
-        ];
-        out.push(polyA(o, q, a, 1.1));
-        // --- 人物 ---
-        // 身長・体格・頭身・脚の開き・簡易ポーズを線画へ反映する。
-    } else if (kind === "person") {
-        // 人物は配置後も高さ・体格・頭身・脚の開き・簡易ポーズを編集できる。
-        // 腕は既存仕様どおり描かず、立体感は胴体・脚・頭の線だけで表現する。
-        const bodyScale = clamp(Number(o.bodyScale) || 1, 0.6, 1.8),
-            shoulderScale = clamp(Number(o.shoulderScale) || 1, 0.6, 1.6),
-            headScale = clamp(Number(o.headScale) || 1, 0.7, 1.5),
-            legSpread = clamp(Number(o.legSpread) || 1, 0.6, 1.8),
-            pose = o.pose || "stand";
-        const defaults = { stand: [0, 0, 0], walk: [0.22, 0, 0], crouch: [0.04, 0.65, 0], sit: [0.1, 0.35, 0] },
-            def = defaults[pose] || defaults.stand;
-        const stride = clamp(Number.isFinite(Number(o.poseStride)) ? Number(o.poseStride) : def[0], 0, 0.5),
-            crouch = clamp(Number.isFinite(Number(o.poseCrouch)) ? Number(o.poseCrouch) : def[1], 0, 1),
-            lean = clamp(Number.isFinite(Number(o.poseLean)) ? Number(o.poseLean) : def[2], -0.35, 0.35),
-            headTilt = clamp(Number(o.headTilt) || 0, -25, 25);
-        const bw = 0.28 * h * bodyScale * shoulderScale,
-            bd = 0.16 * h * bodyScale,
-            leg = 0.055 * h * bodyScale,
-            headR = 0.095 * h * headScale;
-        let legTop = (0.47 - 0.16 * crouch) * h,
-            torso0 = (0.44 - 0.16 * crouch) * h,
-            torso1 = (0.78 - 0.18 * crouch) * h,
-            head0 = (0.84 - 0.18 * crouch) * h,
-            head1 = (0.99 - 0.18 * crouch) * h,
-            footY = [-stride, stride],
-            kneeY = [-0.02 * h, 0.02 * h],
-            kneeX = [-0.09 * h * legSpread, 0.09 * h * legSpread],
-            poseTop = (1 - 0.18 * crouch) * h;
-        const bodyY = lean * 0.18,
-            headY = lean * 0.42,
-            headTopX = Math.sin(headTilt * DG) * 0.06 * h;
-        if (pose === "walk") {
-            kneeY = [-0.05 * h, 0.06 * h];
-            kneeX = [-0.07 * h * legSpread, 0.08 * h * legSpread];
-        }
-        if (pose === "crouch") {
-            kneeY = [-0.06 * h, 0.06 * h];
-            kneeX = [-0.1 * h * legSpread, 0.1 * h * legSpread];
-        }
-        if (pose === "sit") {
-            kneeY = [0.2 * h, 0.26 * h];
-            kneeX = [-0.11 * h * legSpread, 0.11 * h * legSpread];
-        }
-        // 足元の小さな台座と脚。歩幅・しゃがみ量・脚の開きを連続的に反映する。
-        out.push(...boxA(o, leg * 1.5, bd * 0.85, 0, 0.08 * h, c));
-        if (pose === "sit") {
-            out.push(
-                lineA(
-                    o,
-                    [
-                        [-0.09 * h * legSpread, bodyY, 0.32 * h],
-                        [kneeX[0], kneeY[0], 0.3 * h],
-                        [kneeX[0], footY[0], 0],
-                    ],
-                    c,
-                    1.4,
-                ),
-            );
-            out.push(
-                lineA(
-                    o,
-                    [
-                        [0.09 * h * legSpread, bodyY, 0.32 * h],
-                        [kneeX[1], kneeY[1], 0.3 * h],
-                        [kneeX[1], footY[1], 0],
-                    ],
-                    c,
-                    1.4,
-                ),
-            );
-        } else {
-            out.push(
-                lineA(
-                    o,
-                    [
-                        [kneeX[0], footY[0], 0],
-                        [kneeX[0], kneeY[0], legTop],
-                    ],
-                    c,
-                    1.4,
-                ),
-            );
-            out.push(
-                lineA(
-                    o,
-                    [
-                        [kneeX[1], footY[1], 0],
-                        [kneeX[1], kneeY[1], legTop],
-                    ],
-                    c,
-                    1.4,
-                ),
-            );
-        }
-        // Torso and shoulders. leanは肩・首・頭の位置へ反映する。
-        out.push(...boxA(o, bw, bd, torso0, torso1, c));
-        out.push(
-            lineA(
-                o,
-                [
-                    [-bw * 0.48, bodyY, torso1 - 0.02 * h],
-                    [bw * 0.48, bodyY, torso1 - 0.02 * h],
-                ],
-                a,
-                1,
-            ),
-        );
-        // 腕は省略。小さな人物シルエットとして使えるよう胴体と脚だけ残す。
-        // Head rings are shifted/tilted without adding arms.
-        const ringAt = (rx, ry, x0, y0, z, n, color) => {
-            const pts = [];
-            for (let i = 0; i < n; i++) {
-                const t = (i / n) * Math.PI * 2;
-                pts.push([x0 + rx * Math.cos(t), y0 + ry * Math.sin(t), z]);
-            }
-            return polyA(o, pts, color);
-        };
-        out.push(
-            lineA(
-                o,
-                [
-                    [0, bodyY, torso1],
-                    [headTopX, headY, head0],
+                    [-w / 2, y0, z],
+                    [w / 2, y0, z],
+                    [w / 2, y1, z],
+                    [-w / 2, y1, z],
                 ],
                 c,
-                1.1,
-            ),
-        );
-        out.push(ringAt(headR, headR * 0.9, 0, headY, head0, 8, c));
-        out.push(ringAt(headR * 0.86, headR * 0.78, headTopX, headY + 0.02 * h, head1, 8, c));
-        for (let i = 0; i < 8; i++) {
-            const t = (i / 8) * Math.PI * 2;
-            out.push(
-                lineA(
-                    o,
-                    [
-                        [headR * Math.cos(t), headY + headR * 0.9 * Math.sin(t), head0],
-                        [headTopX + headR * 0.86 * Math.cos(t), headY + 0.02 * h + headR * 0.78 * Math.sin(t), head1],
-                    ],
-                    c,
-                    0.85,
-                ),
-            );
-        }
-        // A small measurement tick makes the current pose height reference visible.
-        const mx = 0.42 * h;
-        out.push(
-            lineA(
-                o,
-                [
-                    [mx, 0, 0],
-                    [mx, 0, poseTop],
-                ],
-                a,
-                0.75,
             ),
         );
         out.push(
             lineA(
                 o,
                 [
-                    [mx - 0.045 * h, 0, 0],
-                    [mx + 0.045 * h, 0, 0],
+                    [-w / 2, y0, z0],
+                    [-w / 2, y0, z],
+                    [w / 2, y0, z],
                 ],
                 a,
-                0.75,
+                0.9,
             ),
         );
         out.push(
             lineA(
                 o,
                 [
-                    [mx - 0.045 * h, 0, poseTop],
-                    [mx + 0.045 * h, 0, poseTop],
+                    [w / 2, y0, z0],
+                    [w / 2, y0, z],
                 ],
                 a,
-                0.75,
+                0.9,
             ),
         );
-        // --- 開口のある建物 ---
-        // 外枠に加え、開口の左右柱・上梁・内側面・奥面を描く。
-    } else if (kind === "building") {
-        // チェックを外したリンク建物は、開口のない通常の閉じた箱へ戻す。
-        if (o.openingEnabled === false) return closedBuildingLines(o, w, d, h, c);
-        // 外側は直方体の輪郭を保ちながら、正面から背面まで抜ける開口を作る。
-        // 左右の柱＋上梁として分けて描くので、開口の左右・上面・奥行きも編集対象になる。
-        const bp = buildingParams(o),
-            ow = bp.openingW,
-            oh = bp.openingH,
-            backY = bp.backY,
-            side = bp.sideT,
-            centerX = (ow + side) / 2;
-        const outerFront = [
+        out.push(
+            lineA(
+                o,
+                [
+                    [-w / 2, y0, z],
+                    [-w / 2, y1, z],
+                ],
+                a,
+                0.9,
+            ),
+        );
+        out.push(
+            lineA(
+                o,
+                [
+                    [w / 2, y0, z],
+                    [w / 2, y1, z],
+                ],
+                a,
+                0.9,
+            ),
+        );
+    }
+    out.push(
+        polyA(
+            o,
+            [
                 [-w / 2, -d / 2, 0],
                 [w / 2, -d / 2, 0],
-                [w / 2, -d / 2, h],
-                [-w / 2, -d / 2, h],
+                [w / 2, d / 2, 0],
+                [-w / 2, d / 2, 0],
             ],
-            outerBack = [
+            a,
+            0.9,
+        ),
+    );
+    out.push(
+        lineA(
+            o,
+            [
                 [-w / 2, d / 2, 0],
                 [w / 2, d / 2, 0],
                 [w / 2, d / 2, h],
                 [-w / 2, d / 2, h],
-            ];
-        out.push(polyA(o, outerFront, c));
-        out.push(polyA(o, outerBack, c));
-        const innerFront = [
-                [-ow / 2, -d / 2, 0],
-                [-ow / 2, -d / 2, oh],
-                [ow / 2, -d / 2, oh],
-                [ow / 2, -d / 2, 0],
+                [-w / 2, d / 2, 0],
             ],
-            innerBack = [
-                [-ow / 2, d / 2, 0],
-                [-ow / 2, d / 2, oh],
-                [ow / 2, d / 2, oh],
-                [ow / 2, d / 2, 0],
-            ],
-            innerPanel = [
-                [-ow / 2, backY, 0],
-                [-ow / 2, backY, oh],
-                [ow / 2, backY, oh],
-                [ow / 2, backY, 0],
-            ];
-        out.push(lineA(o, innerFront, a, 1.1));
-        out.push(lineA(o, innerBack, a, 1.1));
-        if (Math.abs(Math.abs(backY) - d / 2) > 0.01) out.push(lineA(o, innerPanel, a, 1.1));
-        // オレンジの奥面の下辺だけを、面から少し浮かせて線画として表示する。
-        out.push(
-            lineA(
-                o,
-                [
-                    [-ow / 2, backY, 0.012],
-                    [ow / 2, backY, 0.012],
-                ],
-                a,
-                1.15,
-            ),
-        );
-        [
-            [-w / 2, -d / 2, 0],
-            [-w / 2, d / 2, 0],
-            [w / 2, -d / 2, 0],
-            [w / 2, d / 2, 0],
-            [-w / 2, -d / 2, h],
-            [-w / 2, d / 2, h],
-            [w / 2, -d / 2, h],
-            [w / 2, d / 2, h],
-            [-ow / 2, -d / 2, 0],
-            [-ow / 2, d / 2, 0],
-            [ow / 2, -d / 2, 0],
-            [ow / 2, d / 2, 0],
-            [-ow / 2, -d / 2, oh],
-            [-ow / 2, d / 2, oh],
-            [ow / 2, -d / 2, oh],
-            [ow / 2, d / 2, oh],
-        ].forEach((p, i, arr) => {
-            if (i % 2 === 0) out.push(lineA(o, [p, arr[i + 1]], a, 1.0));
+            a,
+            1.1,
+        ),
+    );
+    // Rail posts and handrail. The quick setting can hide the whole rail.
+    if (o.handrail === true)
+        [-w / 2, w / 2].forEach((x) => {
+            const p1 = [x, -d / 2, 0.48 * h],
+                p2 = [x, d / 2, h + 0.35];
+            out.push(lineA(o, [p1, p2], a, 1.1));
+            for (let i = 0; i <= 3; i++) {
+                const t = i / 3;
+                out.push(
+                    lineA(
+                        o,
+                        [
+                            [x, -d / 2 + d * t, 0.48 * h + (h + 0.35 - 0.48 * h) * t],
+                            [x, -d / 2 + d * t, 0.48 * h + (h + 0.35 - 0.48 * h) * t + 0.22],
+                        ],
+                        a,
+                        0.8,
+                    ),
+                );
+            }
         });
-        // 開口の内側面（左右・上）を明示して、面表示時にも空洞が見えるようにする。
+    // --- 横断歩道 ---
+    // 道路の面へ白いストライプを並べる。
+}
+
+
+function linesCrosswalk(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    const n = Math.max(3, Math.min(16, Math.round(o.stripes || 7))),
+        gap = d / (n + 1),
+        stripeD = gap * 0.6;
+    for (let i = 0; i < n; i++) {
+        const y = -d / 2 + gap * (i + 1);
         out.push(
             polyA(
                 o,
                 [
-                    [-ow / 2, -d / 2, 0],
-                    [-ow / 2, d / 2, 0],
-                    [-ow / 2, d / 2, oh],
-                    [-ow / 2, -d / 2, oh],
-                ],
-                a,
-                1.0,
-            ),
-        );
-        out.push(
-            polyA(
-                o,
-                [
-                    [ow / 2, -d / 2, 0],
-                    [ow / 2, -d / 2, oh],
-                    [ow / 2, d / 2, oh],
-                    [ow / 2, d / 2, 0],
-                ],
-                a,
-                1.0,
-            ),
-        );
-        out.push(
-            polyA(
-                o,
-                [
-                    [-ow / 2, -d / 2, oh],
-                    [ow / 2, -d / 2, oh],
-                    [ow / 2, d / 2, oh],
-                    [-ow / 2, d / 2, oh],
-                ],
-                a,
-                1.0,
-            ),
-        );
-        // --- 店舗テント ---
-        // awningGeometry()が返す手前上辺・奥側・底辺をつないでテントを描く。
-    } else if (kind === "awning") {
-        // 店舗テント：初期状態は直方体。手前上辺だけを高さ・奥行き方向へ動かせる。
-        const g = awningGeometry(o),
-            x = g.w / 2,
-            baseY = g.baseFrontY,
-            edgeY = g.edgeY,
-            backY = g.d / 2,
-            frontTop = g.edgeZ,
-            backTop = g.h,
-            frontBottom = g.frontBottom,
-            backBottom = g.backBottom;
-        out.push(
-            polyA(
-                o,
-                [
-                    [-x, edgeY, frontTop],
-                    [x, edgeY, frontTop],
-                    [x, backY, backTop],
-                    [-x, backY, backTop],
+                    [-w / 2, y - stripeD / 2, 0.012],
+                    [w / 2, y - stripeD / 2, 0.012],
+                    [w / 2, y + stripeD / 2, 0.012],
+                    [-w / 2, y + stripeD / 2, 0.012],
                 ],
                 c,
                 1.1,
             ),
         );
+    }
+    out.push(
+        lineA(
+            o,
+            [
+                [-w / 2, -d / 2, 0.014],
+                [w / 2, -d / 2, 0.014],
+            ],
+            a,
+            0.9,
+        ),
+    );
+    out.push(
+        lineA(
+            o,
+            [
+                [-w / 2, d / 2, 0.014],
+                [w / 2, d / 2, 0.014],
+            ],
+            a,
+            0.9,
+        ),
+    );
+    // --- 円柱・円錐・球 ---
+    // 円柱は上下輪郭、円錐は底面とシルエット、球は正面向きの円だけを描く。
+}
+
+
+function linesCylinder(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    // 円柱は上下の輪郭だけ。側面の縦エッジは描かない。
+    out.push(ringA(o, w * 0.5, d * 0.5, 0, 12, c));
+    out.push(ringA(o, w * 0.5, d * 0.5, h, 12, c));
+}
+
+
+function linesCone(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    // 円錐も円柱と同じく、底面の輪郭と現在の視点から見える
+    // 左右2本のシルエット母線だけを描く。全周の放射線は描かない。
+    const rx = w * 0.5,
+        ry = d * 0.5,
+        base = [];
+    for (let i = 0; i < 16; i++) {
+        const t = (i / 16) * Math.PI * 2;
+        base.push([rx * Math.cos(t), ry * Math.sin(t), 0]);
+    }
+    out.push(polyA(o, base, c));
+    const cen = L2W(o, 0, 0, 0),
+        rel = V.add(camPos(), cen, 1, -1),
+        [iu, iv] = PL[o.k],
+        cs = Math.cos(o.rot * DG),
+        sn = Math.sin(o.rot * DG),
+        eu = [0, 0, 0],
+        ev = [0, 0, 0];
+    eu[iu] = cs;
+    eu[iv] = sn;
+    ev[iu] = -sn;
+    ev[iv] = cs;
+    const ph = Math.atan2(V.dot(rel, ev), V.dot(rel, eu));
+    [ph + Math.PI / 2, ph - Math.PI / 2].forEach((t) =>
         out.push(
-            polyA(
+            lineA(
                 o,
                 [
-                    [-x, baseY, frontBottom],
-                    [x, baseY, frontBottom],
-                    [x, backY, backBottom],
-                    [-x, backY, backBottom],
+                    [rx * Math.cos(t), ry * Math.sin(t), 0],
+                    [0, 0, h],
                 ],
                 a,
                 1.0,
             ),
-        );
+        ),
+    );
+}
+
+
+function linesSphere(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    // 球は緯度線・経線を描かず、円形の外周輪郭だけを描く。
+    // 視点方向に合わせた「正面向きの円」を3D線として置くため、
+    // カメラを回転・パンしても画面上の輪郭はつぶれず、常に円のままになる。
+    const r = Math.min(w, d, h) * 0.5,
+        zc = h * 0.5,
+        center = L2W(o, 0, 0, zc),
+        eu = [0, 0, 0],
+        ev = [0, 0, 0],
+        ez = [0, 0, 0];
+    const [iu, iv] = PL[o.k],
+        cs = Math.cos(o.rot * DG),
+        sn = Math.sin(o.rot * DG);
+    eu[iu] = cs;
+    eu[iv] = sn;
+    ev[iu] = -sn;
+    ev[iv] = cs;
+    ez[o.k] = -o.d;
+    const right = V.nrm(wld([1, 0, 0])),
+        up = V.nrm(wld([0, 1, 0])),
+        pts = [],
+        toLocal = (world) => {
+            const rel = V.add(world, center, 1, -1);
+            return [V.dot(rel, eu), V.dot(rel, ev), zc + V.dot(rel, ez)];
+        };
+    for (let i = 0; i <= 48; i++) {
+        const t = (i / 48) * Math.PI * 2,
+            co = Math.cos(t),
+            si = Math.sin(t);
+        pts.push(toLocal(V.add(center, V.add(right, up, r * co, r * si))));
+    }
+    out.push(lineA(o, pts, c, 1.1));
+}
+
+
+function linesTriPrism(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    const x = w / 2,
+        y = d / 2,
+        front = [
+            [-x, -y, 0],
+            [x, -y, 0],
+            [0, -y, h],
+        ],
+        back = [
+            [-x, y, 0],
+            [x, y, 0],
+            [0, y, h],
+        ];
+    out.push(polyA(o, front, c));
+    out.push(polyA(o, back, c));
+    for (let i = 0; i < 3; i++) out.push(lineA(o, [front[i], back[i]], a, 1.1));
+}
+
+
+function linesTriPyramid(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    const x = w / 2,
+        y = d / 2,
+        base = [
+            [-x, -y, 0],
+            [x, -y, 0],
+            [0, y, 0],
+        ],
+        apex = [0, 0, h];
+    out.push(polyA(o, base, c));
+    base.forEach((v) => out.push(lineA(o, [v, apex], a, 1.1)));
+}
+
+
+function linesLantern(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    const body0 = 0.22 * h,
+        body1 = 0.7 * h,
+        rx = w * 0.48,
+        ry = d * 0.48;
+    out.push(ringA(o, rx, ry, body0, 8, c));
+    out.push(ringA(o, rx, ry, body1, 8, c));
+    out.push(...spokesA(o, [0, 0], [rx, ry], body0, [0, 0], [rx, ry], body1, 8, c));
+    out.push(ringA(o, rx * 0.82, ry * 0.82, 0.78 * h, 8, a));
+    out.push(...spokesA(o, [0, 0], [rx, ry], body1, [0, 0], [rx * 0.82, ry * 0.82], 0.78 * h, 8, a, 0.9));
+    out.push(
+        lineA(
+            o,
+            [
+                [0, 0, 0.78 * h],
+                [0, 0, 0.94 * h],
+            ],
+            a,
+            1.3,
+        ),
+    );
+    out.push(
+        lineA(
+            o,
+            [
+                [0, 0, 0.94 * h],
+                [-0.1 * w, 0, h],
+                [0.1 * w, 0, h],
+                [0, 0, 0.94 * h],
+            ],
+            a,
+            1.1,
+        ),
+    );
+    // Two inner bands suggest a glowing paper lantern without requiring a texture.
+    [0.36, 0.56].forEach((z) => out.push(ringA(o, rx * 1.02, ry * 1.02, z * h, 8, a, 0.8)));
+    // --- 看板 ---
+    // 外枠と、faceW / faceHで編集できる内側の絵枠を描く。
+}
+
+
+function linesSign(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    // 看板外側は通常の直方体。内側の絵枠だけを追加編集できる。
+    const board0 = 0.08 * h,
+        board1 = 0.82 * h,
+        fy = signFaceDepth(o, 0.009);
+    const faceW = Math.max(0.08, Math.min(Number(o.faceW) || w * 0.7, w * 0.9));
+    const faceH = Math.max(0.08, Math.min(Number(o.faceH) || h * 0.34, (board1 - board0) * 0.84));
+    out.push(...boxA(o, w, d, board0, board1, c));
+    // adjustable inner illustration frame; no lettering strokes inside.
+    const ix = faceW / 2,
+        iz0 = (board0 + board1 - faceH) / 2,
+        iz1 = iz0 + faceH;
+    const q = [
+        [-ix, fy, iz0],
+        [ix, fy, iz0],
+        [ix, fy, iz1],
+        [-ix, fy, iz1],
+    ];
+    out.push(polyA(o, q, a, 1.1));
+    // --- 人物 ---
+    // 身長・体格・頭身・脚の開き・簡易ポーズを線画へ反映する。
+}
+
+
+function linesPerson(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    // 人物は配置後も高さ・体格・頭身・脚の開き・簡易ポーズを編集できる。
+    // 腕は既存仕様どおり描かず、立体感は胴体・脚・頭の線だけで表現する。
+    const bodyScale = clamp(Number(o.bodyScale) || 1, 0.6, 1.8),
+        shoulderScale = clamp(Number(o.shoulderScale) || 1, 0.6, 1.6),
+        headScale = clamp(Number(o.headScale) || 1, 0.7, 1.5),
+        legSpread = clamp(Number(o.legSpread) || 1, 0.6, 1.8),
+        pose = o.pose || "stand";
+    const defaults = { stand: [0, 0, 0], walk: [0.22, 0, 0], crouch: [0.04, 0.65, 0], sit: [0.1, 0.35, 0] },
+        def = defaults[pose] || defaults.stand;
+    const stride = clamp(Number.isFinite(Number(o.poseStride)) ? Number(o.poseStride) : def[0], 0, 0.5),
+        crouch = clamp(Number.isFinite(Number(o.poseCrouch)) ? Number(o.poseCrouch) : def[1], 0, 1),
+        lean = clamp(Number.isFinite(Number(o.poseLean)) ? Number(o.poseLean) : def[2], -0.35, 0.35),
+        headTilt = clamp(Number(o.headTilt) || 0, -25, 25);
+    const bw = 0.28 * h * bodyScale * shoulderScale,
+        bd = 0.16 * h * bodyScale,
+        leg = 0.055 * h * bodyScale,
+        headR = 0.095 * h * headScale;
+    let legTop = (0.47 - 0.16 * crouch) * h,
+        torso0 = (0.44 - 0.16 * crouch) * h,
+        torso1 = (0.78 - 0.18 * crouch) * h,
+        head0 = (0.84 - 0.18 * crouch) * h,
+        head1 = (0.99 - 0.18 * crouch) * h,
+        footY = [-stride, stride],
+        kneeY = [-0.02 * h, 0.02 * h],
+        kneeX = [-0.09 * h * legSpread, 0.09 * h * legSpread],
+        poseTop = (1 - 0.18 * crouch) * h;
+    const bodyY = lean * 0.18,
+        headY = lean * 0.42,
+        headTopX = Math.sin(headTilt * DG) * 0.06 * h;
+    if (pose === "walk") {
+        kneeY = [-0.05 * h, 0.06 * h];
+        kneeX = [-0.07 * h * legSpread, 0.08 * h * legSpread];
+    }
+    if (pose === "crouch") {
+        kneeY = [-0.06 * h, 0.06 * h];
+        kneeX = [-0.1 * h * legSpread, 0.1 * h * legSpread];
+    }
+    if (pose === "sit") {
+        kneeY = [0.2 * h, 0.26 * h];
+        kneeX = [-0.11 * h * legSpread, 0.11 * h * legSpread];
+    }
+    // 足元の小さな台座と脚。歩幅・しゃがみ量・脚の開きを連続的に反映する。
+    out.push(...boxA(o, leg * 1.5, bd * 0.85, 0, 0.08 * h, c));
+    if (pose === "sit") {
         out.push(
-            polyA(
+            lineA(
                 o,
                 [
-                    [-x, baseY, frontBottom],
-                    [x, baseY, frontBottom],
-                    [x, edgeY, frontTop],
-                    [-x, edgeY, frontTop],
+                    [-0.09 * h * legSpread, bodyY, 0.32 * h],
+                    [kneeX[0], kneeY[0], 0.3 * h],
+                    [kneeX[0], footY[0], 0],
                 ],
-                a,
-                1.0,
+                c,
+                1.4,
             ),
         );
         out.push(
-            polyA(
+            lineA(
                 o,
                 [
-                    [-x, backY, backBottom],
-                    [x, backY, backBottom],
-                    [x, backY, backTop],
-                    [-x, backY, backTop],
+                    [0.09 * h * legSpread, bodyY, 0.32 * h],
+                    [kneeX[1], kneeY[1], 0.3 * h],
+                    [kneeX[1], footY[1], 0],
                 ],
-                a,
-                1.0,
+                c,
+                1.4,
+            ),
+        );
+    } else {
+        out.push(
+            lineA(
+                o,
+                [
+                    [kneeX[0], footY[0], 0],
+                    [kneeX[0], kneeY[0], legTop],
+                ],
+                c,
+                1.4,
             ),
         );
         out.push(
-            polyA(
+            lineA(
                 o,
                 [
-                    [-x, baseY, frontBottom],
-                    [-x, backY, backBottom],
-                    [-x, backY, backTop],
-                    [-x, edgeY, frontTop],
+                    [kneeX[1], footY[1], 0],
+                    [kneeX[1], kneeY[1], legTop],
                 ],
-                a,
-                1.0,
-            ),
-        );
-        out.push(
-            polyA(
-                o,
-                [
-                    [x, baseY, frontBottom],
-                    [x, edgeY, frontTop],
-                    [x, backY, backTop],
-                    [x, backY, backBottom],
-                ],
-                a,
-                1.0,
+                c,
+                1.4,
             ),
         );
     }
-    return out;
+    // Torso and shoulders. leanは肩・首・頭の位置へ反映する。
+    out.push(...boxA(o, bw, bd, torso0, torso1, c));
+    out.push(
+        lineA(
+            o,
+            [
+                [-bw * 0.48, bodyY, torso1 - 0.02 * h],
+                [bw * 0.48, bodyY, torso1 - 0.02 * h],
+            ],
+            a,
+            1,
+        ),
+    );
+    // 腕は省略。小さな人物シルエットとして使えるよう胴体と脚だけ残す。
+    // Head rings are shifted/tilted without adding arms.
+    const ringAt = (rx, ry, x0, y0, z, n, color) => {
+        const pts = [];
+        for (let i = 0; i < n; i++) {
+            const t = (i / n) * Math.PI * 2;
+            pts.push([x0 + rx * Math.cos(t), y0 + ry * Math.sin(t), z]);
+        }
+        return polyA(o, pts, color);
+    };
+    out.push(
+        lineA(
+            o,
+            [
+                [0, bodyY, torso1],
+                [headTopX, headY, head0],
+            ],
+            c,
+            1.1,
+        ),
+    );
+    out.push(ringAt(headR, headR * 0.9, 0, headY, head0, 8, c));
+    out.push(ringAt(headR * 0.86, headR * 0.78, headTopX, headY + 0.02 * h, head1, 8, c));
+    out.push(
+        ...spokesA(
+            o,
+            [0, headY],
+            [headR, headR * 0.9],
+            head0,
+            [headTopX, headY + 0.02 * h],
+            [headR * 0.86, headR * 0.78],
+            head1,
+            8,
+            c,
+            0.85,
+        ),
+    );
+    // A small measurement tick makes the current pose height reference visible.
+    const mx = 0.42 * h;
+    out.push(
+        lineA(
+            o,
+            [
+                [mx, 0, 0],
+                [mx, 0, poseTop],
+            ],
+            a,
+            0.75,
+        ),
+    );
+    out.push(
+        lineA(
+            o,
+            [
+                [mx - 0.045 * h, 0, 0],
+                [mx + 0.045 * h, 0, 0],
+            ],
+            a,
+            0.75,
+        ),
+    );
+    out.push(
+        lineA(
+            o,
+            [
+                [mx - 0.045 * h, 0, poseTop],
+                [mx + 0.045 * h, 0, poseTop],
+            ],
+            a,
+            0.75,
+        ),
+    );
+    // --- 開口のある建物 ---
+    // 外枠に加え、開口の左右柱・上梁・内側面・奥面を描く。
 }
+
+
+function linesBuilding(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    // チェックを外したリンク建物は、開口のない通常の閉じた箱へ戻す。
+    if (o.openingEnabled === false) {
+        // 閉じた箱は形が別なので、専用の関数の結果をそのまま返す。
+        out.push(...closedBuildingLines(o, w, d, h, c));
+        return;
+    }
+    // 外側は直方体の輪郭を保ちながら、正面から背面まで抜ける開口を作る。
+    // 左右の柱＋上梁として分けて描くので、開口の左右・上面・奥行きも編集対象になる。
+    const bp = buildingParams(o),
+        ow = bp.openingW,
+        oh = bp.openingH,
+        backY = bp.backY,
+        side = bp.sideT,
+        centerX = (ow + side) / 2;
+    const outerFront = [
+            [-w / 2, -d / 2, 0],
+            [w / 2, -d / 2, 0],
+            [w / 2, -d / 2, h],
+            [-w / 2, -d / 2, h],
+        ],
+        outerBack = [
+            [-w / 2, d / 2, 0],
+            [w / 2, d / 2, 0],
+            [w / 2, d / 2, h],
+            [-w / 2, d / 2, h],
+        ];
+    out.push(polyA(o, outerFront, c));
+    out.push(polyA(o, outerBack, c));
+    const innerFront = [
+            [-ow / 2, -d / 2, 0],
+            [-ow / 2, -d / 2, oh],
+            [ow / 2, -d / 2, oh],
+            [ow / 2, -d / 2, 0],
+        ],
+        innerBack = [
+            [-ow / 2, d / 2, 0],
+            [-ow / 2, d / 2, oh],
+            [ow / 2, d / 2, oh],
+            [ow / 2, d / 2, 0],
+        ],
+        innerPanel = [
+            [-ow / 2, backY, 0],
+            [-ow / 2, backY, oh],
+            [ow / 2, backY, oh],
+            [ow / 2, backY, 0],
+        ];
+    out.push(lineA(o, innerFront, a, 1.1));
+    out.push(lineA(o, innerBack, a, 1.1));
+    if (Math.abs(Math.abs(backY) - d / 2) > 0.01) out.push(lineA(o, innerPanel, a, 1.1));
+    // オレンジの奥面の下辺だけを、面から少し浮かせて線画として表示する。
+    out.push(
+        lineA(
+            o,
+            [
+                [-ow / 2, backY, 0.012],
+                [ow / 2, backY, 0.012],
+            ],
+            a,
+            1.15,
+        ),
+    );
+    [
+        [-w / 2, -d / 2, 0],
+        [-w / 2, d / 2, 0],
+        [w / 2, -d / 2, 0],
+        [w / 2, d / 2, 0],
+        [-w / 2, -d / 2, h],
+        [-w / 2, d / 2, h],
+        [w / 2, -d / 2, h],
+        [w / 2, d / 2, h],
+        [-ow / 2, -d / 2, 0],
+        [-ow / 2, d / 2, 0],
+        [ow / 2, -d / 2, 0],
+        [ow / 2, d / 2, 0],
+        [-ow / 2, -d / 2, oh],
+        [-ow / 2, d / 2, oh],
+        [ow / 2, -d / 2, oh],
+        [ow / 2, d / 2, oh],
+    ].forEach((p, i, arr) => {
+        if (i % 2 === 0) out.push(lineA(o, [p, arr[i + 1]], a, 1.0));
+    });
+    // 開口の内側面（左右・上）を明示して、面表示時にも空洞が見えるようにする。
+    out.push(
+        polyA(
+            o,
+            [
+                [-ow / 2, -d / 2, 0],
+                [-ow / 2, d / 2, 0],
+                [-ow / 2, d / 2, oh],
+                [-ow / 2, -d / 2, oh],
+            ],
+            a,
+            1.0,
+        ),
+    );
+    out.push(
+        polyA(
+            o,
+            [
+                [ow / 2, -d / 2, 0],
+                [ow / 2, -d / 2, oh],
+                [ow / 2, d / 2, oh],
+                [ow / 2, d / 2, 0],
+            ],
+            a,
+            1.0,
+        ),
+    );
+    out.push(
+        polyA(
+            o,
+            [
+                [-ow / 2, -d / 2, oh],
+                [ow / 2, -d / 2, oh],
+                [ow / 2, d / 2, oh],
+                [-ow / 2, d / 2, oh],
+            ],
+            a,
+            1.0,
+        ),
+    );
+    // --- 店舗テント ---
+    // awningGeometry()が返す手前上辺・奥側・底辺をつないでテントを描く。
+}
+
+
+function linesAwning(ctx) {
+    const { o, w, d, h, c, a, out } = ctx;
+    // 店舗テント：初期状態は直方体。手前上辺だけを高さ・奥行き方向へ動かせる。
+    const g = awningGeometry(o),
+        x = g.w / 2,
+        baseY = g.baseFrontY,
+        edgeY = g.edgeY,
+        backY = g.d / 2,
+        frontTop = g.edgeZ,
+        backTop = g.h,
+        frontBottom = g.frontBottom,
+        backBottom = g.backBottom;
+    out.push(
+        polyA(
+            o,
+            [
+                [-x, edgeY, frontTop],
+                [x, edgeY, frontTop],
+                [x, backY, backTop],
+                [-x, backY, backTop],
+            ],
+            c,
+            1.1,
+        ),
+    );
+    out.push(
+        polyA(
+            o,
+            [
+                [-x, baseY, frontBottom],
+                [x, baseY, frontBottom],
+                [x, backY, backBottom],
+                [-x, backY, backBottom],
+            ],
+            a,
+            1.0,
+        ),
+    );
+    out.push(
+        polyA(
+            o,
+            [
+                [-x, baseY, frontBottom],
+                [x, baseY, frontBottom],
+                [x, edgeY, frontTop],
+                [-x, edgeY, frontTop],
+            ],
+            a,
+            1.0,
+        ),
+    );
+    out.push(
+        polyA(
+            o,
+            [
+                [-x, backY, backBottom],
+                [x, backY, backBottom],
+                [x, backY, backTop],
+                [-x, backY, backTop],
+            ],
+            a,
+            1.0,
+        ),
+    );
+    out.push(
+        polyA(
+            o,
+            [
+                [-x, baseY, frontBottom],
+                [-x, backY, backBottom],
+                [-x, backY, backTop],
+                [-x, edgeY, frontTop],
+            ],
+            a,
+            1.0,
+        ),
+    );
+    out.push(
+        polyA(
+            o,
+            [
+                [x, baseY, frontBottom],
+                [x, edgeY, frontTop],
+                [x, backY, backTop],
+                [x, backY, backBottom],
+            ],
+            a,
+            1.0,
+        ),
+    );
+}
+
 // ===== 6. 保存データ・入力値の正規化 =====
 // 描画前に、寸法の下限・ベベル値・階数・パス値などを整える。
 // ここでは見た目を作らず、後段のassetLines()が安全に読める形へ変換する。
@@ -8684,6 +9855,48 @@ function normalizedAsset(o) {
             bevelOffset = clamp(Number(q.bevelOffset) || 0, 0, max),
             bevelSegments = beveledBoxSegments(q.bevelSegments, q.bevelEdges);
         return { ...q, bevelOffset, bevelSegments, h: Math.max(0, Number(q.h) || 0) };
+    }
+    if (q && q.asset === "wallSign") {
+        const params = wallSignParams(q);
+        return {
+            ...q,
+            ra: params.width * 0.5,
+            rb: params.thickness * 0.5,
+            h: params.height,
+            wallSignBracketCount: params.bracketCount,
+            wallSignBracketLength: params.bracketLength,
+            wallSignShape: params.beveled ? "beveled" : "box",
+            wallSignBevelOffset: params.bevelOffset,
+            wallSignBevelSegments: params.bevelSegments,
+        };
+    }
+    if (q && q.asset === "recessedStackedBuilding") {
+        const params = recessedStackedBuildingParams(q);
+        return {
+            ...q,
+            ra: params.w * 0.5,
+            rb: params.d * 0.5,
+            h: params.totalH,
+            recessedFloorCount: params.floorCount,
+            recessedFloorHeight: params.floorHeight,
+            recessedFirstFloorExtra: params.firstFloorExtra,
+            recessedFloorGap: params.floorGap,
+            recessedCornerBevel: params.cornerBevel,
+            recessedCornerBevelSegments: params.cornerBevelSegments,
+            recessedWindowW: params.windowW,
+            recessedWindowMarginLeft: params.marginLeft,
+            recessedWindowMarginEnd: params.marginEnd,
+            recessedJunctionOffset: params.junctionOffset,
+            recessedWindowCount: params.windowCount,
+            recessedWindowH: params.windowH,
+            recessedWindowDepth: params.windowDepth,
+            recessedWindowBottom: params.windowBottom,
+            recessedSillHeight: params.sillHeight,
+            recessedBeamHeight: params.beamHeight,
+            recessedBeamProjection: params.beamProjection,
+            recessedSideWindowW: params.sideWindowW,
+            recessedSideWindows: params.sideWindows,
+        };
     }
     if (q && isStackedBuildingAsset(q)) {
         const source = Array.isArray(q.floors) && q.floors.length ? q.floors : [],
@@ -8827,6 +10040,15 @@ obBounds = function (o) {
                 pts.push(pt(q, xy[0], xy[1], 0));
                 pts.push(pt(q, xy[0], xy[1], params.openingH));
             });
+    } else if (q.asset === "wallSign") {
+        const params = wallSignParams(q),
+            half = params.thickness * 0.5,
+            reach = -params.width * 0.5 - (params.bracketCount > 0 ? params.bracketLength : 0),
+            face = wallSignFacePoints(params);
+        face.forEach(([x, z]) => {
+            [-half, half].forEach((y) => pts.push(pt(q, x, y, z)));
+            pts.push(pt(q, reach, 0, z));
+        });
     } else if (q.asset === "wallSideSign") {
         const bracketLength = clamp(Math.abs(Number(q.wallSideSignBracketLength) || 0.36), 0.05, 5),
             clearance = 0.025,
@@ -8845,6 +10067,19 @@ obBounds = function (o) {
         const mesh = pathPipeMesh(q);
         mesh.rings.forEach((ring) =>
             ring.forEach((v) => pts.push(pt(q, Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0))),
+        );
+    } else if (q.asset === "recessedStackedBuilding") {
+        const params = recessedStackedBuildingParams(q),
+            h = params.totalH,
+            xValues = [-params.w / 2, params.w / 2, params.w / 2 + params.beamProjection],
+            yValues = [-params.d / 2 - params.beamProjection, -params.d / 2, params.d / 2],
+            beamBottom = Math.max(0, h - params.beamHeight);
+        xValues.forEach((x) =>
+            yValues.forEach((y) => {
+                pts.push(customPt(q, x, y, 0));
+                pts.push(customPt(q, x, y, h));
+                pts.push(customPt(q, x, y, beamBottom));
+            }),
         );
     } else if (isStackedBuildingAsset(q)) {
         const floors =
@@ -8893,6 +10128,7 @@ regenObjects();
    アセットの配置・接続・JSON入出力・棚UIを担当する。
 
    処理の流れ
+   0. ASSETS               : asset.js の定義表（棚の並び順もここに従う）
    1. newAsset             : 初期位置、生成面、寸法、固有値を持つ定義を作る
    2. placeAsset           : 線画を生成してSへ登録し、選択状態を更新する
    3. placeLinkedAsset     : 建物とテント／看板などの親子接続を作る
@@ -8915,6 +10151,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         syncFloorPlanDockLayout,
         sceneObjects,
     } = bridge;
+    // ===== 1. 接地と配置位置 =====
     function groundAt(p) {
         const q = hit3(unscr(p), 1, -1, camPos());
         if (q && Number.isFinite(q[0]) && Number.isFinite(q[2])) return q;
@@ -8960,6 +10197,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     }
     // アセット棚での1回の追加に対応する定義を作る。
     // 生成面（P.assetAxis）をkへ変換し、アセット固有の初期値もここで付ける。
+    // ===== 2. アセットの初期値（形状・寸法・固有名） =====
     function newAsset(kind, p, worldPoint = null) {
         const info = ASSETS[kind],
             isDefault = !p && !worldPoint;
@@ -8999,6 +10237,50 @@ window.cityGridInstallAssetUI = function (bridge) {
             accent: info.accent,
         };
         const height = kind === "person" ? Number(P.hm) || 1.7 : info.h;
+        if (kind === "recessedStackedBuilding") {
+            const floorCount = Math.max(1, Math.min(30, Math.round(Number(info.recessedFloorCount) || 4))),
+                floorHeight = Math.max(0.5, Number(info.recessedFloorHeight) || 2.1),
+                firstFloorExtra = Math.max(
+                    0,
+                    Number.isFinite(Number(info.recessedFirstFloorExtra)) ? Number(info.recessedFirstFloorExtra) : 0.35,
+                ),
+                floorGap = Math.max(0, Number.isFinite(Number(info.recessedFloorGap)) ? Number(info.recessedFloorGap) : 1.25),
+                totalH = floorCount * floorHeight + firstFloorExtra + Math.max(0, floorCount - 1) * floorGap;
+            return {
+                ...base,
+                type: "asset",
+                asset: kind,
+                assetId: "recessed-stacked-building",
+                assetName: info.label,
+                k: 1,
+                d: -1,
+                off: [q[0], 0, q[2]],
+                ca: 0,
+                cb: 0,
+                ra: info.w / 2,
+                rb: info.d / 2,
+                h: totalH,
+                recessedFloorCount: floorCount,
+                recessedFloorHeight: floorHeight,
+                recessedFirstFloorExtra: firstFloorExtra,
+                recessedFloorGap: floorGap,
+                recessedCornerBevel: info.recessedCornerBevel,
+                recessedCornerBevelSegments: info.recessedCornerBevelSegments,
+                recessedWindowW: info.recessedWindowW,
+                recessedWindowCount: info.recessedWindowCount,
+                recessedWindowH: info.recessedWindowH,
+                recessedWindowDepth: info.recessedWindowDepth,
+                recessedWindowBottom: info.recessedWindowBottom,
+                recessedSillHeight: info.recessedSillHeight ?? info.recessedWindowBottom,
+                recessedBeamHeight: info.recessedBeamHeight,
+                recessedBeamProjection: info.recessedBeamProjection,
+                recessedSideWindowW: info.recessedSideWindowW,
+                recessedWindowMarginLeft: info.recessedWindowMarginLeft,
+                recessedWindowMarginEnd: info.recessedWindowMarginEnd,
+                recessedJunctionOffset: info.recessedJunctionOffset || 0,
+                recessedSideWindows: info.recessedSideWindows !== false,
+            };
+        }
         if (kind === "stackedBuilding" || kind === "beveledStackedBuilding") {
             const beveled = kind === "beveledStackedBuilding",
                 floorHeight = 2.2,
@@ -9105,6 +10387,31 @@ window.cityGridInstallAssetUI = function (bridge) {
                 cornerCutOpeningDepth: info.cornerCutOpeningDepth,
                 cutColor: info.cutColor,
             };
+        // 壁付け看板（単体）は、板を立てて地面に置き、取付金具を裏側へ出す。
+        // 取付金具の本数・長さ・ベベル形状は配置後に画面と数値の両方から編集できる。
+        if (kind === "wallSign")
+            return {
+                ...base,
+                type: "asset",
+                asset: kind,
+                assetId: "wall-sign",
+                assetName: info.label,
+                k: 1,
+                d: -1,
+                off: [q[0], 0, q[2]],
+                ca: 0,
+                cb: 0,
+                ra: info.w / 2,
+                rb: info.d / 2,
+                h: height,
+                // 初期の向きは正面。回転はほかのアセットと同じく画面から変えられる。
+                rot: 0,
+                wallSignBracketCount: 3,
+                wallSignBracketLength: 0.36,
+                wallSignShape: "beveled",
+                wallSignBevelOffset: 0.18,
+                wallSignBevelSegments: 4,
+            };
         return {
             ...base,
             type: "asset",
@@ -9145,6 +10452,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     }
     // 建物とテント／看板を親子として作る。
     // child.attachment が親の開口側へ追従するため、親の移動・回転・寸法変更に対応できる。
+    // ===== 3. 連結パーツと配置（ベランダ・建物付属） =====
     function placeLinkedAsset(kind, p) {
         const childKind = kind === "buildingAwning" ? "awning" : "rect",
             q = p ? groundAt(p) : assetGroundPoint(ASSETS.building),
@@ -9362,6 +10670,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     // 図形／アセット定義だけをコピーし、貼り付け時に新しいIDで再生成する。
     let objectClipboard = [];
     // 線画ではなく、選択中オブジェクトの定義をJSONとしてクリップボードへ保持する。
+    // ===== 4. コピー・貼り付け・読み込み =====
     function copySelectedObjects() {
         const objects = selectedObjects();
         if (!objects.length) return false;
@@ -9517,6 +10826,7 @@ window.cityGridInstallAssetUI = function (bridge) {
 
     // 既存建物の左右の横壁へ、小型看板を任意で接着する。
     // 建物本体の種類を変えず、attachmentで親の移動・回転・寸法変更へ追従させる。
+    // ===== 5. 横壁看板の取り付け =====
     function wallSideSignChildren(parentId) {
         return sceneObjects()
             .filter((o) => o?.attachment?.parentId === parentId && o.attachment.wallSideSign)
@@ -9723,7 +11033,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     }
     window.cityGridWallSideSignToggle = toggleWallSideSign;
 
-    // ===== アセット棚と配置ボタン =====
+    // ===== 6. アセット棚と配置方向 =====
     // 棚のボタンはplaceAsset()へ集約し、UIイベント内に形状生成ロジックを重複させない。
     const tray = document.createElement("div");
     tray.id = "assetTray";
@@ -9732,7 +11042,10 @@ window.cityGridInstallAssetUI = function (bridge) {
         // 通常の「看板」アセットは、建物へ接着する横壁看板へ統合したため棚から外す。
         // 既存JSONのasset=signはASSETS定義を残して読み込み・表示できるようにする。
         Object.entries(ASSETS)
-            .filter(([k]) => k !== "sign")
+            // 看板は「壁付け看板（単体）」へ統合した。
+            // asset=sign と asset=wallSideSign（建物へ接着する専用形状）は
+            // 既存JSONの読み込み・表示用に定義だけ残し、棚からは外す。
+            .filter(([k]) => k !== "sign" && k !== "wallSideSign")
             .map(
                 ([k, v]) =>
                     `<button class="assetCard" data-asset="${k}" title="${v.label}を追加${k === "balcony" ? "（建物選択中は壁へ接着）" : ""}"><span class="assetGlyph">${v.glyph}</span><span>${v.label}</span></button>`,
@@ -9792,6 +11105,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     // 線そのものではなく定義を保存するので、寸法・向き・ポーズ・アセット固有値を保てる。
     const objectInfoCopyButton = el("objectInfoCopy"),
         objectInfoSaveButton = el("objectInfoSave");
+    // ===== 7. オブジェクト情報のコピー =====
     function objectInfoPayload() {
         const objects = selectedObjects().map((o) => {
             const q = JSON.parse(JSON.stringify(o));
@@ -9880,7 +11194,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         requestAnimationFrame(syncFloorPlanDockLayout);
     };
 
-    // ===== 4本指プリミティブクイックメニュー =====
+    // ===== 8. 4本指プリミティブクイックメニュー =====
     // 基本6種だけを小さなメニューから追加できる。実体の生成は通常のplaceAsset()へ委譲する。
     // 4本指タップで開く、長方形・円・円錐・球体・三角柱・三角錐専用の小型メニュー。
     const primitiveKinds = ["rect", "circle", "cone", "sphere", "triPrism", "triPyramid"];
@@ -9930,6 +11244,17 @@ window.cityGridInstallAssetUI = function (bridge) {
     const el = (id) => document.getElementById(id);
     const side = el("side"),
         stage = el("stage");
+    // ポインタを捕まえてドラッグを継続する。未対応ブラウザでも操作は続けたいので、
+    // 失敗しても例外は投げない（各ドラッグ処理で共通に使う）。
+    const capturePointer = (pointerId) => {
+        try {
+            document.getElementById("cv").setPointerCapture(pointerId);
+        } catch (err) {}
+    };
+    // 正投影ビューで、オブジェクトの外側へ寸法ハンドルを離す距離。
+    // 形の大きさに比例させつつ、画面のピクセル基準で上下限を決める。
+    const orthHandleGap = (span, factor = 0.35) =>
+        Math.max(48 / Z, Math.min(88 / Z, Math.max(0, span) * orthScale() * factor));
 
     // ===== 1. クイック操作パネルと作業画面 =====
     // HTMLの既存サイドバーへ、人物・ポーズ・間取り・視点の操作UIを追加する。
@@ -10181,7 +11506,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     poseButtons.forEach((b) => (b.onclick = () => applyPersonPose(b.dataset.personPose)));
     syncPersonControls();
 
-    // ===== Transparent floor tint =====
+    // ===== 2.1 床の半透明表示 =====
     // ===== 3. 床・生成方向・シーン一覧 =====
     const floorToggle = el("floorTint"),
         floorColor = el("floorTintColor"),
@@ -10249,7 +11574,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     // Asset catalog and geometry generator are provided by asset.js.
 
     // Asset placement, asset tray, object JSON and primitive menu are installed by asset.js.
-    // ===== Scene outliner / object groups =====
+    // ===== 3.1 シーン一覧（オブジェクトグループ） =====
     const list = el("objectList");
     // Sに同じオブジェクトの線が複数あるため、ob.idごとに1件へまとめる。
     function sceneObjects() {
@@ -10934,6 +12259,136 @@ window.cityGridInstallAssetUI = function (bridge) {
             n.disabled = !individualEdit && Number(n.dataset.stackFloorSelect) !== 0;
         });
     }
+    let recessedEditSession = false;
+    function syncRecessedStackedPanel() {
+        const panel = el("recessedStackedP"),
+            o = sel && obOf(sel),
+            active = !!(o && o.type === "asset" && o.asset === "recessedStackedBuilding");
+        if (!panel) return;
+        panel.style.display = active ? "" : "none";
+        if (!active) {
+            recessedEditSession = false;
+            return;
+        }
+        const q = recessedStackedBuildingParams(o),
+            values = [
+                ["recessedFloorCount", q.floorCount],
+                ["recessedFloorHeight", q.floorHeight],
+                ["recessedFirstFloorExtra", q.firstFloorExtra],
+                ["recessedFloorGap", q.floorGap],
+                ["recessedCornerBevel", q.cornerBevel],
+                ["recessedCornerBevelSegments", q.cornerBevelSegments],
+                ["recessedWindowCount", q.windowCount],
+                ["recessedWindowMarginLeft", q.marginLeft],
+                ["recessedWindowMarginEnd", q.marginEnd],
+                ["recessedWindowDepth", q.windowDepth],
+                ["recessedBeamHeight", q.beamHeight],
+                ["recessedBeamProjection", q.beamProjection],
+            ];
+        values.forEach(([id, value]) => {
+            const input = el(id);
+            if (input && document.activeElement !== input) input.value = Number(value).toFixed(3);
+        });
+        const side = el("recessedSideWindows");
+        if (side) side.checked = q.sideWindows;
+    }
+    function applyRecessedStackedProp(name, rawValue) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || o.asset !== "recessedStackedBuilding") return;
+        const q = recessedStackedBuildingParams(o),
+            patch = {};
+        if (name === "recessedSideWindows") patch[name] = rawValue === true;
+        else {
+            const limits = {
+                    recessedFloorCount: [1, 30],
+                    recessedFloorHeight: [0.5, 30],
+                    recessedFirstFloorExtra: [0, 5],
+                    recessedFloorGap: [0, 5],
+                    recessedCornerBevel: [0, recessedMaxInset(q.w, q.d)],
+                    recessedCornerBevelSegments: [1, 8],
+                    recessedWindowCount: [1, 12],
+                    recessedWindowMarginLeft: [0, Math.max(0, q.w - q.cornerBevel - 0.2)],
+                    recessedWindowMarginEnd: [0, Math.max(0, q.d - q.cornerBevel - 0.2)],
+                    recessedWindowDepth: [0.025, Math.max(0.025, recessedMaxInset(q.w, q.d))],
+                    recessedBeamHeight: [0, Math.min(0.6, q.floorHeight * 0.35)],
+                    recessedBeamProjection: [0, Math.max(0, Math.min(q.w - q.cornerBevel, q.d) * 0.25)],
+                }[name],
+                value = Number(rawValue);
+            if (!limits || !Number.isFinite(value)) return;
+            patch[name] = clamp(
+                name === "recessedFloorCount" || name === "recessedWindowCount" ? Math.round(value) : value,
+                limits[0],
+                limits[1],
+            );
+        }
+        const next = { ...o, ...patch },
+            nextParams = recessedStackedBuildingParams(next);
+        patch.ra = nextParams.w * 0.5;
+        patch.rb = nextParams.d * 0.5;
+        patch.h = nextParams.totalH;
+        if (!recessedEditSession) {
+            HU.push(S);
+            RD = [];
+            recessedEditSession = true;
+        }
+        setOb(o.id, patch);
+        render();
+    }
+    [
+        ["recessedFloorCount", "recessedFloorCount"],
+        ["recessedFloorHeight", "recessedFloorHeight"],
+        ["recessedFirstFloorExtra", "recessedFirstFloorExtra"],
+        ["recessedFloorGap", "recessedFloorGap"],
+        ["recessedCornerBevel", "recessedCornerBevel"],
+        ["recessedCornerBevelSegments", "recessedCornerBevelSegments"],
+        ["recessedWindowCount", "recessedWindowCount"],
+        ["recessedWindowMarginLeft", "recessedWindowMarginLeft"],
+        ["recessedWindowMarginEnd", "recessedWindowMarginEnd"],
+        ["recessedWindowDepth", "recessedWindowDepth"],
+        ["recessedBeamHeight", "recessedBeamHeight"],
+        ["recessedBeamProjection", "recessedBeamProjection"],
+    ].forEach(([id, name]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => applyRecessedStackedProp(name, input.value);
+        input.onchange = () => {
+            recessedEditSession = false;
+        };
+    });
+    // 縁付き階層建物と同じ「上方向へ整列」。階を地面から積み直し、
+    // 高さと外形の寸法を現在の設定へそろえる。
+    const recessedAlign = el("recessedAlign");
+    if (recessedAlign)
+        recessedAlign.onclick = () => {
+            const o = sel && obOf(sel);
+            if (!o || o.type !== "asset" || o.asset !== "recessedStackedBuilding") return;
+            HU.push(S);
+            RD = [];
+            const q = recessedStackedBuildingParams(o),
+                floors = recessedStackedBuildingFloors(o, q);
+            let z = 0;
+            floors.forEach((floor) => {
+                z += floor.h + (floor.index < q.floorCount - 1 ? q.floorGap : 0);
+            });
+            setOb(o.id, {
+                ra: q.w * 0.5,
+                rb: q.d * 0.5,
+                h: z,
+                activeFloor: 0,
+                recessedFloorCount: q.floorCount,
+                recessedFloorHeight: q.floorHeight,
+                recessedFloorGap: q.floorGap,
+            });
+            recessedEditSession = false;
+            render();
+        };
+    const recessedSideWindows = el("recessedSideWindows");
+    if (recessedSideWindows)
+        recessedSideWindows.onchange = () => {
+            recessedEditSession = false;
+            applyRecessedStackedProp("recessedSideWindows", recessedSideWindows.checked);
+            recessedEditSession = false;
+        };
     function syncStackedPanel() {
         const panel = el("stackedP"),
             o = sel && obOf(sel),
@@ -11483,6 +12938,101 @@ window.cityGridInstallAssetUI = function (bridge) {
         render();
     }
     if (pathPipeApplyPresetButton) pathPipeApplyPresetButton.onclick = applyPathPipePreset;
+    // ===== 3.2 壁付け看板（単体）のパネル =====
+    // 数値欄・チェック・選択はすべてsetOb()経由で反映し、生成処理を重複させない。
+    let wallSignEditSession = false;
+    function wallSignPanelObject() {
+        const o = sel && obOf(sel);
+        return o && o.type === "asset" && o.asset === "wallSign" ? o : null;
+    }
+    function syncWallSignPanel() {
+        const panel = el("wallSignP"),
+            o = wallSignPanelObject();
+        if (!panel) return;
+        panel.style.display = o ? "" : "none";
+        if (!o) {
+            wallSignEditSession = false;
+            return;
+        }
+        const params = wallSignParams(o),
+            values = [
+                ["wallSignBracketLength", params.bracketLength],
+                ["wallSignBevelOffset", params.bevelOffset],
+                ["wallSignBevelSegments", params.bevelSegments],
+            ];
+        values.forEach(([id, value]) => {
+            const input = el(id);
+            if (input && document.activeElement !== input) input.value = Number(value).toFixed(3);
+        });
+        const brace = el("wallSignBrace"),
+            brackets = el("wallSignBrackets"),
+            shape = el("wallSignShape");
+        if (brace) brace.checked = params.bracketCount > 0;
+        if (brackets) {
+            brackets.disabled = params.bracketCount === 0;
+            if (document.activeElement !== brackets)
+                brackets.value = String(clamp(params.bracketCount || 3, 1, 3));
+        }
+        if (shape && document.activeElement !== shape) shape.value = params.beveled ? "beveled" : "box";
+    }
+    function applyWallSignPatch(patch) {
+        const o = wallSignPanelObject();
+        if (!o || !patch || !Object.keys(patch).length) return;
+        if (!wallSignEditSession) {
+            HU.push(S);
+            RD = [];
+            wallSignEditSession = true;
+        }
+        setOb(o.id, patch);
+        render();
+    }
+    function applyWallSignProp(name, rawValue) {
+        const o = wallSignPanelObject();
+        if (!o) return;
+        const params = wallSignParams(o),
+            value = Number(rawValue),
+            patch = {};
+        if (!Number.isFinite(value)) return;
+        if (name === "wallSignBracketLength") patch.wallSignBracketLength = clamp(value, 0.05, 5);
+        else if (name === "wallSignBevelOffset")
+            // ベベルは板厚方向の稜線へ付くため、上限は板厚で決まる。
+            patch.wallSignBevelOffset = clamp(value, 0, params.bevelMax);
+        else if (name === "wallSignBevelSegments") patch.wallSignBevelSegments = clamp(Math.round(value), 1, 4);
+        applyWallSignPatch(patch);
+    }
+    [
+        ["wallSignBracketLength", "wallSignBracketLength"],
+        ["wallSignBevelOffset", "wallSignBevelOffset"],
+        ["wallSignBevelSegments", "wallSignBevelSegments"],
+    ].forEach(([id, name]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => applyWallSignProp(name, input.value);
+        input.onchange = () => {
+            wallSignEditSession = false;
+        };
+    });
+    const wallSignBrace = el("wallSignBrace"),
+        wallSignBrackets = el("wallSignBrackets"),
+        wallSignShape = el("wallSignShape");
+    if (wallSignBrace)
+        wallSignBrace.onchange = () => {
+            applyWallSignPatch({ wallSignBracketCount: wallSignBrace.checked ? 3 : 0 });
+            wallSignEditSession = false;
+        };
+    if (wallSignBrackets)
+        wallSignBrackets.onchange = () => {
+            applyWallSignPatch({ wallSignBracketCount: clamp(Math.round(Number(wallSignBrackets.value) || 1), 0, 3) });
+            wallSignEditSession = false;
+        };
+    if (wallSignShape)
+        wallSignShape.onchange = () => {
+            applyWallSignPatch({
+                wallSignShape: wallSignShape.value === "beveled" ? "beveled" : "box",
+                wallSignBevelSegments: 4,
+            });
+            wallSignEditSession = false;
+        };
     let beveledBoxEditSession = false;
     function syncBeveledBoxPanel() {
         const panel = el("beveledBoxP"),
@@ -11639,8 +13189,10 @@ window.cityGridInstallAssetUI = function (bridge) {
         syncWallSideSignPanel();
         syncBalconyPanel();
         syncPathPipePanel();
+        syncWallSignPanel();
         syncBeveledBoxPanel();
         syncCornerCutPanel();
+        syncRecessedStackedPanel();
         syncStackedPanel();
         syncFloorControls();
         syncAssetDepth();
@@ -11650,7 +13202,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         syncFloorPlanSelection?.();
     };
 
-    // ===== 標準ビューと間取りショートカット（8=間取り横 / 9=間取り真上 / 0=元の視点） =====
+    // ===== 4.1 標準ビューと間取りショートカット（8=間取り横 / 9=間取り真上 / 0=元の視点） =====
     // 標準ビューだけは透視ではなく正投影にし、真横90°・真上90°を正確に扱う。
     const viewKeys = ["lens", "yaw", "hz", "pitch", "fov", "roll", "ch", "cx", "cz"];
     const captureHomeView = () => {
@@ -11716,7 +13268,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     el("viewFloorTop").onclick = () => showFloorPlan("top");
     el("viewHome").onclick = () => (window.cityFloorPlanActive ? exitFloorPlan(true) : applyStandardView("home"));
 
-    // ===== 間取りモード：真上／真横の正投影でシーンを確認する =====
+    // ===== 4.2 間取りモード：真上／真横の正投影でシーンを確認する =====
     let floorPlanView = null,
         floorPlanSideWasHidden = null,
         floorPlanAutoHidSide = false;
@@ -11960,9 +13512,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             };
             e.preventDefault();
             e.stopImmediatePropagation();
-            try {
-                cv.setPointerCapture(e.pointerId);
-            } catch (err) {}
+            capturePointer(e.pointerId);
             return true;
         }
         return false;
@@ -12290,10 +13840,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 0.01,
                 -1,
             );
-            const gap = Math.max(
-                48 / Z,
-                Math.min(88 / Z, Math.max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], 0.6) * orthScale() * 0.35),
-            );
+            const gap = orthHandleGap(Math.max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], 0.6));
             addScreen(
                 "h",
                 "高さ",
@@ -12381,7 +13928,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     -1,
                 );
             } else addScreen("h", "高さ", { x: center.x, y: center.y - 52 / Z, ok: true }, { x: 0, y: -1 }, 0);
-            const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(b.hi[0] - b.lo[0], 0.6) * orthScale() * 0.35));
+            const gap = orthHandleGap(Math.max(b.hi[0] - b.lo[0], 0.6));
             addScreen(
                 "d",
                 "奥行き",
@@ -12404,7 +13951,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             yMin = -g.d / 2 + 0.025,
             yMax = g.d / 2 - 0.025;
         if (orthView === "top") {
-            const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(g.w, g.d, 0.6) * orthScale() * 0.35));
+            const gap = orthHandleGap(Math.max(g.w, g.d, 0.6));
             out.push({
                 kind: "awningEdgeZ",
                 label: "前縁Y",
@@ -12441,7 +13988,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         }
         if (!o.attachment?.verticalOnly) {
             if (orthView === "front") {
-                const gap = Math.max(48 / Z, Math.min(88 / Z, Math.max(g.w, g.d, 0.6) * orthScale() * 0.35));
+                const gap = orthHandleGap(Math.max(g.w, g.d, 0.6));
                 out.push({
                     kind: "awningEdgeY",
                     label: "前後",
@@ -12767,6 +14314,12 @@ window.cityGridInstallAssetUI = function (bridge) {
                         handles.push({ ...openingHandle, kind: openingHandle.kind, opening: true });
                 });
         }
+        if (o.type === "asset" && o.asset === "recessedStackedBuilding" && typeof recessedStackedGizmo === "function") {
+            const special = recessedStackedGizmo(o);
+            Object.values(special?.handles || {}).forEach((h) => {
+                if (h?.s?.ok) handles.push({ ...h, opening: true });
+            });
+        }
         if (o.type === "asset" && o.asset === "building") handles.push(...floorBuildingInnerHandles(o));
         if (o.type === "asset" && o.asset === "awning") {
             const edge = floorAwningEdgeHandle(o);
@@ -12814,13 +14367,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             add("d", "奥行＋", L2W(o, 0, o.rb, 0), L2W(o, 0, o.rb + 0.1, 0), Math.abs(o.rb) * 2, 0.01, 1);
             add("d", "奥行−", L2W(o, 0, -o.rb, 0), L2W(o, 0, -o.rb - 0.1, 0), Math.abs(o.rb) * 2, 0.01, -1);
             // 真上ではY方向が投影されないため、画面上へ高さハンドルを逃がして表示する。
-            const gap = Math.max(
-                48 / Z,
-                Math.min(
-                    88 / Z,
-                    Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)) * orthScale() * 0.65,
-                ),
-            );
+            const gap = orthHandleGap(Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)), 0.65);
             handles.push({
                 kind: "h",
                 label: "高さ",
@@ -12839,13 +14386,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             // ベベル直方体は初期状態が厚み0の面なので、下端と上端が
             // 同じ位置に重なって移動を奪わないよう、高さハンドルを上へ逃がす。
             if (Math.max(0, Number(o.h) || 0) <= 1e-6) {
-                const gap = Math.max(
-                    48 / Z,
-                    Math.min(
-                        88 / Z,
-                        Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)) * orthScale() * 0.65,
-                    ),
-                );
+                const gap = orthHandleGap(Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)), 0.65);
                 handles.push({
                     kind: "h",
                     label: "高さ",
@@ -12869,13 +14410,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             // 初期の厚み0では上下端が同じ画面点になり、クリックが高さ編集へ
             // 吸われる。高さハンドルを上へ逃がして面の移動を残す。
             if (Math.max(0, Number(o.h) || 0) <= 1e-6) {
-                const gap = Math.max(
-                    48 / Z,
-                    Math.min(
-                        88 / Z,
-                        Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)) * orthScale() * 0.65,
-                    ),
-                );
+                const gap = orthHandleGap(Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)), 0.65);
                 handles.push({
                     kind: "h",
                     label: "高さ",
@@ -12890,13 +14425,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 add("h", "上端", L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + 0.1), Math.max(0, Number(o.h) || 0), 0, 1);
                 add("h", "下端", L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - 0.1), Math.max(0, Number(o.h) || 0), 0, -1);
             }
-            const gap = Math.max(
-                48 / Z,
-                Math.min(
-                    88 / Z,
-                    Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.h) || 0.6)) * orthScale() * 0.65,
-                ),
-            );
+            const gap = orthHandleGap(Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.h) || 0.6)), 0.65);
             handles.push({
                 kind: "d",
                 label: "奥行き",
@@ -12918,6 +14447,12 @@ window.cityGridInstallAssetUI = function (bridge) {
                     if (openingHandle?.s?.ok)
                         handles.push({ ...openingHandle, kind: openingHandle.kind, opening: true });
                 });
+        }
+        if (o.type === "asset" && o.asset === "recessedStackedBuilding" && typeof recessedStackedGizmo === "function") {
+            const special = recessedStackedGizmo(o);
+            Object.values(special?.handles || {}).forEach((h) => {
+                if (h?.s?.ok) handles.push({ ...h, opening: true });
+            });
         }
         if (o.type === "asset" && o.asset === "building") handles.push(...floorBuildingInnerHandles(o));
         if (o.type === "asset" && o.asset === "awning") {
@@ -13082,7 +14617,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             c.fill();
             c.stroke();
             c.fillStyle = fill;
-            c.fillText(h.label, h.s.x + 8 / Z, h.s.y - 7 / Z);
+            const handleLabel = h.kind === "recessed-window-count" ? `${h.label} ${Math.round(h.start)}枚` : h.kind === "recessed-floor-gap" ? `${h.label} ${Number(h.start).toFixed(2)}m` : h.label;
+            c.fillText(handleLabel, h.s.x + 8 / Z, h.s.y - 7 / Z);
         });
         c.restore();
     }
@@ -13227,7 +14763,11 @@ window.cityGridInstallAssetUI = function (bridge) {
                 drawFloorPlanEditHandles(c);
                 // ベベル直方体は通常の幅／奥行／高さハンドルに加えて、
                 // 断面オフセット用の専用ハンドルも同じビューへ表示する。
-                if (tool === "edit" && h.object.o.asset === "beveledBox") drawSpecialGizmo(c, h.object.o);
+                if (
+                    tool === "edit" &&
+                    (h.object.o.asset === "beveledBox" || h.object.o.asset === "wallSign")
+                )
+                    drawSpecialGizmo(c, h.object.o);
             }
         }
         // カメラ：本体をドラッグして位置、先端の丸をドラッグして向き
@@ -13342,6 +14882,34 @@ window.cityGridInstallAssetUI = function (bridge) {
     function floorDimensionPatch(o, name, value, side = 1) {
         const v = Math.max(name === "h" ? 0 : 0.01, Number(value));
         if (!Number.isFinite(v)) return null;
+        if (o.type === "asset" && o.asset === "recessedStackedBuilding" && typeof recessedStackedBuildingParams === "function") {
+            const q = recessedStackedBuildingParams(o),
+                cs = Math.cos(Number(o.rot || 0) * DG),
+                sn = Math.sin(Number(o.rot || 0) * DG),
+                patch = {};
+            if (name === "w" || name === "d") {
+                const old = name === "w" ? q.w : q.d,
+                    delta = (v - old) / 2;
+                if (name === "w") {
+                    patch.ca = (Number(o.ca) || 0) + side * delta * cs;
+                    patch.cb = (Number(o.cb) || 0) + side * delta * sn;
+                    patch.ra = Math.max(0.25, v / 2);
+                } else {
+                    patch.ca = (Number(o.ca) || 0) - side * delta * sn;
+                    patch.cb = (Number(o.cb) || 0) + side * delta * cs;
+                    patch.rb = Math.max(0.25, v / 2);
+                }
+                return patch;
+            }
+            if (name === "h") {
+                const nextFloorHeight = clamp(
+                    (v - q.firstFloorExtra - Math.max(0, q.floorCount - 1) * q.floorGap) / q.floorCount,
+                    0.5,
+                    30,
+                );
+                return { floorHeight: nextFloorHeight, h: v };
+            }
+        }
         if (o.type === "compound") {
             const b = obBounds(o),
                 axis = { w: 0, d: 2, h: 1 }[name];
@@ -13658,9 +15226,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             tapClear,
             moved: false,
         };
-        try {
-            cv.setPointerCapture(e.pointerId);
-        } catch (err) {}
+        capturePointer(e.pointerId);
     }
     function beginFloorBoxPending(e, p) {
         if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
@@ -13671,9 +15237,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             center0: [...(window.cityFloorPlanCenter || [0, 0])],
             tapClear: true,
         });
-        try {
-            cv.setPointerCapture(e.pointerId);
-        } catch (err) {}
+        capturePointer(e.pointerId);
     }
     cv.addEventListener(
         "contextmenu",
@@ -13712,6 +15276,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                         customAsset === "pathPipe" ||
                         customAsset === "wallSideSign" ||
                         (customAsset === "beveledBox" && special?.t === "beveled-offset") ||
+                        (customAsset === "wallSign" && special?.t?.startsWith("wall-sign-")) ||
                         special?.t?.startsWith("sign-") ||
                         (special?.t === "face" && customAsset === "sign");
                 const activeFloorObject = sel && obOf(sel),
@@ -13738,9 +15303,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     ptr = e.pointerId;
                     ptrType = e.pointerType;
                     beginGizmo(special, p);
-                    try {
-                        cv.setPointerCapture(e.pointerId);
-                    } catch (err) {}
+                    capturePointer(e.pointerId);
                     syncSel();
                     render();
                     return;
@@ -13765,9 +15328,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                         p0: p,
                         started: false,
                     };
-                    try {
-                        cv.setPointerCapture(e.pointerId);
-                    } catch (err) {}
+                    capturePointer(e.pointerId);
                     return;
                 }
             }
@@ -13786,9 +15347,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     p0: p,
                     started: false,
                 };
-                try {
-                    cv.setPointerCapture(e.pointerId);
-                } catch (err) {}
+                capturePointer(e.pointerId);
                 return;
             }
             const moveHandle = floorMoveHandleAt(p),
@@ -13813,9 +15372,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     p0: p,
                     started: false,
                 };
-                try {
-                    cv.setPointerCapture(e.pointerId);
-                } catch (err) {}
+                capturePointer(e.pointerId);
                 return;
             }
             if (orthView === "side" || orthView === "front") {
@@ -13830,9 +15387,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     e.preventDefault();
                     e.stopImmediatePropagation();
                     floorPlanDrag = { kind: "aimSide", axis: verticalAxis, pointerId: e.pointerId };
-                    try {
-                        cv.setPointerCapture(e.pointerId);
-                    } catch (err) {}
+                    capturePointer(e.pointerId);
                     return;
                 }
                 if (
@@ -13851,9 +15406,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                         dz: orthView === "side" ? P.cz - w.z : 0,
                         dy: P.ch - 1 - w.y,
                     };
-                    try {
-                        cv.setPointerCapture(e.pointerId);
-                    } catch (err) {}
+                    capturePointer(e.pointerId);
                     return;
                 }
             }
@@ -13896,9 +15449,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                         dy: base[1] - w.y,
                         started: false,
                     };
-                    try {
-                        cv.setPointerCapture(e.pointerId);
-                    } catch (err) {}
+                    capturePointer(e.pointerId);
                     syncSel();
                     render();
                 } else if (e.shiftKey) beginFloorPan(e, p);
@@ -13921,18 +15472,14 @@ window.cityGridInstallAssetUI = function (bridge) {
                     angle0,
                     started: false,
                 };
-                try {
-                    cv.setPointerCapture(e.pointerId);
-                } catch (err) {}
+                capturePointer(e.pointerId);
                 return;
             }
             if (h.camera && Math.hypot(h.camera.sTarget.x - p.x, h.camera.sTarget.y - p.y) < lim) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 floorPlanDrag = { kind: "aim", pointerId: e.pointerId };
-                try {
-                    cv.setPointerCapture(e.pointerId);
-                } catch (err) {}
+                capturePointer(e.pointerId);
                 return;
             }
             if (h.camera && Math.hypot(h.camera.sBody.x - p.x, h.camera.sBody.y - p.y) < lim) {
@@ -13941,9 +15488,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 floorPlanDrag = { kind: "camera", pointerId: e.pointerId, dx: P.cx - w.x, dz: P.cz - w.z };
-                try {
-                    cv.setPointerCapture(e.pointerId);
-                } catch (err) {}
+                capturePointer(e.pointerId);
                 return;
             }
             if (
@@ -13961,9 +15506,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     lens0: Number(P.lens) || 35,
                     started: false,
                 };
-                try {
-                    cv.setPointerCapture(e.pointerId);
-                } catch (err) {}
+                capturePointer(e.pointerId);
                 return;
             }
             const w = floorPlanWorldAt(p),
@@ -14003,9 +15546,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     dz: base[2] - w.z,
                     started: false,
                 };
-                try {
-                    cv.setPointerCapture(e.pointerId);
-                } catch (err) {}
+                capturePointer(e.pointerId);
                 syncSel();
                 render();
             } else beginFloorBoxPending(e, p);
@@ -14063,10 +15604,19 @@ window.cityGridInstallAssetUI = function (bridge) {
                         ((p.x - floorPlanDrag.p0.x) * h.dir.x + (p.y - floorPlanDrag.p0.y) * h.dir.y) / (h.scale || 1),
                     value = clamp(h.start + (h.factor || 1) * amount, h.min, h.max ?? 20);
                 snapHit = null;
-                const patch =
-                    h.kind === "cornerCut-offset"
+                // 凹窓階層建物のハンドルは、3Dドラッグと同じ変換を共有する。
+                const recessedPatch = typeof recessedHandlePatch === "function"
+                        ? recessedHandlePatch(o, h.kind, value)
+                        : null,
+                    patch = recessedPatch
+                        ? recessedPatch
+                        : h.kind === "cornerCut-offset"
                         ? { cornerOffset: value }
-                        : h.kind === "cornerCut-opening-width-left" || h.kind === "cornerCut-opening-width-right"
+                        : h.kind === "wall-sign-bracket-length"
+                          ? { wallSignBracketLength: value }
+                          : h.kind === "wall-sign-bevel"
+                            ? { wallSignBevelOffset: value }
+                          : h.kind === "cornerCut-opening-width-left" || h.kind === "cornerCut-opening-width-right"
                           ? { cornerCutOpeningW: value }
                           : h.kind === "cornerCut-opening-height"
                             ? { cornerCutOpeningH: value }
@@ -14419,7 +15969,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     });
     addEventListener("blur", () => (floorPlanPanMode = false));
 
-    // ===== Camera / scale presets =====
+    // ===== 5.1 カメラ・スケールのプリセット =====
     function setValues(values) {
         Object.entries(values).forEach(([k, v]) => {
             if (k in P) setP(k, v);
@@ -14450,7 +16000,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         render();
     }
 
-    // ===== User camera / settings presets =====
+    // ===== 5.2 視点・設定のプリセット =====
     const STUDIO_PRESET_KEY = "city-grid-studio-presets-v1";
     const studioPresetNameInput = el("studioPresetName"),
         studioPresetSelect = el("studioPresetSelect");
@@ -14654,7 +16204,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     };
     refreshStudioPresetList();
 
-    // ===== Common lens buttons =====
+    // ===== 5.3 レンズのボタン =====
     quick.querySelectorAll("[data-lens-preset]").forEach(
         (b) =>
             (b.onclick = () => {
@@ -14717,7 +16267,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     };
     el("clearRef").onclick = () => el("phx").click();
 
-    // ===== Compact export / help UI =====
+    // ===== 5.4 書き出し・ヘルプのUI =====
     el("exportToggle").onclick = (e) => {
         e.stopPropagation();
         setExportOpen(!el("exportMenu").classList.contains("open"));
