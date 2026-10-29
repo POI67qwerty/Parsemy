@@ -33,6 +33,13 @@ def inject_script(html: str, marker: str, content: str) -> str:
     return html[:start] + "\n" + content + "\n" + html[end:]
 
 
+def inject_style(html: str, marker: str, content: str) -> str:
+    """指定したstyleタグの中身だけを置き換える（CSSの二重管理を防ぐ）。"""
+    start = html.index(marker) + len(marker)
+    end = html.index("</style>", start)
+    return html[:start] + "\n" + content + "\n" + html[end:]
+
+
 def main() -> None:
     """ソース順を固定して、3種類の配布用ファイルを更新する。"""
     core = read("engine-core.js")
@@ -50,6 +57,10 @@ def main() -> None:
 
     # 単体HTMLは、engineとstudio-uiの2ブロックへ同じソースを埋め込む。
     html = read("cyberpunk-city-studio.html")
+    # CSSも単体HTMLへ埋め込む。以前は手で貼っていたため、studio.css を直しても
+    # 配布用HTMLだけ古い見た目のまま、という食い違いが起きた。
+    html = inject_style(html, "<style>", read("style.css"))
+    html = inject_style(html, '<style id="studio-ui">', read("studio.css"))
     html = inject_script(html, '<script id="engine">', engine)
     html = inject_script(html, '<script id="studio-ui">', asset + "\n" + controller + "\n" + ui)
     write("cyberpunk-city-studio.html", html)

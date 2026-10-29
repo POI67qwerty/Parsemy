@@ -5,1531 +5,1584 @@
         <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
         <title>パース定規グリッド（視点設定＋定規描画）</title>
         <style>
-            :root {
-                --bg: #141513;
-                --pn: #1e201d;
-                --tx: #e8e8e2;
-                --mu: #9a9c92;
-                --ac: #e8a33d;
-                --bd: #34372f;
-            }
-            @media (prefers-color-scheme: light) {
-                :root {
-                    --bg: #eceae4;
-                    --pn: #fff;
-                    --tx: #222;
-                    --mu: #666;
-                    --bd: #d0cec6;
-                }
-            }
-            * {
-                box-sizing: border-box;
-            }
-            html,
-            body {
-                height: 100%;
-                margin: 0;
-            }
-            body {
-                background: var(--bg);
-                color: var(--tx);
-                font:
-                    13px/1.5 system-ui,
-                    "Hiragino Sans",
-                    "Noto Sans JP",
-                    sans-serif;
-                display: flex;
-                padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
-                    env(safe-area-inset-left);
-            }
-            #side {
-                width: 340px;
-                overflow-y: auto;
-                background: var(--pn);
-                border-right: 1px solid var(--bd);
-                padding: 10px;
-            }
-            #side.hide {
-                display: none;
-            }
-            #main {
-                flex: 1;
-                min-width: 0;
-                display: flex;
-                flex-direction: column;
-                -webkit-user-select: none;
-                user-select: none;
-                -webkit-touch-callout: none;
-            }
-            #bar {
-                display: flex;
-                gap: 6px;
-                padding: 8px;
-                flex-wrap: wrap;
-                align-items: center;
-            }
-            #stage {
-                flex: 1;
-                min-height: 0;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 6px;
-            }
-            canvas {
-                touch-action: none;
-                box-shadow: 0 0 0 1px var(--bd);
-            }
-            button,
-            select,
-            input[type="number"] {
-                background: var(--pn);
-                color: var(--tx);
-                border: 1px solid var(--bd);
-                border-radius: 6px;
-                padding: 5px 9px;
-                font: inherit;
-            }
-            button.on {
-                background: var(--ac);
-                color: #111;
-                border-color: var(--ac);
-            }
-            h3 {
-                margin: 12px 0 4px;
-                font-size: 12px;
-                color: var(--ac);
-            }
-            details {
-                border-bottom: 1px solid var(--bd);
-                padding: 0 0 4px;
-            }
-            summary {
-                cursor: pointer;
-                font-size: 13px;
-                font-weight: 600;
-                color: var(--ac);
-                padding: 10px 2px;
-                list-style: none;
-                -webkit-user-select: none;
-                user-select: none;
-            }
-            summary::-webkit-details-marker {
-                display: none;
-            }
-            summary::before {
-                content: "▸ ";
-            }
-            details[open] > summary::before {
-                content: "▾ ";
-            }
-            .secbar {
-                display: flex;
-                gap: 6px;
-                margin-bottom: 4px;
-            }
-            #edgeTab {
-                position: fixed;
-                top: 45%;
-                z-index: 5;
-                width: 24px;
-                height: 60px;
-                padding: 0;
-                border-radius: 0 10px 10px 0;
-                opacity: 0.9;
-            }
-            @media (max-width: 800px) {
-                #edgeTab {
-                    display: none;
-                }
-            }
-            label {
-                display: flex;
-                align-items: center;
-                gap: 6px;
-                margin: 3px 0;
-            }
-            label > span:first-child {
-                width: 88px;
-                flex: none;
-                color: var(--mu);
-            }
-            input[type="range"] {
-                flex: 1;
-                min-width: 0;
-            }
-            /* 全ての数値設定で上下スピナーを残す。Safari/Chromiumの見た目差も吸収する。 */
-            input[type="number"] {
-                -webkit-appearance: auto;
-                appearance: auto;
-                -moz-appearance: number-input;
-            }
-            input[type="number"]::-webkit-inner-spin-button,
-            input[type="number"]::-webkit-outer-spin-button {
-                display: block;
-                opacity: 1;
-            }
-            output {
-                width: 58px;
-                text-align: right;
-            }
-            .nv {
-                width: 74px;
-                flex: none;
-                text-align: right;
-            }
-            .un {
-                width: 24px;
-                flex: none;
-                color: var(--mu);
-            }
-            .note {
-                color: var(--mu);
-                font-size: 12px;
-            }
-            @media (max-width: 800px) {
-                body {
-                    flex-direction: column-reverse;
-                }
-                #side {
-                    width: auto;
-                    max-height: 42vh;
-                    border-right: 0;
-                    border-top: 1px solid var(--bd);
-                }
-            }
-        </style>
+/* Base compatibility styles. Kept first in the cascade. */
+:root {
+    --bg: #141513;
+    --pn: #1e201d;
+    --tx: #e8e8e2;
+    --mu: #9a9c92;
+    --ac: #e8a33d;
+    --bd: #34372f;
+}
+@media (prefers-color-scheme: light) {
+    :root {
+        --bg: #eceae4;
+        --pn: #fff;
+        --tx: #222;
+        --mu: #666;
+        --bd: #d0cec6;
+    }
+}
+* {
+    box-sizing: border-box;
+}
+html,
+body {
+    height: 100%;
+    margin: 0;
+}
+body {
+    background: var(--bg);
+    color: var(--tx);
+    font:
+        13px/1.5 system-ui,
+        "Hiragino Sans",
+        "Noto Sans JP",
+        sans-serif;
+    display: flex;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+#side {
+    width: 340px;
+    overflow-y: auto;
+    background: var(--pn);
+    border-right: 1px solid var(--bd);
+    padding: 10px;
+}
+#side.hide {
+    display: none;
+}
+#main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+#bar {
+    display: flex;
+    gap: 6px;
+    padding: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+#stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+}
+canvas {
+    touch-action: none;
+    box-shadow: 0 0 0 1px var(--bd);
+}
+button,
+select,
+input[type="number"] {
+    background: var(--pn);
+    color: var(--tx);
+    border: 1px solid var(--bd);
+    border-radius: 6px;
+    padding: 5px 9px;
+    font: inherit;
+}
+button.on {
+    background: var(--ac);
+    color: #111;
+    border-color: var(--ac);
+}
+h3 {
+    margin: 12px 0 4px;
+    font-size: 12px;
+    color: var(--ac);
+}
+details {
+    border-bottom: 1px solid var(--bd);
+    padding: 0 0 4px;
+}
+summary {
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ac);
+    padding: 10px 2px;
+    list-style: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+summary::-webkit-details-marker {
+    display: none;
+}
+summary::before {
+    content: "▸ ";
+}
+details[open] > summary::before {
+    content: "▾ ";
+}
+.secbar {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+#edgeTab {
+    position: fixed;
+    top: 45%;
+    z-index: 5;
+    width: 24px;
+    height: 60px;
+    padding: 0;
+    border-radius: 0 10px 10px 0;
+    opacity: 0.9;
+}
+@media (max-width: 800px) {
+    #edgeTab {
+        display: none;
+    }
+}
+label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 3px 0;
+}
+label > span:first-child {
+    width: 88px;
+    flex: none;
+    color: var(--mu);
+}
+input[type="range"] {
+    flex: 1;
+    min-width: 0;
+}
+output {
+    width: 58px;
+    text-align: right;
+}
+.nv {
+    width: 74px;
+    flex: none;
+    text-align: right;
+}
+.un {
+    width: 24px;
+    flex: none;
+    color: var(--mu);
+}
+.note {
+    color: var(--mu);
+    font-size: 12px;
+}
+@media (max-width: 800px) {
+    body {
+        flex-direction: column-reverse;
+    }
+    #side {
+        width: auto;
+        max-height: 42vh;
+        border-right: 0;
+        border-top: 1px solid var(--bd);
+    }
+}
+
+</style>
 
         <style id="studio-ui">
-            /* City Grid Studio styles. This file overrides the base styles above. */
-            :root {
-                --bg: #0a0f14;
-                --panel: #121a21;
-                --panel-2: #19232c;
-                --panel-3: #202c36;
-                --ink: #edf5f3;
-                --muted: #8e9da4;
-                --line: #2b3a43;
-                --mint: #66e3c8;
-                --violet: #ad9cff;
-                --orange: #ff9f68;
-                --danger: #ff718d;
-                --shadow: 0 18px 50px rgba(0, 0, 0, 0.32);
-            }
-            html,
-            body {
-                background: var(--bg);
-                color: var(--ink);
-            }
-            body {
-                overflow: hidden;
-                font-size: 14px;
-                background: radial-gradient(1200px 800px at 75% 20%, #182530 0, #0a0f14 62%);
-            }
-            #side {
-                width: 332px;
-                min-width: 332px;
-                padding: 14px 13px 30px;
-                background: linear-gradient(180deg, rgba(18, 26, 33, 0.98), rgba(12, 18, 23, 0.98));
-                border-right: 1px solid #26343d;
-                box-shadow: 12px 0 35px rgba(0, 0, 0, 0.16);
-                z-index: 10;
-            }
-            #side.hide {
-                display: none;
-            }
-            #main {
-                position: relative;
-                background: linear-gradient(180deg, #101820 0%, #0b1116 100%);
-            }
-            #bar {
-                min-height: 64px;
-                padding: 10px 14px;
-                gap: 8px;
-                flex-wrap: nowrap;
-                overflow-x: auto;
-                white-space: nowrap;
-                background: rgba(11, 17, 22, 0.88);
-                border-bottom: 1px solid #26343d;
-                backdrop-filter: blur(18px);
-                -webkit-overflow-scrolling: touch;
-                scrollbar-width: thin;
-                z-index: 5;
-            }
-            #bar::-webkit-scrollbar {
-                height: 4px;
-            }
-            #bar::-webkit-scrollbar-thumb {
-                background: #334852;
-                border-radius: 99px;
-            }
-            .brand {
-                display: flex;
-                align-items: center;
-                gap: 9px;
-                padding-right: 8px;
-                margin-right: 2px;
-                flex: none;
-            }
-            .brandMark {
-                display: grid;
-                place-items: center;
-                width: 34px;
-                height: 34px;
-                border-radius: 11px;
-                background: linear-gradient(135deg, var(--mint), #4a8cff);
-                color: #081116;
-                font-weight: 900;
-                box-shadow: 0 0 22px rgba(102, 227, 200, 0.25);
-            }
-            .brandText {
-                font-weight: 800;
-                letter-spacing: 0.02em;
-                line-height: 1.05;
-            }
-            .brandText small {
-                display: block;
-                color: var(--muted);
-                font-weight: 500;
-                font-size: 10px;
-                margin-top: 3px;
-            }
-            .barGroup {
-                display: flex;
-                align-items: center;
-                gap: 5px;
-                flex: none;
-            }
-            .barGrow {
-                flex: 1;
-                min-width: 10px;
-            }
-            #bar button,
-            .barGroup button {
-                min-height: 36px;
-                border: 1px solid #30414b;
-                background: #17222a;
-                color: #dce8e7;
-                border-radius: 10px;
-                padding: 7px 11px;
-                font-size: 13px;
-                white-space: nowrap;
-                transition:
-                    background 0.16s,
-                    border-color 0.16s,
-                    transform 0.16s;
-            }
-            .barGroup button:hover,
-            #bar button:hover {
-                background: #22323d;
-                border-color: #4b6570;
-            }
-            .barGroup button:active,
-            #bar button:active {
-                transform: translateY(1px);
-            }
-            #bar button.on {
-                background: linear-gradient(135deg, #67e0c6, #7dc9ff);
-                border-color: #7de9d3;
-                color: #071116;
-                font-weight: 800;
-                box-shadow: 0 4px 16px rgba(102, 227, 200, 0.18);
-            }
-            #tg {
-                padding-inline: 10px !important;
-            }
-            .toolBtn.on {
-                background: #3a2944 !important;
-                border-color: #c2a4ff !important;
-                color: #eadfff !important;
-            }
-            .iconBtn {
-                font-size: 18px !important;
-                padding-inline: 9px !important;
-            }
-            .toolIconButton {
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                gap: 5px;
-                min-width: 36px !important;
-                padding-inline: 8px !important;
-            }
-            .toolIconButton svg {
-                display: block;
-                width: 18px;
-                height: 18px;
-                stroke: currentColor;
-                fill: none;
-                stroke-width: 1.9;
-                stroke-linecap: round;
-                stroke-linejoin: round;
-            }
-            .saveBtn {
-                border-color: #527966 !important;
-                color: #baffea !important;
-            }
-            .warnBtn {
-                border-color: #754253 !important;
-                color: #ffb1be !important;
-            }
-            #stage {
-                position: relative;
-                min-height: 0;
-                padding: 16px;
-                background: radial-gradient(900px 700px at 55% 38%, #182631 0%, #0d151c 68%, #091016 100%);
-                overflow: hidden;
-            }
-            #stage:before {
-                content: "";
-                position: absolute;
-                inset: 0;
-                pointer-events: none;
-                opacity: 0.14;
-                background-image:
-                    linear-gradient(rgba(112, 174, 180, 0.18) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(112, 174, 180, 0.18) 1px, transparent 1px);
-                background-size: 32px 32px;
-                mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent 75%);
-            }
-            canvas {
-                border: 1px solid #344650;
-                border-radius: 13px;
-                box-shadow:
-                    0 18px 55px rgba(0, 0, 0, 0.4),
-                    0 0 0 1px rgba(149, 223, 218, 0.05);
-                position: relative;
-                z-index: 1;
-            }
-            #hint {
-                margin: 0 14px 10px !important;
-                padding: 8px 12px !important;
-                min-height: 34px;
-                color: #b9c8c9 !important;
-                background: rgba(18, 27, 34, 0.88);
-                border: 1px solid #293c46;
-                border-radius: 10px;
-                font-size: 12px !important;
-                box-shadow: 0 5px 20px rgba(0, 0, 0, 0.16);
-            }
-            #side h3 {
-                margin: 18px 0 7px;
-                color: var(--mint);
-                font-size: 11px;
-                letter-spacing: 0.08em;
-                text-transform: none;
-            }
-            #side details {
-                border-bottom: 1px solid #27353e;
-                padding-bottom: 5px;
-            }
-            #side summary {
-                padding: 11px 3px;
-                color: #d9e8e5;
-                font-size: 13px;
-                letter-spacing: 0.02em;
-            }
-            #side summary::before {
-                color: var(--mint);
-            }
-            #side label {
-                margin: 5px 0;
-                min-height: 28px;
-            }
-            #side label > span:first-child {
-                color: #9fb0b4;
-                width: 96px;
-            }
-            #side button,
-            #side select,
-            #side input[type="number"] {
-                background: #18242c;
-                border-color: #334750;
-                color: #e6f0ee;
-                border-radius: 8px;
-            }
-            #side input[type="range"] {
-                accent-color: var(--mint);
-            }
-            #side input[type="color"] {
-                height: 30px;
-                border-radius: 8px;
-                border: 1px solid #40535b;
-                background: #1a252b;
-            }
-            #side output {
-                color: var(--mint);
-            }
-            #side .note {
-                color: #82949a;
-                font-size: 11px;
-            }
-            #side .secbar {
-                position: sticky;
-                top: -14px;
-                z-index: 2;
-                margin: -14px -13px 4px;
-                padding: 11px 13px 8px;
-                background: rgba(15, 23, 29, 0.96);
-                border-bottom: 1px solid #27353e;
-            }
-            #side .secbar button {
-                font-size: 11px;
-                padding: 5px 8px;
-            }
-            #studioQuick {
-                margin: -2px 0 12px;
-                padding: 12px;
-                border: 1px solid #2b4249;
-                border-radius: 13px;
-                background: linear-gradient(145deg, rgba(32, 50, 57, 0.78), rgba(19, 30, 37, 0.84));
-                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.14);
-            }
-            #studioQuick h2 {
-                font-size: 13px;
-                margin: 0 0 3px;
-                color: #f0fffb;
-            }
-            #studioQuick .quickSub {
-                font-size: 11px;
-                color: var(--muted);
-                margin-bottom: 10px;
-            }
-            .workspaceTabs {
-                display: grid;
-                grid-template-columns: repeat(4, 1fr);
-                gap: 5px;
-                margin: 10px 0 9px;
-                padding: 3px;
-                border: 1px solid rgba(116, 180, 174, 0.25);
-                border-radius: 10px;
-                background: rgba(5, 14, 18, 0.25);
-            }
-            .workspaceTab {
-                min-width: 0 !important;
-                padding: 6px 4px !important;
-                border: 0 !important;
-                border-radius: 7px !important;
-                background: transparent !important;
-                color: #9bb3b2 !important;
-                font-size: 11px !important;
-            }
-            .workspaceTab.active {
-                background: linear-gradient(135deg, #285e5a, #315d86) !important;
-                color: #effffb !important;
-                box-shadow: 0 2px 9px rgba(0, 0, 0, 0.18);
-            }
-            .workspaceScreen[hidden] {
-                display: none !important;
-            }
-            .screenLead {
-                margin: 2px 0 8px;
-                color: #d7e9e5;
-                font-size: 11px;
-                line-height: 1.45;
-            }
-            .screenLead small {
-                display: block;
-                color: #8ca5a5;
-                font-size: 10px;
-            }
-            .poseButton.active {
-                border-color: var(--mint) !important;
-                background: #285e5a !important;
-                color: #effffb !important;
-            }
-            .quickRow {
-                display: flex;
-                gap: 6px;
-                flex-wrap: wrap;
-            }
-            .quickRow button {
-                flex: 1;
-                min-width: 0;
-            }
-            .quickRow .primary {
-                background: linear-gradient(135deg, #285e5a, #315d86);
-                border-color: #4baba0;
-                color: #e8fffb;
-            }
-            .lensPresetRow {
-                margin-top: 6px;
-            }
-            .lensPresetRow button {
-                flex: 1 1 92px;
-                font-size: 11px;
-                padding: 6px 5px;
-            }
-            .quickField {
-                display: grid;
-                grid-template-columns: 1fr 88px 28px;
-                align-items: center;
-                gap: 7px;
-                margin: 9px 0 10px;
-                color: #adc0c0;
-                font-size: 12px;
-            }
-            .quickField input,
-            .quickField select {
-                width: 100%;
-                padding: 6px 7px;
-            }
-            .quickField em {
-                font-style: normal;
-                color: var(--mint);
-            }
-            .quickCheck {
-                display: flex !important;
-                align-items: center;
-                gap: 7px;
-                color: #b4c7c5 !important;
-                font-size: 12px !important;
-                margin: 2px 0 9px !important;
-            }
-            .quickCheck input {
-                accent-color: var(--mint);
-            }
-            .floorTintBox {
-                margin-top: 9px;
-                padding: 8px 9px;
-                border: 1px solid rgba(116, 180, 174, 0.2);
-                border-radius: 9px;
-                background: rgba(7, 16, 21, 0.18);
-            }
-            .floorTintBox .quickField {
-                margin: 6px 0 2px;
-            }
-            .floorTintBox input[type="color"] {
-                height: 26px;
-                padding: 1px;
-            }
-            .floorTintBox output {
-                width: auto;
-                text-align: right;
-                color: var(--mint);
-                font-size: 11px;
-            }
-            .quickHint {
-                margin-top: 9px;
-                padding-top: 8px;
-                border-top: 1px solid rgba(116, 180, 174, 0.16);
-                font-size: 11px;
-                color: #91a7aa;
-                line-height: 1.55;
-            }
-            #primitiveQuickMenu {
-                position: absolute;
-                left: 50%;
-                top: 50%;
-                transform: translate(-50%, -50%);
-                z-index: 25;
-                display: none;
-                width: min(330px, calc(100% - 28px));
-                padding: 13px;
-                border: 1px solid #4a7177;
-                border-radius: 18px;
-                background: rgba(10, 20, 26, 0.95);
-                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-                backdrop-filter: blur(18px);
-                pointer-events: auto;
-            }
-            #primitiveQuickMenu.open {
-                display: block;
-            }
-            .primitiveMenuTitle {
-                margin-bottom: 9px;
-                text-align: center;
-                color: #eafffa;
-                font-weight: 800;
-                font-size: 12px;
-            }
-            .primitiveMenuSub {
-                margin-top: 8px;
-                text-align: center;
-                color: #8fa8aa;
-                font-size: 10px;
-            }
-            .primitiveMenuGrid {
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 7px;
-            }
-            .primitiveCard {
-                display: grid;
-                place-items: center;
-                gap: 3px;
-                min-height: 62px;
-                padding: 7px 4px;
-                border: 1px solid #38555d !important;
-                border-radius: 11px !important;
-                background: #1a2c33 !important;
-                color: #e7f7f3 !important;
-                font-size: 11px !important;
-            }
-            .primitiveCard:hover,
-            .primitiveCard:active {
-                border-color: var(--mint) !important;
-                background: #27454a !important;
-            }
-            .primitiveCard b {
-                font-size: 22px;
-                color: var(--mint);
-                font-weight: 500;
-            }
-            .primitiveCard small {
-                font-size: 10px;
-                color: #b6c9c7;
-            }
-            #floorPlanDock {
-                position: absolute;
-                right: 18px;
-                top: 18px;
-                z-index: 24;
-                display: none;
-                width: min(500px, calc(100% - 36px));
-                pointer-events: none;
-            }
-            .floorPlanDockInner {
-                display: flex;
-                align-items: center;
-                gap: 7px;
-                flex-wrap: wrap;
-                padding: 8px 10px;
-                border: 1px solid rgba(102, 227, 200, 0.55);
-                border-radius: 13px;
-                background: rgba(9, 20, 25, 0.92);
-                box-shadow: 0 14px 35px rgba(0, 0, 0, 0.42);
-                backdrop-filter: blur(14px);
-                pointer-events: auto;
-            }
-            .floorPlanDockHeader {
-                display: flex;
-                align-items: flex-start;
-                gap: 8px;
-                flex: 1 1 100%;
-                min-width: 0;
-            }
-            .floorPlanDockStatus {
-                flex: 1;
-                min-width: 0;
-                color: #effffb;
-                font-size: 11px;
-                line-height: 1.3;
-            }
-            .floorPlanDockStatus small {
-                display: block;
-                color: #9eb6b4;
-                font-size: 10px;
-            }
-            .floorHistoryButtons {
-                display: flex;
-                gap: 4px;
-                flex: none;
-            }
-            .floorHistoryButton {
-                min-width: 36px !important;
-                padding: 5px 7px !important;
-            }
-            .floorPlanPanTools {
-                display: flex;
-                align-items: center;
-                gap: 4px;
-                flex: 0 0 auto;
-                color: #9eb1b1;
-                font-size: 10px;
-            }
-            .floorPlanPanTools button {
-                min-width: 34px !important;
-                padding: 5px 6px !important;
-            }
-            .floorLensTools {
-                display: flex;
-                align-items: center;
-                gap: 4px;
-                flex: 0 0 auto;
-                color: #9eb1b1;
-                font-size: 10px;
-            }
-            .floorLensTools input {
-                width: 56px !important;
-                padding: 5px 6px !important;
-                border: 1px solid #4b7779;
-                border-radius: 6px;
-                background: #0d1b21;
-                color: #effffb;
-                font-size: 11px;
-            }
-            #floorPlanDock button {
-                min-width: 62px;
-                padding: 6px 8px !important;
-                font-size: 11px !important;
-            }
-            #floorPlanDock button:disabled {
-                opacity: 0.42;
-                cursor: default;
-            }
-            #floorPlanDock .dockCollapse {
-                flex: none;
-                min-width: 34px !important;
-                padding: 4px 8px !important;
-                color: #baffea !important;
-                border-color: #4b7779 !important;
-            }
-            #floorPlanDock .dockHint {
-                flex: 1 1 220px;
-                color: #9eb1b1;
-                font-size: 10px;
-                line-height: 1.3;
-            }
-            #floorPlanDock.collapsed {
-                width: auto;
-                right: 18px;
-            }
-            #floorPlanDock.collapsed .floorPlanDockInner {
-                padding: 6px 8px;
-                flex-wrap: nowrap;
-            }
-            #floorPlanDock.collapsed .floorPlanDockHeader {
-                flex: 0 0 auto;
-            }
-            #floorPlanDock.collapsed .floorPlanDockStatus,
-            #floorPlanDock.collapsed .dockHint,
-            #floorPlanDock.collapsed .floorPlanPanTools,
-            #floorPlanDock.collapsed .floorLensTools,
-            #floorPlanDock.collapsed [data-floor-dock-action]:not([data-floor-dock-action="collapse"]) {
-                display: none;
-            }
-            #floorPlanDock.collapsed .dockCollapse {
-                min-width: 88px !important;
-            }
-            #floorPlanDock.open {
-                display: block;
-            }
-            #objectList {
-                margin-top: 9px;
-                max-height: 190px;
-                overflow: auto;
-                display: grid;
-                gap: 5px;
-            }
-            .objectRow {
-                display: flex;
-                align-items: center;
-                gap: 7px;
-                width: 100%;
-                text-align: left;
-                padding: 7px 8px !important;
-                background: #152027 !important;
-                border: 1px solid #293b44 !important;
-                border-radius: 8px !important;
-                font-size: 12px !important;
-                cursor: pointer;
-            }
-            .objectRow:hover {
-                border-color: #5c9b95 !important;
-            }
-            .objectRow.selected {
-                border-color: var(--orange) !important;
-                background: #382b27 !important;
-            }
-            .objectRow.activeObject {
-                box-shadow: inset 3px 0 0 var(--mint) !important;
-            }
-            .objectCheck {
-                flex: none;
-                width: 15px;
-                height: 15px;
-                accent-color: var(--mint);
-            }
-            .objectVisibility {
-                flex: none;
-                width: 22px;
-                height: 22px;
-                padding: 0 !important;
-                border: 0 !important;
-                background: transparent !important;
-                color: var(--mint) !important;
-                font-size: 15px !important;
-                line-height: 1;
-                opacity: 0.9;
-            }
-            .objectVisibility:hover {
-                color: #fff !important;
-            }
-            .objectRow.hiddenObject {
-                opacity: 0.55;
-            }
-            .objectRow.hiddenObject .objectVisibility {
-                color: #83969a !important;
-            }
-            .objectIcon {
-                width: 22px;
-                height: 22px;
-                display: grid;
-                place-items: center;
-                border-radius: 6px;
-                background: #273a42;
-                color: var(--mint);
-                font-size: 12px;
-            }
-            .objectMeta {
-                min-width: 0;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-            }
-            .groupMark,
-            .compoundMark {
-                display: inline-block;
-                margin-left: 4px;
-                padding: 1px 4px;
-                border: 1px solid #4b7779;
-                border-radius: 4px;
-                color: #baffea;
-                font-size: 9px;
-                vertical-align: 1px;
-            }
-            .compoundMark {
-                border-color: #b38a48;
-                color: #ffe0a0;
-            }
-            .objectMeta small {
-                display: block;
-                color: #819397;
-                font-size: 10px;
-            }
-            .emptyList {
-                color: #71858a;
-                font-size: 11px;
-                padding: 5px 2px;
-            }
-            .sceneTitle {
-                margin-top: 11px;
-                color: #9fb9b8;
-                font-size: 11px;
-            }
-            .sceneTools {
-                display: flex;
-                gap: 5px;
-                margin-top: 6px;
-                flex-wrap: wrap;
-            }
-            .sceneTools button {
-                flex: 1 1 72px;
-                min-width: 0 !important;
-                padding: 6px 5px !important;
-                font-size: 11px !important;
-            }
-            .sceneTools .danger {
-                border-color: #754253 !important;
-                color: #ffb1be !important;
-            }
-            .alignTools {
-                display: grid;
-                grid-template-columns: 1.05fr 1.2fr auto;
-                gap: 5px;
-                margin-top: 6px;
-            }
-            .alignTools select,
-            .alignTools button {
-                min-width: 0 !important;
-                padding: 6px 5px !important;
-                font-size: 11px !important;
-            }
-            .alignTools button {
-                color: #baffea !important;
-                border-color: #527966 !important;
-            }
-            .sceneNote {
-                margin-top: 5px;
-                color: #82999b;
-                font-size: 10px;
-                line-height: 1.4;
-            }
-            #assetTray {
-                position: absolute;
-                left: 18px;
-                right: 18px;
-                bottom: 18px;
-                z-index: 4;
-                display: none;
-                pointer-events: none;
-            }
-            .assetTrayInner {
-                pointer-events: auto;
-                display: flex;
-                align-items: stretch;
-                gap: 8px;
-                max-width: 100%;
-                overflow: auto;
-                padding: 9px;
-                background: rgba(13, 22, 28, 0.91);
-                border: 1px solid #3a5960;
-                border-radius: 14px;
-                box-shadow: var(--shadow);
-                backdrop-filter: blur(16px);
-                scrollbar-width: thin;
-            }
-            #assetTray.floorAssetTray {
-                bottom: 18px;
-            }
-            .assetTrayNote {
-                pointer-events: auto;
-                margin-top: 5px;
-                padding: 0 4px;
-                color: #9eb7b5;
-                font-size: 10px;
-                line-height: 1.35;
-            }
-            .assetTrayTitle {
-                display: flex;
-                align-items: center;
-                padding: 0 7px 0 3px;
-                color: #b5cbc9;
-                font-size: 11px;
-                white-space: nowrap;
-            }
-            .assetTrayTools {
-                display: flex;
-                align-items: center;
-                flex: 0 0 auto;
-                padding: 0 8px;
-                border-left: 1px solid rgba(116, 180, 174, 0.25);
-                border-right: 1px solid rgba(116, 180, 174, 0.25);
-                color: #a9c0bf;
-                font-size: 10px;
-                white-space: nowrap;
-            }
-            .assetTrayTools label {
-                display: flex;
-                align-items: center;
-                gap: 5px;
-                margin: 0;
-            }
-            .assetTrayTools select {
-                min-width: 118px;
-                padding: 5px 6px;
-                font-size: 10px;
-            }
-            .assetClipboardTools {
-                display: flex;
-                align-items: center;
-                gap: 5px;
-                flex: 0 0 auto;
-                padding: 0 8px;
-                border-right: 1px solid rgba(116, 180, 174, 0.25);
-            }
-            .assetClipboardTools button {
-                min-width: 52px;
-                padding: 6px 8px !important;
-                font-size: 10px !important;
-            }
-            .assetClipboardTools button:disabled {
-                opacity: 0.42;
-                cursor: default;
-            }
-            .assetCard {
-                flex: 0 0 auto;
-                display: flex;
-                align-items: center;
-                gap: 7px;
-                min-width: 88px;
-                padding: 7px 9px;
-                border: 1px solid #344951 !important;
-                background: #1b2a31 !important;
-                border-radius: 10px !important;
-                color: #e6f3f0 !important;
-                text-align: left;
-                cursor: pointer;
-            }
-            .assetCard:hover {
-                border-color: var(--mint) !important;
-                background: #243b42 !important;
-            }
-            .assetGlyph {
-                display: grid;
-                place-items: center;
-                width: 27px;
-                height: 27px;
-                border-radius: 8px;
-                background: linear-gradient(135deg, #2b625f, #394e86);
-                font-size: 16px;
-            }
-            .assetCard span:last-child {
-                font-size: 11px;
-                line-height: 1.2;
-            }
-            .assetCard small {
-                display: block;
-                color: #8fa5a5;
-                font-size: 9px;
-            }
-            #exportMenu {
-                position: fixed;
-                top: 68px;
-                right: 76px;
-                z-index: 1000;
-                display: none;
-                grid-template-columns: repeat(2, minmax(115px, 1fr));
-                gap: 6px;
-                padding: 9px;
-                background: rgba(15, 24, 30, 0.98);
-                border: 1px solid #38515a;
-                border-radius: 12px;
-                box-shadow: var(--shadow);
-                min-width: 260px;
-                white-space: normal;
-            }
-            #exportMenu.open {
-                display: grid;
-            }
-            .exportMenu button {
-                font-size: 11px !important;
-                padding: 8px 9px !important;
-                min-height: 32px !important;
-            }
-            .exportWidthControl {
-                grid-column: 1 / -1;
-                display: flex;
-                align-items: center;
-                gap: 7px;
-                padding: 3px 2px;
-                color: var(--muted);
-                font-size: 11px;
-            }
-            .exportWidthControl span {
-                width: 64px;
-            }
-            #exportLineWidth {
-                width: 78px;
-                flex: none;
-            }
-            #helpPanel {
-                position: absolute;
-                right: 16px;
-                top: 72px;
-                z-index: 11;
-                display: none;
-                width: min(330px, calc(100vw - 32px));
-                padding: 14px;
-                background: rgba(14, 23, 29, 0.97);
-                border: 1px solid #3b545d;
-                border-radius: 14px;
-                box-shadow: var(--shadow);
-                font-size: 12px;
-                line-height: 1.7;
-                color: #b8c8c8;
-            }
-            .helpTitle {
-                font-weight: 800;
-                color: #e8fffa;
-                margin-bottom: 6px;
-            }
-            .helpKey {
-                display: inline-block;
-                padding: 1px 5px;
-                border: 1px solid #4c6168;
-                border-radius: 4px;
-                color: var(--mint);
-                font-size: 10px;
-                margin-right: 3px;
-            }
-            #edgeTab {
-                border: 1px solid #4b7779 !important;
-                background: #1b373b !important;
-                color: #b6fff0 !important;
-                box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
-            }
-            @media (max-width: 900px) {
-                body {
-                    display: block;
-                    position: relative;
-                }
-                #main {
-                    width: 100vw;
-                    height: 100vh;
-                }
-                #side {
-                    position: fixed;
-                    left: 0;
-                    top: 64px;
-                    bottom: 0;
-                    width: min(360px, 88vw);
-                    min-width: 0;
-                    height: auto;
-                    max-height: none;
-                    transform: translateX(0);
-                    transition: transform 0.2s ease;
-                    box-shadow: 16px 0 45px rgba(0, 0, 0, 0.5);
-                }
-                #side.hide {
-                    display: block !important;
-                    transform: translateX(-105%);
-                }
-                #edgeTab {
-                    display: flex !important;
-                    align-items: center;
-                    justify-content: center;
-                    position: fixed !important;
-                    top: 82px !important;
-                    left: 0 !important;
-                    width: 28px !important;
-                    height: 54px !important;
-                    border-radius: 0 10px 10px 0 !important;
-                    z-index: 30 !important;
-                }
-                #stage {
-                    padding: 8px 8px 12px;
-                }
-                #bar {
-                    padding-inline: 9px;
-                }
-                .brandText {
-                    display: none;
-                }
-                .barGrow {
-                    display: none;
-                }
-                #exportMenu {
-                    position: fixed;
-                    top: 68px;
-                    right: 10px;
-                }
-                #assetTray {
-                    left: 8px;
-                    right: 8px;
-                    bottom: 10px;
-                }
-                .assetTrayInner {
-                    padding: 7px;
-                }
-                .assetTrayTitle {
-                    display: none;
-                }
-                #hint {
-                    margin-inline: 8px !important;
-                    font-size: 11px !important;
-                }
-            }
-            @media (max-width: 520px) {
-                #studioQuick .workspaceTabs {
-                    grid-template-columns: repeat(2, 1fr);
-                }
-                #bar {
-                    gap: 5px;
-                }
-                .barGroup {
-                    gap: 4px;
-                }
-                #bar button,
-                .barGroup button {
-                    padding: 6px 8px;
-                    font-size: 12px;
-                }
-                .iconBtn {
-                    font-size: 16px !important;
-                }
-                .quickField {
-                    grid-template-columns: 1fr 76px 24px;
-                }
-                .assetCard {
-                    min-width: 78px;
-                    padding: 6px 7px;
-                }
-                .assetGlyph {
-                    width: 24px;
-                    height: 24px;
-                }
-            }
+/* City Grid Studio styles. This file overrides the base styles above. */
+:root {
+    --bg: #0a0f14;
+    --panel: #121a21;
+    --panel-2: #19232c;
+    --panel-3: #202c36;
+    --ink: #edf5f3;
+    --muted: #8e9da4;
+    --line: #2b3a43;
+    --mint: #66e3c8;
+    --violet: #ad9cff;
+    --orange: #ff9f68;
+    --danger: #ff718d;
+    --shadow: 0 18px 50px rgba(0, 0, 0, 0.32);
+}
+html,
+body {
+    background: var(--bg);
+    color: var(--ink);
+}
+body {
+    overflow: hidden;
+    font-size: 14px;
+    background: radial-gradient(1200px 800px at 75% 20%, #182530 0, #0a0f14 62%);
+}
+#side {
+    width: 332px;
+    min-width: 332px;
+    padding: 14px 13px 30px;
+    background: linear-gradient(180deg, rgba(18, 26, 33, 0.98), rgba(12, 18, 23, 0.98));
+    border-right: 1px solid #26343d;
+    box-shadow: 12px 0 35px rgba(0, 0, 0, 0.16);
+    z-index: 10;
+}
+#side.hide {
+    display: none;
+}
+#main {
+    position: relative;
+    background: linear-gradient(180deg, #101820 0%, #0b1116 100%);
+}
+#bar {
+    min-height: 64px;
+    padding: 10px 14px;
+    gap: 8px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    white-space: nowrap;
+    background: rgba(11, 17, 22, 0.88);
+    border-bottom: 1px solid #26343d;
+    backdrop-filter: blur(18px);
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    z-index: 5;
+}
+#bar::-webkit-scrollbar {
+    height: 4px;
+}
+#bar::-webkit-scrollbar-thumb {
+    background: #334852;
+    border-radius: 99px;
+}
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding-right: 8px;
+    margin-right: 2px;
+    flex: none;
+}
+.brandMark {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 11px;
+    background: linear-gradient(135deg, var(--mint), #4a8cff);
+    color: #081116;
+    font-weight: 900;
+    box-shadow: 0 0 22px rgba(102, 227, 200, 0.25);
+}
+.brandText {
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    line-height: 1.05;
+}
+.brandText small {
+    display: block;
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 10px;
+    margin-top: 3px;
+}
+.barGroup {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: none;
+}
+.barGrow {
+    flex: 1;
+    min-width: 10px;
+}
+#bar button,
+.barGroup button {
+    min-height: 36px;
+    border: 1px solid #30414b;
+    background: #17222a;
+    color: #dce8e7;
+    border-radius: 10px;
+    padding: 7px 11px;
+    font-size: 13px;
+    white-space: nowrap;
+    transition:
+        background 0.16s,
+        border-color 0.16s,
+        transform 0.16s;
+}
+.barGroup button:hover,
+#bar button:hover {
+    background: #22323d;
+    border-color: #4b6570;
+}
+.barGroup button:active,
+#bar button:active {
+    transform: translateY(1px);
+}
+#bar button.on {
+    background: linear-gradient(135deg, #67e0c6, #7dc9ff);
+    border-color: #7de9d3;
+    color: #071116;
+    font-weight: 800;
+    box-shadow: 0 4px 16px rgba(102, 227, 200, 0.18);
+}
+#tg {
+    padding-inline: 10px !important;
+}
+.toolBtn.on {
+    background: #3a2944 !important;
+    border-color: #c2a4ff !important;
+    color: #eadfff !important;
+}
+.iconBtn {
+    font-size: 18px !important;
+    padding-inline: 9px !important;
+}
+.toolIconButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-width: 36px !important;
+    padding-inline: 8px !important;
+}
+.toolIconButton svg {
+    display: block;
+    width: 18px;
+    height: 18px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.saveBtn {
+    border-color: #527966 !important;
+    color: #baffea !important;
+}
+.warnBtn {
+    border-color: #754253 !important;
+    color: #ffb1be !important;
+}
+#stage {
+    position: relative;
+    min-height: 0;
+    padding: 16px;
+    background: radial-gradient(900px 700px at 55% 38%, #182631 0%, #0d151c 68%, #091016 100%);
+    overflow: hidden;
+}
+#stage:before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.14;
+    background-image:
+        linear-gradient(rgba(112, 174, 180, 0.18) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(112, 174, 180, 0.18) 1px, transparent 1px);
+    background-size: 32px 32px;
+    mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent 75%);
+}
+canvas {
+    border: 1px solid #344650;
+    border-radius: 13px;
+    box-shadow:
+        0 18px 55px rgba(0, 0, 0, 0.4),
+        0 0 0 1px rgba(149, 223, 218, 0.05);
+    position: relative;
+    z-index: 1;
+}
+#hint {
+    margin: 0 14px 10px !important;
+    padding: 8px 12px !important;
+    min-height: 34px;
+    color: #b9c8c9 !important;
+    background: rgba(18, 27, 34, 0.88);
+    border: 1px solid #293c46;
+    border-radius: 10px;
+    font-size: 12px !important;
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.16);
+}
+#side h3 {
+    margin: 18px 0 7px;
+    color: var(--mint);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: none;
+}
+#side details {
+    border-bottom: 1px solid #27353e;
+    padding-bottom: 5px;
+}
+#side summary {
+    padding: 11px 3px;
+    color: #d9e8e5;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+}
+#side summary::before {
+    color: var(--mint);
+}
+#side label {
+    margin: 5px 0;
+    min-height: 28px;
+}
+#side label > span:first-child {
+    color: #9fb0b4;
+    width: 96px;
+}
+#side button,
+#side select,
+#side input[type="number"] {
+    background: #18242c;
+    border-color: #334750;
+    color: #e6f0ee;
+    border-radius: 8px;
+}
+#side input[type="range"] {
+    accent-color: var(--mint);
+}
+#side input[type="color"] {
+    height: 30px;
+    border-radius: 8px;
+    border: 1px solid #40535b;
+    background: #1a252b;
+}
+#side output {
+    color: var(--mint);
+}
+#side .note {
+    color: #82949a;
+    font-size: 11px;
+}
+#side .secbar {
+    position: sticky;
+    top: -14px;
+    z-index: 2;
+    margin: -14px -13px 4px;
+    padding: 11px 13px 8px;
+    background: rgba(15, 23, 29, 0.96);
+    border-bottom: 1px solid #27353e;
+}
+#side .secbar button {
+    font-size: 11px;
+    padding: 5px 8px;
+}
+#studioQuick {
+    margin: -2px 0 12px;
+    padding: 12px;
+    border: 1px solid #2b4249;
+    border-radius: 13px;
+    background: linear-gradient(145deg, rgba(32, 50, 57, 0.78), rgba(19, 30, 37, 0.84));
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.14);
+}
+#studioQuick h2 {
+    font-size: 13px;
+    margin: 0 0 3px;
+    color: #f0fffb;
+}
+#studioQuick .quickSub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 10px;
+}
+.workspaceTabs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 5px;
+    margin: 10px 0 9px;
+    padding: 3px;
+    border: 1px solid rgba(116, 180, 174, 0.25);
+    border-radius: 10px;
+    background: rgba(5, 14, 18, 0.25);
+}
+.workspaceTab {
+    min-width: 0 !important;
+    padding: 6px 4px !important;
+    border: 0 !important;
+    border-radius: 7px !important;
+    background: transparent !important;
+    color: #9bb3b2 !important;
+    font-size: 11px !important;
+}
+.workspaceTab.active {
+    background: linear-gradient(135deg, #285e5a, #315d86) !important;
+    color: #effffb !important;
+    box-shadow: 0 2px 9px rgba(0, 0, 0, 0.18);
+}
+.workspaceScreen[hidden] {
+    display: none !important;
+}
+.screenLead {
+    margin: 2px 0 8px;
+    color: #d7e9e5;
+    font-size: 11px;
+    line-height: 1.45;
+}
+.screenLead small {
+    display: block;
+    color: #8ca5a5;
+    font-size: 10px;
+}
+.poseButton.active {
+    border-color: var(--mint) !important;
+    background: #285e5a !important;
+    color: #effffb !important;
+}
+.quickRow {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.quickRow button {
+    flex: 1;
+    min-width: 0;
+}
+.quickRow .primary {
+    background: linear-gradient(135deg, #285e5a, #315d86);
+    border-color: #4baba0;
+    color: #e8fffb;
+}
+.lensPresetRow {
+    margin-top: 6px;
+}
+.lensPresetRow button {
+    flex: 1 1 92px;
+    font-size: 11px;
+    padding: 6px 5px;
+}
+.quickField {
+    display: grid;
+    grid-template-columns: 1fr 88px 28px;
+    align-items: center;
+    gap: 7px;
+    margin: 9px 0 10px;
+    color: #adc0c0;
+    font-size: 12px;
+}
+.quickField input,
+.quickField select {
+    width: 100%;
+    padding: 6px 7px;
+}
+.quickField em {
+    font-style: normal;
+    color: var(--mint);
+}
+.quickCheck {
+    display: flex !important;
+    align-items: center;
+    gap: 7px;
+    color: #b4c7c5 !important;
+    font-size: 12px !important;
+    margin: 2px 0 9px !important;
+}
+.quickCheck input {
+    accent-color: var(--mint);
+}
+.floorTintBox {
+    margin-top: 9px;
+    padding: 8px 9px;
+    border: 1px solid rgba(116, 180, 174, 0.2);
+    border-radius: 9px;
+    background: rgba(7, 16, 21, 0.18);
+}
+.floorTintBox .quickField {
+    margin: 6px 0 2px;
+}
+.floorTintBox input[type="color"] {
+    height: 26px;
+    padding: 1px;
+}
+.floorTintBox output {
+    width: auto;
+    text-align: right;
+    color: var(--mint);
+    font-size: 11px;
+}
+.quickHint {
+    margin-top: 9px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(116, 180, 174, 0.16);
+    font-size: 11px;
+    color: #91a7aa;
+    line-height: 1.55;
+}
+#primitiveQuickMenu {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 25;
+    display: none;
+    width: min(330px, calc(100% - 28px));
+    padding: 13px;
+    border: 1px solid #4a7177;
+    border-radius: 18px;
+    background: rgba(10, 20, 26, 0.95);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(18px);
+    pointer-events: auto;
+}
+#primitiveQuickMenu.open {
+    display: block;
+}
+.primitiveMenuTitle {
+    margin-bottom: 9px;
+    text-align: center;
+    color: #eafffa;
+    font-weight: 800;
+    font-size: 12px;
+}
+.primitiveMenuSub {
+    margin-top: 8px;
+    text-align: center;
+    color: #8fa8aa;
+    font-size: 10px;
+}
+.primitiveMenuGrid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 7px;
+}
+.primitiveCard {
+    display: grid;
+    place-items: center;
+    gap: 3px;
+    min-height: 62px;
+    padding: 7px 4px;
+    border: 1px solid #38555d !important;
+    border-radius: 11px !important;
+    background: #1a2c33 !important;
+    color: #e7f7f3 !important;
+    font-size: 11px !important;
+}
+.primitiveCard:hover,
+.primitiveCard:active {
+    border-color: var(--mint) !important;
+    background: #27454a !important;
+}
+.primitiveCard b {
+    font-size: 22px;
+    color: var(--mint);
+    font-weight: 500;
+}
+.primitiveCard small {
+    font-size: 10px;
+    color: #b6c9c7;
+}
+#floorPlanDock {
+    position: absolute;
+    right: 18px;
+    top: 18px;
+    z-index: 24;
+    display: none;
+    width: min(500px, calc(100% - 36px));
+    pointer-events: none;
+}
+.floorPlanDockInner {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    border: 1px solid rgba(102, 227, 200, 0.55);
+    border-radius: 13px;
+    background: rgba(9, 20, 25, 0.92);
+    box-shadow: 0 14px 35px rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(14px);
+    pointer-events: auto;
+}
+.floorPlanDockHeader {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    flex: 1 1 100%;
+    min-width: 0;
+}
+.floorPlanDockStatus {
+    flex: 1;
+    min-width: 0;
+    color: #effffb;
+    font-size: 11px;
+    line-height: 1.3;
+}
+.floorPlanDockStatus small {
+    display: block;
+    color: #9eb6b4;
+    font-size: 10px;
+}
+.floorHistoryButtons {
+    display: flex;
+    gap: 4px;
+    flex: none;
+}
+.floorHistoryButton {
+    min-width: 36px !important;
+    padding: 5px 7px !important;
+}
+.floorPlanPanTools {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+    color: #9eb1b1;
+    font-size: 10px;
+}
+.floorPlanPanTools button {
+    min-width: 34px !important;
+    padding: 5px 6px !important;
+}
+.floorLensTools {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+    color: #9eb1b1;
+    font-size: 10px;
+}
+.floorLensTools input {
+    width: 56px !important;
+    padding: 5px 6px !important;
+    border: 1px solid #4b7779;
+    border-radius: 6px;
+    background: #0d1b21;
+    color: #effffb;
+    font-size: 11px;
+}
+#floorPlanDock button {
+    min-width: 62px;
+    padding: 6px 8px !important;
+    font-size: 11px !important;
+}
+#floorPlanDock button:disabled {
+    opacity: 0.42;
+    cursor: default;
+}
+#floorPlanDock .dockCollapse {
+    flex: none;
+    min-width: 34px !important;
+    padding: 4px 8px !important;
+    color: #baffea !important;
+    border-color: #4b7779 !important;
+}
+#floorPlanDock .dockHint {
+    flex: 1 1 220px;
+    color: #9eb1b1;
+    font-size: 10px;
+    line-height: 1.3;
+}
+#floorPlanDock.collapsed {
+    width: auto;
+    right: 18px;
+}
+#floorPlanDock.collapsed .floorPlanDockInner {
+    padding: 6px 8px;
+    flex-wrap: nowrap;
+}
+#floorPlanDock.collapsed .floorPlanDockHeader {
+    flex: 0 0 auto;
+}
+#floorPlanDock.collapsed .floorPlanDockStatus,
+#floorPlanDock.collapsed .dockHint,
+#floorPlanDock.collapsed .floorPlanPanTools,
+#floorPlanDock.collapsed .floorLensTools,
+#floorPlanDock.collapsed [data-floor-dock-action]:not([data-floor-dock-action="collapse"]) {
+    display: none;
+}
+#floorPlanDock.collapsed .dockCollapse {
+    min-width: 88px !important;
+}
+#floorPlanDock.open {
+    display: block;
+}
+#objectList {
+    margin-top: 9px;
+    max-height: 190px;
+    overflow: auto;
+    display: grid;
+    gap: 5px;
+}
+.objectRow {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    text-align: left;
+    padding: 7px 8px !important;
+    background: #152027 !important;
+    border: 1px solid #293b44 !important;
+    border-radius: 8px !important;
+    font-size: 12px !important;
+    cursor: pointer;
+}
+.objectRow:hover {
+    border-color: #5c9b95 !important;
+}
+.objectRow.selected {
+    border-color: var(--orange) !important;
+    background: #382b27 !important;
+}
+.objectRow.activeObject {
+    box-shadow: inset 3px 0 0 var(--mint) !important;
+}
+.objectCheck {
+    flex: none;
+    width: 15px;
+    height: 15px;
+    accent-color: var(--mint);
+}
+.objectVisibility {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: var(--mint) !important;
+    font-size: 15px !important;
+    line-height: 1;
+    opacity: 0.9;
+}
+.objectVisibility:hover {
+    color: #fff !important;
+}
+.objectRow.hiddenObject {
+    opacity: 0.55;
+}
+.objectRow.hiddenObject .objectVisibility {
+    color: #83969a !important;
+}
+/* ロック（2026-10-30 追加）：鍵ボタンと、ロック中の行の見た目。
+   絵文字は環境によって豆腐（□）になるため、鍵はSVGで描く。 */
+.objectLock {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    line-height: 1;
+    opacity: 0.5;
+    display: grid;
+    place-items: center;
+}
+.objectLock svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: #9fb6c2;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.objectLock:hover {
+    opacity: 1;
+}
+.objectLock:hover svg {
+    stroke: #fff;
+}
+.objectLock.isLocked svg {
+    stroke: #8fd8ff;
+}
+/* 上部バーのロックアイコン（開錠＝はねが開く） */
+.lockBtn {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 5px;
+}
+.lockIcon {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    flex: none;
+}
+.lockBtn.unlocked .lockShackle {
+    d: path("M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0");
+}
+.objectRow.lockedObject {
+    border-color: #4a6a7a !important;
+    background: #131c22 !important;
+}
+.objectRow.lockedObject .objectLock {
+    opacity: 1;
+    filter: none;
+}
+.objectRow.lockedObject .objectMeta {
+    color: #9fb6c2;
+}
+.objectCheck:disabled {
+    opacity: 0.35;
+}
+/* 上部バーのロックボタン（点いているときは状態が分かるように） */
+#lockSel.on,
+#lockCam.on {
+    border-color: #ffd34d !important;
+    color: #ffe9a8 !important;
+    background: #3a3320 !important;
+}
+body.cameraLocked #cv {
+    cursor: default;
+}
+.hintFlash {
+    color: #ffe9a8 !important;
+}
+.objectIcon {
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    border-radius: 6px;
+    background: #273a42;
+    color: var(--mint);
+    font-size: 12px;
+}
+.objectMeta {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.groupMark,
+.compoundMark {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 1px 4px;
+    border: 1px solid #4b7779;
+    border-radius: 4px;
+    color: #baffea;
+    font-size: 9px;
+    vertical-align: 1px;
+}
+.compoundMark {
+    border-color: #b38a48;
+    color: #ffe0a0;
+}
+.objectMeta small {
+    display: block;
+    color: #819397;
+    font-size: 10px;
+}
+.emptyList {
+    color: #71858a;
+    font-size: 11px;
+    padding: 5px 2px;
+}
+.sceneTitle {
+    margin-top: 11px;
+    color: #9fb9b8;
+    font-size: 11px;
+}
+.sceneTools {
+    display: flex;
+    gap: 5px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+}
+.sceneTools button {
+    flex: 1 1 72px;
+    min-width: 0 !important;
+    padding: 6px 5px !important;
+    font-size: 11px !important;
+}
+.sceneTools .danger {
+    border-color: #754253 !important;
+    color: #ffb1be !important;
+}
+.alignTools {
+    display: grid;
+    grid-template-columns: 1.05fr 1.2fr auto;
+    gap: 5px;
+    margin-top: 6px;
+}
+.alignTools select,
+.alignTools button {
+    min-width: 0 !important;
+    padding: 6px 5px !important;
+    font-size: 11px !important;
+}
+.alignTools button {
+    color: #baffea !important;
+    border-color: #527966 !important;
+}
+.sceneNote {
+    margin-top: 5px;
+    color: #82999b;
+    font-size: 10px;
+    line-height: 1.4;
+}
+#assetTray {
+    position: absolute;
+    left: 18px;
+    right: 18px;
+    bottom: 18px;
+    z-index: 4;
+    display: none;
+    pointer-events: none;
+}
+.assetTrayInner {
+    pointer-events: auto;
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    max-width: 100%;
+    overflow: auto;
+    padding: 9px;
+    background: rgba(13, 22, 28, 0.91);
+    border: 1px solid #3a5960;
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(16px);
+    scrollbar-width: thin;
+}
+#assetTray.floorAssetTray {
+    bottom: 18px;
+}
+.assetTrayNote {
+    pointer-events: auto;
+    margin-top: 5px;
+    padding: 0 4px;
+    color: #9eb7b5;
+    font-size: 10px;
+    line-height: 1.35;
+}
+.assetTrayTitle {
+    display: flex;
+    align-items: center;
+    padding: 0 7px 0 3px;
+    color: #b5cbc9;
+    font-size: 11px;
+    white-space: nowrap;
+}
+.assetTrayTools {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    padding: 0 8px;
+    border-left: 1px solid rgba(116, 180, 174, 0.25);
+    border-right: 1px solid rgba(116, 180, 174, 0.25);
+    color: #a9c0bf;
+    font-size: 10px;
+    white-space: nowrap;
+}
+.assetTrayTools label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 0;
+}
+.assetTrayTools select {
+    min-width: 118px;
+    padding: 5px 6px;
+    font-size: 10px;
+}
+.assetClipboardTools {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;
+    padding: 0 8px;
+    border-right: 1px solid rgba(116, 180, 174, 0.25);
+}
+.assetClipboardTools button {
+    min-width: 52px;
+    padding: 6px 8px !important;
+    font-size: 10px !important;
+}
+.assetClipboardTools button:disabled {
+    opacity: 0.42;
+    cursor: default;
+}
+.assetCard {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 88px;
+    padding: 7px 9px;
+    border: 1px solid #344951 !important;
+    background: #1b2a31 !important;
+    border-radius: 10px !important;
+    color: #e6f3f0 !important;
+    text-align: left;
+    cursor: pointer;
+}
+.assetCard:hover {
+    border-color: var(--mint) !important;
+    background: #243b42 !important;
+}
+.assetGlyph {
+    display: grid;
+    place-items: center;
+    width: 27px;
+    height: 27px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #2b625f, #394e86);
+    font-size: 16px;
+}
+.assetCard span:last-child {
+    font-size: 11px;
+    line-height: 1.2;
+}
+.assetCard small {
+    display: block;
+    color: #8fa5a5;
+    font-size: 9px;
+}
+#exportMenu {
+    position: fixed;
+    top: 68px;
+    right: 76px;
+    z-index: 1000;
+    display: none;
+    grid-template-columns: repeat(2, minmax(115px, 1fr));
+    gap: 6px;
+    padding: 9px;
+    background: rgba(15, 24, 30, 0.98);
+    border: 1px solid #38515a;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    min-width: 260px;
+    white-space: normal;
+}
+#exportMenu.open {
+    display: grid;
+}
+.exportMenu button {
+    font-size: 11px !important;
+    padding: 8px 9px !important;
+    min-height: 32px !important;
+}
+#helpPanel {
+    position: absolute;
+    right: 16px;
+    top: 72px;
+    z-index: 11;
+    display: none;
+    width: min(330px, calc(100vw - 32px));
+    padding: 14px;
+    background: rgba(14, 23, 29, 0.97);
+    border: 1px solid #3b545d;
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    font-size: 12px;
+    line-height: 1.7;
+    color: #b8c8c8;
+}
+.helpTitle {
+    font-weight: 800;
+    color: #e8fffa;
+    margin-bottom: 6px;
+}
+.helpKey {
+    display: inline-block;
+    padding: 1px 5px;
+    border: 1px solid #4c6168;
+    border-radius: 4px;
+    color: var(--mint);
+    font-size: 10px;
+    margin-right: 3px;
+}
+#edgeTab {
+    border: 1px solid #4b7779 !important;
+    background: #1b373b !important;
+    color: #b6fff0 !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+@media (max-width: 900px) {
+    body {
+        display: block;
+        position: relative;
+    }
+    #main {
+        width: 100vw;
+        height: 100vh;
+    }
+    #side {
+        position: fixed;
+        left: 0;
+        top: 64px;
+        bottom: 0;
+        width: min(360px, 88vw);
+        min-width: 0;
+        height: auto;
+        max-height: none;
+        transform: translateX(0);
+        transition: transform 0.2s ease;
+        box-shadow: 16px 0 45px rgba(0, 0, 0, 0.5);
+    }
+    #side.hide {
+        display: block !important;
+        transform: translateX(-105%);
+    }
+    #edgeTab {
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+        position: fixed !important;
+        top: 82px !important;
+        left: 0 !important;
+        width: 28px !important;
+        height: 54px !important;
+        border-radius: 0 10px 10px 0 !important;
+        z-index: 30 !important;
+    }
+    #stage {
+        padding: 8px 8px 12px;
+    }
+    #bar {
+        padding-inline: 9px;
+    }
+    .brandText {
+        display: none;
+    }
+    .barGrow {
+        display: none;
+    }
+    #exportMenu {
+        position: fixed;
+        top: 68px;
+        right: 10px;
+    }
+    #assetTray {
+        left: 8px;
+        right: 8px;
+        bottom: 10px;
+    }
+    .assetTrayInner {
+        padding: 7px;
+    }
+    .assetTrayTitle {
+        display: none;
+    }
+    #hint {
+        margin-inline: 8px !important;
+        font-size: 11px !important;
+    }
+}
+@media (max-width: 520px) {
+    #studioQuick .workspaceTabs {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    #bar {
+        gap: 5px;
+    }
+    .barGroup {
+        gap: 4px;
+    }
+    #bar button,
+    .barGroup button {
+        padding: 6px 8px;
+        font-size: 12px;
+    }
+    .iconBtn {
+        font-size: 16px !important;
+    }
+    .quickField {
+        grid-template-columns: 1fr 76px 24px;
+    }
+    .assetCard {
+        min-width: 78px;
+        padding: 6px 7px;
+    }
+    .assetGlyph {
+        width: 24px;
+        height: 24px;
+    }
+}
 
-            /* ===== Compact UI refresh ===== */
-            #side {
-                width: 292px;
-                min-width: 292px;
-                padding: 9px 8px 20px;
-            }
-            #bar {
-                min-height: 50px;
-                padding: 7px 10px;
-                gap: 5px;
-            }
-            .brand {
-                gap: 7px;
-                padding-right: 4px;
-            }
-            .brandMark {
-                width: 29px;
-                height: 29px;
-                border-radius: 9px;
-                font-size: 13px;
-            }
-            .brandText {
-                font-size: 12px;
-            }
-            .brandText small {
-                font-size: 9px;
-                margin-top: 1px;
-            }
-            #bar button,
-            .barGroup button {
-                min-height: 32px;
-                padding: 5px 8px;
-                font-size: 11px;
-                border-radius: 8px;
-            }
-            #stage {
-                padding: 8px;
-            }
-            .canvas {
-                border-radius: 10px;
-            }
-            #hint {
-                display: none !important;
-            }
-            #side .secbar {
-                top: -9px;
-                margin: -9px -8px 3px;
-                padding: 7px 8px;
-            }
-            #side .secbar button {
-                padding: 4px 7px;
-                font-size: 10px;
-            }
-            #side summary {
-                padding: 8px 3px;
-                font-size: 12px;
-            }
-            #side h3 {
-                margin: 12px 0 5px;
-            }
-            #studioQuick {
-                margin: -1px 0 8px;
-                padding: 8px;
-                border-radius: 11px;
-                box-shadow: 0 7px 18px rgba(0, 0, 0, 0.12);
-            }
-            #studioQuick h2 {
-                font-size: 12px;
-                margin: 0;
-            }
-            #studioQuick .quickSub {
-                display: none;
-            }
-            .workspaceTabs {
-                margin: 6px 0 7px;
-                gap: 3px;
-                padding: 2px;
-            }
-            .workspaceTab {
-                padding: 5px 3px !important;
-                font-size: 10px !important;
-                border-radius: 6px !important;
-            }
-            #studioQuick .screenLead {
-                font-size: 0 !important;
-                line-height: 1;
-                min-height: 13px;
-                margin: 0 0 4px;
-            }
-            #studioQuick .screenLead small {
-                font-size: 10px;
-                line-height: 1.25;
-            }
-            #studioQuick .sceneNote {
-                display: none;
-            }
-            #studioQuick #floorPlanSelectionStatus {
-                display: block;
-                font-size: 10px;
-                margin: 3px 0;
-                color: #9db0b1;
-            }
-            #studioQuick .sceneTitle {
-                margin-top: 7px;
-                font-size: 10px;
-            }
-            #studioQuick .quickRow {
-                gap: 4px;
-            }
-            #studioQuick .quickRow button {
-                padding: 5px 6px;
-                font-size: 10px;
-                border-radius: 7px;
-            }
-            #studioQuick .quickField {
-                grid-template-columns: 1fr 74px 22px;
-                gap: 5px;
-                margin: 6px 0;
-                font-size: 10px;
-            }
-            #studioQuick .quickField input,
-            #studioQuick .quickField select {
-                padding: 5px 6px;
-                font-size: 11px;
-            }
-            #studioQuick label {
-                min-height: 23px;
-                margin: 4px 0;
-                font-size: 10px;
-            }
-            #studioQuick .lensPresetRow {
-                margin-top: 4px;
-            }
-            #studioQuick .lensPresetRow button {
-                flex: 1 1 64px;
-                padding: 5px 3px;
-                font-size: 10px;
-            }
-            #studioQuick .compactPresets button {
-                font-size: 10px;
-            }
-            #studioQuick .floorTintBox {
-                margin-top: 6px;
-                padding: 6px 7px;
-            }
-            #studioQuick .sceneTools {
-                margin-top: 5px;
-            }
-            #studioQuick .sceneTools button {
-                padding: 5px 4px !important;
-                font-size: 10px !important;
-            }
-            #studioQuick .alignTools {
-                gap: 4px;
-                margin-top: 5px;
-            }
-            #studioQuick .alignTools select,
-            #studioQuick .alignTools button {
-                padding: 5px 4px !important;
-                font-size: 10px !important;
-            }
-            #objectList {
-                max-height: 120px;
-                margin-top: 6px;
-                gap: 4px;
-            }
-            .objectRow {
-                padding: 5px 6px !important;
-                font-size: 10px !important;
-            }
-            .objectIcon {
-                width: 20px;
-                height: 20px;
-            }
-            .objectMeta small {
-                font-size: 9px;
-            }
-            #floorPlanDock {
-                right: 10px;
-                top: 10px;
-                width: min(430px, calc(100% - 20px));
-            }
-            .floorPlanDockInner {
-                gap: 4px;
-                padding: 6px 7px;
-                border-radius: 10px;
-            }
-            .floorPlanDockStatus {
-                font-size: 10px;
-            }
-            .floorPlanDockStatus small,
-            .floorPlanDock .dockHint {
-                display: none;
-            }
-            .floorPlanDockHeader {
-                gap: 4px;
-            }
-            .floorHistoryButtons {
-                gap: 3px;
-            }
-            .floorHistoryButton {
-                min-width: 30px !important;
-                padding: 4px 6px !important;
-            }
-            .floorPlanPanTools {
-                gap: 2px;
-                font-size: 9px;
-            }
-            .floorPlanPanTools button {
-                min-width: 27px !important;
-                padding: 4px 5px !important;
-            }
-            .floorLensTools {
-                font-size: 9px;
-            }
-            .floorLensTools input {
-                width: 48px !important;
-                padding: 4px 5px !important;
-            }
-            .floorPlanDock button {
-                min-width: 40px !important;
-                padding: 5px 6px !important;
-                font-size: 10px !important;
-            }
-            .floorPlanDock .dockCollapse {
-                min-width: 30px !important;
-            }
-            .floorPlanDock.collapsed .dockCollapse {
-                min-width: 70px !important;
-            }
-            #stackFloorRows {
-                display: grid;
-                gap: 6px;
-                margin-top: 8px;
-            }
-            .stackFloorRow {
-                display: grid;
-                grid-template-columns: 38px repeat(4, minmax(0, 1fr));
-                gap: 4px;
-                padding: 5px;
-                border: 1px solid var(--bd);
-                border-radius: 7px;
-                background: rgba(255, 255, 255, 0.025);
-            }
-            .stackFloorRow.active {
-                border-color: #ffb36f;
-                box-shadow: 0 0 0 1px rgba(255, 179, 111, 0.22);
-            }
-            .stackFloorRow > label {
-                display: grid;
-                gap: 2px;
-                min-width: 0;
-                color: var(--muted);
-                font-size: 9px;
-            }
-            .stackFloorRow input {
-                width: 100%;
-                min-width: 0;
-                box-sizing: border-box;
-                padding: 3px 4px;
-                font-size: 10px;
-            }
-            .stackFloorSelect {
-                align-self: start;
-                min-width: 0 !important;
-                padding: 5px 2px !important;
-                font-size: 10px !important;
-            }
-            @media (max-width: 900px) {
-                #side {
-                    width: min(310px, 88vw);
-                    min-width: 0;
-                    padding: 9px 8px 18px;
-                }
-                #bar {
-                    min-height: 48px;
-                }
-                .brand {
-                    padding-right: 0;
-                }
-                .brandText {
-                    display: none;
-                }
-                #stage {
-                    padding: 6px;
-                }
-            }
-        </style>
+/* ===== Compact UI refresh ===== */
+#side {
+    width: 292px;
+    min-width: 292px;
+    padding: 9px 8px 20px;
+}
+#bar {
+    min-height: 50px;
+    padding: 7px 10px;
+    gap: 5px;
+}
+.brand {
+    gap: 7px;
+    padding-right: 4px;
+}
+.brandMark {
+    width: 29px;
+    height: 29px;
+    border-radius: 9px;
+    font-size: 13px;
+}
+.brandText {
+    font-size: 12px;
+}
+.brandText small {
+    font-size: 9px;
+    margin-top: 1px;
+}
+#bar button,
+.barGroup button {
+    min-height: 32px;
+    padding: 5px 8px;
+    font-size: 11px;
+    border-radius: 8px;
+}
+#stage {
+    padding: 8px;
+}
+.canvas {
+    border-radius: 10px;
+}
+#hint {
+    display: none !important;
+}
+#side .secbar {
+    top: -9px;
+    margin: -9px -8px 3px;
+    padding: 7px 8px;
+}
+#side .secbar button {
+    padding: 4px 7px;
+    font-size: 10px;
+}
+#side summary {
+    padding: 8px 3px;
+    font-size: 12px;
+}
+#side h3 {
+    margin: 12px 0 5px;
+}
+#studioQuick {
+    margin: -1px 0 8px;
+    padding: 8px;
+    border-radius: 11px;
+    box-shadow: 0 7px 18px rgba(0, 0, 0, 0.12);
+}
+#studioQuick h2 {
+    font-size: 12px;
+    margin: 0;
+}
+#studioQuick .quickSub {
+    display: none;
+}
+.workspaceTabs {
+    margin: 6px 0 7px;
+    gap: 3px;
+    padding: 2px;
+}
+.workspaceTab {
+    padding: 5px 3px !important;
+    font-size: 10px !important;
+    border-radius: 6px !important;
+}
+#studioQuick .screenLead {
+    font-size: 0 !important;
+    line-height: 1;
+    min-height: 13px;
+    margin: 0 0 4px;
+}
+#studioQuick .screenLead small {
+    font-size: 10px;
+    line-height: 1.25;
+}
+#studioQuick .sceneNote {
+    display: none;
+}
+#studioQuick #floorPlanSelectionStatus {
+    display: block;
+    font-size: 10px;
+    margin: 3px 0;
+    color: #9db0b1;
+}
+#studioQuick .sceneTitle {
+    margin-top: 7px;
+    font-size: 10px;
+}
+#studioQuick .quickRow {
+    gap: 4px;
+}
+#studioQuick .quickRow button {
+    padding: 5px 6px;
+    font-size: 10px;
+    border-radius: 7px;
+}
+#studioQuick .quickField {
+    grid-template-columns: 1fr 74px 22px;
+    gap: 5px;
+    margin: 6px 0;
+    font-size: 10px;
+}
+#studioQuick .quickField input,
+#studioQuick .quickField select {
+    padding: 5px 6px;
+    font-size: 11px;
+}
+#studioQuick label {
+    min-height: 23px;
+    margin: 4px 0;
+    font-size: 10px;
+}
+#studioQuick .lensPresetRow {
+    margin-top: 4px;
+}
+#studioQuick .lensPresetRow button {
+    flex: 1 1 64px;
+    padding: 5px 3px;
+    font-size: 10px;
+}
+#studioQuick .compactPresets button {
+    font-size: 10px;
+}
+#studioQuick .floorTintBox {
+    margin-top: 6px;
+    padding: 6px 7px;
+}
+#studioQuick .sceneTools {
+    margin-top: 5px;
+}
+#studioQuick .sceneTools button {
+    padding: 5px 4px !important;
+    font-size: 10px !important;
+}
+#studioQuick .alignTools {
+    gap: 4px;
+    margin-top: 5px;
+}
+#studioQuick .alignTools select,
+#studioQuick .alignTools button {
+    padding: 5px 4px !important;
+    font-size: 10px !important;
+}
+#objectList {
+    max-height: 120px;
+    margin-top: 6px;
+    gap: 4px;
+}
+.objectRow {
+    padding: 5px 6px !important;
+    font-size: 10px !important;
+}
+.objectIcon {
+    width: 20px;
+    height: 20px;
+}
+.objectMeta small {
+    font-size: 9px;
+}
+#floorPlanDock {
+    right: 10px;
+    top: 10px;
+    width: min(430px, calc(100% - 20px));
+}
+.floorPlanDockInner {
+    gap: 4px;
+    padding: 6px 7px;
+    border-radius: 10px;
+}
+.floorPlanDockStatus {
+    font-size: 10px;
+}
+.floorPlanDockStatus small,
+.floorPlanDock .dockHint {
+    display: none;
+}
+.floorPlanDockHeader {
+    gap: 4px;
+}
+.floorHistoryButtons {
+    gap: 3px;
+}
+.floorHistoryButton {
+    min-width: 30px !important;
+    padding: 4px 6px !important;
+}
+.floorPlanPanTools {
+    gap: 2px;
+    font-size: 9px;
+}
+.floorPlanPanTools button {
+    min-width: 27px !important;
+    padding: 4px 5px !important;
+}
+.floorLensTools {
+    font-size: 9px;
+}
+.floorLensTools input {
+    width: 48px !important;
+    padding: 4px 5px !important;
+}
+.floorPlanDock button {
+    min-width: 40px !important;
+    padding: 5px 6px !important;
+    font-size: 10px !important;
+}
+.floorPlanDock .dockCollapse {
+    min-width: 30px !important;
+}
+.floorPlanDock.collapsed .dockCollapse {
+    min-width: 70px !important;
+}
+#stackFloorRows {
+    display: grid;
+    gap: 6px;
+    margin-top: 8px;
+}
+.stackFloorRow {
+    display: grid;
+    grid-template-columns: 38px repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    padding: 5px;
+    border: 1px solid var(--bd);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.025);
+}
+.stackFloorRow.active {
+    border-color: #ffb36f;
+    box-shadow: 0 0 0 1px rgba(255, 179, 111, 0.22);
+}
+.stackFloorRow > label {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 9px;
+}
+.stackFloorRow input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 3px 4px;
+    font-size: 10px;
+}
+.stackFloorSelect {
+    align-self: start;
+    min-width: 0 !important;
+    padding: 5px 2px !important;
+    font-size: 10px !important;
+}
+@media (max-width: 900px) {
+    #side {
+        width: min(310px, 88vw);
+        min-width: 0;
+        padding: 9px 8px 18px;
+    }
+    #bar {
+        min-height: 48px;
+    }
+    .brand {
+        padding-right: 0;
+    }
+    .brandText {
+        display: none;
+    }
+    #stage {
+        padding: 6px;
+    }
+}
+
+</style>
     </head>
     <body>
         <div id="side"></div>
@@ -1564,6 +1617,27 @@
                         消去</button
                     ><button id="surfaceToggle" class="toolBtn" title="画像全体の面表示と背面処理を切り替え">
                         面 OFF
+                    </button
+                    ><button
+                        id="lockSel"
+                        class="toolBtn lockBtn"
+                        title="選択中のオブジェクトをロック／解除（⌘/Ctrl+L）"
+                    >
+                        <svg class="lockIcon" viewBox="0 0 24 24" aria-hidden="true">
+                            <rect x="5" y="10.5" width="14" height="10" rx="2.4" />
+                            <path class="lockShackle" d="M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" />
+                        </svg>
+                        <span class="lockText">ロック</span></button
+                    ><button
+                        id="lockCam"
+                        class="toolBtn lockBtn"
+                        title="カメラ（視点）を固定して誤操作を防ぐ（L）"
+                    >
+                        <svg class="lockIcon" viewBox="0 0 24 24" aria-hidden="true">
+                            <rect x="5" y="10.5" width="14" height="10" rx="2.4" />
+                            <path class="lockShackle" d="M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" />
+                        </svg>
+                        <span class="lockText">カメラ固定</span>
                     </button>
                 </div>
                 <div class="barGroup" id="standardViews">
@@ -1988,17 +2062,29 @@ function leaveOrthView(changedKey) {
     }
     orthView = null;
 }
-function setP(k, v) {
+function setP(k, v, force = false) {
+    // カメラロック中は視点の値を書き換えない（左パネル・標準ビュー・矢印キーなど共通）。
+    // force=true は保存データの読み込みなど、内部でどうしても必要なときだけ使う。
+    if (!force && cameraLock && CAMERA_KEYS.has(k)) {
+        if (typeof window.flashHint === "function") window.flashHint("カメラ固定中：視点は動きません（L で解除）");
+        return false;
+    }
     leaveOrthView(k);
     P[k] = v;
     const input = $(k);
     if (input) input.value = v;
+    return true;
 }
 for (const k in P) {
     const el = $(k);
     if (!el) continue;
     el.value = P[k];
     el.oninput = () => {
+        if (cameraLock && CAMERA_KEYS.has(k)) {
+            el.value = P[k]; // つまみを元の位置へ戻す
+            if (typeof window.flashHint === "function") window.flashHint("カメラ固定中：視点は動きません（L で解除）");
+            return;
+        }
         leaveOrthView(k);
         P[k] = +el.value;
         sync();
@@ -2008,6 +2094,11 @@ for (const k in P) {
     nv.oninput = () => {
         let v = parseFloat(nv.value);
         if (isNaN(v)) return;
+        if (cameraLock && CAMERA_KEYS.has(k)) {
+            nv.value = +P[k].toFixed(3);
+            if (typeof window.flashHint === "function") window.flashHint("カメラ固定中：視点は動きません（L で解除）");
+            return;
+        }
         leaveOrthView(k);
         v = Math.max(+el.min, Math.min(k === "n" ? 3000 : +el.max, v));
         P[k] = v;
@@ -2600,6 +2691,115 @@ const obOf = (id) => {
     return s && s.ob;
 };
 const objectVisible = (o) => !o || o.visible !== false;
+
+// ===== 10.1 ロック（2026-10-30 追加） =====
+// 2種類ある。どちらも「保存データの形を変えずに済む」ように作っている。
+//  1) オブジェクトロック … 図形の定義に locked:true を持たせる（JSON保存にそのまま乗る）
+//  2) カメラロック       … 視点（位置・向き・画角・ズーム）を固定する。保存はしない
+const LOCK_ADMIN_KEYS = new Set(["locked", "visible"]); // ロック中でも変更してよい項目
+// カメラ（視点）を構成する値。これらが変わると「視点が動いた」とみなす。
+const CAMERA_KEYS = new Set(["cx", "cz", "ch", "yaw", "pitch", "roll", "lens", "hz", "fov"]);
+const obLocked = (o) => !!(o && o.locked === true);
+let cameraLock = false,
+    cameraLockSnap = null;
+// 今の視点を記録する。カメラロック中は、この値へ常に戻す。
+function cameraSnapshotNow() {
+    const snap = { view: orthView, Z, ox, oy };
+    CAMERA_KEYS.forEach((k) => (snap[k] = Number(P[k]) || 0));
+    return snap;
+}
+function setCameraLock(on) {
+    cameraLock = !!on;
+    cameraLockSnap = cameraLock ? cameraSnapshotNow() : null;
+    // ロックした瞬間にドラッグ中だった場合は、その操作を打ち切る。
+    if (cameraLock) {
+        drag = null;
+        mg = null;
+    }
+    if (typeof window.syncLockButtons === "function") window.syncLockButtons();
+    if (typeof window.flashHint === "function")
+        window.flashHint(cameraLock ? "カメラを固定しました（L で解除）" : "カメラの固定を解除しました");
+    render();
+    return cameraLock;
+}
+// カメラロック中に視点が変わっていたら、記録した値へ戻す。
+// マウス・ホイール・ピンチ・矢印キー・左パネル・間取りのカメラ操作など、
+// 視点を動かす入口がいくつもあるため、最後に必ずここで1回そろえる。
+function enforceCameraLock() {
+    if (!cameraLock || !cameraLockSnap) return false;
+    const snap = cameraLockSnap;
+    let changed = false;
+    CAMERA_KEYS.forEach((k) => {
+        if (Number(P[k]) !== snap[k]) {
+            P[k] = snap[k];
+            changed = true;
+        }
+    });
+    if (Z !== snap.Z) {
+        Z = snap.Z;
+        changed = true;
+    }
+    if (ox !== snap.ox) {
+        ox = snap.ox;
+        changed = true;
+    }
+    if (oy !== snap.oy) {
+        oy = snap.oy;
+        changed = true;
+    }
+    if (changed) {
+        sync();
+        if (typeof updZ === "function") updZ();
+    }
+    return changed;
+}
+// 選択中のオブジェクトをまとめてロック／解除する。接続パーツは親子でそろえる。
+function setObjectLock(id, locked) {
+    const o = obOf(id);
+    if (!o) return false;
+    const ids = new Set([id]);
+    // 接続している子（看板・テントなど）は、親と一緒にロックする。
+    S.forEach((s) => {
+        const q = s && s.ob;
+        if (q && q.attachment?.parentId === id) ids.add(q.id);
+    });
+    // グループは見た目も操作も一体なので、同じロック状態へそろえる。
+    groupMemberIds(id).forEach((member) => ids.add(member));
+    if (locked) {
+        HU.push(S);
+        RD = [];
+    }
+    ids.forEach((member) => {
+        const def = obOf(member);
+        if (def) setOb(member, { locked: !!locked });
+    });
+    if (locked && ids.has(sel)) {
+        // ロックしたものは選択から外す（ギズモも消える）。
+        ids.forEach((member) => selIds.delete(member));
+        normalizeSelection();
+    }
+    return true;
+}
+function unlockAllObjects() {
+    const ids = new Set();
+    S.forEach((s) => {
+        const q = s && s.ob;
+        if (obLocked(q)) ids.add(q.id);
+    });
+    if (!ids.size) return 0;
+    HU.push(S);
+    RD = [];
+    ids.forEach((id) => setOb(id, { locked: false }));
+    return ids.size;
+}
+const lockedObjectCount = () => {
+    const ids = new Set();
+    S.forEach((s) => {
+        const q = s && s.ob;
+        if (obLocked(q)) ids.add(q.id);
+    });
+    return ids.size;
+};
 // 親オブジェクトの面に接続した子を、親の寸法・回転に追従させる。
 // attachment.verticalOnly の子は、移動時にこの接続面から離れない。
 function syncAttachedPart(o, parentOverride = null) {
@@ -2746,13 +2946,28 @@ function normalizeSelection() {
     [...selIds].forEach((id) => {
         if (!obOf(id)) selIds.delete(id);
     });
+    // ロック中のオブジェクトは選択に残さない（後からロックした場合もここで外れる）。
+    [...selIds].forEach((id) => {
+        if (obLocked(obOf(id))) selIds.delete(id);
+    });
     // グループは常に一体選択。行・キャンバスのどのメンバーを選んでも全員を選ぶ。
-    [...selIds].forEach((id) => groupMemberIds(id).forEach((member) => selIds.add(member)));
+    // ただしロック中のメンバーは加えない。
+    [...selIds].forEach((id) =>
+        groupMemberIds(id).forEach((member) => {
+            if (!obLocked(obOf(member))) selIds.add(member);
+        }),
+    );
     if (sel && !obOf(sel)) sel = null;
+    if (sel && obLocked(obOf(sel))) sel = null;
     if (!sel && selIds.size) sel = [...selIds][selIds.size - 1];
-    if (sel && !selIds.has(sel)) selIds.add(sel);
+    if (sel && !selIds.has(sel) && !obLocked(obOf(sel))) selIds.add(sel);
 }
 function setSelection(id, add = false) {
+    // ロック中のものは選択しない（当たり判定・一覧・箱選択のすべてがここへ集まる）。
+    if (id && obLocked(obOf(id))) {
+        if (typeof window.flashHint === "function") window.flashHint("ロック中のオブジェクトです（一覧の鍵で解除）");
+        return false;
+    }
     const members = id ? groupMemberIds(id) : [];
     if (!add) selIds.clear();
     if (id) {
@@ -2800,6 +3015,12 @@ function regenObjects() {
 function setOb(id, patch) {
     const o = obOf(id);
     if (!o) return;
+    // ロック中のオブジェクトは、ギズモ・数値パネル・整列などどこから来た変更でも受け付けない。
+    // locked / visible（一覧の鍵・目のボタン）だけは例外にして、解除できなくならないようにする。
+    if (obLocked(o) && patch && Object.keys(patch).some((k) => !LOCK_ADMIN_KEYS.has(k))) {
+        if (typeof window.flashHint === "function") window.flashHint("ロック中のオブジェクトは編集できません");
+        return false;
+    }
     let next = { ...o, ...patch };
     // 接続子の幅・横方向の面ハンドルは、反対側の面を固定したまま編集する。
     // syncAttachedPartで接着面へ戻す前に、移動後の中心を親ローカルXへ記録する。
@@ -2866,12 +3087,14 @@ function setOb(id, patch) {
     });
 }
 // 近くにある図形の線を探す（24px以内）
-function pickOb(p) {
+function pickOb(p, includeLocked = false) {
     let best = null,
         bd = 24 / Z,
         bestAttached = false;
     S.forEach((s) => {
-        if (!s.ob || !objectVisible(s.ob)) return;
+        // ロック中のオブジェクトは通常のクリックでは選ばない。
+        // includeLocked=true は「押した場所がロック中だった」と知らせるためだけに使う。
+        if (!s.ob || !objectVisible(s.ob) || (!includeLocked && obLocked(s.ob))) return;
         for (const v of s.p) {
             const q = sp(s, v);
             if (!q.ok) continue;
@@ -2995,6 +3218,8 @@ function fixOb(o) {
 // 選択中の図形の数値を、パネルに表示
 function syncSel() {
     normalizeSelection();
+    // 選択が変わるとロックボタンの文言（ロック／解除）も変わる。
+    if (typeof window.syncLockButtons === "function") window.syncLockButtons();
     const o = sel && obOf(sel);
     if (sel && !o) sel = null;
     $("objP").style.display = o ? "" : "none";
@@ -3220,6 +3445,27 @@ function deleteSelectedObjects() {
             });
         }
     });
+    // ロック中のオブジェクトは消さない。親を残す場合は接続している子も残す
+    // （子だけ消えると宙に浮いて、あとから位置を直せなくなるため）。
+    [...ids].forEach((id) => {
+        if (obLocked(obOf(id))) ids.delete(id);
+    });
+    let dropped = true;
+    while (dropped) {
+        dropped = false;
+        [...ids].forEach((id) => {
+            const q = obOf(id),
+                parentId = q?.attachment?.parentId;
+            if (parentId && !ids.has(parentId)) {
+                ids.delete(id);
+                dropped = true;
+            }
+        });
+    }
+    if (!ids.size) {
+        if (typeof window.flashHint === "function") window.flashHint("ロック中のオブジェクトは削除されません");
+        return false;
+    }
     HU.push(S);
     S = S.filter((s) => !(s.ob && ids.has(s.ob.id)));
     RD = [];
@@ -8253,6 +8499,8 @@ function drawObjectSurfaces(c) {
 }
 function render() {
     dirty = true;
+    // カメラロック中は、どの入口から視点が動いても描く前に元へ戻す（最後の砦）。
+    enforceCameraLock();
     // sigNow()は描画1回につき一度だけ計算する。以前は線ごとに再計算していたため、
     // アセットや線が多いシーンほど不要な文字列計算が増えていた。
     const currentSignature = sigNow();
@@ -8336,6 +8584,7 @@ function render() {
     }
     if (T === "f") {
         markF(c);
+        drawLockMarks(c);
         overlay(c);
         c.restore();
         return;
@@ -8356,6 +8605,7 @@ function render() {
         c.font = "bold 18px system-ui";
         c.fillText(nm + (t < 1 ? " →" : ""), Math.min(px + 10, W - 70), Math.max(py - 10, 20));
     });
+    drawLockMarks(c);
     overlay(c);
     c.restore();
     const q = (v) => (v ? `(${((v.x / W) * 100).toFixed(0)}%, ${((v.y / H) * 100).toFixed(0)}%)` : "無限遠(平行)");
@@ -8393,6 +8643,10 @@ cv.addEventListener(
     "wheel",
     (e) => {
         e.preventDefault();
+        if (cameraLock) {
+            flashHint("カメラ固定中：ズームも固定です（L で解除）");
+            return;
+        }
         if (mode === "view") {
             P.lens = clamp(P.lens * Math.exp(-e.deltaY * 0.0012), 14, 200);
             sync();
@@ -8471,7 +8725,10 @@ function multiMove(tc) {
         const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
             mx = (pts[0].x + pts[1].x) / 2,
             my = (pts[0].y + pts[1].y) / 2;
-        if (mg.view) {
+        if (mg.view && cameraLock) {
+            // カメラ固定中のピンチは、視点を動かさない（指を離すまで何もしない）。
+            enforceCameraLock();
+        } else if (mg.view) {
             const k = W / cv.getBoundingClientRect().width,
                 worldPerPx = ((Math.max(0.15, P.ch) * 2) / H) * k,
                 dx = mx - mg.mx0,
@@ -8653,6 +8910,7 @@ function finishBoxSelection(end) {
         y1 = Math.max(a.y, b.y),
         chosen = [];
     boxSceneObjects().forEach((o) => {
+        if (obLocked(o)) return; // ロック中は箱選択でも選ばない
         const q = boxScreenBounds(o);
         if (!q) return;
         const cx = (q.x0 + q.x1) / 2,
@@ -8897,6 +9155,11 @@ cv.onpointerdown = (e) => {
                       ? "view"
                       : mode; // 視点モードでは、残っている編集ツールよりもカメラ操作を優先する。
     if (act === "view") {
+        if (cameraLock) {
+            // カメラ固定中は視点操作そのものを開始しない（オブジェクト編集は妨げない）。
+            flashHint("カメラ固定中：視点は動きません（L で解除）");
+            return;
+        }
         const pan = e.shiftKey || e.altKey || e.button === 2;
         drag = {
             kind: pan ? "pan" : "orbit",
@@ -8919,6 +9182,12 @@ cv.onpointerdown = (e) => {
             const id = pickOb(p),
                 multi = e.shiftKey || e.metaKey || e.ctrlKey,
                 wasSelected = !!(id && selIds.has(id));
+            // 何も選べなかった場所がロック中のオブジェクトだったときは、その旨を伝える
+            // （ロックは「選べない」ので、理由が分からないまま無反応に見えるのを防ぐ）。
+            if (!id) {
+                const lockedId = pickOb(p, true);
+                if (lockedId && obLocked(obOf(lockedId))) flashHint("ロック中のオブジェクトです（一覧の鍵で解除）");
+            }
             // Shift/Ctrl/⌘クリックで追加・解除。選択済みのオブジェクトをそのままドラッグしたときは、選択中全体を動かす。
             if (multi) setSelection(id, true);
             else if (!wasSelected || selIds.size <= 1) setSelection(id, false);
@@ -8985,6 +9254,13 @@ cv.onpointermove = (e) => {
     if (boxPendingState === "pending" || boxPendingState === "cancel") return;
     if (e.pointerId !== ptr) return;
     const k = W / cv.getBoundingClientRect().width;
+    if (drag && cameraLock) {
+        // 途中でロックした場合も、視点は記録した位置へ戻す。
+        drag = null;
+        enforceCameraLock();
+        render();
+        return;
+    }
     if (drag) {
         const dx = e.clientX - drag.x,
             dy = e.clientY - drag.y;
@@ -9192,9 +9468,11 @@ const undo = () => {
 $("undo").onclick = undo;
 $("redo").onclick = redo;
 $("clr").onclick = () => {
-    if (S.length && confirm("全部消しますか？")) {
+    const lockedLines = S.filter((s) => obLocked(s && s.ob));
+    if (S.length && confirm("全部消しますか？" + (lockedLines.length ? "\n（ロック中のオブジェクトは残ります）" : ""))) {
         HU.push(S);
-        S = [];
+        // ロック中の線は残す（解除しない限り消えない、という約束を守る）。
+        S = lockedLines;
         RD = [];
         render();
     }
@@ -9219,6 +9497,14 @@ addEventListener("keydown", (e) => {
         e.stopPropagation();
         if (window.cityGridDeleteSelected) window.cityGridDeleteSelected();
         else if (typeof deleteSelectedObjects === "function") deleteSelectedObjects();
+        return;
+    }
+    if (key === "l" && !/INPUT|SELECT|TEXTAREA/.test(tag)) {
+        // L = カメラ固定／解除、⌘/Ctrl+L = 選択オブジェクトのロック／解除。
+        // L 単独は「カメラ」、修飾キー付きは「オブジェクト」と覚える。
+        e.preventDefault();
+        if (m) toggleSelectionLock();
+        else toggleCameraLock();
         return;
     }
     if (key === "e" && !window.cityFloorPlanActive && !/INPUT|SELECT|TEXTAREA/.test(tag)) {
@@ -9272,6 +9558,12 @@ addEventListener("keydown", (e) => {
         }
     }
     if (mode !== "view" || /INPUT|SELECT/.test(e.target.tagName)) return;
+    if (cameraLock && /^Arrow/.test(e.key)) {
+        // カメラ固定中は矢印キーでも視点を回さない。
+        e.preventDefault();
+        flashHint("カメラ固定中：視点は動きません（L で解除）");
+        return;
+    }
     const d = e.shiftKey ? 5 : 0.5;
     const L = 180;
     if (e.key === "ArrowLeft") setP("yaw", clamp(P.yaw - d, -L, L));
@@ -9524,6 +9816,9 @@ function pack(withPhoto) {
 // 保存した状態を戻す
 function unpack(d) {
     if (!d || d.app !== "perspective-ruler-grid" || !Array.isArray(d.S)) throw new Error("形式が違います");
+    // ファイルを開いたらカメラ固定は解除する（保存されていた視点へ戻す必要があるため）。
+    // オブジェクトの locked は保存データに含まれているので、そのまま復元される。
+    if (typeof setCameraLock === "function" && cameraLock) setCameraLock(false);
     $("ar").value = d.ar;
     $("ar").onchange(); // 画面比率
     $("gt").value = d.gt;
@@ -9625,11 +9920,185 @@ addEventListener("keyup", (e) => {
 addEventListener("blur", curs);
 cv.oncontextmenu = (e) => e.preventDefault();
 
+// ===== 16.5 オブジェクトロック／カメラロック（2026-10-30 追加） =====
+// 状態そのものは engine-core.js（obLocked / cameraLock / CAMERA_KEYS）が持ち、
+// ここでは「操作の入口」と「画面の表示」を受け持つ。
+let hintTimer = null,
+    hintBase = "";
+// ヒント行に一時メッセージを出す（元の文は自動で戻る）。
+function flashHint(msg, ms = 1900) {
+    const h = $("hint");
+    if (!h) return;
+    if (!hintTimer) hintBase = h.textContent;
+    h.textContent = msg;
+    h.classList.add("hintFlash");
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => {
+        hintTimer = null;
+        h.classList.remove("hintFlash");
+        h.textContent = hintBase;
+    }, ms);
+}
+window.flashHint = flashHint;
+
+// バーと一覧のボタン表示を現在の状態へ合わせる。ロック・解除のたびに呼ぶ。
+function syncLockButtons() {
+    const selBtn = $("lockSel"),
+        camBtn = $("lockCam"),
+        lockedCount = typeof lockedObjectCount === "function" ? lockedObjectCount() : 0,
+        selected = selectedObjects(),
+        allLocked = selected.length > 0 && selected.every(obLocked);
+    if (selBtn) {
+        // 文言はテキスト部分だけ差し替える（アイコンのSVGを消さないため）。
+        const text = selBtn.querySelector(".lockText"),
+            label = selected.length
+                ? allLocked
+                    ? "ロック解除"
+                    : "ロック"
+                : lockedCount
+                  ? `全解除 (${lockedCount})`
+                  : "ロック";
+        if (text) text.textContent = label;
+        else selBtn.textContent = label;
+        // 状態はアイコンの形（施錠／開錠）でも分かるようにする。
+        selBtn.classList.toggle("on", allLocked);
+        selBtn.classList.toggle("unlocked", !allLocked && (selected.length > 0 || lockedCount > 0));
+        selBtn.disabled = !selected.length && !lockedCount;
+        selBtn.title = selected.length
+            ? allLocked
+                ? "選択中のオブジェクトのロックを解除（⌘/Ctrl+L）"
+                : "選択中のオブジェクトをロック（⌘/Ctrl+L）"
+            : lockedCount
+              ? "ロック中のオブジェクトを全解除（⌘/Ctrl+L）"
+              : "オブジェクトを選ぶとロックできます";
+    }
+    if (camBtn) {
+        const text = camBtn.querySelector(".lockText");
+        if (text) text.textContent = cameraLock ? "カメラ固定中" : "カメラ固定";
+        else camBtn.textContent = cameraLock ? "カメラ固定中" : "カメラ固定";
+        camBtn.classList.toggle("on", cameraLock);
+        camBtn.title = cameraLock
+            ? "カメラ（視点）を固定しています。クリックまたは L で解除"
+            : "カメラ（視点）を固定して、誤操作で視点が動かないようにする（L）";
+    }
+    document.body.classList.toggle("cameraLocked", cameraLock);
+}
+window.syncLockButtons = syncLockButtons;
+
+function toggleCameraLock() {
+    return typeof setCameraLock === "function" ? setCameraLock(!cameraLock) : false;
+}
+// 選択中のロック切替。選択が無くロック中のものがあるときは全解除にする。
+function toggleSelectionLock() {
+    const selected = selectedObjects();
+    if (selected.length) {
+        const lock = !selected.every(obLocked);
+        selected.forEach((o) => setObjectLock(o.id, lock));
+        flashHint(lock ? `${selected.length}個をロックしました（⌘/Ctrl+L で解除）` : "ロックを解除しました");
+    } else if (lockedObjectCount()) {
+        const n = unlockAllObjects();
+        flashHint(`ロックを全解除しました（${n}個）`);
+    } else {
+        flashHint("ロックするオブジェクトを先に選択してください");
+    }
+    syncLockButtons();
+    if (typeof updateOutliner === "function") updateOutliner();
+    render();
+}
+window.cityToggleObjectLock = toggleSelectionLock;
+window.cityToggleCameraLock = toggleCameraLock;
+
+if ($("lockSel")) $("lockSel").onclick = toggleSelectionLock;
+if ($("lockCam")) $("lockCam").onclick = toggleCameraLock;
+
+// 鍵アイコン（キャンバス用）。x,y は中心、s は一辺の目安。
+function drawLockGlyph(c, x, y, s, color) {
+    c.save();
+    c.strokeStyle = color;
+    c.lineWidth = Math.max(1, s * 0.16);
+    c.lineCap = "round";
+    c.beginPath();
+    c.arc(x, y - s * 0.16, s * 0.26, Math.PI, Math.PI * 2); // はね
+    c.stroke();
+    c.beginPath();
+    const w = s * 0.8,
+        h = s * 0.6,
+        bx = x - w / 2,
+        by = y - s * 0.08;
+    if (c.roundRect) c.roundRect(bx, by, w, h, s * 0.12);
+    else c.rect(bx, by, w, h);
+    c.fillStyle = "#0f1a20";
+    c.fill();
+    c.stroke();
+    c.restore();
+}
+// ロック中のオブジェクトに小さな鍵、カメラ固定中は画面の左下にラベルを出す。
+// どちらも「今どういう状態か」を画面だけで判断できるようにするためのもの。
+function drawLockMarks(c) {
+    const locked = [];
+    const seen = new Set();
+    S.forEach((s) => {
+        const o = s && s.ob;
+        if (!o || seen.has(o.id)) return;
+        seen.add(o.id);
+        if (obLocked(o) && objectVisible(o)) locked.push(o);
+    });
+    if (!locked.length && !cameraLock) return;
+    c.save();
+    c.setTransform(1, 0, 0, 1, 0, 0); // 画面座標で描く（ズームの影響を受けない）
+    locked.forEach((o) => {
+        const b = obBounds(o);
+        if (!b) return;
+        const p = scrW([(b.lo[0] + b.hi[0]) / 2, b.hi[1], (b.lo[2] + b.hi[2]) / 2]);
+        if (!p || !p.ok) return;
+        const x = p.x * Z + ox,
+            y = p.y * Z + oy - 14;
+        if (x < -20 || y < -20 || x > W + 20 || y > H + 20) return;
+        c.globalAlpha = 0.92;
+        c.fillStyle = "rgba(13,20,24,.72)";
+        c.strokeStyle = "#8fd8ff";
+        c.lineWidth = 1.2;
+        c.beginPath();
+        if (c.roundRect) c.roundRect(x - 9, y - 9, 18, 18, 5);
+        else c.rect(x - 9, y - 9, 18, 18);
+        c.fill();
+        c.stroke();
+        drawLockGlyph(c, x, y + 1, 12, "#8fd8ff");
+    });
+    if (cameraLock) {
+        const label = "カメラ固定",
+            padX = 10;
+        c.font = "bold 12px system-ui, sans-serif";
+        const tw = c.measureText(label).width,
+            w = tw + padX * 2 + 16,
+            h = 24,
+            x = 12,
+            y = H - h - 12;
+        c.globalAlpha = 0.94;
+        c.fillStyle = "rgba(13,20,24,.78)";
+        c.strokeStyle = "#ffd34d";
+        c.lineWidth = 1.4;
+        c.beginPath();
+        if (c.roundRect) c.roundRect(x, y, w, h, 7);
+        else c.rect(x, y, w, h);
+        c.fill();
+        c.stroke();
+        drawLockGlyph(c, x + 13, y + h / 2 + 1, 13, "#ffd34d");
+        c.fillStyle = "#ffe9a8";
+        c.textBaseline = "middle";
+        c.fillText(label, x + 26, y + h / 2 + 1);
+        c.textBaseline = "alphabetic";
+    }
+    c.restore();
+}
+window.cityLockSnapshot = () => ({ cameraLock, locked: lockedObjectCount() });
+
 // ===== 17. 起動 =====
 cv.width = W;
 cv.height = H;
 sync();
 syncSurfaceToggle();
+syncLockButtons();
 applyType(2);
 try {
     const sideState = localStorage.getItem("pgrid-side");
@@ -14607,7 +15076,7 @@ window.cityGridInstallAssetUI = function (bridge) {
 
     <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　7 前　8 横　9 上　0 3D　／　詳細操作は「？」</div>
     <div class="sceneTitle">シーン内オブジェクト</div>
-    <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button><button id="sceneCombineSel">結合</button><button id="sceneSeparateSel">結合解除</button></div>
+    <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneLockSel" title="選択中のオブジェクトをロック／解除（⌘/Ctrl+L）">選択をロック</button><button id="sceneUnlockAll" title="ロック中のオブジェクトをすべて解除">全ロック解除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button><button id="sceneCombineSel">結合</button><button id="sceneSeparateSel">結合解除</button></div>
     <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Y軸（高さ）</option><option value=2>Z軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
     <div class="sceneNote">行のチェックで複数選択。整列は2個以上を選んでください。グループ化は後から解除できます。結合は複数の定義を一つの複合オブジェクトにまとめ、結合解除まで一体として扱います。</div>
     <div id="objectList"><div class="emptyList">まだオブジェクトがありません</div></div>`;
@@ -15053,8 +15522,10 @@ window.cityGridInstallAssetUI = function (bridge) {
                                 : o.type === "asset"
                                   ? "low-poly asset"
                                   : "vector shape";
-                      const visible = objectVisible(o);
-                      return `<div class="objectRow ${selIds.has(o.id) ? "selected" : ""} ${sel === o.id ? "activeObject" : ""} ${visible ? "" : "hiddenObject"}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? "オブジェクトを非表示" : "オブジェクトを表示"}" aria-label="${visible ? "非表示" : "表示"}">${visible ? "◉" : "○"}</button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? "checked" : ""} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1} ${group}<small>${detail}</small></span></div>`;
+                      const visible = objectVisible(o),
+                          locked = obLocked(o);
+                      // 鍵ボタンは「ロック中でも押せる」唯一の入口。ここから解除できる。
+                      return `<div class="objectRow ${selIds.has(o.id) ? "selected" : ""} ${sel === o.id ? "activeObject" : ""} ${visible ? "" : "hiddenObject"} ${locked ? "lockedObject" : ""}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? "オブジェクトを非表示" : "オブジェクトを表示"}" aria-label="${visible ? "非表示" : "表示"}">${visible ? "◉" : "○"}</button><button type="button" class="objectLock ${locked ? "isLocked" : ""}" data-object-lock="${o.id}" title="${locked ? "ロックを解除（⌘/Ctrl+L）" : "ロックする（⌘/Ctrl+L）"}" aria-label="${locked ? "ロック解除" : "ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked ? "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" : "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1} ${group}<small>${detail}</small></span></div>`;
                   })
                   .join("")
             : '<div class="emptyList">まだオブジェクトがありません</div>';
@@ -15063,7 +15534,14 @@ window.cityGridInstallAssetUI = function (bridge) {
     function deleteSelectedScene() {
         const ids = new Set();
         selectedObjects().forEach((o) => linkedMemberIds(o.id).forEach((member) => ids.add(member)));
-        if (!ids.size) return;
+        // ロック中のものは消さない（engine-core の deleteSelectedObjects と同じ約束）。
+        [...ids].forEach((id) => {
+            if (obLocked(obOf(id))) ids.delete(id);
+        });
+        if (!ids.size) {
+            flashHint("ロック中のオブジェクトは削除されません");
+            return;
+        }
         HU.push(S);
         S = S.filter((s) => !(s.ob && ids.has(s.ob.id)));
         RD = [];
@@ -15121,6 +15599,26 @@ window.cityGridInstallAssetUI = function (bridge) {
             setObjectVisibility(id, !objectVisible(chosen));
             return;
         }
+        if (e.target.closest("[data-object-lock]")) {
+            // 一覧の鍵。ロック／解除だけは「選択されていなくても」行える。
+            e.preventDefault();
+            e.stopPropagation();
+            const nowLocked = !obLocked(obOf(id));
+            setObjectLock(id, nowLocked);
+            if (typeof syncLockButtons === "function") syncLockButtons();
+            flashHint(nowLocked ? "ロックしました（一覧の鍵で解除）" : "ロックを解除しました");
+            updateOutliner();
+            syncSel();
+            render();
+            return;
+        }
+        if (chosen && obLocked(chosen)) {
+            // ロック中の行は選択できない。理由を伝えて終わる。
+            e.preventDefault();
+            syncSel();
+            render();
+            return;
+        }
         if (chosen && !objectVisible(chosen)) {
             e.preventDefault();
             syncSel();
@@ -15151,6 +15649,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         selIds.clear();
         sceneObjects()
             .filter(objectVisible)
+            .filter((o) => !obLocked(o)) // ロック中は全選択の対象外
             .forEach((o) => selIds.add(o.id));
         sel = [...selIds].pop() || null;
         normalizeSelection();
@@ -15164,6 +15663,20 @@ window.cityGridInstallAssetUI = function (bridge) {
         render();
     };
     el("sceneDeleteSel").onclick = deleteSelectedScene;
+    el("sceneLockSel").onclick = () => {
+        toggleSelectionLock();
+        updateOutliner();
+        syncSel();
+        render();
+    };
+    el("sceneUnlockAll").onclick = () => {
+        const n = unlockAllObjects();
+        flashHint(n ? `ロックを全解除しました（${n}個）` : "ロック中のオブジェクトはありません");
+        syncLockButtons();
+        updateOutliner();
+        syncSel();
+        render();
+    };
     el("sceneDeleteButton").onclick = deleteSelectedScene;
     el("sceneGroupSel").onclick = groupSelectedScene;
     el("sceneUngroupSel").onclick = ungroupSelectedScene;
@@ -19805,7 +20318,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     const help = document.createElement("div");
     help.id = "helpPanel";
     help.innerHTML =
-        '<div class="helpTitle">操作のコツ</div><div><span class="helpKey">Pencil</span>線を引く　<span class="helpKey">指</span>視点・ピンチ</div><div><span class="helpKey">⌘ Z</span>元に戻す　<span class="helpKey">E</span>消しゴム</div><div><span class="helpKey">図形</span>ドラッグで床・壁に配置</div><div><span class="helpKey">編集</span>線を選択 → 矢印移動／白い四角で拡縮／輪で回転</div><div style="margin-top:7px;color:#7f999c">アセットを追加したあと、編集モードでBlender風ギズモを使えます。人物は基準身長から作られます。</div>';
+        '<div class="helpTitle">操作のコツ</div><div><span class="helpKey">Pencil</span>線を引く　<span class="helpKey">指</span>視点・ピンチ</div><div><span class="helpKey">⌘ Z</span>元に戻す　<span class="helpKey">E</span>消しゴム</div><div><span class="helpKey">図形</span>ドラッグで床・壁に配置</div><div><span class="helpKey">編集</span>線を選択 → 矢印移動／白い四角で拡縮／輪で回転</div><div><span class="helpKey">⌘ L</span>選択をロック／解除　<span class="helpKey">L</span>カメラ（視点）を固定</div><div style="margin-top:7px;color:#7f999c">アセットを追加したあと、編集モードでBlender風ギズモを使えます。人物は基準身長から作られます。<br>ロックしたオブジェクトは、ギズモ・数値パネル・整列・削除のどれでも変わりません（シーン一覧の鍵で解除）。カメラ固定中もオブジェクトの編集はできます。</div>';
     el("main").appendChild(help);
     el("helpToggle").onclick = () => {
         help.style.display = help.style.display === "block" ? "none" : "block";

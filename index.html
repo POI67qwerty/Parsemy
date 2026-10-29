@@ -41,6 +41,27 @@
                         消去</button
                     ><button id="surfaceToggle" class="toolBtn" title="画像全体の面表示と背面処理を切り替え">
                         面 OFF
+                    </button
+                    ><button
+                        id="lockSel"
+                        class="toolBtn lockBtn"
+                        title="選択中のオブジェクトをロック／解除（⌘/Ctrl+L）"
+                    >
+                        <svg class="lockIcon" viewBox="0 0 24 24" aria-hidden="true">
+                            <rect x="5" y="10.5" width="14" height="10" rx="2.4" />
+                            <path class="lockShackle" d="M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" />
+                        </svg>
+                        <span class="lockText">ロック</span></button
+                    ><button
+                        id="lockCam"
+                        class="toolBtn lockBtn"
+                        title="カメラ（視点）を固定して誤操作を防ぐ（L）"
+                    >
+                        <svg class="lockIcon" viewBox="0 0 24 24" aria-hidden="true">
+                            <rect x="5" y="10.5" width="14" height="10" rx="2.4" />
+                            <path class="lockShackle" d="M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" />
+                        </svg>
+                        <span class="lockText">カメラ固定</span>
                     </button>
                 </div>
                 <div class="barGroup" id="standardViews">

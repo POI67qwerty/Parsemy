@@ -131,7 +131,7 @@
 
     <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　7 前　8 横　9 上　0 3D　／　詳細操作は「？」</div>
     <div class="sceneTitle">シーン内オブジェクト</div>
-    <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button><button id="sceneCombineSel">結合</button><button id="sceneSeparateSel">結合解除</button></div>
+    <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneLockSel" title="選択中のオブジェクトをロック／解除（⌘/Ctrl+L）">選択をロック</button><button id="sceneUnlockAll" title="ロック中のオブジェクトをすべて解除">全ロック解除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button><button id="sceneCombineSel">結合</button><button id="sceneSeparateSel">結合解除</button></div>
     <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Y軸（高さ）</option><option value=2>Z軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
     <div class="sceneNote">行のチェックで複数選択。整列は2個以上を選んでください。グループ化は後から解除できます。結合は複数の定義を一つの複合オブジェクトにまとめ、結合解除まで一体として扱います。</div>
     <div id="objectList"><div class="emptyList">まだオブジェクトがありません</div></div>`;
@@ -577,8 +577,10 @@
                                 : o.type === "asset"
                                   ? "low-poly asset"
                                   : "vector shape";
-                      const visible = objectVisible(o);
-                      return `<div class="objectRow ${selIds.has(o.id) ? "selected" : ""} ${sel === o.id ? "activeObject" : ""} ${visible ? "" : "hiddenObject"}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? "オブジェクトを非表示" : "オブジェクトを表示"}" aria-label="${visible ? "非表示" : "表示"}">${visible ? "◉" : "○"}</button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? "checked" : ""} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1} ${group}<small>${detail}</small></span></div>`;
+                      const visible = objectVisible(o),
+                          locked = obLocked(o);
+                      // 鍵ボタンは「ロック中でも押せる」唯一の入口。ここから解除できる。
+                      return `<div class="objectRow ${selIds.has(o.id) ? "selected" : ""} ${sel === o.id ? "activeObject" : ""} ${visible ? "" : "hiddenObject"} ${locked ? "lockedObject" : ""}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? "オブジェクトを非表示" : "オブジェクトを表示"}" aria-label="${visible ? "非表示" : "表示"}">${visible ? "◉" : "○"}</button><button type="button" class="objectLock ${locked ? "isLocked" : ""}" data-object-lock="${o.id}" title="${locked ? "ロックを解除（⌘/Ctrl+L）" : "ロックする（⌘/Ctrl+L）"}" aria-label="${locked ? "ロック解除" : "ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked ? "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" : "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1} ${group}<small>${detail}</small></span></div>`;
                   })
                   .join("")
             : '<div class="emptyList">まだオブジェクトがありません</div>';
@@ -587,7 +589,14 @@
     function deleteSelectedScene() {
         const ids = new Set();
         selectedObjects().forEach((o) => linkedMemberIds(o.id).forEach((member) => ids.add(member)));
-        if (!ids.size) return;
+        // ロック中のものは消さない（engine-core の deleteSelectedObjects と同じ約束）。
+        [...ids].forEach((id) => {
+            if (obLocked(obOf(id))) ids.delete(id);
+        });
+        if (!ids.size) {
+            flashHint("ロック中のオブジェクトは削除されません");
+            return;
+        }
         HU.push(S);
         S = S.filter((s) => !(s.ob && ids.has(s.ob.id)));
         RD = [];
@@ -645,6 +654,26 @@
             setObjectVisibility(id, !objectVisible(chosen));
             return;
         }
+        if (e.target.closest("[data-object-lock]")) {
+            // 一覧の鍵。ロック／解除だけは「選択されていなくても」行える。
+            e.preventDefault();
+            e.stopPropagation();
+            const nowLocked = !obLocked(obOf(id));
+            setObjectLock(id, nowLocked);
+            if (typeof syncLockButtons === "function") syncLockButtons();
+            flashHint(nowLocked ? "ロックしました（一覧の鍵で解除）" : "ロックを解除しました");
+            updateOutliner();
+            syncSel();
+            render();
+            return;
+        }
+        if (chosen && obLocked(chosen)) {
+            // ロック中の行は選択できない。理由を伝えて終わる。
+            e.preventDefault();
+            syncSel();
+            render();
+            return;
+        }
         if (chosen && !objectVisible(chosen)) {
             e.preventDefault();
             syncSel();
@@ -675,6 +704,7 @@
         selIds.clear();
         sceneObjects()
             .filter(objectVisible)
+            .filter((o) => !obLocked(o)) // ロック中は全選択の対象外
             .forEach((o) => selIds.add(o.id));
         sel = [...selIds].pop() || null;
         normalizeSelection();
@@ -688,6 +718,20 @@
         render();
     };
     el("sceneDeleteSel").onclick = deleteSelectedScene;
+    el("sceneLockSel").onclick = () => {
+        toggleSelectionLock();
+        updateOutliner();
+        syncSel();
+        render();
+    };
+    el("sceneUnlockAll").onclick = () => {
+        const n = unlockAllObjects();
+        flashHint(n ? `ロックを全解除しました（${n}個）` : "ロック中のオブジェクトはありません");
+        syncLockButtons();
+        updateOutliner();
+        syncSel();
+        render();
+    };
     el("sceneDeleteButton").onclick = deleteSelectedScene;
     el("sceneGroupSel").onclick = groupSelectedScene;
     el("sceneUngroupSel").onclick = ungroupSelectedScene;
@@ -5329,7 +5373,7 @@
     const help = document.createElement("div");
     help.id = "helpPanel";
     help.innerHTML =
-        '<div class="helpTitle">操作のコツ</div><div><span class="helpKey">Pencil</span>線を引く　<span class="helpKey">指</span>視点・ピンチ</div><div><span class="helpKey">⌘ Z</span>元に戻す　<span class="helpKey">E</span>消しゴム</div><div><span class="helpKey">図形</span>ドラッグで床・壁に配置</div><div><span class="helpKey">編集</span>線を選択 → 矢印移動／白い四角で拡縮／輪で回転</div><div style="margin-top:7px;color:#7f999c">アセットを追加したあと、編集モードでBlender風ギズモを使えます。人物は基準身長から作られます。</div>';
+        '<div class="helpTitle">操作のコツ</div><div><span class="helpKey">Pencil</span>線を引く　<span class="helpKey">指</span>視点・ピンチ</div><div><span class="helpKey">⌘ Z</span>元に戻す　<span class="helpKey">E</span>消しゴム</div><div><span class="helpKey">図形</span>ドラッグで床・壁に配置</div><div><span class="helpKey">編集</span>線を選択 → 矢印移動／白い四角で拡縮／輪で回転</div><div><span class="helpKey">⌘ L</span>選択をロック／解除　<span class="helpKey">L</span>カメラ（視点）を固定</div><div style="margin-top:7px;color:#7f999c">アセットを追加したあと、編集モードでBlender風ギズモを使えます。人物は基準身長から作られます。<br>ロックしたオブジェクトは、ギズモ・数値パネル・整列・削除のどれでも変わりません（シーン一覧の鍵で解除）。カメラ固定中もオブジェクトの編集はできます。</div>';
     el("main").appendChild(help);
     el("helpToggle").onclick = () => {
         help.style.display = help.style.display === "block" ? "none" : "block";

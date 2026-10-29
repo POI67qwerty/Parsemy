@@ -5015,6 +5015,8 @@ function drawObjectSurfaces(c) {
 }
 function render() {
     dirty = true;
+    // カメラロック中は、どの入口から視点が動いても描く前に元へ戻す（最後の砦）。
+    enforceCameraLock();
     // sigNow()は描画1回につき一度だけ計算する。以前は線ごとに再計算していたため、
     // アセットや線が多いシーンほど不要な文字列計算が増えていた。
     const currentSignature = sigNow();
@@ -5098,6 +5100,7 @@ function render() {
     }
     if (T === "f") {
         markF(c);
+        drawLockMarks(c);
         overlay(c);
         c.restore();
         return;
@@ -5118,6 +5121,7 @@ function render() {
         c.font = "bold 18px system-ui";
         c.fillText(nm + (t < 1 ? " →" : ""), Math.min(px + 10, W - 70), Math.max(py - 10, 20));
     });
+    drawLockMarks(c);
     overlay(c);
     c.restore();
     const q = (v) => (v ? `(${((v.x / W) * 100).toFixed(0)}%, ${((v.y / H) * 100).toFixed(0)}%)` : "無限遠(平行)");
@@ -5155,6 +5159,10 @@ cv.addEventListener(
     "wheel",
     (e) => {
         e.preventDefault();
+        if (cameraLock) {
+            flashHint("カメラ固定中：ズームも固定です（L で解除）");
+            return;
+        }
         if (mode === "view") {
             P.lens = clamp(P.lens * Math.exp(-e.deltaY * 0.0012), 14, 200);
             sync();
@@ -5233,7 +5241,10 @@ function multiMove(tc) {
         const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
             mx = (pts[0].x + pts[1].x) / 2,
             my = (pts[0].y + pts[1].y) / 2;
-        if (mg.view) {
+        if (mg.view && cameraLock) {
+            // カメラ固定中のピンチは、視点を動かさない（指を離すまで何もしない）。
+            enforceCameraLock();
+        } else if (mg.view) {
             const k = W / cv.getBoundingClientRect().width,
                 worldPerPx = ((Math.max(0.15, P.ch) * 2) / H) * k,
                 dx = mx - mg.mx0,
@@ -5415,6 +5426,7 @@ function finishBoxSelection(end) {
         y1 = Math.max(a.y, b.y),
         chosen = [];
     boxSceneObjects().forEach((o) => {
+        if (obLocked(o)) return; // ロック中は箱選択でも選ばない
         const q = boxScreenBounds(o);
         if (!q) return;
         const cx = (q.x0 + q.x1) / 2,
@@ -5659,6 +5671,11 @@ cv.onpointerdown = (e) => {
                       ? "view"
                       : mode; // 視点モードでは、残っている編集ツールよりもカメラ操作を優先する。
     if (act === "view") {
+        if (cameraLock) {
+            // カメラ固定中は視点操作そのものを開始しない（オブジェクト編集は妨げない）。
+            flashHint("カメラ固定中：視点は動きません（L で解除）");
+            return;
+        }
         const pan = e.shiftKey || e.altKey || e.button === 2;
         drag = {
             kind: pan ? "pan" : "orbit",
@@ -5681,6 +5698,12 @@ cv.onpointerdown = (e) => {
             const id = pickOb(p),
                 multi = e.shiftKey || e.metaKey || e.ctrlKey,
                 wasSelected = !!(id && selIds.has(id));
+            // 何も選べなかった場所がロック中のオブジェクトだったときは、その旨を伝える
+            // （ロックは「選べない」ので、理由が分からないまま無反応に見えるのを防ぐ）。
+            if (!id) {
+                const lockedId = pickOb(p, true);
+                if (lockedId && obLocked(obOf(lockedId))) flashHint("ロック中のオブジェクトです（一覧の鍵で解除）");
+            }
             // Shift/Ctrl/⌘クリックで追加・解除。選択済みのオブジェクトをそのままドラッグしたときは、選択中全体を動かす。
             if (multi) setSelection(id, true);
             else if (!wasSelected || selIds.size <= 1) setSelection(id, false);
@@ -5747,6 +5770,13 @@ cv.onpointermove = (e) => {
     if (boxPendingState === "pending" || boxPendingState === "cancel") return;
     if (e.pointerId !== ptr) return;
     const k = W / cv.getBoundingClientRect().width;
+    if (drag && cameraLock) {
+        // 途中でロックした場合も、視点は記録した位置へ戻す。
+        drag = null;
+        enforceCameraLock();
+        render();
+        return;
+    }
     if (drag) {
         const dx = e.clientX - drag.x,
             dy = e.clientY - drag.y;
@@ -5954,9 +5984,11 @@ const undo = () => {
 $("undo").onclick = undo;
 $("redo").onclick = redo;
 $("clr").onclick = () => {
-    if (S.length && confirm("全部消しますか？")) {
+    const lockedLines = S.filter((s) => obLocked(s && s.ob));
+    if (S.length && confirm("全部消しますか？" + (lockedLines.length ? "\n（ロック中のオブジェクトは残ります）" : ""))) {
         HU.push(S);
-        S = [];
+        // ロック中の線は残す（解除しない限り消えない、という約束を守る）。
+        S = lockedLines;
         RD = [];
         render();
     }
@@ -5981,6 +6013,14 @@ addEventListener("keydown", (e) => {
         e.stopPropagation();
         if (window.cityGridDeleteSelected) window.cityGridDeleteSelected();
         else if (typeof deleteSelectedObjects === "function") deleteSelectedObjects();
+        return;
+    }
+    if (key === "l" && !/INPUT|SELECT|TEXTAREA/.test(tag)) {
+        // L = カメラ固定／解除、⌘/Ctrl+L = 選択オブジェクトのロック／解除。
+        // L 単独は「カメラ」、修飾キー付きは「オブジェクト」と覚える。
+        e.preventDefault();
+        if (m) toggleSelectionLock();
+        else toggleCameraLock();
         return;
     }
     if (key === "e" && !window.cityFloorPlanActive && !/INPUT|SELECT|TEXTAREA/.test(tag)) {
@@ -6034,6 +6074,12 @@ addEventListener("keydown", (e) => {
         }
     }
     if (mode !== "view" || /INPUT|SELECT/.test(e.target.tagName)) return;
+    if (cameraLock && /^Arrow/.test(e.key)) {
+        // カメラ固定中は矢印キーでも視点を回さない。
+        e.preventDefault();
+        flashHint("カメラ固定中：視点は動きません（L で解除）");
+        return;
+    }
     const d = e.shiftKey ? 5 : 0.5;
     const L = 180;
     if (e.key === "ArrowLeft") setP("yaw", clamp(P.yaw - d, -L, L));
@@ -6286,6 +6332,9 @@ function pack(withPhoto) {
 // 保存した状態を戻す
 function unpack(d) {
     if (!d || d.app !== "perspective-ruler-grid" || !Array.isArray(d.S)) throw new Error("形式が違います");
+    // ファイルを開いたらカメラ固定は解除する（保存されていた視点へ戻す必要があるため）。
+    // オブジェクトの locked は保存データに含まれているので、そのまま復元される。
+    if (typeof setCameraLock === "function" && cameraLock) setCameraLock(false);
     $("ar").value = d.ar;
     $("ar").onchange(); // 画面比率
     $("gt").value = d.gt;
@@ -6387,11 +6436,185 @@ addEventListener("keyup", (e) => {
 addEventListener("blur", curs);
 cv.oncontextmenu = (e) => e.preventDefault();
 
+// ===== 16.5 オブジェクトロック／カメラロック（2026-10-30 追加） =====
+// 状態そのものは engine-core.js（obLocked / cameraLock / CAMERA_KEYS）が持ち、
+// ここでは「操作の入口」と「画面の表示」を受け持つ。
+let hintTimer = null,
+    hintBase = "";
+// ヒント行に一時メッセージを出す（元の文は自動で戻る）。
+function flashHint(msg, ms = 1900) {
+    const h = $("hint");
+    if (!h) return;
+    if (!hintTimer) hintBase = h.textContent;
+    h.textContent = msg;
+    h.classList.add("hintFlash");
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => {
+        hintTimer = null;
+        h.classList.remove("hintFlash");
+        h.textContent = hintBase;
+    }, ms);
+}
+window.flashHint = flashHint;
+
+// バーと一覧のボタン表示を現在の状態へ合わせる。ロック・解除のたびに呼ぶ。
+function syncLockButtons() {
+    const selBtn = $("lockSel"),
+        camBtn = $("lockCam"),
+        lockedCount = typeof lockedObjectCount === "function" ? lockedObjectCount() : 0,
+        selected = selectedObjects(),
+        allLocked = selected.length > 0 && selected.every(obLocked);
+    if (selBtn) {
+        // 文言はテキスト部分だけ差し替える（アイコンのSVGを消さないため）。
+        const text = selBtn.querySelector(".lockText"),
+            label = selected.length
+                ? allLocked
+                    ? "ロック解除"
+                    : "ロック"
+                : lockedCount
+                  ? `全解除 (${lockedCount})`
+                  : "ロック";
+        if (text) text.textContent = label;
+        else selBtn.textContent = label;
+        // 状態はアイコンの形（施錠／開錠）でも分かるようにする。
+        selBtn.classList.toggle("on", allLocked);
+        selBtn.classList.toggle("unlocked", !allLocked && (selected.length > 0 || lockedCount > 0));
+        selBtn.disabled = !selected.length && !lockedCount;
+        selBtn.title = selected.length
+            ? allLocked
+                ? "選択中のオブジェクトのロックを解除（⌘/Ctrl+L）"
+                : "選択中のオブジェクトをロック（⌘/Ctrl+L）"
+            : lockedCount
+              ? "ロック中のオブジェクトを全解除（⌘/Ctrl+L）"
+              : "オブジェクトを選ぶとロックできます";
+    }
+    if (camBtn) {
+        const text = camBtn.querySelector(".lockText");
+        if (text) text.textContent = cameraLock ? "カメラ固定中" : "カメラ固定";
+        else camBtn.textContent = cameraLock ? "カメラ固定中" : "カメラ固定";
+        camBtn.classList.toggle("on", cameraLock);
+        camBtn.title = cameraLock
+            ? "カメラ（視点）を固定しています。クリックまたは L で解除"
+            : "カメラ（視点）を固定して、誤操作で視点が動かないようにする（L）";
+    }
+    document.body.classList.toggle("cameraLocked", cameraLock);
+}
+window.syncLockButtons = syncLockButtons;
+
+function toggleCameraLock() {
+    return typeof setCameraLock === "function" ? setCameraLock(!cameraLock) : false;
+}
+// 選択中のロック切替。選択が無くロック中のものがあるときは全解除にする。
+function toggleSelectionLock() {
+    const selected = selectedObjects();
+    if (selected.length) {
+        const lock = !selected.every(obLocked);
+        selected.forEach((o) => setObjectLock(o.id, lock));
+        flashHint(lock ? `${selected.length}個をロックしました（⌘/Ctrl+L で解除）` : "ロックを解除しました");
+    } else if (lockedObjectCount()) {
+        const n = unlockAllObjects();
+        flashHint(`ロックを全解除しました（${n}個）`);
+    } else {
+        flashHint("ロックするオブジェクトを先に選択してください");
+    }
+    syncLockButtons();
+    if (typeof updateOutliner === "function") updateOutliner();
+    render();
+}
+window.cityToggleObjectLock = toggleSelectionLock;
+window.cityToggleCameraLock = toggleCameraLock;
+
+if ($("lockSel")) $("lockSel").onclick = toggleSelectionLock;
+if ($("lockCam")) $("lockCam").onclick = toggleCameraLock;
+
+// 鍵アイコン（キャンバス用）。x,y は中心、s は一辺の目安。
+function drawLockGlyph(c, x, y, s, color) {
+    c.save();
+    c.strokeStyle = color;
+    c.lineWidth = Math.max(1, s * 0.16);
+    c.lineCap = "round";
+    c.beginPath();
+    c.arc(x, y - s * 0.16, s * 0.26, Math.PI, Math.PI * 2); // はね
+    c.stroke();
+    c.beginPath();
+    const w = s * 0.8,
+        h = s * 0.6,
+        bx = x - w / 2,
+        by = y - s * 0.08;
+    if (c.roundRect) c.roundRect(bx, by, w, h, s * 0.12);
+    else c.rect(bx, by, w, h);
+    c.fillStyle = "#0f1a20";
+    c.fill();
+    c.stroke();
+    c.restore();
+}
+// ロック中のオブジェクトに小さな鍵、カメラ固定中は画面の左下にラベルを出す。
+// どちらも「今どういう状態か」を画面だけで判断できるようにするためのもの。
+function drawLockMarks(c) {
+    const locked = [];
+    const seen = new Set();
+    S.forEach((s) => {
+        const o = s && s.ob;
+        if (!o || seen.has(o.id)) return;
+        seen.add(o.id);
+        if (obLocked(o) && objectVisible(o)) locked.push(o);
+    });
+    if (!locked.length && !cameraLock) return;
+    c.save();
+    c.setTransform(1, 0, 0, 1, 0, 0); // 画面座標で描く（ズームの影響を受けない）
+    locked.forEach((o) => {
+        const b = obBounds(o);
+        if (!b) return;
+        const p = scrW([(b.lo[0] + b.hi[0]) / 2, b.hi[1], (b.lo[2] + b.hi[2]) / 2]);
+        if (!p || !p.ok) return;
+        const x = p.x * Z + ox,
+            y = p.y * Z + oy - 14;
+        if (x < -20 || y < -20 || x > W + 20 || y > H + 20) return;
+        c.globalAlpha = 0.92;
+        c.fillStyle = "rgba(13,20,24,.72)";
+        c.strokeStyle = "#8fd8ff";
+        c.lineWidth = 1.2;
+        c.beginPath();
+        if (c.roundRect) c.roundRect(x - 9, y - 9, 18, 18, 5);
+        else c.rect(x - 9, y - 9, 18, 18);
+        c.fill();
+        c.stroke();
+        drawLockGlyph(c, x, y + 1, 12, "#8fd8ff");
+    });
+    if (cameraLock) {
+        const label = "カメラ固定",
+            padX = 10;
+        c.font = "bold 12px system-ui, sans-serif";
+        const tw = c.measureText(label).width,
+            w = tw + padX * 2 + 16,
+            h = 24,
+            x = 12,
+            y = H - h - 12;
+        c.globalAlpha = 0.94;
+        c.fillStyle = "rgba(13,20,24,.78)";
+        c.strokeStyle = "#ffd34d";
+        c.lineWidth = 1.4;
+        c.beginPath();
+        if (c.roundRect) c.roundRect(x, y, w, h, 7);
+        else c.rect(x, y, w, h);
+        c.fill();
+        c.stroke();
+        drawLockGlyph(c, x + 13, y + h / 2 + 1, 13, "#ffd34d");
+        c.fillStyle = "#ffe9a8";
+        c.textBaseline = "middle";
+        c.fillText(label, x + 26, y + h / 2 + 1);
+        c.textBaseline = "alphabetic";
+    }
+    c.restore();
+}
+window.cityLockSnapshot = () => ({ cameraLock, locked: lockedObjectCount() });
+
 // ===== 17. 起動 =====
 cv.width = W;
 cv.height = H;
 sync();
 syncSurfaceToggle();
+syncLockButtons();
 applyType(2);
 try {
     const sideState = localStorage.getItem("pgrid-side");

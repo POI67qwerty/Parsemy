@@ -378,17 +378,29 @@ function leaveOrthView(changedKey) {
     }
     orthView = null;
 }
-function setP(k, v) {
+function setP(k, v, force = false) {
+    // カメラロック中は視点の値を書き換えない（左パネル・標準ビュー・矢印キーなど共通）。
+    // force=true は保存データの読み込みなど、内部でどうしても必要なときだけ使う。
+    if (!force && cameraLock && CAMERA_KEYS.has(k)) {
+        if (typeof window.flashHint === "function") window.flashHint("カメラ固定中：視点は動きません（L で解除）");
+        return false;
+    }
     leaveOrthView(k);
     P[k] = v;
     const input = $(k);
     if (input) input.value = v;
+    return true;
 }
 for (const k in P) {
     const el = $(k);
     if (!el) continue;
     el.value = P[k];
     el.oninput = () => {
+        if (cameraLock && CAMERA_KEYS.has(k)) {
+            el.value = P[k]; // つまみを元の位置へ戻す
+            if (typeof window.flashHint === "function") window.flashHint("カメラ固定中：視点は動きません（L で解除）");
+            return;
+        }
         leaveOrthView(k);
         P[k] = +el.value;
         sync();
@@ -398,6 +410,11 @@ for (const k in P) {
     nv.oninput = () => {
         let v = parseFloat(nv.value);
         if (isNaN(v)) return;
+        if (cameraLock && CAMERA_KEYS.has(k)) {
+            nv.value = +P[k].toFixed(3);
+            if (typeof window.flashHint === "function") window.flashHint("カメラ固定中：視点は動きません（L で解除）");
+            return;
+        }
         leaveOrthView(k);
         v = Math.max(+el.min, Math.min(k === "n" ? 3000 : +el.max, v));
         P[k] = v;
@@ -990,6 +1007,115 @@ const obOf = (id) => {
     return s && s.ob;
 };
 const objectVisible = (o) => !o || o.visible !== false;
+
+// ===== 10.1 ロック（2026-10-30 追加） =====
+// 2種類ある。どちらも「保存データの形を変えずに済む」ように作っている。
+//  1) オブジェクトロック … 図形の定義に locked:true を持たせる（JSON保存にそのまま乗る）
+//  2) カメラロック       … 視点（位置・向き・画角・ズーム）を固定する。保存はしない
+const LOCK_ADMIN_KEYS = new Set(["locked", "visible"]); // ロック中でも変更してよい項目
+// カメラ（視点）を構成する値。これらが変わると「視点が動いた」とみなす。
+const CAMERA_KEYS = new Set(["cx", "cz", "ch", "yaw", "pitch", "roll", "lens", "hz", "fov"]);
+const obLocked = (o) => !!(o && o.locked === true);
+let cameraLock = false,
+    cameraLockSnap = null;
+// 今の視点を記録する。カメラロック中は、この値へ常に戻す。
+function cameraSnapshotNow() {
+    const snap = { view: orthView, Z, ox, oy };
+    CAMERA_KEYS.forEach((k) => (snap[k] = Number(P[k]) || 0));
+    return snap;
+}
+function setCameraLock(on) {
+    cameraLock = !!on;
+    cameraLockSnap = cameraLock ? cameraSnapshotNow() : null;
+    // ロックした瞬間にドラッグ中だった場合は、その操作を打ち切る。
+    if (cameraLock) {
+        drag = null;
+        mg = null;
+    }
+    if (typeof window.syncLockButtons === "function") window.syncLockButtons();
+    if (typeof window.flashHint === "function")
+        window.flashHint(cameraLock ? "カメラを固定しました（L で解除）" : "カメラの固定を解除しました");
+    render();
+    return cameraLock;
+}
+// カメラロック中に視点が変わっていたら、記録した値へ戻す。
+// マウス・ホイール・ピンチ・矢印キー・左パネル・間取りのカメラ操作など、
+// 視点を動かす入口がいくつもあるため、最後に必ずここで1回そろえる。
+function enforceCameraLock() {
+    if (!cameraLock || !cameraLockSnap) return false;
+    const snap = cameraLockSnap;
+    let changed = false;
+    CAMERA_KEYS.forEach((k) => {
+        if (Number(P[k]) !== snap[k]) {
+            P[k] = snap[k];
+            changed = true;
+        }
+    });
+    if (Z !== snap.Z) {
+        Z = snap.Z;
+        changed = true;
+    }
+    if (ox !== snap.ox) {
+        ox = snap.ox;
+        changed = true;
+    }
+    if (oy !== snap.oy) {
+        oy = snap.oy;
+        changed = true;
+    }
+    if (changed) {
+        sync();
+        if (typeof updZ === "function") updZ();
+    }
+    return changed;
+}
+// 選択中のオブジェクトをまとめてロック／解除する。接続パーツは親子でそろえる。
+function setObjectLock(id, locked) {
+    const o = obOf(id);
+    if (!o) return false;
+    const ids = new Set([id]);
+    // 接続している子（看板・テントなど）は、親と一緒にロックする。
+    S.forEach((s) => {
+        const q = s && s.ob;
+        if (q && q.attachment?.parentId === id) ids.add(q.id);
+    });
+    // グループは見た目も操作も一体なので、同じロック状態へそろえる。
+    groupMemberIds(id).forEach((member) => ids.add(member));
+    if (locked) {
+        HU.push(S);
+        RD = [];
+    }
+    ids.forEach((member) => {
+        const def = obOf(member);
+        if (def) setOb(member, { locked: !!locked });
+    });
+    if (locked && ids.has(sel)) {
+        // ロックしたものは選択から外す（ギズモも消える）。
+        ids.forEach((member) => selIds.delete(member));
+        normalizeSelection();
+    }
+    return true;
+}
+function unlockAllObjects() {
+    const ids = new Set();
+    S.forEach((s) => {
+        const q = s && s.ob;
+        if (obLocked(q)) ids.add(q.id);
+    });
+    if (!ids.size) return 0;
+    HU.push(S);
+    RD = [];
+    ids.forEach((id) => setOb(id, { locked: false }));
+    return ids.size;
+}
+const lockedObjectCount = () => {
+    const ids = new Set();
+    S.forEach((s) => {
+        const q = s && s.ob;
+        if (obLocked(q)) ids.add(q.id);
+    });
+    return ids.size;
+};
 // 親オブジェクトの面に接続した子を、親の寸法・回転に追従させる。
 // attachment.verticalOnly の子は、移動時にこの接続面から離れない。
 function syncAttachedPart(o, parentOverride = null) {
@@ -1136,13 +1262,28 @@ function normalizeSelection() {
     [...selIds].forEach((id) => {
         if (!obOf(id)) selIds.delete(id);
     });
+    // ロック中のオブジェクトは選択に残さない（後からロックした場合もここで外れる）。
+    [...selIds].forEach((id) => {
+        if (obLocked(obOf(id))) selIds.delete(id);
+    });
     // グループは常に一体選択。行・キャンバスのどのメンバーを選んでも全員を選ぶ。
-    [...selIds].forEach((id) => groupMemberIds(id).forEach((member) => selIds.add(member)));
+    // ただしロック中のメンバーは加えない。
+    [...selIds].forEach((id) =>
+        groupMemberIds(id).forEach((member) => {
+            if (!obLocked(obOf(member))) selIds.add(member);
+        }),
+    );
     if (sel && !obOf(sel)) sel = null;
+    if (sel && obLocked(obOf(sel))) sel = null;
     if (!sel && selIds.size) sel = [...selIds][selIds.size - 1];
-    if (sel && !selIds.has(sel)) selIds.add(sel);
+    if (sel && !selIds.has(sel) && !obLocked(obOf(sel))) selIds.add(sel);
 }
 function setSelection(id, add = false) {
+    // ロック中のものは選択しない（当たり判定・一覧・箱選択のすべてがここへ集まる）。
+    if (id && obLocked(obOf(id))) {
+        if (typeof window.flashHint === "function") window.flashHint("ロック中のオブジェクトです（一覧の鍵で解除）");
+        return false;
+    }
     const members = id ? groupMemberIds(id) : [];
     if (!add) selIds.clear();
     if (id) {
@@ -1190,6 +1331,12 @@ function regenObjects() {
 function setOb(id, patch) {
     const o = obOf(id);
     if (!o) return;
+    // ロック中のオブジェクトは、ギズモ・数値パネル・整列などどこから来た変更でも受け付けない。
+    // locked / visible（一覧の鍵・目のボタン）だけは例外にして、解除できなくならないようにする。
+    if (obLocked(o) && patch && Object.keys(patch).some((k) => !LOCK_ADMIN_KEYS.has(k))) {
+        if (typeof window.flashHint === "function") window.flashHint("ロック中のオブジェクトは編集できません");
+        return false;
+    }
     let next = { ...o, ...patch };
     // 接続子の幅・横方向の面ハンドルは、反対側の面を固定したまま編集する。
     // syncAttachedPartで接着面へ戻す前に、移動後の中心を親ローカルXへ記録する。
@@ -1256,12 +1403,14 @@ function setOb(id, patch) {
     });
 }
 // 近くにある図形の線を探す（24px以内）
-function pickOb(p) {
+function pickOb(p, includeLocked = false) {
     let best = null,
         bd = 24 / Z,
         bestAttached = false;
     S.forEach((s) => {
-        if (!s.ob || !objectVisible(s.ob)) return;
+        // ロック中のオブジェクトは通常のクリックでは選ばない。
+        // includeLocked=true は「押した場所がロック中だった」と知らせるためだけに使う。
+        if (!s.ob || !objectVisible(s.ob) || (!includeLocked && obLocked(s.ob))) return;
         for (const v of s.p) {
             const q = sp(s, v);
             if (!q.ok) continue;
@@ -1385,6 +1534,8 @@ function fixOb(o) {
 // 選択中の図形の数値を、パネルに表示
 function syncSel() {
     normalizeSelection();
+    // 選択が変わるとロックボタンの文言（ロック／解除）も変わる。
+    if (typeof window.syncLockButtons === "function") window.syncLockButtons();
     const o = sel && obOf(sel);
     if (sel && !o) sel = null;
     $("objP").style.display = o ? "" : "none";
@@ -1610,6 +1761,27 @@ function deleteSelectedObjects() {
             });
         }
     });
+    // ロック中のオブジェクトは消さない。親を残す場合は接続している子も残す
+    // （子だけ消えると宙に浮いて、あとから位置を直せなくなるため）。
+    [...ids].forEach((id) => {
+        if (obLocked(obOf(id))) ids.delete(id);
+    });
+    let dropped = true;
+    while (dropped) {
+        dropped = false;
+        [...ids].forEach((id) => {
+            const q = obOf(id),
+                parentId = q?.attachment?.parentId;
+            if (parentId && !ids.has(parentId)) {
+                ids.delete(id);
+                dropped = true;
+            }
+        });
+    }
+    if (!ids.size) {
+        if (typeof window.flashHint === "function") window.flashHint("ロック中のオブジェクトは削除されません");
+        return false;
+    }
     HU.push(S);
     S = S.filter((s) => !(s.ob && ids.has(s.ob.id)));
     RD = [];

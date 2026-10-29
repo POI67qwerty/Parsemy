@@ -659,6 +659,84 @@ canvas {
 .objectRow.hiddenObject .objectVisibility {
     color: #83969a !important;
 }
+/* ロック（2026-10-30 追加）：鍵ボタンと、ロック中の行の見た目。
+   絵文字は環境によって豆腐（□）になるため、鍵はSVGで描く。 */
+.objectLock {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    line-height: 1;
+    opacity: 0.5;
+    display: grid;
+    place-items: center;
+}
+.objectLock svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: #9fb6c2;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.objectLock:hover {
+    opacity: 1;
+}
+.objectLock:hover svg {
+    stroke: #fff;
+}
+.objectLock.isLocked svg {
+    stroke: #8fd8ff;
+}
+/* 上部バーのロックアイコン（開錠＝はねが開く） */
+.lockBtn {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 5px;
+}
+.lockIcon {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    flex: none;
+}
+.lockBtn.unlocked .lockShackle {
+    d: path("M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0");
+}
+.objectRow.lockedObject {
+    border-color: #4a6a7a !important;
+    background: #131c22 !important;
+}
+.objectRow.lockedObject .objectLock {
+    opacity: 1;
+    filter: none;
+}
+.objectRow.lockedObject .objectMeta {
+    color: #9fb6c2;
+}
+.objectCheck:disabled {
+    opacity: 0.35;
+}
+/* 上部バーのロックボタン（点いているときは状態が分かるように） */
+#lockSel.on,
+#lockCam.on {
+    border-color: #ffd34d !important;
+    color: #ffe9a8 !important;
+    background: #3a3320 !important;
+}
+body.cameraLocked #cv {
+    cursor: default;
+}
+.hintFlash {
+    color: #ffe9a8 !important;
+}
 .objectIcon {
     width: 22px;
     height: 22px;
