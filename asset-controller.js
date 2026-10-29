@@ -261,6 +261,42 @@ window.cityGridInstallAssetUI = function (bridge) {
                 cornerCutOpeningDepth: info.cornerCutOpeningDepth,
                 cutColor: info.cutColor,
             };
+        // 屋根・スロープ・窓グリッドは、定義表の固有値（軒の出・板厚・棟の向き・
+        // 窓の行×列など）をそのまま初期値として持たせる。数値は画面から編集できる。
+        if (kind === "gableRoof" || kind === "shedRoof" || kind === "ramp" || kind === "windowGrid") {
+            const extra = {};
+            [
+                "roofOverhang",
+                "roofThickness",
+                "roofRidgeAxis",
+                "roofLowZ",
+                "windowRows",
+                "windowCols",
+                "windowMarginX",
+                "windowSill",
+                "windowHead",
+                "windowGapX",
+                "windowGapZ",
+                "handrail",
+                "rampRailHeight",
+            ].forEach((key) => {
+                if (info[key] !== undefined) extra[key] = info[key];
+            });
+            // 窓グリッドは板なので、既定で裏表の両方へ窓を描く。
+            if (kind === "windowGrid") extra.windowBack = true;
+            return {
+                ...base,
+                ...extra,
+                type: "asset",
+                asset: kind,
+                assetId: kind,
+                assetName: info.label,
+                ra: info.w / 2,
+                rb: info.d / 2,
+                h: Math.max(0.05, info.h),
+                extrude: true,
+            };
+        }
         // 壁付け看板（単体）は、板を立てて地面に置き、取付金具を裏側へ出す。
         // 取付金具の本数・長さ・ベベル形状は配置後に画面と数値の両方から編集できる。
         if (kind === "wallSign")

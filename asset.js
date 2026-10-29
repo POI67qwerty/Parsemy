@@ -2,11 +2,15 @@
    このファイルは「アセットの見た目」と「アセットの寸法の正規化」を担当する。
 
    読み方の目安
-   1. ASSETS                 : アセット棚に表示する名前・初期サイズ・色
-   2. 座標／線画ヘルパー     : ローカル座標をワールド座標の線へ変換
-   3. assetLines             : アセットごとの線画を作る本体
-   4. normalizedAsset         : 古い保存データや入力値を安全な値へ整える
-   5. genAsset / obBounds     : 既存エンジンの描画・選択処理へ接続する橋
+   1. ASSETS                  : アセット棚に表示する名前・初期サイズ・色
+   2. 名前・アイコン          : 棚と選択パネルへ出すラベル
+   3. 座標／線画ヘルパー      : ローカル座標をワールド座標の線へ変換
+   4. 実用ヘルパー            : 寸法・鏡映・反復・窓グリッド・屋根合わせ
+   5. パスパイプ             : 折れ線と円管の計算
+   6. アセット別の線画        : 1形状=1関数（ASSET_LINE_BUILDERS の表から呼ぶ）
+   7. 保存データの正規化      : 古い保存データや入力値を安全な値へ整える
+   8. 既存エンジンへの接続    : genShape / obBounds をアセット対応へ差し替える
+   9. 初期化                 : 自動保存データを新しい線画へ作り直す
 
    UIのボタンや編集イベントは studio-ui.js、3Dギズモと移動処理は
    engine-tools.js が担当する。このファイルでは主に「何を描くか」を決める。 */
@@ -101,6 +105,38 @@ const ASSETS = {
         accent: "#ff9f68",
     },
     crosswalk: { label: "横断歩道", glyph: "▥", w: 3.2, d: 4.2, h: 0.02, accent: "#668cff" },
+    gableRoof: {
+        label: "切妻屋根",
+        glyph: "⋀",
+        w: 4.2,
+        d: 3.2,
+        h: 1.35,
+        roofOverhang: 0.18,
+        roofThickness: 0.12,
+        roofRidgeAxis: "x",
+        accent: "#e8b86d",
+    },
+    shedRoof: {
+        label: "片流れ屋根",
+        glyph: "◢",
+        w: 4.2,
+        d: 3.2,
+        h: 1.1,
+        roofOverhang: 0.16,
+        roofThickness: 0.12,
+        accent: "#d98b68",
+    },
+    ramp: { label: "スロープ", glyph: "◣", w: 1.45, d: 3.6, h: 0.78, accent: "#8ce6c2" },
+    windowGrid: {
+        label: "窓グリッド",
+        glyph: "▦",
+        w: 3.6,
+        d: 0.12,
+        h: 2.4,
+        windowRows: 2,
+        windowCols: 4,
+        accent: "#76d9ff",
+    },
 };
 // ===== 2. 棚・選択パネルに表示する名前とアイコン =====
 // 接続パーツや結合オブジェクトは、元アセット名ではなく役割名を返す。
@@ -370,7 +406,7 @@ function beveledBoxFootprint(width, depth, offset, segmentCount) {
     });
     return out;
 }
-// ===== 壁付け看板（単体）=====
+// ===== 3.1 壁付け看板（単体）=====
 // 看板は板を立てた形状で、ローカル座標は x=板の幅、y=板厚、z=高さ。
 // 取付金具は板の裏側（+y）へ張り出し、先端の取付板で壁へ当たる形にする。
 // 座標系を通常アセットと同じ向きにしているため、幅・奥行き・高さの
@@ -949,7 +985,7 @@ function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
         ];
     return out;
 }
-// ===== 4. パスパイプ用のベクトル計算 =====
+// ===== 5. パスパイプ用のベクトル計算 =====
 // パスパイプは制御点を丸めて中心線を作り、その周囲に円形断面を並べる。
 // 以下の小さな関数群は、その中心線・接線・法線を計算するためのもの。
 function pathVecSub(a, b) {
@@ -1133,6 +1169,315 @@ function ringA(o, rx, ry, z, n = 8, color = o.c || "#e7fff4") {
     }
     return polyA(o, a, color);
 }
+// ===== 6. 実用ヘルパー =====
+// 建物を強くするための共通計算。線画からも、UI／ツール側からも呼べる。
+// ・寸法    assetDimensions / assetFootprintArea / assetVolume
+// ・変形    mirrorLocalPoints / translateLocalPoints / scaledAssetProps
+// ・並べる  evenSpaced / linearRepeatOffsets
+// ・衝突    aabbOverlaps / assetsOverlap
+// ・窓      facadeWindowGridRects / appendFacadeWindows
+// ・屋根    roofParams / roofFitFromHost / rampParams
+function finiteNumber(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+}
+function assetDimensions(o) {
+    const q = o || {};
+    return {
+        w: Math.max(0, Math.abs(finiteNumber(q.ra, 0.5)) * 2),
+        d: Math.max(0, Math.abs(finiteNumber(q.rb, 0.5)) * 2),
+        h: Math.max(0, Math.abs(finiteNumber(q.h, 0))),
+    };
+}
+// ここから下は「アセットを足すときの下請け」として用意した関数。
+// 現在のアセット定義では未使用（面積・体積・点列の移動や反転・等間隔配置など）。
+// 新しくアセットを作るときに使う想定で残している。
+function assetFootprintArea(o) {
+    const { w, d } = assetDimensions(o);
+    return w * d;
+}
+function assetVolume(o) {
+    const { w, d, h } = assetDimensions(o);
+    return w * d * h;
+}
+function translateLocalPoints(pts, dx = 0, dy = 0, dz = 0) {
+    return (pts || []).map((p) => [p[0] + dx, p[1] + dy, p[2] + dz]);
+}
+function mirrorLocalPoints(pts, axis = "x") {
+    const sx = axis === "x" ? -1 : 1,
+        sy = axis === "y" ? -1 : 1,
+        sz = axis === "z" ? -1 : 1;
+    return (pts || []).map((p) => [p[0] * sx, p[1] * sy, p[2] * sz]);
+}
+function scaledAssetProps(o, scale = 1) {
+    const s = Math.max(0.01, finiteNumber(scale, 1)),
+        { w, d, h } = assetDimensions(o);
+    return { ra: w * 0.5 * s, rb: d * 0.5 * s, h: h * s };
+}
+// 2Dの折れ線を、進行方向の左手前（zが下向き）へ一定距離ずらす。
+// 屋根板の「板厚を斜面に直角で一定」にするための計算。
+// 折れ点は2本の平行線の交点（マイター）で求めるので、角も途切れない。
+function offsetPolyline2D(points, distance) {
+    const pts = (points || []).filter((p) => Array.isArray(p) && p.length >= 2).map((p) => [Number(p[0]) || 0, Number(p[1]) || 0]),
+        d = finiteNumber(distance, 0);
+    if (pts.length < 2 || Math.abs(d) < 1e-9) return pts.map((p) => [...p]);
+    // 各線分を法線方向へずらした直線（点＋方向）を作る。
+    const normals = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+        const dx = pts[i + 1][0] - pts[i][0],
+            dz = pts[i + 1][1] - pts[i][1],
+            len = Math.hypot(dx, dz);
+        if (len < 1e-9) {
+            normals.push(normals[normals.length - 1] || [0, -1]);
+            continue;
+        }
+        // 進行方向を -90 度回すと「下向き」の法線になる。
+        normals.push([dz / len, -dx / len]);
+    }
+    const lines = pts.map((p, i) => {
+        const n = normals[Math.min(i, normals.length - 1)] || [0, -1];
+        return { p: [p[0] + n[0] * d, p[1] + n[1] * d], dir: i < pts.length - 1 ? [pts[i + 1][0] - p[0], pts[i + 1][1] - p[1]] : [p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]] };
+    });
+    const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
+    // 隣り合う2直線の交点＝ずらした折れ点。
+    return lines.map((line, i) => {
+        if (i === 0) return line.p;
+        const prev = lines[i - 1],
+            den = cross(prev.dir, line.dir);
+        if (Math.abs(den) < 1e-9) return line.p;
+        const t = cross([line.p[0] - prev.p[0], line.p[1] - prev.p[1]], line.dir) / den;
+        return [prev.p[0] + prev.dir[0] * t, prev.p[1] + prev.dir[1] * t];
+    });
+}
+function evenSpaced(count, span) {
+    const n = clamp(Math.round(finiteNumber(count, 1)), 1, 64),
+        s = finiteNumber(span, 0);
+    if (n === 1) return [0];
+    return Array.from({ length: n }, (_, i) => -s * 0.5 + (s * i) / (n - 1));
+}
+function linearRepeatOffsets(count, spacing, axis = "x") {
+    const n = clamp(Math.round(finiteNumber(count, 1)), 1, 64),
+        gap = finiteNumber(spacing, 0),
+        ax = axis === "y" ? 1 : axis === "z" ? 2 : 0,
+        origin = -((n - 1) * gap) * 0.5;
+    return Array.from({ length: n }, (_, i) => {
+        const v = [0, 0, 0];
+        v[ax] = origin + i * gap;
+        return v;
+    });
+}
+function aabbOverlaps(a, b, pad = 0) {
+    if (!a?.lo || !a?.hi || !b?.lo || !b?.hi) return false;
+    const p = Math.max(0, finiteNumber(pad, 0));
+    for (let i = 0; i < 3; i++) {
+        if (a.hi[i] + p < b.lo[i] - p || b.hi[i] + p < a.lo[i] - p) return false;
+    }
+    return true;
+}
+function assetsOverlap(a, b, pad = 0) {
+    if (!a || !b) return false;
+    return aabbOverlaps(obBounds(a), obBounds(b), pad);
+}
+function windowGridOptions(o, wallW, wallH) {
+    const rows = clamp(Math.round(finiteNumber(o?.windowRows, 0)), 0, 20),
+        cols = clamp(Math.round(finiteNumber(o?.windowCols, 0)), 0, 20),
+        mx = clamp(finiteNumber(o?.windowMarginX, wallW * 0.12), 0, wallW * 0.45),
+        sill = clamp(finiteNumber(o?.windowSill, wallH * 0.22), 0, wallH * 0.7),
+        head = clamp(finiteNumber(o?.windowHead, wallH * 0.12), 0, wallH * 0.45),
+        gx = clamp(finiteNumber(o?.windowGapX, wallW * 0.06), 0, wallW * 0.4),
+        gz = clamp(finiteNumber(o?.windowGapZ, wallH * 0.1), 0, wallH * 0.4),
+        // 窓1枚の大きさ。0は「割り付けから自動で決める」の意味。
+        ww = clamp(finiteNumber(o?.windowW, 0), 0, Math.max(0.03, wallW)),
+        wh = clamp(finiteNumber(o?.windowH, 0), 0, Math.max(0.03, wallH));
+    return { rows, cols, mx, sill, head, gx, gz, ww, wh };
+}
+function normalizedWindowFields(q) {
+    const { w, h } = assetDimensions(q),
+        opts = windowGridOptions(q, w, h);
+    return {
+        windowRows: opts.rows,
+        windowCols: opts.cols,
+        windowMarginX: opts.mx,
+        windowSill: opts.sill,
+        windowHead: opts.head,
+        windowGapX: opts.gx,
+        windowGapZ: opts.gz,
+        windowW: opts.ww,
+        windowH: opts.wh,
+        windowSides: q?.windowSides === true,
+        windowBack: q?.windowBack === true,
+    };
+}
+function facadeWindowGridRects(wallW, wallH, options) {
+    const q = options || {},
+        rows = q.rows || 0,
+        cols = q.cols || 0,
+        out = [];
+    if (rows < 1 || cols < 1 || wallW < 0.05 || wallH < 0.05) return out;
+    const mx = q.mx || 0,
+        sill = q.sill || 0,
+        head = q.head || 0,
+        gx = q.gx || 0,
+        gz = q.gz || 0,
+        usableW = Math.max(0.04, wallW - mx * 2),
+        usableH = Math.max(0.04, wallH - sill - head),
+        cellW = Math.max(0.03, (usableW - gx * Math.max(0, cols - 1)) / cols),
+        cellH = Math.max(0.03, (usableH - gz * Math.max(0, rows - 1)) / rows),
+        x0 = -wallW * 0.5 + mx,
+        z0 = sill,
+        // 窓1枚の大きさ（指定があればその寸法、無ければセルいっぱい）。
+        winW = Math.min(cellW, Math.max(0.03, q.ww || cellW)),
+        winH = Math.min(cellH, Math.max(0.03, q.wh || cellH)),
+        // セルの中央へ置くので、窓を小さくすると四方の壁が均等に増える。
+        padX = (cellW - winW) * 0.5,
+        padZ = (cellH - winH) * 0.5;
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const x = x0 + c * (cellW + gx) + padX,
+                z = z0 + r * (cellH + gz) + padZ;
+            out.push({ x0: x, x1: x + winW, z0: z, z1: z + winH });
+        }
+    }
+    return out;
+}
+function windowRectHitsOpening(rect, opening) {
+    if (!opening) return false;
+    const cx = (rect.x0 + rect.x1) * 0.5,
+        cz = (rect.z0 + rect.z1) * 0.5,
+        hw = Math.max(0, finiteNumber(opening.w, 0) * 0.5),
+        oh = Math.max(0, finiteNumber(opening.h, 0));
+    return Math.abs(cx) <= hw && cz >= 0 && cz <= oh;
+}
+function appendFacadeWindows(o, out, w, d, h, color, opening) {
+    const opts = windowGridOptions(o, w, h);
+    if (opts.rows < 1 || opts.cols < 1) return;
+    const yFront = -d * 0.5,
+        yBack = d * 0.5,
+        rects = facadeWindowGridRects(w, h, opts),
+        pushAtY = (y) => {
+            rects.forEach((rect) => {
+                if (windowRectHitsOpening(rect, opening)) return;
+                out.push(
+                    lineA(
+                        o,
+                        [
+                            [rect.x0, y, rect.z0],
+                            [rect.x1, y, rect.z0],
+                            [rect.x1, y, rect.z1],
+                            [rect.x0, y, rect.z1],
+                            [rect.x0, y, rect.z0],
+                        ],
+                        color,
+                        1.05,
+                    ),
+                );
+            });
+        };
+    pushAtY(yFront);
+    if (o.windowBack === true) pushAtY(yBack);
+    if (o.windowSides === true) {
+        const sideOpts = windowGridOptions(o, d, h),
+            sideRects = facadeWindowGridRects(d, h, sideOpts);
+        [-w * 0.5, w * 0.5].forEach((x) =>
+            sideRects.forEach((rect) => {
+                out.push(
+                    lineA(
+                        o,
+                        [
+                            [x, rect.x0, rect.z0],
+                            [x, rect.x1, rect.z0],
+                            [x, rect.x1, rect.z1],
+                            [x, rect.x0, rect.z1],
+                            [x, rect.x0, rect.z0],
+                        ],
+                        color,
+                        1.05,
+                    ),
+                );
+            }),
+        );
+    }
+}
+function roofParams(o) {
+    const w = Math.max(0.2, Math.abs(finiteNumber(o?.ra, 2)) * 2),
+        d = Math.max(0.2, Math.abs(finiteNumber(o?.rb, 1.5)) * 2),
+        h = Math.max(0.12, Math.abs(finiteNumber(o?.h, 1.2))),
+        overhang = clamp(finiteNumber(o?.roofOverhang, 0.18), 0, Math.min(w, d) * 0.45),
+        thickness = clamp(finiteNumber(o?.roofThickness, 0.12), 0.02, Math.max(0.02, h * 0.5)),
+        ridgeAxis = o?.roofRidgeAxis === "y" ? "y" : "x",
+        lowZ = clamp(finiteNumber(o?.roofLowZ, 0), 0, h - 0.05);
+    return { w, d, h, overhang, thickness, ridgeAxis, lowZ };
+}
+// 屋根板の断面（棟に直交する平面の形）と、押し出す向き・長さを返す。
+// 板厚は斜面に直角な距離で一定にする。内側の面は offsetPolyline2D で
+// 外側の面を法線方向へずらして作るので、勾配が強くても薄さが変わらない。
+function roofSlab(o, kind = o?.asset) {
+    const p = roofParams(o),
+        halfW = p.w * 0.5 + p.overhang,
+        halfD = p.d * 0.5 + p.overhang,
+        ridgeAlongX = p.ridgeAxis !== "y",
+        // 棟に直交する方向の半長（勾配が走る向き）。
+        halfSpan = ridgeAlongX ? halfD : halfW,
+        // 棟に沿って押し出す向きと半長。
+        axis = ridgeAlongX ? "x" : "y",
+        half = ridgeAlongX ? halfW : halfD,
+        outerPath =
+            kind === "shedRoof"
+                ? [
+                      [-halfSpan, p.lowZ],
+                      [halfSpan, p.h],
+                  ]
+                : [
+                      [-halfSpan, p.lowZ],
+                      [0, p.h],
+                      [halfSpan, p.lowZ],
+                  ],
+        innerPath = offsetPolyline2D(outerPath, p.thickness),
+        // 断面は「外側を進んで、内側を戻る」閉じた多角形。側面が板厚の面になる。
+        cross = [...outerPath, ...[...innerPath].reverse()];
+    // 両端（軒先）は法線方向ではなく「鉛直に切る」（垂木の小口を垂直に切るのと同じ）。
+    // 法線オフセットのままだと軒先が棟方向へ伸び、屋根の中心がずれてしまう。
+    // 鉛直に切るときの下げ量は t / cosθ（θ＝勾配の角度）。
+    // こうすると斜面上の垂距離は、端でも中央でもちょうど t のまま保たれる。
+    [
+        [0, 0], // 手前の軒先（最初の線分）
+        [outerPath.length - 1, outerPath.length - 2], // 奥の軒先（最後の線分）
+    ].forEach(([i, seg]) => {
+        const a = outerPath[seg],
+            b = outerPath[seg + 1],
+            run = Math.abs(b[0] - a[0]),
+            len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (run <= 1e-6 || len <= 1e-6) return;
+        // 端の点は外側と同じ位置（u）に置き、高さだけ下げる。
+        innerPath[i][0] = outerPath[i][0];
+        innerPath[i][1] = outerPath[i][1] - (p.thickness * len) / run;
+    });
+    return { p, axis, half, halfSpan, outerPath, innerPath, cross, thickness: p.thickness };
+}
+function roofFitFromHost(host, kind = "gableRoof") {
+    const { w, d, h } = assetDimensions(host),
+        ridgeAxis = w >= d ? "x" : "y",
+        roofH =
+            kind === "shedRoof" || kind === "shed" ? Math.max(0.4, d * 0.28) : Math.max(0.5, Math.min(w, d) * 0.35);
+    return {
+        ra: w * 0.5,
+        rb: d * 0.5,
+        h: roofH,
+        roofOverhang: 0.18,
+        roofThickness: 0.12,
+        roofRidgeAxis: ridgeAxis,
+        roofLowZ: 0,
+        liftHint: h,
+    };
+}
+function rampParams(o) {
+    const w = Math.max(0.2, Math.abs(finiteNumber(o?.ra, 0.72)) * 2),
+        d = Math.max(0.4, Math.abs(finiteNumber(o?.rb, 1.8)) * 2),
+        h = Math.max(0.08, Math.abs(finiteNumber(o?.h, 0.78))),
+        rail = o?.handrail === true,
+        railH = clamp(finiteNumber(o?.rampRailHeight, 0.42), 0.12, 1.8);
+    return { w, d, h, rail, railH };
+}
 // 開口建物の寸法を、描画に使いやすい形へまとめる。
 function buildingParams(o) {
     const g = buildingGeometry(o),
@@ -1178,6 +1523,412 @@ function closedBuildingLines(o, w, d, h, color = o.c || "#222222") {
         lineA(o, [front[3], back[3]], color),
     ];
 }
+// ===== 6.2 新しいアセットを作るときの下請け（2026-10-29 追加） =====
+// 「アセットを1つ足すたびに、同じような点列・同じような窓割り付け・同じような
+// 数値クランプを書き写す」のをやめるために用意した共通部品。
+// どの関数も asset.js のローカル座標（x=幅 / y=奥行き / z=高さ）だけを扱い、
+// ワールド変換は lineA / polyA が行う。つまり genShape・面メッシュ・当たり判定の
+// 仕組みは一切変えずに、線画の組み立てだけを短く書ける。
+//
+//   A. 値の取り出し      assetNum / assetBool
+//     補間・丸め        lerp / inverseLerp / roundTo / snapValue / smoothUnit
+//     範囲              boundsOfPoints
+//   B. 並べる            spanSplit
+//   C. 1本で描ける面     rect2DOutlineA / quadFaceA / arcPointsA / discOutlineA
+//   D. 立体をまとめて     wireCylinderA / wirePrismA / wirePyramidA
+//   E. 建具・部品        stairsRunA / latticePanelA
+//   F. 登録と確認        registerAsset / describeAsset
+//
+// 使い方は ASSET_JS_GUIDE.md の「6-3. 新規アセットの作り方（写経）」を参照。
+
+// --- A. 値の取り出し -------------------------------------------------------
+// 数値プロパティを「有限値・範囲内」で取り出す。0 は 0 として扱い、
+// undefined / "" / "abc" / NaN は fallback になる。
+// min/max を渡すと clamp するので、寸法が 0 や負になって線が消える事故を防げる。
+function assetNum(o, key, fallback = 0, min = -Infinity, max = Infinity) {
+    const raw = o?.[key],
+        n = raw === "" || raw === null || raw === undefined ? NaN : Number(raw),
+        v = Number.isFinite(n) ? n : finiteNumber(fallback, 0);
+    return clamp(v, min, max);
+}
+// 真偽プロパティ。JSON から戻した "false" / 0 / "off" も false として読む。
+function assetBool(o, key, fallback = false) {
+    const raw = o?.[key];
+    if (raw === undefined || raw === null || raw === "") return !!fallback;
+    if (typeof raw === "boolean") return raw;
+    if (typeof raw === "number") return raw !== 0;
+    const t = String(raw).trim().toLowerCase();
+    if (["false", "0", "off", "no", "none"].includes(t)) return false;
+    if (["true", "1", "on", "yes"].includes(t)) return true;
+    return !!fallback;
+}
+// 値を step の倍数へ丸める（数値スピナーの刻みと同じ丸め方に揃える）。
+// step<=0 のときは丸めない。負の値でも 0 をまたいで正しく丸まる。
+// 0.1 刻みで 1.2000000000000002 のような値が出ると数値欄が読みにくいので、
+// 最後に小数6桁へ丸めて返す。
+function snapValue(v, step = 0.1) {
+    const value = finiteNumber(v, 0),
+        s = Math.abs(finiteNumber(step, 0));
+    if (s < 1e-9) return value;
+    return roundTo(Math.round(value / s) * s, 6);
+}
+// 小数 digits 桁へ丸める。数値欄・ラベル表示用（内部計算には使わない）。
+function roundTo(v, digits = 2) {
+    const d = clamp(Math.round(finiteNumber(digits, 2)), 0, 9),
+        n = finiteNumber(v, 0);
+    return Number(n.toFixed(d));
+}
+// 線形補間。t=0 で a、t=1 で b。t は 0..1 に丸めない（外挿したいとき用）。
+function lerp(a, b, t) {
+    const A = finiteNumber(a, 0),
+        B = finiteNumber(b, 0);
+    return A + (B - A) * finiteNumber(t, 0);
+}
+// lerp の逆算。値 v が a→b のどこにあるかを 0..1 で返す（a===b のときは 0）。
+function inverseLerp(a, b, v) {
+    const A = finiteNumber(a, 0),
+        B = finiteNumber(b, 0),
+        d = B - A;
+    if (Math.abs(d) < 1e-9) return 0;
+    return (finiteNumber(v, 0) - A) / d;
+}
+// 点列（[x,y] でも [x,y,z] でもよい）の軸並行バウンディングボックス。
+// 線画を作る前に「どこまで広がるか」を確かめたいとき、当たり判定の下見に使う。
+// 点が1つも無いときは lo=[0,0,0], hi=[0,0,0] を返す（NaN を返さない）。
+function boundsOfPoints(pts) {
+    const lo = [Infinity, Infinity, Infinity],
+        hi = [-Infinity, -Infinity, -Infinity];
+    let n = 0;
+    (pts || []).forEach((p) => {
+        if (!Array.isArray(p)) return;
+        n++;
+        for (let i = 0; i < 3; i++) {
+            const v = finiteNumber(p[i], 0);
+            if (v < lo[i]) lo[i] = v;
+            if (v > hi[i]) hi[i] = v;
+        }
+    });
+    if (!n) return { lo: [0, 0, 0], hi: [0, 0, 0] };
+    return { lo, hi };
+}
+// 0..1 の入力を、両端でなめらかに加減速する 0..1 に変換する（smoothstep）。
+// 段差のあるアニメーション的な形（屋根の反り・テーパー・曲線の分割）に使う。
+function smoothUnit(t) {
+    const x = clamp(finiteNumber(t, 0), 0, 1);
+    return x * x * (3 - 2 * x);
+}
+
+// --- B. 並べる -------------------------------------------------------------
+// 長さ total の区間に、同じ大きさの部品を count 個、隙間 gap で並べる。
+// 返り値の centers は「中心が 0 の左右対称」な座標なので、そのまま
+// x 座標（または y 座標）として使える。窓・横断歩道の縞・柵・梁に使う。
+//   size  … 1個の大きさ
+//   gap   … 実際に使った隙間（minSize を確保するために詰めた場合は小さくなる）
+//   centers … 各ピースの中心座標
+// size が minSize を下回る場合は、隙間を詰めて minSize を確保する。
+function spanSplit(total, count, gap = 0, minSize = 0) {
+    const len = Math.max(0, finiteNumber(total, 0)),
+        n = clamp(Math.round(finiteNumber(count, 1)), 1, 64),
+        g0 = Math.max(0, finiteNumber(gap, 0)),
+        minS = Math.max(0, finiteNumber(minSize, 0));
+    if (n === 1) return { size: Math.max(minS, len), gap: 0, centers: [0], total: len };
+    let g = g0,
+        size = (len - g * (n - 1)) / n;
+    if (size < minS) {
+        g = Math.max(0, (len - minS * n) / (n - 1));
+        size = (len - g * (n - 1)) / n;
+    }
+    size = Math.max(0, size);
+    const centers = Array.from({ length: n }, (_, i) => -len / 2 + size / 2 + i * (size + g));
+    return { size, gap: g, centers, total: len };
+}
+
+// --- C. 1本で描ける面 -------------------------------------------------------
+// 水平な長方形の輪郭1本。cx/cy は中心、w/d は幅・奥行き、z は高さ。
+// 「板を1枚置く」「床・天板・影」のような一番よく使う形を1行で書くため。
+function rect2DOutlineA(o, cx, cy, w, d, z, color, width) {
+    const x = Math.abs(finiteNumber(w, 0)) / 2,
+        y = Math.abs(finiteNumber(d, 0)) / 2,
+        X = finiteNumber(cx, 0),
+        Y = finiteNumber(cy, 0),
+        Z = finiteNumber(z, 0);
+    return polyA(
+        o,
+        [
+            [X - x, Y - y, Z],
+            [X + x, Y - y, Z],
+            [X + x, Y + y, Z],
+            [X - x, Y + y, Z],
+        ],
+        color,
+        width,
+    );
+}
+// 任意の4点（[x,y,z] を4つ）を閉じた四角として描く。面を斜めにしたいとき
+// （切妻屋根の妻面・スロープの側面・テントの垂れ）に使う。
+function quadFaceA(o, a, b, c, d, color, width) {
+    const pts = [a, b, c, d].filter((q) => Array.isArray(q) && q.length >= 3);
+    if (pts.length < 3) return null;
+    return polyA(o, pts, color, width);
+}
+// 円弧（閉じない）の折れ線。a0→a1 はラジアン。
+// アーチ窓・ドーム・パイプの曲がり・影の表現に使う。
+function arcPointsA(o, cx, cy, rx, ry, z, a0 = 0, a1 = Math.PI, segments = 16, color, width) {
+    const n = clamp(Math.round(finiteNumber(segments, 16)), 2, 128),
+        X = finiteNumber(cx, 0),
+        Y = finiteNumber(cy, 0),
+        RX = Math.abs(finiteNumber(rx, 0)),
+        RY = Math.abs(finiteNumber(ry, RX)),
+        A0 = finiteNumber(a0, 0),
+        A1 = finiteNumber(a1, Math.PI),
+        Z = finiteNumber(z, 0),
+        pts = [];
+    for (let i = 0; i <= n; i++) {
+        const t = A0 + ((A1 - A0) * i) / n;
+        pts.push([X + RX * Math.cos(t), Y + RY * Math.sin(t), Z]);
+    }
+    return lineA(o, pts, color, width);
+}
+// 円・楕円の輪郭1本（中心を指定できる ringA）。z を2つ渡すと上下2本を返す。
+// 既存の ringA は中心が必ず原点なので、部品を原点以外へ置くときに使う。
+function discOutlineA(o, cx, cy, rx, ry, z, segments = 16, color) {
+    const line = arcPointsA(o, cx, cy, rx, ry, z, 0, Math.PI * 2, segments, color);
+    return line;
+}
+
+// --- D. 立体をまとめて -----------------------------------------------------
+// ワイヤーフレームの円柱（下の円・上の円・縦の稜線 n 本）。
+// 既存の ringA + spokesA を1回で呼ぶだけだが、部品として使う回数が多いので用意。
+function wireCylinderA(o, cx, cy, r, z0, z1, segments = 12, color) {
+    const n = clamp(Math.round(finiteNumber(segments, 12)), 3, 64),
+        X = finiteNumber(cx, 0),
+        Y = finiteNumber(cy, 0),
+        R = Math.abs(finiteNumber(r, 0)),
+        Z0 = finiteNumber(z0, 0),
+        Z1 = finiteNumber(z1, 0),
+        out = [
+            arcPointsA(o, X, Y, R, R, Z0, 0, Math.PI * 2, n, color),
+            arcPointsA(o, X, Y, R, R, Z1, 0, Math.PI * 2, n, color),
+        ];
+    for (let i = 0; i < n; i++) {
+        const t = (i / n) * Math.PI * 2,
+            px = X + R * Math.cos(t),
+            py = Y + R * Math.sin(t);
+        out.push(
+            lineA(
+                o,
+                [
+                    [px, py, Z0],
+                    [px, py, Z1],
+                ],
+                color,
+            ),
+        );
+    }
+    return out;
+}
+// 2D多角形（[[x,y], …]）を z0→z1 へ押し出したワイヤー。
+// 柱・看板の枠・風変わりな建物など「任意の断面」をそのまま立体にできる。
+function wirePrismA(o, polygon, z0, z1, color) {
+    const poly = (polygon || []).filter((q) => Array.isArray(q) && q.length >= 2);
+    if (poly.length < 3) return [];
+    const Z0 = finiteNumber(z0, 0),
+        Z1 = finiteNumber(z1, 0),
+        out = [
+            polyA(
+                o,
+                poly.map(([x, y]) => [x, y, Z0]),
+                color,
+            ),
+            polyA(
+                o,
+                poly.map(([x, y]) => [x, y, Z1]),
+                color,
+            ),
+        ];
+    poly.forEach(([x, y]) =>
+        out.push(
+            lineA(
+                o,
+                [
+                    [x, y, Z0],
+                    [x, y, Z1],
+                ],
+                color,
+            ),
+        ),
+    );
+    return out;
+}
+// 2D多角形を底面にして、1点（apex）へ集めるワイヤー（錐・ドーム・尖塔）。
+function wirePyramidA(o, polygon, zBase, apexZ, color, apexX = 0, apexY = 0) {
+    // 多角形は2D（[x,y]）でも3D（[x,y,z]）でも受け取れる。x/y だけを使う。
+    const poly = (polygon || []).filter((q) => Array.isArray(q) && q.length >= 2);
+    if (poly.length < 3) return [];
+    const Z0 = finiteNumber(zBase, 0),
+        Z1 = finiteNumber(apexZ, Z0 + 1),
+        apex = [finiteNumber(apexX, 0), finiteNumber(apexY, 0), Z1],
+        out = [
+            polyA(
+                o,
+                poly.map(([x, y]) => [x, y, Z0]),
+                color,
+            ),
+        ];
+    poly.forEach(([x, y]) =>
+        out.push(
+            lineA(
+                o,
+                [
+                    [x, y, Z0],
+                    apex,
+                ],
+                color,
+            ),
+        ),
+    );
+    return out;
+}
+
+// --- E. 建具・部品 ---------------------------------------------------------
+// 直階段。width=幅、depth=奥行き、steps=段数、baseZ→topZ へ上がる。
+// 各段の踏面（水平）と蹴上げ（垂直）を幅いっぱいに引き、両側面の階段状の
+// 輪郭も描くので、どのビューでも階段だと分かる。
+function stairsRunA(o, opt = {}) {
+    const w = Math.max(0.05, finiteNumber(opt.width, 1)),
+        d = Math.max(0.05, finiteNumber(opt.depth, 2)),
+        z0 = finiteNumber(opt.baseZ, 0),
+        z1 = finiteNumber(opt.topZ, z0 + 1),
+        n = clamp(Math.round(finiteNumber(opt.steps, 6)), 1, 48),
+        color = opt.color,
+        x = w / 2,
+        run = d / n,
+        rise = (z1 - z0) / n,
+        out = [],
+        // 奥（+y）へ上がる向き。i段目の踏面は z = z0 + rise*(i+1)。
+        treadZ = (i) => z0 + rise * (i + 1),
+        edgeY = (i) => -d / 2 + run * i;
+    for (let i = 0; i < n; i++) {
+        out.push(
+            lineA(
+                o,
+                [
+                    [-x, edgeY(i), treadZ(i)],
+                    [x, edgeY(i), treadZ(i)],
+                ],
+                color,
+            ),
+        );
+        out.push(
+            lineA(
+                o,
+                [
+                    [-x, edgeY(i), treadZ(i) - rise],
+                    [-x, edgeY(i), treadZ(i)],
+                ],
+                color,
+            ),
+        );
+        out.push(
+            lineA(
+                o,
+                [
+                    [x, edgeY(i), treadZ(i) - rise],
+                    [x, edgeY(i), treadZ(i)],
+                ],
+                color,
+            ),
+        );
+    }
+    // 左右の側面（階段状の輪郭）
+    [-x, x].forEach((sx) => {
+        const pts = [];
+        for (let i = 0; i < n; i++) {
+            pts.push([sx, edgeY(i), treadZ(i)]);
+            pts.push([sx, edgeY(i) + run, treadZ(i)]);
+        }
+        pts.push([sx, d / 2, z0]);
+        pts.unshift([sx, -d / 2, z0]);
+        out.push(lineA(o, pts, color));
+    });
+    return out;
+}
+// 格子パネル（柵・フェンス・窓の桟）。y を固定した x-z 平面に、
+// 縦棒 cols 本と横棒 rows 本を等間隔で引く。
+function latticePanelA(o, opt = {}) {
+    const w = Math.max(0.05, finiteNumber(opt.width, 1)),
+        z0 = finiteNumber(opt.z0, 0),
+        z1 = finiteNumber(opt.z1, z0 + 1),
+        y = finiteNumber(opt.y, 0),
+        cols = clamp(Math.round(finiteNumber(opt.cols, 3)), 1, 64),
+        rows = clamp(Math.round(finiteNumber(opt.rows, 2)), 1, 64),
+        color = opt.color,
+        x = w / 2,
+        out = [];
+    for (let i = 0; i < cols; i++) {
+        const px = -x + (w * i) / (cols - 1 || 1);
+        out.push(
+            lineA(
+                o,
+                [
+                    [cols === 1 ? 0 : px, y, z0],
+                    [cols === 1 ? 0 : px, y, z1],
+                ],
+                color,
+            ),
+        );
+    }
+    for (let i = 0; i < rows; i++) {
+        const pz = z0 + ((z1 - z0) * i) / (rows - 1 || 1);
+        out.push(
+            lineA(
+                o,
+                [
+                    [-x, y, rows === 1 ? (z0 + z1) / 2 : pz],
+                    [x, y, rows === 1 ? (z0 + z1) / 2 : pz],
+                ],
+                color,
+            ),
+        );
+    }
+    return out;
+}
+
+// --- F. 登録と確認 ---------------------------------------------------------
+// 新しいアセットを「カタログ（ASSETS）」と「線画の表（ASSET_LINE_BUILDERS）」へ
+// 同時に登録する。両方に書くのを忘れて「棚に出るのに形が出ない」事故を防ぐ。
+//   registerAsset("fence", { label: "フェンス", glyph: "‖", w: 2, d: 0.1, h: 1.2 }, linesFence)
+// 既に同じ名前がある場合は上書きせず false を返す（既存アセットの保護）。
+function registerAsset(kind, meta = {}, builder) {
+    if (!kind || typeof kind !== "string" || typeof builder !== "function") return false;
+    if (ASSETS[kind] || ASSET_LINE_BUILDERS[kind]) return false;
+    ASSETS[kind] = {
+        label: meta.label || kind,
+        glyph: meta.glyph || "◆",
+        w: Math.max(0.05, finiteNumber(meta.w, 1)),
+        d: Math.max(0.05, finiteNumber(meta.d, 1)),
+        h: Math.max(0, finiteNumber(meta.h, 0)),
+        accent: meta.accent || "#66e3c8",
+        ...meta,
+    };
+    ASSET_LINE_BUILDERS[kind] = builder;
+    return true;
+}
+// デバッグ用の1行要約。寸法・アセット名・線画の本数をまとめて出す。
+// コンソールで describeAsset(obOf(sel)) と打てば、いまの寸法を確認できる。
+function describeAsset(o) {
+    if (!o) return "（オブジェクトなし）";
+    const { w, d, h } = assetDimensions(o);
+    let lines = 0;
+    try {
+        lines = o.type === "asset" ? assetLines(o).length : 0;
+    } catch (e) {
+        lines = -1;
+    }
+    return `${assetLabel(o)} / ${o.asset || o.type} / ${w.toFixed(2)}×${d.toFixed(2)}×${h.toFixed(2)}m / 線画${lines}本`;
+}
+
+// ===== 7. アセットごとの線画生成本体 =====
 // 形ごとの処理は ASSET_LINE_BUILDERS の表から呼び出す。1形状=1関数にして、
 // 追加・修正するときに触る範囲をその形の中だけに閉じ込める。
 function assetLines(o) {
@@ -1216,9 +1967,13 @@ const ASSET_LINE_BUILDERS = {
     person: linesPerson,
     building: linesBuilding,
     awning: linesAwning,
+    gableRoof: linesGableRoof,
+    shedRoof: linesShedRoof,
+    ramp: linesRamp,
+    windowGrid: linesWindowGrid,
 };
 
-    // --- 作成サイトから読み込んだ任意形状 ---
+// --- 作成サイトから読み込んだ任意形状 ---
 // geometry.vertices / edges / loops を、そのまま3D線画へ変換する。
 function linesCustom(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
@@ -1265,20 +2020,19 @@ function linesCustom(ctx) {
                 Number(style.width) || width,
             );
     });
-    // --- 直方体 ---
-    // ベベルなしの基準形状。ベベル直方体とは別アセットとして選べる。
 }
 
-
+// --- 直方体 ---
+// ベベルなしの基準形状。ベベル直方体とは別アセットとして選べる。
 function linesBox(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     out.push(...wireBoxA(o, 0, 0, w, d, 0, Math.max(0.01, h), c));
-    // --- 壁付け看板（単体）---
-    // 板の表裏の輪郭を同じ点列から作り、対応する頂点を結んで板厚を出す。
-    // 取付金具は板の左側面から横へ伸びる直方体として並べる。
+    appendFacadeWindows(o, out, w, d, Math.max(0.01, h), a);
 }
 
-
+// --- 壁付け看板（単体）---
+// 板の表裏の輪郭を同じ点列から作り、対応する頂点を結んで板厚を出す。
+// 取付金具は板の左側面から横へ伸びる直方体として並べる。
 function linesWallSign(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const params = wallSignParams(o),
@@ -1304,7 +2058,8 @@ function linesWallSign(ctx) {
     );
 }
 
-
+// --- 隅切り直方体 ---
+// 隅を1か所切り落とした箱と、赤い断面に開けた開口を描く。
 function linesCornerCutBox(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const q = cornerCutOpeningParams(o),
@@ -1314,12 +2069,11 @@ function linesCornerCutBox(ctx) {
         out.push(
             ...cornerCutWireBoxA(o, q.w, q.d, 0, z1, q.cornerOffset, q.cornerCutCorner, c, o.cutColor || "#e24b4b"),
         );
-    // --- 横壁看板 ---
-    // 看板本体を縦長の箱として描き、必要なら壁からの
-    // 面のある取付金具を0〜3本、看板の裏側へ追加する。
 }
 
-
+// --- 横壁看板 ---
+// 看板本体を縦長の箱として描き、必要なら壁からの
+// 面のある取付金具を0〜3本、看板の裏側へ追加する。
 function linesWallSideSign(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const boardH = Math.max(0.05, Math.abs(Number(o.ra) || 0.9) * 2),
@@ -1351,11 +2105,10 @@ function linesWallSideSign(ctx) {
         // ベベルは看板本体だけに適用し、取付金具は普通の直方体で描く。
         out.push(...wireBoxA(o, x, bracketCenter, bracketV, bracketSpan, -thickness * 0.5, thickness * 0.5, c));
     }
-    // --- ベベル直方体 ---
-    // footprintを底面・上面へ複製し、押し出し後だけ縦辺を追加する。
 }
 
-
+// --- ベベル直方体 ---
+// footprintを底面・上面へ複製し、押し出し後だけ縦辺を追加する。
 function linesBeveledBox(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const q = beveledBoxParams(o),
@@ -1392,11 +2145,10 @@ function linesBeveledBox(ctx) {
             ),
         );
     }
-    // --- パスパイプ ---
-    // 丸めた中心線のリングを描き、リング間の縦線でパイプらしさを出す。
 }
 
-
+// --- パスパイプ ---
+// 丸めた中心線のリングを描き、リング間の縦線でパイプらしさを出す。
 function linesPathPipe(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const mesh = pathPipeMesh(o);
@@ -1410,19 +2162,17 @@ function linesPathPipe(ctx) {
                 0.85,
             ),
         );
-    // --- 凹窓階層建物 ---
-    // 各階に同じ矩形凹窓を反復し、正面・右側面のファサードを描く。
 }
 
-
+// --- 凹窓階層建物 ---
+// 各階に同じ矩形凹窓を反復し、正面・右側面のファサードを描く。
 function linesRecessedStackedBuilding(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     out.push(...recessedStackedBuildingLines(o));
-    // --- 階層建物／ベベル階層建物 ---
-    // floors配列を階ごとに描く。開口はopeningEnabledがtrueの1Fだけへ追加する。
 }
 
-
+// --- 階層建物／ベベル階層建物 ---
+// floors配列を階ごとに描く。開口はopeningEnabledがtrueの1Fだけへ追加する。
 function linesStackedBuilding(ctx) {
     const { o, w, d, h, c, a, out, kind } = ctx;
     const floors =
@@ -1628,11 +2378,10 @@ function linesStackedBuilding(ctx) {
             addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
         }
     });
-    // --- 壁付けベランダ ---
-    // 床スラブ、前面の腰壁、左右の腰壁、支持ブラケットを別々に描く。
 }
 
-
+// --- 壁付けベランダ ---
+// 床スラブ、前面の腰壁、左右の腰壁、支持ブラケットを別々に描く。
 function linesBalcony(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     // 壁側（+Y）を建物外壁へ合わせ、床を外側（-Y）へ張り出すU字型のベランダ。
@@ -1665,11 +2414,10 @@ function linesBalcony(ctx) {
             ),
         ),
     );
-    // --- 階段 ---
-    // stepsの数だけ段板と蹴上げを作り、必要なら手すりも追加する。
 }
 
-
+// --- 階段 ---
+// stepsの数だけ段板と蹴上げを作り、必要なら手すりも追加する。
 function linesStairs(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const n = Math.max(2, Math.min(24, Math.round(o.steps || 6))),
@@ -1787,11 +2535,10 @@ function linesStairs(ctx) {
                 );
             }
         });
-    // --- 横断歩道 ---
-    // 道路の面へ白いストライプを並べる。
 }
 
-
+// --- 横断歩道 ---
+// 道路の面へ白いストライプを並べる。
 function linesCrosswalk(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const n = Math.max(3, Math.min(16, Math.round(o.stripes || 7))),
@@ -1835,18 +2582,16 @@ function linesCrosswalk(ctx) {
             0.9,
         ),
     );
-    // --- 円柱・円錐・球 ---
-    // 円柱は上下輪郭、円錐は底面とシルエット、球は正面向きの円だけを描く。
 }
 
-
+// --- 円柱・円錐・球 ---
+// 円柱は上下輪郭、円錐は底面とシルエット、球は正面向きの円だけを描く。
 function linesCylinder(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     // 円柱は上下の輪郭だけ。側面の縦エッジは描かない。
     out.push(ringA(o, w * 0.5, d * 0.5, 0, 12, c));
     out.push(ringA(o, w * 0.5, d * 0.5, h, 12, c));
 }
-
 
 function linesCone(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
@@ -1887,7 +2632,6 @@ function linesCone(ctx) {
     );
 }
 
-
 function linesSphere(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     // 球は緯度線・経線を描かず、円形の外周輪郭だけを描く。
@@ -1923,7 +2667,6 @@ function linesSphere(ctx) {
     out.push(lineA(o, pts, c, 1.1));
 }
 
-
 function linesTriPrism(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const x = w / 2,
@@ -1943,7 +2686,6 @@ function linesTriPrism(ctx) {
     for (let i = 0; i < 3; i++) out.push(lineA(o, [front[i], back[i]], a, 1.1));
 }
 
-
 function linesTriPyramid(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const x = w / 2,
@@ -1957,7 +2699,6 @@ function linesTriPyramid(ctx) {
     out.push(polyA(o, base, c));
     base.forEach((v) => out.push(lineA(o, [v, apex], a, 1.1)));
 }
-
 
 function linesLantern(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
@@ -1996,11 +2737,10 @@ function linesLantern(ctx) {
     );
     // Two inner bands suggest a glowing paper lantern without requiring a texture.
     [0.36, 0.56].forEach((z) => out.push(ringA(o, rx * 1.02, ry * 1.02, z * h, 8, a, 0.8)));
-    // --- 看板 ---
-    // 外枠と、faceW / faceHで編集できる内側の絵枠を描く。
 }
 
-
+// --- 看板 ---
+// 外枠と、faceW / faceHで編集できる内側の絵枠を描く。
 function linesSign(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     // 看板外側は通常の直方体。内側の絵枠だけを追加編集できる。
@@ -2021,31 +2761,41 @@ function linesSign(ctx) {
         [-ix, fy, iz1],
     ];
     out.push(polyA(o, q, a, 1.1));
-    // --- 人物 ---
-    // 身長・体格・頭身・脚の開き・簡易ポーズを線画へ反映する。
 }
 
-
-function linesPerson(ctx) {
-    const { o, w, d, h, c, a, out } = ctx;
-    // 人物は配置後も高さ・体格・頭身・脚の開き・簡易ポーズを編集できる。
-    // 腕は既存仕様どおり描かず、立体感は胴体・脚・頭の線だけで表現する。
-    const bodyScale = clamp(Number(o.bodyScale) || 1, 0.6, 1.8),
-        shoulderScale = clamp(Number(o.shoulderScale) || 1, 0.6, 1.6),
-        headScale = clamp(Number(o.headScale) || 1, 0.7, 1.5),
-        legSpread = clamp(Number(o.legSpread) || 1, 0.6, 1.8),
-        pose = o.pose || "stand";
-    const defaults = { stand: [0, 0, 0], walk: [0.22, 0, 0], crouch: [0.04, 0.65, 0], sit: [0.1, 0.35, 0] },
-        def = defaults[pose] || defaults.stand;
-    const stride = clamp(Number.isFinite(Number(o.poseStride)) ? Number(o.poseStride) : def[0], 0, 0.5),
-        crouch = clamp(Number.isFinite(Number(o.poseCrouch)) ? Number(o.poseCrouch) : def[1], 0, 1),
-        lean = clamp(Number.isFinite(Number(o.poseLean)) ? Number(o.poseLean) : def[2], -0.35, 0.35),
-        headTilt = clamp(Number(o.headTilt) || 0, -25, 25);
+// --- 人物 ---
+// 人形の骨格を1か所で決める。線画（linesPerson）と面メッシュ
+// （engine-tools.js の exportSurfaceTriangles）が同じ値を使うので、
+// 関節を回しても線と面が食い違わない。
+// 角度はすべて度。正の値が「前に振る（-y 側）」。膝だけは正が「曲げる（かかとが後ろ）」。
+function personPose(o) {
+    const q = o || {},
+        bodyScale = clamp(finiteNumber(q.bodyScale, 1), 0.6, 1.8),
+        shoulderScale = clamp(finiteNumber(q.shoulderScale, 1), 0.6, 1.6),
+        headScale = clamp(finiteNumber(q.headScale, 1), 0.7, 1.5),
+        legSpread = clamp(finiteNumber(q.legSpread, 1), 0.6, 1.8),
+        h = Math.max(0.2, Math.abs(finiteNumber(q.h, 1.7))),
+        pose = q.pose === "walk" || q.pose === "crouch" || q.pose === "sit" ? q.pose : "stand",
+        stride = clamp(finiteNumber(q.poseStride, pose === "walk" ? 0.22 : pose === "sit" ? 0.1 : pose === "crouch" ? 0.04 : 0), 0, 0.5),
+        crouch = clamp(finiteNumber(q.poseCrouch, pose === "crouch" ? 0.65 : pose === "sit" ? 0.35 : 0), 0, 1),
+        lean = clamp(finiteNumber(q.poseLean, 0), -0.35, 0.35),
+        headTilt = clamp(finiteNumber(q.headTilt, 0), -25, 25),
+        // 関節の角度（画面上のギズモでもパネルでも同じ値を使う）
+        waistAngle = clamp(finiteNumber(q.personWaist, 0), -60, 60),
+        neckAngle = clamp(finiteNumber(q.personNeck, 0), -40, 40),
+        hipAngles = [
+            clamp(finiteNumber(q.personHipL, 0), -80, 80),
+            clamp(finiteNumber(q.personHipR, 0), -80, 80),
+        ],
+        kneeAngles = [
+            clamp(finiteNumber(q.personKneeL, 0), 0, 120),
+            clamp(finiteNumber(q.personKneeR, 0), 0, 120),
+        ];
     const bw = 0.28 * h * bodyScale * shoulderScale,
         bd = 0.16 * h * bodyScale,
-        leg = 0.055 * h * bodyScale,
-        headR = 0.095 * h * headScale;
-    let legTop = (0.47 - 0.16 * crouch) * h,
+        legR = 0.055 * h * bodyScale,
+        headR = 0.095 * h * headScale,
+        legTop = (0.47 - 0.16 * crouch) * h,
         torso0 = (0.44 - 0.16 * crouch) * h,
         torso1 = (0.78 - 0.18 * crouch) * h,
         head0 = (0.84 - 0.18 * crouch) * h,
@@ -2053,88 +2803,139 @@ function linesPerson(ctx) {
         footY = [-stride, stride],
         kneeY = [-0.02 * h, 0.02 * h],
         kneeX = [-0.09 * h * legSpread, 0.09 * h * legSpread],
+        bodyY = lean * 0.18,
+        headTopX = Math.sin(headTilt * DG) * 0.06 * h,
         poseTop = (1 - 0.18 * crouch) * h;
-    const bodyY = lean * 0.18,
-        headY = lean * 0.42,
-        headTopX = Math.sin(headTilt * DG) * 0.06 * h;
-    if (pose === "walk") {
-        kneeY = [-0.05 * h, 0.06 * h];
-        kneeX = [-0.07 * h * legSpread, 0.08 * h * legSpread];
-    }
-    if (pose === "crouch") {
-        kneeY = [-0.06 * h, 0.06 * h];
-        kneeX = [-0.1 * h * legSpread, 0.1 * h * legSpread];
-    }
+    if (pose === "walk") kneeY = [-0.05 * h, 0.06 * h];
+    if (pose === "crouch") kneeX = [-0.1 * h * legSpread, 0.1 * h * legSpread];
     if (pose === "sit") {
         kneeY = [0.2 * h, 0.26 * h];
         kneeX = [-0.11 * h * legSpread, 0.11 * h * legSpread];
     }
-    // 足元の小さな台座と脚。歩幅・しゃがみ量・脚の開きを連続的に反映する。
-    out.push(...boxA(o, leg * 1.5, bd * 0.85, 0, 0.08 * h, c));
-    if (pose === "sit") {
-        out.push(
-            lineA(
-                o,
-                [
-                    [-0.09 * h * legSpread, bodyY, 0.32 * h],
-                    [kneeX[0], kneeY[0], 0.3 * h],
-                    [kneeX[0], footY[0], 0],
-                ],
-                c,
-                1.4,
-            ),
-        );
-        out.push(
-            lineA(
-                o,
-                [
-                    [0.09 * h * legSpread, bodyY, 0.32 * h],
-                    [kneeX[1], kneeY[1], 0.3 * h],
-                    [kneeX[1], footY[1], 0],
-                ],
-                c,
-                1.4,
-            ),
-        );
-    } else {
-        out.push(
-            lineA(
-                o,
-                [
-                    [kneeX[0], footY[0], 0],
-                    [kneeX[0], kneeY[0], legTop],
-                ],
-                c,
-                1.4,
-            ),
-        );
-        out.push(
-            lineA(
-                o,
-                [
-                    [kneeX[1], footY[1], 0],
-                    [kneeX[1], kneeY[1], legTop],
-                ],
-                c,
-                1.4,
-            ),
-        );
-    }
-    // Torso and shoulders. leanは肩・首・頭の位置へ反映する。
-    out.push(...boxA(o, bw, bd, torso0, torso1, c));
-    out.push(
-        lineA(
-            o,
+    // 2D（前後 y・上下 z）の回転。正で前（-y）へ振れる。
+    const rot = (dy, dz, deg) => {
+            const a = -deg * DG,
+                cs = Math.cos(a),
+                sn = Math.sin(a);
+            return [dy * cs - dz * sn, dy * sn + dz * cs];
+        },
+        // 脚：もとの姿勢の「股→膝」「膝→足」の向きを測り、そこから関節角度ぶん回す。
+        // 長さを変えないので、回しても脚が伸び縮みしない。
+        legs = [0, 1].map((i) => {
+            const x = kneeX[i],
+                sit = pose === "sit",
+                hip = { x, y: sit ? bodyY : kneeY[i], z: sit ? 0.32 * h : legTop },
+                knee0 = { x, y: kneeY[i], z: sit ? 0.3 * h : (legTop + 0) * 0.5 },
+                foot0 = { x, y: footY[i], z: 0 },
+                dv = (a, b) => [b.y - a.y, b.z - a.z],
+                len = (v) => Math.hypot(v[0], v[1]) || 1e-6,
+                vThigh = dv(hip, knee0),
+                vShin = dv(knee0, foot0),
+                thighLen = len(vThigh),
+                shinLen = len(vShin),
+                dirThigh = rot(vThigh[0] / thighLen, vThigh[1] / thighLen, hipAngles[i]),
+                dirShin = rot(dirThigh[0], dirThigh[1], -kneeAngles[i]),
+                knee = { x, y: hip.y + dirThigh[0] * thighLen, z: hip.z + dirThigh[1] * thighLen },
+                foot = { x, y: knee.y + dirShin[0] * shinLen, z: knee.z + dirShin[1] * shinLen };
+            return { hip, knee, foot };
+        }),
+        // 腰の支点。ここを中心に上体（胴の上面・首・頭）を回す。
+        waistPivot = { y: 0, z: torso0 },
+        tiltAbout = (y, z, deg, py = waistPivot.y, pz = waistPivot.z) => {
+            const v = rot(y - py, z - pz, deg);
+            return { y: py + v[0], z: pz + v[1] };
+        },
+        // 胴の4すみ。下の面は固定、上の面だけ腰の角度ぶん回す。
+        halfW = bw * 0.5,
+        halfD = bd * 0.5,
+        torsoBottom = [
+            [-halfW, -halfD, torso0],
+            [halfW, -halfD, torso0],
+            [halfW, halfD, torso0],
+            [-halfW, halfD, torso0],
+        ],
+        torsoTop = [
+            [-halfW, -halfD],
+            [halfW, -halfD],
+            [halfW, halfD],
+            [-halfW, halfD],
+        ].map(([x, y]) => {
+            const p = tiltAbout(y, torso1, waistAngle);
+            return [x, p.y, p.z];
+        }),
+        neckBase = (() => {
+            const p = tiltAbout(bodyY, torso1, waistAngle);
+            return { y: p.y, z: p.z };
+        })(),
+        // 頭は「首の根元から、腰＋首の角度ぶん傾いた向き」へ積む。
+        headAxis = rot(0, 1, waistAngle + neckAngle),
+        headPoint = (z) => ({
+            y: neckBase.y + headAxis[0] * (z - torso1),
+            z: neckBase.z + headAxis[1] * (z - torso1),
+        }),
+        headC0 = headPoint(head0),
+        headC1 = headPoint(head1);
+    return {
+        h, bw, bd, legR, headR, legTop, torso0, torso1, head0, head1,
+        bodyY, headY: headC0.y, headTopX, poseTop, headTilt, pose, stride, crouch, lean,
+        waistAngle, neckAngle, hipAngles, kneeAngles,
+        waistPivot, neckBase, headAxis, headC0, headC1,
+        torsoBottom, torsoTop, legs,
+    };
+}
+// 身長・体格・頭身・脚の開き・ポーズ・関節角度を線画へ反映する。
+function linesPerson(ctx) {
+    const { o, c, a, out } = ctx,
+        p = personPose(o),
+        h = p.h,
+        line = (pts, col = c, width = 1.4) => out.push(lineA(o, pts, col, width));
+    // 足元の台座（立方体）は描かない。人物は「そのまま立っている」形にして、
+    // 配置したときに足元の箱が他のアセットと重ならないようにする。
+    // 脚：股関節 → 膝 → 足。関節角度は personPose() の中で反映済み。
+    p.legs.forEach((leg) => {
+        line(
             [
-                [-bw * 0.48, bodyY, torso1 - 0.02 * h],
-                [bw * 0.48, bodyY, torso1 - 0.02 * h],
+                [leg.hip.x, leg.hip.y, leg.hip.z],
+                [leg.knee.x, leg.knee.y, leg.knee.z],
+                [leg.foot.x, leg.foot.y, leg.foot.z],
+            ],
+            c,
+            1.4,
+        );
+        // 膝の関節が分かるよう、小さな点を打つ
+        line(
+            [
+                [leg.knee.x - 0.012 * h, leg.knee.y, leg.knee.z],
+                [leg.knee.x + 0.012 * h, leg.knee.y, leg.knee.z],
             ],
             a,
-            1,
-        ),
+            0.9,
+        );
+    });
+    // 胴：下の面は固定、上の面は腰の角度ぶん傾けた四角柱
+    const bottom = p.torsoBottom,
+        top = p.torsoTop;
+    line([...bottom, bottom[0]], c, 1.15);
+    line([...top, top[0]], c, 1.15);
+    bottom.forEach((q, i) => line([q, top[i]], a, 0.95));
+    // 肩の線と首
+    line(
+        [
+            [p.torsoTop[0][0], p.torsoTop[0][1], p.torsoTop[0][2]],
+            [p.torsoTop[1][0], p.torsoTop[1][1], p.torsoTop[1][2]],
+        ],
+        a,
+        1,
     );
-    // 腕は省略。小さな人物シルエットとして使えるよう胴体と脚だけ残す。
-    // Head rings are shifted/tilted without adding arms.
+    line(
+        [
+            [0, p.neckBase.y, p.neckBase.z],
+            [0, p.headC0.y, p.headC0.z],
+        ],
+        c,
+        1.1,
+    );
+    // 頭：首の角度ぶん傾いた2つのリングと縦の骨
     const ringAt = (rx, ry, x0, y0, z, n, color) => {
         const pts = [];
         for (let i = 0; i < n; i++) {
@@ -2143,79 +2944,48 @@ function linesPerson(ctx) {
         }
         return polyA(o, pts, color);
     };
+    out.push(ringAt(p.headR, p.headR * 0.9, 0, p.headC0.y, p.headC0.z, 8, c));
+    out.push(ringAt(p.headR * 0.86, p.headR * 0.78, p.headTopX, p.headC1.y, p.headC1.z, 8, c));
     out.push(
-        lineA(
-            o,
-            [
-                [0, bodyY, torso1],
-                [headTopX, headY, head0],
-            ],
-            c,
-            1.1,
-        ),
+        ...spokesA(o, [0, p.headC0.y], [p.headR, p.headR * 0.9], p.headC0.z, [p.headTopX, p.headC1.y], [p.headR * 0.86, p.headR * 0.78], p.headC1.z, 8, c, 0.85),
     );
-    out.push(ringAt(headR, headR * 0.9, 0, headY, head0, 8, c));
-    out.push(ringAt(headR * 0.86, headR * 0.78, headTopX, headY + 0.02 * h, head1, 8, c));
-    out.push(
-        ...spokesA(
-            o,
-            [0, headY],
-            [headR, headR * 0.9],
-            head0,
-            [headTopX, headY + 0.02 * h],
-            [headR * 0.86, headR * 0.78],
-            head1,
-            8,
-            c,
-            0.85,
-        ),
-    );
-    // A small measurement tick makes the current pose height reference visible.
+    // 姿勢の高さ目盛り
     const mx = 0.42 * h;
-    out.push(
-        lineA(
-            o,
-            [
-                [mx, 0, 0],
-                [mx, 0, poseTop],
-            ],
-            a,
-            0.75,
-        ),
+    line(
+        [
+            [mx, 0, 0],
+            [mx, 0, p.poseTop],
+        ],
+        a,
+        0.75,
     );
-    out.push(
-        lineA(
-            o,
-            [
-                [mx - 0.045 * h, 0, 0],
-                [mx + 0.045 * h, 0, 0],
-            ],
-            a,
-            0.75,
-        ),
+    line(
+        [
+            [mx - 0.045 * h, 0, 0],
+            [mx + 0.045 * h, 0, 0],
+        ],
+        a,
+        0.75,
     );
-    out.push(
-        lineA(
-            o,
-            [
-                [mx - 0.045 * h, 0, poseTop],
-                [mx + 0.045 * h, 0, poseTop],
-            ],
-            a,
-            0.75,
-        ),
+    line(
+        [
+            [mx - 0.045 * h, 0, p.poseTop],
+            [mx + 0.045 * h, 0, p.poseTop],
+        ],
+        a,
+        0.75,
     );
-    // --- 開口のある建物 ---
-    // 外枠に加え、開口の左右柱・上梁・内側面・奥面を描く。
 }
 
-
+// --- 開口のある建物 ---
+// 外枠に加え、開口の左右柱・上梁・内側面・奥面を描く。
 function linesBuilding(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     // チェックを外したリンク建物は、開口のない通常の閉じた箱へ戻す。
     if (o.openingEnabled === false) {
         // 閉じた箱は形が別なので、専用の関数の結果をそのまま返す。
         out.push(...closedBuildingLines(o, w, d, h, c));
+        appendFacadeWindows(o, out, w, d, h, a);
         return;
     }
     // 外側は直方体の輪郭を保ちながら、正面から背面まで抜ける開口を作る。
@@ -2333,11 +3103,11 @@ function linesBuilding(ctx) {
             1.0,
         ),
     );
-    // --- 店舗テント ---
-    // awningGeometry()が返す手前上辺・奥側・底辺をつないでテントを描く。
+    appendFacadeWindows(o, out, w, d, h, a, { w: ow, h: oh });
 }
 
-
+// --- 店舗テント ---
+// awningGeometry()が返す手前上辺・奥側・底辺をつないでテントを描く。
 function linesAwning(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     // 店舗テント：初期状態は直方体。手前上辺だけを高さ・奥行き方向へ動かせる。
@@ -2430,7 +3200,141 @@ function linesAwning(ctx) {
     );
 }
 
-// ===== 6. 保存データ・入力値の正規化 =====
+// --- 切妻屋根・片流れ屋根 ---
+// どちらも「勾配のついた板」なので、断面（roofSlab）を棟方向へ押し出した形で描く。
+// 板厚は斜面に直角方向で一定。断面の外形・内形・両端の輪郭を線にする。
+function roofSlabLines(ctx, kind) {
+    const { o, c, a, out } = ctx,
+        slab = roofSlab(o, kind),
+        { axis, half } = slab,
+        // 断面の(u,z)を3Dへ。u は押し出す軸と直交する水平軸。
+        at = (u, z, s) => (axis === "x" ? [s, u, z] : [u, s, z]),
+        line = (pts, col = c, width = 1.1) => out.push(lineA(o, pts, col, width)),
+        profOuter = slab.outerPath.map(([u, z]) => at(u, z, -half)),
+        profBack = slab.outerPath.map(([u, z]) => at(u, z, half)),
+        profInnerF = slab.innerPath.map(([u, z]) => at(u, z, -half)),
+        profInnerB = slab.innerPath.map(([u, z]) => at(u, z, half));
+    // 両端の断面（板厚まで含めた輪郭）。これで「薄さ」が断面で読める。
+    const ring = (front, back) => [...front, ...[...back].reverse(), front[0]];
+    line(ring(profOuter, profInnerF), c, 1.15);
+    line(ring(profBack, profInnerB), c, 1.15);
+    // 棟と軒に沿った縦の稜線（外側・内側の両方）。
+    slab.outerPath.forEach(([u, z]) => line([at(u, z, -half), at(u, z, half)], a, 1.05));
+    slab.innerPath.forEach(([u, z]) => line([at(u, z, -half), at(u, z, half)], a, 0.85));
+    // 軒先の見付け（外側の軒と内側の軒をつなぐ短い線）。
+    [0, slab.outerPath.length - 1].forEach((i) => {
+        const [ou, oz] = slab.outerPath[i],
+            [iu, iz] = slab.innerPath[i] || slab.innerPath[0];
+        line([at(ou, oz, -half), at(iu, iz, -half)], a, 0.9);
+        line([at(ou, oz, half), at(iu, iz, half)], a, 0.9);
+    });
+}
+// --- 切妻屋根 ---
+// 棟を中心に左右へ下る山形の板。overhangで軒の出、thicknessで板厚を決める。
+function linesGableRoof(ctx) {
+    roofSlabLines(ctx, "gableRoof");
+}
+// --- 片流れ屋根 ---
+// 低い側から高い側へ一枚で上がる板。lowZで低い側の高さを決める。
+function linesShedRoof(ctx) {
+    roofSlabLines(ctx, "shedRoof");
+}
+// --- スロープ ---
+// 手前が床、奥が立ち上がり高さの楔。手すりを付けると支柱も描く。
+function linesRamp(ctx) {
+    const { o, c, a, out } = ctx,
+        q = rampParams(o),
+        x = q.w * 0.5,
+        y0 = -q.d * 0.5,
+        y1 = q.d * 0.5,
+        line = (pts, col = c, width = 1.05) => out.push(lineA(o, pts, col, width)),
+        fl = [-x, y0, 0],
+        fr = [x, y0, 0],
+        bl = [-x, y1, q.h],
+        br = [x, y1, q.h],
+        bl0 = [-x, y1, 0],
+        br0 = [x, y1, 0];
+    line([fl, fr, br, bl, fl]);
+    line([fl, fr, br0, bl0, fl], a, 0.9);
+    line([fl, bl, bl0, fl], a);
+    line([fr, br, br0, fr], a);
+    line([bl0, br0, br, bl, bl0], a);
+    if (q.rail)
+        [-x, x].forEach((px) => {
+            line(
+                [
+                    [px, y0, q.railH],
+                    [px, y1, q.h + q.railH],
+                ],
+                a,
+                1.1,
+            );
+            for (let i = 0; i <= 3; i++) {
+                const t = i / 3,
+                    y = y0 + (y1 - y0) * t,
+                    zDeck = q.h * t;
+                line(
+                    [
+                        [px, y, zDeck],
+                        [px, y, zDeck + q.railH],
+                    ],
+                    a,
+                    0.8,
+                );
+            }
+        });
+}
+// --- 窓グリッド ---
+// 厚みのある板の表裏へ、行×列の窓枠を並べる。窓は窓グリッドの共通計算を使う。
+function linesWindowGrid(ctx) {
+    const { o, w, d, h, c, a, out } = ctx,
+        hh = Math.max(0.2, Math.abs(Number(h) || 0.2)),
+        ww = Math.max(0.2, Math.abs(Number(w) || 0.2)),
+        thick = Math.max(0.01, Math.abs(Number(d) || 0.01)),
+        y0 = -thick * 0.5,
+        y1 = thick * 0.5;
+    out.push(
+        lineA(
+            o,
+            [
+                [-ww / 2, y0, 0],
+                [ww / 2, y0, 0],
+                [ww / 2, y0, hh],
+                [-ww / 2, y0, hh],
+                [-ww / 2, y0, 0],
+            ],
+            c,
+            1.15,
+        ),
+        lineA(
+            o,
+            [
+                [-ww / 2, y1, 0],
+                [ww / 2, y1, 0],
+                [ww / 2, y1, hh],
+                [-ww / 2, y1, hh],
+                [-ww / 2, y1, 0],
+            ],
+            a,
+            0.9,
+        ),
+    );
+    [
+        [-ww / 2, 0],
+        [ww / 2, 0],
+        [ww / 2, hh],
+        [-ww / 2, hh],
+    ].forEach(([x, z]) => out.push(lineA(o, [[x, y0, z], [x, y1, z]], a, 0.8)));
+    const panel = {
+        ...o,
+        windowRows: Math.max(1, Math.round(Number(o.windowRows) || 2)),
+        windowCols: Math.max(1, Math.round(Number(o.windowCols) || 4)),
+        windowBack: true,
+    };
+    appendFacadeWindows(panel, out, ww, thick, hh, c);
+}
+
+// ===== 8. 保存データ・入力値の正規化 =====
 // 描画前に、寸法の下限・ベベル値・階数・パス値などを整える。
 // ここでは見た目を作らず、後段のassetLines()が安全に読める形へ変換する。
 function normalizedAsset(o) {
@@ -2598,7 +3502,36 @@ function normalizedAsset(o) {
             n = { ...q, openingW, openingH };
         if (Number.isFinite(Number(q.openingBack)))
             n.openingBack = clamp(Number(q.openingBack), -d / 2 + 0.025, d / 2 - 0.025);
-        return n;
+        return { ...n, ...normalizedWindowFields(n) };
+    }
+    if (q && q.asset === "box") return { ...q, ...normalizedWindowFields(q) };
+    if (q && (q.asset === "gableRoof" || q.asset === "shedRoof")) {
+        const p = roofParams(q);
+        return {
+            ...q,
+            ra: p.w * 0.5,
+            rb: p.d * 0.5,
+            h: p.h,
+            roofOverhang: p.overhang,
+            roofThickness: p.thickness,
+            roofRidgeAxis: p.ridgeAxis,
+            roofLowZ: p.lowZ,
+        };
+    }
+    if (q && q.asset === "ramp") {
+        const p = rampParams(q);
+        return { ...q, ra: p.w * 0.5, rb: p.d * 0.5, h: p.h, rampRailHeight: p.railH };
+    }
+    if (q && q.asset === "windowGrid") {
+        const rows = Math.max(1, Math.round(Number(q.windowRows) || 2)),
+            cols = Math.max(1, Math.round(Number(q.windowCols) || 4));
+        return {
+            ...q,
+            ...normalizedWindowFields({ ...q, windowRows: rows, windowCols: cols }),
+            h: Math.max(0.2, Math.abs(Number(q.h) || 2.4)),
+            // 板なので既定は裏表とも窓を描く。パネルから片側だけにもできる。
+            windowBack: q.windowBack !== false,
+        };
     }
     return q;
 }
@@ -2608,7 +3541,7 @@ function genAsset(o) {
     return assetLines(q).map((s) => ({ ...s, ob: q, d3: true, cs: sigNow() }));
 }
 
-// ===== 7. 既存エンジンへの接続 =====
+// ===== 9. 既存エンジンへの接続 =====
 // engine-core.jsのgenShapeを置き換えず、元の関数を退避してから
 // assetだけをgenAssetへ振り分ける。通常のrect/box/circは従来処理のまま。
 const baseGenShape = genShape;
@@ -2704,6 +3637,17 @@ obBounds = function (o) {
             add(w, d, 0, h);
             add(w + ro * 2, d + ro * 2, h - rh, h);
         });
+    } else if (q.asset === "gableRoof" || q.asset === "shedRoof") {
+        // 屋根は断面（roofSlab）の外形・内形の両方を両端へ置いて範囲を取る。
+        // 包絡箱で代用すると、板厚のぶん軒先が下がることや棟の位置が枠から外れる。
+        const slab = roofSlab(q, q.asset),
+            at = (u, z, s) => (slab.axis === "x" ? [s, u, z] : [u, s, z]);
+        [-slab.half, slab.half].forEach((side) =>
+            [...slab.outerPath, ...slab.innerPath].forEach(([u, z]) => {
+                const v = at(u, z, side);
+                pts.push(pt(q, v[0], v[1], v[2]));
+            }),
+        );
     } else {
         const hs = [0, q.h],
             xs = [-q.ra, q.ra],
@@ -2720,6 +3664,6 @@ obBounds = function (o) {
     );
     return { lo, hi };
 };
-// ===== 8. 初期化 =====
+// ===== 10. 初期化 =====
 // すでに自動保存されているオブジェクトも、今回の円柱・球・看板の新しい線画へ更新する。
 regenObjects();

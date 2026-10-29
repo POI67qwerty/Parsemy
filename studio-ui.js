@@ -71,8 +71,14 @@
       <div class="quickField"><span>しゃがみ量</span><input id="personPoseCrouch" type="number" min="0" max="1" step="0.05" value="0"><em>倍</em></div>
       <div class="quickField"><span>体の傾き</span><input id="personPoseLean" type="number" min="-0.35" max="0.35" step="0.01" value="0"><em>m</em></div>
       <div class="quickField"><span>頭の傾き</span><input id="personHeadTilt" type="number" min="-25" max="25" step="1" value="0"><em>°</em></div>
+      <div class="quickField"><span>腰の回転</span><input id="personWaist" type="number" min="-60" max="60" step="1" value="0"><em>°</em></div>
+      <div class="quickField"><span>首の回転</span><input id="personNeck" type="number" min="-40" max="40" step="1" value="0"><em>°</em></div>
+      <div class="quickField"><span>左股関節</span><input id="personHipL" type="number" min="-80" max="80" step="1" value="0"><em>°</em></div>
+      <div class="quickField"><span>右股関節</span><input id="personHipR" type="number" min="-80" max="80" step="1" value="0"><em>°</em></div>
+      <div class="quickField"><span>左膝</span><input id="personKneeL" type="number" min="0" max="120" step="1" value="0"><em>°</em></div>
+      <div class="quickField"><span>右膝</span><input id="personKneeR" type="number" min="0" max="120" step="1" value="0"><em>°</em></div>
       <div class="quickRow"><button id="applyPersonPoseDetail" class="primary">ポーズを微調整</button></div>
-      <div class="sceneNote">プリセット後に歩幅・しゃがみ量・体の傾き・頭の傾きを調整できます。身長・体型は保持されます。</div>
+      <div class="sceneNote">プリセット後に歩幅・しゃがみ量・体の傾き・頭の傾きを調整できます。腰・首・股関節・膝の角度は3Dビューの関節ギズモ（丸ハンドル）でも回せます。身長・体型は保持されます。</div>
     </section>
 
     <section class="workspaceScreen" data-workspace-screen="floorplan" hidden>
@@ -163,7 +169,16 @@
     const personPoseStrideInput = el("personPoseStride"),
         personPoseCrouchInput = el("personPoseCrouch"),
         personPoseLeanInput = el("personPoseLean"),
-        personHeadTiltInput = el("personHeadTilt");
+        personHeadTiltInput = el("personHeadTilt"),
+        // 関節角度（3Dビューの関節ギズモと同じ値）
+        personJointInputs = {
+            personWaist: el("personWaist"),
+            personNeck: el("personNeck"),
+            personHipL: el("personHipL"),
+            personHipR: el("personHipR"),
+            personKneeL: el("personKneeL"),
+            personKneeR: el("personKneeR"),
+        };
     const poseButtons = [...quick.querySelectorAll("[data-person-pose]")];
     const poseDefaults = {
         stand: { stride: 0, crouch: 0, lean: 0, headTilt: 0 },
@@ -206,6 +221,9 @@
             personPoseLeanInput.value = Number(o?.poseLean ?? pd.lean).toFixed(2);
         if (personHeadTiltInput && document.activeElement !== personHeadTiltInput)
             personHeadTiltInput.value = Number(o?.headTilt ?? pd.headTilt).toFixed(0);
+        Object.entries(personJointInputs).forEach(([key, input]) => {
+            if (input && document.activeElement !== input) input.value = Number(o?.[key] ?? 0).toFixed(0);
+        });
         if (personStatus)
             personStatus.textContent = o
                 ? `選択中：人物アセット（身長 ${h.toFixed(2)} m）`
@@ -251,7 +269,20 @@
         const d = poseDefaults[pose] || poseDefaults.stand;
         HU.push(S);
         RD = [];
-        setOb(o.id, { pose, poseStride: d.stride, poseCrouch: d.crouch, poseLean: d.lean, headTilt: d.headTilt });
+        // プリセットは姿勢を丸ごと決めるので、関節角度も0へ戻す。
+        setOb(o.id, {
+            pose,
+            poseStride: d.stride,
+            poseCrouch: d.crouch,
+            poseLean: d.lean,
+            headTilt: d.headTilt,
+            personWaist: 0,
+            personNeck: 0,
+            personHipL: 0,
+            personHipR: 0,
+            personKneeL: 0,
+            personKneeR: 0,
+        });
         setStudioWorkspace("pose");
         render();
     }
@@ -264,10 +295,19 @@
         const stride = clamp(parseFloat(personPoseStrideInput.value) || 0, 0, 0.5),
             crouch = clamp(parseFloat(personPoseCrouchInput.value) || 0, 0, 1),
             lean = clamp(parseFloat(personPoseLeanInput.value) || 0, -0.35, 0.35),
-            headTilt = clamp(parseFloat(personHeadTiltInput.value) || 0, -25, 25);
+            headTilt = clamp(parseFloat(personHeadTiltInput.value) || 0, -25, 25),
+            // 関節角度も同時に反映する（ギズモで回した値と数値欄は同じ項目）
+            joints = {
+                personWaist: clamp(parseFloat(personJointInputs.personWaist.value) || 0, -60, 60),
+                personNeck: clamp(parseFloat(personJointInputs.personNeck.value) || 0, -40, 40),
+                personHipL: clamp(parseFloat(personJointInputs.personHipL.value) || 0, -80, 80),
+                personHipR: clamp(parseFloat(personJointInputs.personHipR.value) || 0, -80, 80),
+                personKneeL: clamp(parseFloat(personJointInputs.personKneeL.value) || 0, 0, 120),
+                personKneeR: clamp(parseFloat(personJointInputs.personKneeR.value) || 0, 0, 120),
+            };
         HU.push(S);
         RD = [];
-        setOb(o.id, { pose: "custom", poseStride: stride, poseCrouch: crouch, poseLean: lean, headTilt });
+        setOb(o.id, { pose: "custom", poseStride: stride, poseCrouch: crouch, poseLean: lean, headTilt, ...joints });
         setStudioWorkspace("pose");
         render();
     }
@@ -1803,6 +1843,228 @@
             });
             wallSignEditSession = false;
         };
+    // ===== 3.3 屋根・スロープ・窓グリッドのパネル =====
+    // 3つのアセットは共通の編集パターン（編集セッション＋setOb）を使う。
+    function newAssetPanelObject(kinds, prop) {
+        const o = sel && obOf(sel);
+        return o && o.type === "asset" && kinds.includes(o.asset) ? o : null;
+    }
+    function makeAssetEditSession() {
+        return {
+            open(o, patch) {
+                if (!this.active) {
+                    HU.push(S);
+                    RD = [];
+                    this.active = true;
+                }
+                setOb(o.id, patch);
+                render();
+            },
+            end() {
+                this.active = false;
+            },
+            active: false,
+        };
+    }
+    const roofSession = makeAssetEditSession(),
+        rampSession = makeAssetEditSession(),
+        windowSession = makeAssetEditSession();
+    const roofPanelObject = () => newAssetPanelObject(["gableRoof", "shedRoof"], "roof"),
+        rampPanelObject = () => newAssetPanelObject(["ramp"], "ramp"),
+        windowPanelObject = () => newAssetPanelObject(["windowGrid"], "window");
+    function syncRoofPanel() {
+        const panel = el("roofP"),
+            o = roofPanelObject();
+        if (!panel) return;
+        panel.style.display = o ? "" : "none";
+        if (!o) return;
+        const p = roofParams(o),
+            isGable = o.asset === "gableRoof",
+            overhang = el("roofOverhang"),
+            thickness = el("roofThickness"),
+            ridge = el("roofRidgeAxis"),
+            low = el("roofLowZ");
+        if (overhang && document.activeElement !== overhang) overhang.value = p.overhang.toFixed(3);
+        if (thickness && document.activeElement !== thickness) thickness.value = p.thickness.toFixed(3);
+        if (ridge) {
+            ridge.disabled = !isGable;
+            if (document.activeElement !== ridge) ridge.value = p.ridgeAxis;
+        }
+        if (low) {
+            low.disabled = isGable;
+            if (document.activeElement !== low) low.value = p.lowZ.toFixed(3);
+        }
+    }
+    function applyRoofProp(patch) {
+        const o = roofPanelObject();
+        if (o && patch && Object.keys(patch).length) roofSession.open(o, patch);
+    }
+    // 選んだ屋根を、近くにある建物の上面へ合わせる。
+    // 建物の寸法から屋根の大きさ・高さ・位置を決めるので、
+    // 数値を手で合わせる必要がない。
+    function fitRoofToHost() {
+        const o = roofPanelObject();
+        if (!o) return;
+        const b = obBounds(o),
+            centerX = (b.lo[0] + b.hi[0]) * 0.5,
+            centerZ = (b.lo[2] + b.hi[2]) * 0.5,
+            hosts = [];
+        S.forEach((s) => {
+            const q = s.ob;
+            if (!q || q === o || q.type !== "asset") return;
+            if (!["building", "box", "stackedBuilding", "beveledStackedBuilding", "recessedStackedBuilding"].includes(q.asset))
+                return;
+            const hb = obBounds(q),
+                hx = (hb.lo[0] + hb.hi[0]) * 0.5,
+                hz = (hb.lo[2] + hb.hi[2]) * 0.5;
+            hosts.push({ q, hb, top: hb.hi[1], dist: Math.hypot(hx - centerX, hz - centerZ) });
+        });
+        if (!hosts.length) return;
+        // 真下に近い建物を優先する。
+        hosts.sort((a, c) => a.dist - c.dist);
+        const host = hosts[0],
+            fit = roofFitFromHost(host.q, o.asset),
+            k = Number(o.k) || 1,
+            d = Number(o.d) || -1,
+            off = [...(o.off || [0, 0, 0])],
+            [iu, iv] = PL[k],
+            hostX = (host.hb.lo[0] + host.hb.hi[0]) * 0.5,
+            hostZ = (host.hb.lo[2] + host.hb.hi[2]) * 0.5;
+        // 水平位置は建物の中心へ寄せる（offはローカル中心への足し込み）。
+        off[iu] = hostX - (Number(o.ca) || 0);
+        off[iv] = hostZ - (Number(o.cb) || 0);
+        // 鉛直位置は、屋根の「いちばん低い面」が建物の上面へ来るようにする。
+        // 板厚は斜面に直角で取るので、軒先の下面は基準面より少し下がる。
+        // その分（slabDrop）を持ち上げないと、軒が建物へめり込む。
+        const slab = typeof roofSlab === "function" ? roofSlab({ ...o, h: fit.h, ra: fit.ra, rb: fit.rb, roofThickness: fit.roofThickness, roofLowZ: 0 }, o.asset) : null,
+            slabDrop = slab ? Math.min(...slab.innerPath.map((p) => p[1]), 0) : 0;
+        off[k] = host.top - d - slabDrop;
+        roofSession.open(o, {
+            ra: fit.ra,
+            rb: fit.rb,
+            h: fit.h,
+            roofOverhang: fit.roofOverhang,
+            roofThickness: fit.roofThickness,
+            roofRidgeAxis: fit.roofRidgeAxis,
+            roofLowZ: 0,
+            lift: 0,
+            off,
+        });
+        roofSession.end();
+    }
+    [
+        ["roofOverhang", (v) => ({ roofOverhang: v })],
+        ["roofThickness", (v) => ({ roofThickness: v })],
+        ["roofLowZ", (v) => ({ roofLowZ: v })],
+    ].forEach(([id, toPatch]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => {
+            const value = Number(input.value);
+            if (Number.isFinite(value)) applyRoofProp(toPatch(value));
+        };
+        input.onchange = () => roofSession.end();
+    });
+    const roofRidgeAxis = el("roofRidgeAxis");
+    if (roofRidgeAxis)
+        roofRidgeAxis.onchange = () => {
+            applyRoofProp({ roofRidgeAxis: roofRidgeAxis.value === "y" ? "y" : "x" });
+            roofSession.end();
+        };
+    const roofFitHost = el("roofFitHost");
+    if (roofFitHost) roofFitHost.onclick = fitRoofToHost;
+
+    function syncRampPanel() {
+        const panel = el("rampP"),
+            o = rampPanelObject();
+        if (!panel) return;
+        panel.style.display = o ? "" : "none";
+        if (!o) return;
+        const p = rampParams(o),
+            rail = el("rampHandrail"),
+            height = el("rampRailHeight");
+        if (rail) rail.checked = p.rail;
+        if (height) {
+            height.disabled = !p.rail;
+            if (document.activeElement !== height) height.value = p.railH.toFixed(3);
+        }
+    }
+    const rampHandrail = el("rampHandrail"),
+        rampRailHeight = el("rampRailHeight");
+    if (rampHandrail)
+        rampHandrail.onchange = () => {
+            const o = rampPanelObject();
+            if (o) rampSession.open(o, { handrail: rampHandrail.checked });
+            rampSession.end();
+        };
+    if (rampRailHeight)
+        rampRailHeight.oninput = () => {
+            const o = rampPanelObject(),
+                value = Number(rampRailHeight.value);
+            if (o && Number.isFinite(value)) rampSession.open(o, { rampRailHeight: clamp(value, 0.12, 1.8) });
+        };
+    if (rampRailHeight) rampRailHeight.onchange = () => rampSession.end();
+
+    function syncWindowGridPanel() {
+        const panel = el("windowGridP"),
+            o = windowPanelObject();
+        if (!panel) return;
+        panel.style.display = o ? "" : "none";
+        if (!o) return;
+        const f = normalizedWindowFields(o),
+            rows = el("windowRows"),
+            cols = el("windowCols"),
+            back = el("windowBack"),
+            sides = el("windowSides");
+        [
+            ["windowW", f.windowW],
+            ["windowH", f.windowH],
+            ["windowMarginX", f.windowMarginX],
+            ["windowSill", f.windowSill],
+            ["windowHead", f.windowHead],
+            ["windowGapX", f.windowGapX],
+            ["windowGapZ", f.windowGapZ],
+        ].forEach(([id, value]) => {
+            const input = el(id);
+            if (input && document.activeElement !== input) input.value = Number(value).toFixed(3);
+        });
+        if (rows && document.activeElement !== rows) rows.value = String(f.windowRows);
+        if (cols && document.activeElement !== cols) cols.value = String(f.windowCols);
+        if (back) back.checked = f.windowBack;
+        if (sides) sides.checked = f.windowSides;
+    }
+    const applyWindowProp = (patch) => {
+        const o = windowPanelObject();
+        if (o && patch && Object.keys(patch).length) windowSession.open(o, patch);
+    };
+    [
+        ["windowRows", (v) => ({ windowRows: clamp(Math.round(v), 0, 20) })],
+        ["windowCols", (v) => ({ windowCols: clamp(Math.round(v), 0, 20) })],
+        ["windowW", (v) => ({ windowW: Math.max(0, v) })],
+        ["windowH", (v) => ({ windowH: Math.max(0, v) })],
+        ["windowMarginX", (v) => ({ windowMarginX: Math.max(0, v) })],
+        ["windowSill", (v) => ({ windowSill: Math.max(0, v) })],
+        ["windowHead", (v) => ({ windowHead: Math.max(0, v) })],
+        ["windowGapX", (v) => ({ windowGapX: Math.max(0, v) })],
+        ["windowGapZ", (v) => ({ windowGapZ: Math.max(0, v) })],
+    ].forEach(([id, toPatch]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => {
+            const value = Number(input.value);
+            if (Number.isFinite(value)) applyWindowProp(toPatch(value));
+        };
+        input.onchange = () => windowSession.end();
+    });
+    ["windowBack", "windowSides"].forEach((id) => {
+        const input = el(id);
+        if (!input) return;
+        input.onchange = () => {
+            applyWindowProp({ [id]: input.checked });
+            windowSession.end();
+        };
+    });
+
     let beveledBoxEditSession = false;
     function syncBeveledBoxPanel() {
         const panel = el("beveledBoxP"),
@@ -1960,6 +2222,9 @@
         syncBalconyPanel();
         syncPathPipePanel();
         syncWallSignPanel();
+        syncRoofPanel();
+        syncRampPanel();
+        syncWindowGridPanel();
         syncBeveledBoxPanel();
         syncCornerCutPanel();
         syncRecessedStackedPanel();
@@ -3526,19 +3791,23 @@
             drawFloorMoveGizmo(c, h.object.o);
             const editHandles = floorPlanEditHandles();
             if (editHandles?.special) {
-                // 壁横看板はengine-tools側の専用ギズモを描画する。
-                // ここで再描画すると黄色の金具ハンドルが二重になる。
-                if (h.object.o?.asset !== "wallSideSign") drawSpecialGizmo(c, h.object.o);
+                // 専用ギズモを持つアセット（積層建物・パスパイプなど）は
+                // 幅／奥行／高さの汎用ハンドルを出さない。
             } else {
                 drawFloorPlanEditHandles(c);
-                // ベベル直方体は通常の幅／奥行／高さハンドルに加えて、
-                // 断面オフセット用の専用ハンドルも同じビューへ表示する。
-                if (
-                    tool === "edit" &&
-                    (h.object.o.asset === "beveledBox" || h.object.o.asset === "wallSign")
-                )
-                    drawSpecialGizmo(c, h.object.o);
             }
+            // アセット専用ハンドル（窓の幅・高さの青い菱形、人物の関節の丸、
+            // 金具・ベベルなど）は、間取りの汎用ハンドルの有無に関わらず
+            // どのビューでも同じように描く。
+            // 以前は「専用ギズモを持つアセット」と「ベベル直方体・壁付け看板」だけを
+            // ここで描いていたため、人物や窓グリッドは 3D でしか見えず、
+            // 前／横／上では「編集できるのにハンドルが無い」状態だった。
+            // 壁横看板だけは engine-tools 側の drawGizmo が担当するので二重に描かない。
+            // ツールが「編集」以外でも、選択中なら3Dビューと同じように専用ハンドルを描く。
+            // 3D側（engine-tools の drawGizmo）はツールに関係なく描画するため、
+            // ここで tool === "edit" を条件にすると「3Dでは出るが前／横／上では出ない」
+            // という差が生まれる（実際にその状態になっていた）。
+            if (h.object.o?.asset !== "wallSideSign") drawSpecialGizmo(c, h.object.o);
         }
         // カメラ：本体をドラッグして位置、先端の丸をドラッグして向き
         const k = h.camera,
@@ -4038,17 +4307,26 @@
             }
             // 看板の絵枠ハンドルは通常の3Dギズモと同じ編集経路へ渡す。
             // これを家具の間取り判定より後にすると、横／上ビューで本体移動として処理される。
-            if (tool === "edit" && sel) {
+            if (sel) {
+                // アセット専用の寸法ハンドル（窓の大きさ・人物の関節・ベベル・
+                // 金具・階の高さなど）は、3Dビューと同じ beginGizmo 経路へ渡す。
+                // 以前はアセット名を1つずつ並べた表で振り分けていたため、
+                // 表に無い新しいハンドル（人物の関節・窓グリッドなど）が
+                // 前／横／上ビューでだけ効かなかった。
+                // 面・軸・回転リングだけは間取り側の専用ハンドルが受け持つので除く。
                 const special = hitGizmo(p),
-                    customAsset = special?.g?.o?.asset,
-                    customFloorGizmo =
-                        ["stackedBuilding", "beveledStackedBuilding"].includes(customAsset) ||
-                        customAsset === "pathPipe" ||
-                        customAsset === "wallSideSign" ||
-                        (customAsset === "beveledBox" && special?.t === "beveled-offset") ||
-                        (customAsset === "wallSign" && special?.t?.startsWith("wall-sign-")) ||
-                        special?.t?.startsWith("sign-") ||
-                        (special?.t === "face" && customAsset === "sign");
+                    specialT = special?.t || "",
+                    specialAsset = special?.g?.o?.asset,
+                    // 看板（sign）だけは絵枠と同じ扱いで、面ハンドルも3D経路へ渡す。
+                    // 回転リングも3D経路へ渡す。以前は「間取り側の専用ハンドルが
+                    // 受け持つ」として除外していたが、3Dで描かれているリングを
+                    // 前／横／上で押すと何も起きず、「3Dでしか回せない」状態だった。
+                    // dragEdit 側は正投影でもリングを回せる（ringPlaneUV）。
+                    genericGizmo =
+                        (specialT === "face" && specialAsset !== "sign") ||
+                        specialT === "axis" ||
+                        specialT === "mv",
+                    customFloorGizmo = !!special && !genericGizmo;
                 const activeFloorObject = sel && obOf(sel),
                     wallPlaneSelection = !!(activeFloorObject && activeFloorObject.k !== 1),
                     signBounds = wallPlaneSelection ? obBounds(activeFloorObject) : null,
@@ -4067,7 +4345,7 @@
                             !signBodyCenterHit &&
                             special?.sign?.s?.ok &&
                             Math.hypot(special.sign.s.x - p.x, special.sign.s.y - p.y) <= 12 / Z);
-                if (special && customFloorGizmo && !(wallPlaneSelection && special.t === "face") && signHandleClose) {
+                if (customFloorGizmo && signHandleClose) {
                     e.preventDefault();
                     e.stopImmediatePropagation();
                     ptr = e.pointerId;
@@ -4082,7 +4360,7 @@
             // 正面／横ビューにも、上面と同じ回転ハンドルを用意する。
             // これまではこの2ビューだけ先に高さ／移動判定へ落ち、回転丸を
             // 押しても通常の面編集として扱われていた。
-            if (tool === "edit" && sel && (orthView === "front" || orthView === "side")) {
+            if (sel && (orthView === "front" || orthView === "side")) {
                 const turn = floorPlanHandles(),
                     turnLimit = 24 / Z;
                 if (turn.object?.s?.ok && Math.hypot(turn.object.s.x - p.x, turn.object.s.y - p.y) < turnLimit) {

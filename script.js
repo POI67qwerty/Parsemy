@@ -190,6 +190,33 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>ベベル分割数</span><input type=number class=nv id=wallSignBevelSegments min=1 max=4 step=1 style="width:100px"><span class="un">分割</span></label>
 <div class="note">看板は板を立てた形状で、取付金具は裏側の壁へ向かって出ます。幅・奥行き（板厚）・高さは共通の面ハンドルまたは数値欄で編集できます。金具の長さとベベル幅は画面上のハンドルからも変更できます。</div>
 </div>
+<div id=roofP style="display:none"><h3>屋根</h3>
+<label><span>軒の出</span><input type=number class=nv id=roofOverhang min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>板の厚さ</span><input type=number class=nv id=roofThickness min=0.02 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>棟の向き</span><select id=roofRidgeAxis style="width:120px"><option value="x">幅方向（左右）</option><option value="y">奥行方向（前後）</option></select></label>
+<label><span>低い側の高さ</span><input type=number class=nv id=roofLowZ min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><button type=button id=roofFitHost class=primary>下の建物に合わせる</button></label>
+<div class="note">幅・奥行き・高さは共通の面ハンドルまたは数値欄で編集できます。軒の出は外形の広がり、板の厚さは屋根板の厚みです。棟の向きは切妻屋根だけに効きます。</div>
+</div>
+<div id=rampP style="display:none"><h3>スロープ</h3>
+<label><input type=checkbox id=rampHandrail> 手すりを付ける</label>
+<label><span>手すりの高さ</span><input type=number class=nv id=rampRailHeight min=0.12 step=0.02 style="width:100px"><span class=un>m</span></label>
+<div class="note">高さは奥側の立ち上がり、奥行きは勾配の長さです。手すりは左右の立ち上がりへ支柱付きで描きます。</div>
+</div>
+<div id=windowGridP style="display:none"><h3>窓グリッド</h3>
+<label><span>行</span><input type=number class=nv id=windowRows min=0 max=20 step=1 style="width:100px"></label>
+<label><span>列</span><input type=number class=nv id=windowCols min=0 max=20 step=1 style="width:100px"></label>
+<label><span>窓の幅</span><input type=number class=nv id=windowW min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>窓の高さ</span><input type=number class=nv id=windowH min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>左右の余白</span><input type=number class=nv id=windowMarginX min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>窓台の高さ</span><input type=number class=nv id=windowSill min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>上部の余白</span><input type=number class=nv id=windowHead min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>横の間隔</span><input type=number class=nv id=windowGapX min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>縦の間隔</span><input type=number class=nv id=windowGapZ min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><input type=checkbox id=windowBack> 裏側にも窓を描く</label>
+<label><input type=checkbox id=windowSides> 左右の側面にも窓を描く</label>
+<div class="note">行×列で窓を並べます。窓の幅・高さは各セルの中央へ置かれ、0にするとセルいっぱいまで自動で広がります。余白と間隔は壁の大きさに対する上限で自動的に収まります。同じ設定は直方体と建物にも使えます（行・列が0のときは窓を描きません）。</div>
+</div>
 <div id=beveledBoxP style="display:none"><h3>ベベル直方体</h3>
 <label><span>ベベルオフセット</span><input type=number class=nv id=beveledBoxOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
 <label><span>ベベルセグメント数</span><input type=number class=nv id=beveledBoxSegments min=1 max=4 step=1 style="width:100px"><span class=un>分割</span></label>
@@ -613,6 +640,7 @@ function orthBasis() {
     if (orthView === "top") return { right: [1, 0, 0], up: [0, 0, 1], depth: [0, -1, 0] };
     return { right: [1, 0, 0], up: [0, 1, 0], depth: [0, 0, 1] };
 }
+const ZERO2 = [0, 0];
 const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 // 間取りモードだけ、オブジェクト群を画面中央へ自動フィットする。
 // 通常の9=真上は従来どおり原点中心の正投影を維持する。
@@ -624,27 +652,57 @@ const orthScale = () =>
         : Math.min(W, H) / 7.2;
 // 正面／横／上の間取りビュー専用の正投影。
 // right / up / depth の基底を変えるだけで3方向を同じ処理で描画する。
-function orthPoint(v) {
-    const b = orthBasis(),
-        sc = orthScale(),
-        pc =
-            window.cityFloorPlanActive && (orthView === "top" || orthView === "side" || orthView === "front")
-                ? orthPlanCenter()
-                : [0, 0];
-    let rx = dot3(v, b.right),
-        ry = dot3(v, b.up);
+//
+// 投影の係数（基底・倍率・画面上の原点）は、ビュー・倍率・中心・カメラが
+// 変わらない間ずっと同じ。以前は点1つごとに orthBasis() / orthScale() /
+// orthPlanCenter() を呼び、配列を3つずつ作っていたので、線の点数が多いほど
+// 無駄が増えていた。ここでは署名が同じ間だけ計算結果を使い回す。
+let orthSetupKey = "",
+    orthSetupVal = null;
+function orthSetup() {
+    const sc = orthScale(),
+        active = !!window.cityFloorPlanActive,
+        pc = active ? orthPlanCenter() : ZERO2,
+        key =
+            orthView + "|" + sc + "|" + W + "|" + H + "|" +
+            (active ? 1 : 0) + "|" + pc[0] + "|" + pc[1] + "|" + P.cx + "|" + P.cz + "|" + P.ch;
+    if (orthSetupVal && key === orthSetupKey) return orthSetupVal;
+    const b = orthBasis();
     // scrW() は先にカメラ原点へ移すため、正投影では表示軸だけワールド原点へ戻す。
-    if (window.cityFloorPlanActive && orthView === "top") {
-        rx += P.cx;
-        ry += P.cz;
-    } else if (window.cityFloorPlanActive && orthView === "side") {
-        rx += P.cz;
-        ry += P.ch - 1;
-    } else if (window.cityFloorPlanActive && orthView === "front") {
-        rx += P.cx;
-        ry += P.ch - 1;
+    let sx = 0,
+        sy = 0;
+    if (active && orthView === "top") {
+        sx = P.cx;
+        sy = P.cz;
+    } else if (active && orthView === "side") {
+        sx = P.cz;
+        sy = P.ch - 1;
+    } else if (active && orthView === "front") {
+        sx = P.cx;
+        sy = P.ch - 1;
     }
-    return { x: W / 2 + (rx - pc[0]) * sc, y: H / 2 - (ry - pc[1]) * sc, depth: dot3(v, b.depth), ok: true };
+    // x = ax + dot(v,right)*sc / y = ay - dot(v,up)*sc
+    orthSetupVal = {
+        right: b.right,
+        up: b.up,
+        depth: b.depth,
+        sc,
+        ax: W / 2 + (sx - pc[0]) * sc,
+        ay: H / 2 - (sy - pc[1]) * sc,
+    };
+    orthSetupKey = key;
+    return orthSetupVal;
+}
+function orthPoint(v) {
+    const s = orthSetup(),
+        rx = v[0] * s.right[0] + v[1] * s.right[1] + v[2] * s.right[2],
+        ry = v[0] * s.up[0] + v[1] * s.up[1] + v[2] * s.up[2];
+    return {
+        x: s.ax + rx * s.sc,
+        y: s.ay - ry * s.sc,
+        depth: v[0] * s.depth[0] + v[1] * s.depth[1] + v[2] * s.depth[2],
+        ok: true,
+    };
 }
 // ワールドの向き→画面（今のグリッド種類の投影）。okがfalseなら画角の外/カメラの後ろ
 function scr(v) {
@@ -710,8 +768,11 @@ function strokeW(c, s) {
         on ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y);
         on = true;
     };
+    // 正投影ビューでは投影が線形なので、点の間を球面上で補間する必要がない。
+    // （以前は全ビューで角度分割していたため、1本の線が最大200点に増えていた）
+    const subdivide = !orthView;
     s.p.forEach((v, i) => {
-        if (i) {
+        if (i && subdivide) {
             const a = s.p[i - 1],
                 n = Math.ceil(Math.acos(Math.max(-1, Math.min(1, V.dot(V.nrm(rl(a)), V.nrm(rl(v)))))) / 0.03);
             for (let j = 1; j < n; j++) put(co ? V.add(a, v, 1 - j / n, j / n) : V.nrm(V.add(a, v, 1 - j / n, j / n)));
@@ -1586,6 +1647,11 @@ const wrap180 = (a) => ((((a + 180) % 360) + 360) % 360) - 180;
 // カメラの向きで裏へ回り込んだハンドルは、輪郭の外側へ逃がして描く。
 // 逃がす距離は画面のピクセル基準なので、ズーム倍率Zで割って座標系に合わせる。
 const hiddenHandleGap = () => Math.max(30 / Z, 42 / Z);
+// 画面上で向きが読めないハンドル（真上から見た高さ方向など）を逃がす向き。
+// 真上ビューでは斜め左下へ、それ以外は左やや下へ逃がすと、本体の線に重なりにくい。
+const hiddenHandleDir = () => (orthView === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 });
+// つぶれた向きのときの倍率（px/単位）。正投影は px/単位が分かるのでそれを使う。
+const hiddenHandleScale = () => Math.max(24, orthView ? orthScale() : 24);
 const segd = (p, a, b) => {
     const dx = b.x - a.x,
         dy = b.y - a.y,
@@ -1593,6 +1659,50 @@ const segd = (p, a, b) => {
         t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l));
     return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
 };
+// 軸矢印の「掴める範囲」は、中心から先端までの線分のうち外側だけにする。
+// 線分全体を当たり判定にすると、中心から先端へ引いた線が図形の内側を通るため、
+// 面上の白い四角やアセット専用ハンドル（窓の幅など）を軸が奪ってしまう。
+// 図形の中心付近は面・専用ハンドルへ譲り、矢印の外側（全長の55%〜先端）だけを
+// 軸の当たり判定にする。軸を掴める長さは十分に残る。
+const AXIS_GRAB_FROM = 0.55;
+function axisGrabSeg(g, a) {
+    const k = AXIS_GRAB_FROM;
+    return {
+        a: { x: g.sC.x + (a.sT.x - g.sC.x) * k, y: g.sC.y + (a.sT.y - g.sC.y) * k },
+        b: a.sT,
+    };
+}
+// 押した点が軸矢印（外側部分）に触れているか。触れていればその軸を返す。
+function axisHitAt(g, p, rad) {
+    if (!g || !Array.isArray(g.axes) || !g.sC) return null;
+    let best = null;
+    const minLen = 14 / Z;
+    for (const a of g.axes) {
+        // 画面上で長さが無い軸（真上ビューの高さ方向など）は掴めない。
+        // 中心に固まった矢印を当たり判定に残すと、中心付近の面ハンドルを奪う。
+        if (!a || !a.sT || Math.hypot(a.sT.x - g.sC.x, a.sT.y - g.sC.y) < minLen) continue;
+        const seg = axisGrabSeg(g, a),
+            d = segd(p, seg.a, seg.b);
+        if (d < rad && (!best || d < best.d)) best = { a, d };
+    }
+    return best;
+}
+// 回転リングの「画面の点 → 面内の座標」変換。
+// 面内の2軸（iu,iv）が画面上でどちらへ伸びるか（su/sv）が分かっていれば、
+// 画面の移動量を2元連立で面内の (u,v) に戻せる。正投影はアフィンなので誤差が出ない。
+// 面が画面に対して真横を向いている（行列式≒0）ときは null を返し、
+// 呼び出し側が画面角度による回転へ切り替える。
+function ringPlaneUV(plane, p) {
+    if (!plane || !plane.s0 || !plane.su || !plane.sv) return null;
+    const det = plane.su.x * plane.sv.y - plane.su.y * plane.sv.x;
+    if (!Number.isFinite(det) || Math.abs(det) < 1e-6) return null;
+    const dx = p.x - plane.s0.x,
+        dy = p.y - plane.s0.y;
+    return {
+        u: (dx * plane.sv.y - dy * plane.sv.x) / det,
+        v: (plane.su.x * dy - plane.su.y * dx) / det,
+    };
+}
 // 視線rと「点Cを通る向きaの直線」の最も近い点の、直線上の位置t（軸に沿った移動量を求める）
 function lineParam(r, C, a) {
     const b = V.dot(r, a),
@@ -1621,9 +1731,13 @@ function faceScreenGuide(face) {
                 scale: px / step,
             };
     }
-    // 真正面の奥行き面など、画面上で法線方向が完全につぶれる場合は、
-    // 不定な拡縮を起こさず「このビューでは動かない」として扱う。
-    return { hidden: true, dir: { x: 0, y: 0 }, scale: Infinity };
+    // 真正面の奥行き面（前ビューで手前/奥の面）や、真上ビューでの高さ面は、
+    // 画面上で法線方向が完全につぶれて向きが取れない。以前はここで dl=0 にして
+    // 「このビューでは動かない」扱いにしていたが、それだと 3D では編集できる面が
+    // 前・横・上では編集できない、という差が出る。
+    // つぶれた向きは専用ハンドルと同じ規則で画面の上向きへ逃がし、
+    // 倍率は正投影の px/単位（3D は既定値）を使う。これでどのビューでも同じ量だけ動く。
+    return { hidden: true, dir: hiddenHandleDir(), scale: hiddenHandleScale() };
 }
 // ワールド軸の移動量を、オブジェクト定義のca/cb/liftへ戻す。
 // 親子接続中は、必要に応じて接着オフセットも保つ。
@@ -2171,7 +2285,7 @@ function stackedBevelHandle(o, f, index) {
         length = Math.hypot(dx, dy),
         projected = !!raw?.ok && !!probe?.ok && Number.isFinite(length),
         hidden = projected && length <= 0.5 / Z,
-        fallback = orthView === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 };
+        fallback = hiddenHandleDir();
     return {
         kind: "stacked-bevel-offset",
         s: !raw?.ok
@@ -2188,7 +2302,7 @@ function stackedBevelHandle(o, f, index) {
         scale:
             projected && length > 0.0001
                 ? length / Math.max(0.0001, Math.min(step, max - start || step))
-                : Math.max(24, orthView ? orthScale() : 24),
+                : hiddenHandleScale(),
         start,
         min: 0,
         max,
@@ -2227,7 +2341,7 @@ function stackedOpeningGizmo(o) {
                 kind,
                 s: display,
                 dir: hidden ? fallback : { x: dx / length, y: dy / length },
-                scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : length / step || 1,
+                scale: hidden ? hiddenHandleScale() : length / step || 1,
                 start,
                 min,
                 max,
@@ -2296,7 +2410,7 @@ function stackedOpeningGizmo(o) {
         ppx = Math.hypot(pdx, pdy),
         panelProjected = Number.isFinite(ppx) && ppx > 0.5 / Z,
         panelDir = panelProjected ? { x: pdx / ppx, y: pdy / ppx } : { x: 1, y: 0 },
-        panelScale = panelProjected ? ppx / 0.1 : Math.max(24, orthView ? orthScale() : 24);
+        panelScale = panelProjected ? ppx / 0.1 : hiddenHandleScale();
     return {
         o,
         opening: g,
@@ -2356,7 +2470,7 @@ function stackedBuildingGizmo(o) {
                 kind,
                 s: display,
                 dir: hidden ? fallback : { x: dx / pxLen, y: dy / pxLen },
-                scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : pxLen / step,
+                scale: hidden ? hiddenHandleScale() : pxLen / step,
                 start: axis === "w" ? w : axis === "d" ? d : h,
                 min: 0.08,
                 max: 30,
@@ -2414,7 +2528,7 @@ function recessedStackedGizmo(o) {
                 s,
                 anchor,
                 dir,
-                scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : px,
+                scale: hidden ? hiddenHandleScale() : px,
                 start,
                 min,
                 max,
@@ -2574,7 +2688,8 @@ function pathPipeGizmo(o) {
         controlPoints = points.map((v) => pr(v)),
         pathHandles = [],
         axisNames = ["X", "Y", "Z"],
-        axisColors = ["#e8743d", "#4a7be8", "#2fb5a5"],
+        // ローカル y＝奥行き（緑）／ローカル z＝高さ（青）
+        axisColors = ["#e8743d", "#3fa45b", "#4a7be8"],
         // 正面／横ビューでは、経路の別の点が投影上で同じ場所になることがある
         // （例：奥行きだけが違う2点）。同じ画面座標へ全ハンドルを重ねると
         // hitGizmoが常に先頭の点を返すため、重なった点の操作列を扇状に分ける。
@@ -2618,7 +2733,7 @@ function pathPipeGizmo(o) {
                 s: display,
                 anchor,
                 dir: hidden ? fallback : { x: dx / length, y: dy / length },
-                scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : length / step,
+                scale: hidden ? hiddenHandleScale() : length / step,
                 start: Number(v[axis]) || 0,
                 min: -50,
                 max: 50,
@@ -2660,7 +2775,7 @@ function pathPipeGizmo(o) {
             s: radiusDisplay,
             anchor: radiusAnchor,
             dir: radiusHidden ? radiusFallback : { x: rdx / rLength, y: rdy / rLength },
-            scale: radiusHidden ? Math.max(24, orthView ? orthScale() : 24) : rLength / radius,
+            scale: radiusHidden ? hiddenHandleScale() : rLength / radius,
             start: radius,
             min: 0.02,
             max: 5,
@@ -2684,7 +2799,7 @@ function beveledBoxGizmo(o) {
         length = Math.hypot(dx, dy),
         projected = !!raw?.ok && !!probe?.ok && Number.isFinite(length),
         hidden = projected && length <= 0.5 / Z,
-        fallback = orthView === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 },
+        fallback = hiddenHandleDir(),
         visibleDir = hidden ? fallback : { x: dx / length, y: dy / length },
         // 断面の実点は外周線のすぐ内側にあるため、そこへハンドルを置くと
         // 面／移動ギズモと重なって「移動できない」ように見える。表示だけを
@@ -2709,7 +2824,7 @@ function beveledBoxGizmo(o) {
             anchor,
             dir: visibleDir,
             scale: hidden
-                ? Math.max(24, orthView ? orthScale() : 24)
+                ? hiddenHandleScale()
                 : length / Math.max(0.0001, Math.min(step, q.max - q.bevelOffset || step)),
             start: q.bevelOffset,
             min: 0,
@@ -2740,7 +2855,7 @@ function cornerCutOpeningGizmo(o, opening) {
             return {
                 anchor: a,
                 dir: hidden ? { x: f.x / fl, y: f.y / fl } : { x: dx / px, y: dy / px },
-                scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : px,
+                scale: hidden ? hiddenHandleScale() : px,
                 hidden,
             };
         },
@@ -2858,7 +2973,7 @@ function cornerCutGizmo(o) {
         dy = (probe?.y || 0) - (anchor?.y || 0),
         px = Math.hypot(dx, dy),
         hidden = !anchor?.ok || !probe?.ok || px <= 0.5 / Z,
-        fallback = orthView === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 },
+        fallback = hiddenHandleDir(),
         dir = hidden ? fallback : { x: dx / px, y: dy / px },
         gap = Math.max(32 / Z, 48 / Z),
         display = anchor?.ok
@@ -2876,7 +2991,7 @@ function cornerCutGizmo(o) {
             s: display,
             anchor,
             dir,
-            scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : px / step,
+            scale: hidden ? hiddenHandleScale() : px / step,
             start: q.cornerOffset,
             min: 0,
             max: q.max,
@@ -2887,39 +3002,45 @@ function cornerCutGizmo(o) {
 // 壁付け看板（単体）のギズモ。
 // 金具の長さとベベル幅を、3D・正面・横・上のどこからでも同じ手順で編集できる。
 // 幅・奥行き（板厚）・高さは標準の面ハンドルへ任せる。
+// 画面上のハンドルを1つ作る共通処理。
+// anchor3=取付点（線の付け根）、sample3=つまみの位置、probe3=少し先の点。
+// 奥に隠れて投影が潰れたときは fallback の向きへ逃がして、必ず掴める位置に置く。
+function screenHandle(o, kind, anchor3, sample3, probe3, start, min, max, label, fallback, color) {
+    const pr = (x, y, z) => scrW(pt(o, x, y, z)),
+        anchor = pr(...anchor3),
+        from = pr(...sample3),
+        to = pr(...probe3),
+        dx = (to?.x || 0) - (from?.x || 0),
+        dy = (to?.y || 0) - (from?.y || 0),
+        length = Math.hypot(dx, dy),
+        hidden = !from?.ok || !to?.ok || length <= 0.5 / Z,
+        fl = Math.hypot(fallback.x, fallback.y) || 1,
+        dir = hidden ? { x: fallback.x / fl, y: fallback.y / fl } : { x: dx / length, y: dy / length },
+        gap = Math.max(40 / Z, 50 / Z);
+    return {
+        kind,
+        s: hidden && from?.ok ? { x: from.x + dir.x * gap, y: from.y + dir.y * gap, ok: true } : from,
+        anchor,
+        dir,
+        scale: hidden ? hiddenHandleScale() : length,
+        start,
+        min,
+        max,
+        label,
+        color,
+    };
+}
 function wallSignGizmo(o) {
     if (!o || o.type !== "asset" || o.asset !== "wallSign" || typeof wallSignParams !== "function") return null;
     const params = wallSignParams(o),
         half = params.thickness * 0.5,
+        // 板の輪郭を画面座標へ落とすための投影と、寸法ハンドルを作る関数。
         pr = (x, y, z) => scrW(pt(o, x, y, z)),
-        project = (kind, anchor3, sample3, probe3, start, min, max, label, fallback, color) => {
-            const anchor = pr(...anchor3),
-                from = pr(...sample3),
-                to = pr(...probe3),
-                dx = (to?.x || 0) - (from?.x || 0),
-                dy = (to?.y || 0) - (from?.y || 0),
-                length = Math.hypot(dx, dy),
-                hidden = !from?.ok || !to?.ok || length <= 0.5 / Z,
-                fl = Math.hypot(fallback.x, fallback.y) || 1,
-                dir = hidden ? { x: fallback.x / fl, y: fallback.y / fl } : { x: dx / length, y: dy / length },
-                gap = Math.max(40 / Z, 50 / Z);
-            return {
-                kind,
-                s: hidden && from?.ok ? { x: from.x + dir.x * gap, y: from.y + dir.y * gap, ok: true } : from,
-                anchor,
-                dir,
-                scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : length,
-                start,
-                min,
-                max,
-                label,
-                color,
-            };
-        },
+        handle = (...args) => screenHandle(o, ...args),
         // 金具は板の左側面（-x）から横へ伸びる。ハンドルは先端（外側）へ置く。
         bracketInner = [-params.width * 0.5, 0, 0],
         bracketOuter = [-params.width * 0.5 - params.bracketLength, 0, 0],
-        bracket = project(
+        bracket = handle(
             "wall-sign-bracket-length",
             bracketInner,
             bracketOuter,
@@ -2934,7 +3055,7 @@ function wallSignGizmo(o) {
         // ベベルは板の表裏の輪郭の角へ付くので、右前上の角にハンドルを置く。
         bevelCorner = [params.width * 0.5, -half, params.height * 0.5],
         bevelInset = params.beveled ? params.bevelOffset : 0,
-        bevel = project(
+        bevel = handle(
             "wall-sign-bevel",
             bevelCorner,
             [bevelCorner[0] - bevelInset, bevelCorner[1], bevelCorner[2] - bevelInset],
@@ -2954,13 +3075,270 @@ function wallSignGizmo(o) {
         backFrame: wallSignFacePoints(params).map(([x, z]) => pr(x, half, z)),
     };
 }
+// 窓グリッドは、窓1枚の幅と高さを画面上のハンドルで変えられる。
+// ハンドルは左上の窓の右辺・上辺へ置き、ドラッグ量をそのまま寸法へ足す。
+function windowGridGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "windowGrid" || typeof windowGridOptions !== "function") return null;
+    const w = Math.max(0.2, Math.abs(Number(o.ra) || 0.2) * 2),
+        h = Math.max(0.2, Math.abs(Number(o.h) || 0.2)),
+        t = Math.max(0.01, Math.abs(Number(o.rb) || 0.06) * 2),
+        opts = windowGridOptions(o, w, h),
+        rects = facadeWindowGridRects(w, h, opts),
+        y = -t * 0.5;
+    if (!rects.length) return null;
+    // 左上（最も上・最も左）の窓を基準にする。並びは行→列の順で作られている。
+    const rect = rects[0],
+        cx = (rect.x0 + rect.x1) * 0.5,
+        cz = (rect.z0 + rect.z1) * 0.5,
+        winW = rect.x1 - rect.x0,
+        winH = rect.z1 - rect.z0,
+        maxW = Math.max(0.05, w - Math.abs(opts.mx) * 2),
+        maxH = Math.max(0.05, h - opts.sill - opts.head),
+        widthHandle = screenHandle(
+            o,
+            "window-grid-width",
+            [cx, y, cz],
+            [rect.x1, y, cz],
+            [rect.x1 + 0.1, y, cz],
+            winW,
+            0.05,
+            maxW,
+            "窓の幅",
+            { x: 1, y: 0 },
+            "#5ec8ff",
+        ),
+        heightHandle = screenHandle(
+            o,
+            "window-grid-height",
+            [cx, y, cz],
+            [cx, y, rect.z1],
+            [cx, y, rect.z1 + 0.1],
+            winH,
+            0.05,
+            maxH,
+            "窓の高さ",
+            { x: 0, y: -1 },
+            "#5ec8ff",
+        );
+    return { o, C3: L2W(o, 0, y, cz), handles: { width: widthHandle, height: heightHandle } };
+}
+// 人物の関節回転ギズモ。腰・首・左右の股関節・左右の膝に、
+// 画面で回せる丸ハンドルを1つずつ置く。
+// 角度は asset.js の personPose と同じ式で計算するので、
+// 線画・面メッシュとハンドルの位置が食い違わない。
+// 関節ハンドルの 1度あたりの画面ピクセル（向きが画面上で動かない場合）。
+// 6px/度 なので、200px ドラッグすると約33度まわる。
+const PERSON_JOINT_PX_PER_DEG = 6;
+// 画面上でほぼ同じ点に重なったハンドルを、輪状に少しずつずらす。
+// 真上ビューの腰と首、股と膝のように視線方向で前後する関節は、
+// 正投影すると1点に重なって掴み分けできなくなる。ずらした位置から
+// 支点へ破線を引くので、どの関節のハンドルかは見た目で分かる。
+function spreadOverlappingHandles(handles, minGap) {
+    if (!Array.isArray(handles) || handles.length < 2) return handles;
+    const gap = Math.max(14 / Z, Number(minGap) || 0 || 26 / Z),
+        placed = [];
+    for (const h of handles) {
+        if (!h || !h.s || !h.s.ok || !Number.isFinite(h.s.x) || !Number.isFinite(h.s.y)) {
+            placed.push(null);
+            continue;
+        }
+        let x = h.s.x,
+            y = h.s.y,
+            k = 0;
+        // 重なりが解けるまで、外側へ広がる渦状の候補点を順に試す。
+        while (k < 32 && placed.some((q) => q && Math.hypot(q.x - x, q.y - y) < gap)) {
+            k++;
+            const ring = Math.ceil(k / 8),
+                ang = -Math.PI / 2 + ((k - 1) % 8) * (Math.PI / 4);
+            x = h.s.x + Math.cos(ang) * gap * ring;
+            y = h.s.y + Math.sin(ang) * gap * ring;
+        }
+        h.s = { x, y, ok: true, spread: k > 0 };
+        placed.push(h.s);
+    }
+    return handles;
+}
+function personJointHandles(o) {
+    if (!o || o.type !== "asset" || o.asset !== "person" || typeof personPose !== "function") return [];
+    const eps = 4,
+        rad = (deg) => -Number(deg || 0) * DG,
+        rotate = (py, pz, oy, oz, deg) => {
+            const a = rad(deg),
+                cs = Math.cos(a),
+                sn = Math.sin(a),
+                dy = py - oy,
+                dz = pz - oz;
+            return [oy + dy * cs - dz * sn, oz + dy * sn + dz * cs];
+        },
+        base = personPose(o),
+        pr = (x, y, z) => scrW(L2W(o, x, y, z)),
+        // 1つの関節ハンドル。pivot=支点、probe=いまの位置、alt=角度を少し増やした位置。
+        make = (id, key, label, color, pivot3, probe3, alt3, start, min, max) => {
+            const anchor = pr(...pivot3),
+                from = pr(...probe3),
+                to = pr(...alt3),
+                dx = (to?.x ?? 0) - (from?.x ?? 0),
+                dy = (to?.y ?? 0) - (from?.y ?? 0),
+                length = Math.hypot(dx, dy),
+                visible = !!from?.ok && !!to?.ok && length > 0.75,
+                // 画面で回転が動かない向き（真横から見た膝の曲げなど）では、
+                // 支点から見た外向きの直交方向へ逃がして固定ハンドルにする。
+                ax = (from?.x ?? 0) - (anchor?.x ?? 0),
+                ay = (from?.y ?? 0) - (anchor?.y ?? 0),
+                an = Math.hypot(ax, ay) || 1,
+                fallback = { x: -ay / an, y: ax / an },
+                dir = visible ? { x: dx / length, y: dy / length } : fallback,
+                gap = Math.max(34 / Z, 42 / Z),
+                s = visible
+                    ? from
+                    : from?.ok
+                      ? { x: from.x + fallback.x * gap, y: from.y + fallback.y * gap, ok: true }
+                      : from;
+            return {
+                kind: `person-joint-${id}`,
+                key,
+                label,
+                color,
+                s,
+                anchor,
+                dir,
+                // 1度あたりの画面ピクセル。ドラッグ量÷これが角度(度)になる。
+                // 画面上で回転が動く向き（visible）は、実際の移動量から求めた
+                // 比率を使う。動かない向き（前から見た膝など）は比率が取れないので、
+                // どのビューでも同じ操作感になる固定値を使う。
+                // 以前はここに orthScale()×4（前ビューで約533px/度）を入れていたため、
+                // 200px ドラッグしても 0.4 度しか動かず「編集できない」状態だった。
+                scale: visible ? clamp(length / eps, 3, 14) : PERSON_JOINT_PX_PER_DEG,
+                start,
+                min,
+                max,
+            };
+        },
+        num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d),
+        waist = clamp(num(o.personWaist, 0), -60, 60),
+        neck = clamp(num(o.personNeck, 0), -40, 40),
+        hips = [clamp(num(o.personHipL, 0), -80, 80), clamp(num(o.personHipR, 0), -80, 80)],
+        knees = [clamp(num(o.personKneeL, 0), 0, 120), clamp(num(o.personKneeR, 0), 0, 120)],
+        [waistY, waistZ] = rotate(base.bodyY, base.torso1, 0, base.torso0, waist),
+        [waistYa, waistZa] = rotate(base.bodyY, base.torso1, 0, base.torso0, waist + eps),
+        // 「角度を少しだけ増やした位置」は、骨格をもう一度計算せずに
+        // 支点まわりの回転だけで求める（毎フレームの再計算を1回に抑える）。
+        neckAlt = rotate(base.headC1.y, base.headC1.z, base.neckBase.y, base.neckBase.z, eps),
+        hipAlt = [0, 1].map((i) =>
+            rotate(base.legs[i].knee.y, base.legs[i].knee.z, base.legs[i].hip.y, base.legs[i].hip.z, eps),
+        ),
+        kneeAlt = [0, 1].map((i) =>
+            rotate(base.legs[i].foot.y, base.legs[i].foot.z, base.legs[i].knee.y, base.legs[i].knee.z, -eps),
+        );
+    return spreadOverlappingHandles([
+        make("waist", "personWaist", "腰", "#ff8a3d", [0, 0, base.torso0], [0, waistY, waistZ], [0, waistYa, waistZa], waist, -60, 60),
+        make(
+            "neck",
+            "personNeck",
+            "首",
+            "#5ec8ff",
+            [0, base.neckBase.y, base.neckBase.z],
+            [0, base.headC1.y, base.headC1.z],
+            [0, neckAlt[0], neckAlt[1]],
+            neck,
+            -40,
+            40,
+        ),
+        ...[0, 1].map((i) =>
+            make(
+                `hip-${i}`,
+                i ? "personHipR" : "personHipL",
+                i ? "右股" : "左股",
+                "#7bd389",
+                [base.legs[i].hip.x, base.legs[i].hip.y, base.legs[i].hip.z],
+                [base.legs[i].knee.x, base.legs[i].knee.y, base.legs[i].knee.z],
+                [base.legs[i].knee.x, hipAlt[i][0], hipAlt[i][1]],
+                hips[i],
+                -80,
+                80,
+            ),
+        ),
+        ...[0, 1].map((i) =>
+            make(
+                `knee-${i}`,
+                i ? "personKneeR" : "personKneeL",
+                i ? "右膝" : "左膝",
+                "#c792ea",
+                [base.legs[i].knee.x, base.legs[i].knee.y, base.legs[i].knee.z],
+                [base.legs[i].foot.x, base.legs[i].foot.y, base.legs[i].foot.z],
+                [base.legs[i].foot.x, kneeAlt[i][0], kneeAlt[i][1]],
+                knees[i],
+                0,
+                120,
+            ),
+        ),
+    ]);
+}
+// 人物ギズモは関節ハンドルの集まり。C3は腰の高さにして、
+// 移動用の軸矢印・回転リングは通常のギズモ側で描く。
+function personGizmo(o) {
+    const handles = personJointHandles(o);
+    if (!handles.length) return null;
+    return { o, C3: L2W(o, 0, 0, 0), handles: Object.fromEntries(handles.map((h) => [h.kind, h])) };
+}
+// 画面上で向きがつぶれたハンドルを、必ず動かせる向きへ直す。
+// 真上から見たときの高さ方向のように「視線と平行な軸」は画面上の長さが0になり、
+// dir が (0,0)・scale が 0 になって、ドラッグしても値が変わらない状態になる。
+// 正投影（前・横・上）ではどの軸も同じ px/単位なので、画面の上向きと
+// orthScale() を代わりに使えば、3Dビューと同じ感覚で増減できる。
+function fixScreenHandleDir(h) {
+    if (!h || typeof h !== "object") return;
+    const dir = h.dir;
+    if (!dir || !h.s || !h.s.ok) return;
+    const len = Math.hypot(Number(dir.x) || 0, Number(dir.y) || 0);
+    if (len > 0.15) return;
+    const sc = Number(h.scale);
+    h.dir = { x: 0, y: -1 }; // 画面の上向き＝値を増やす向き
+    h.scale = orthView
+        ? Math.max(1, orthScale())
+        : Number.isFinite(sc) && sc > 1e-6 && sc < 1e6
+          ? Math.max(6, sc)
+          : 24;
+    h.hiddenDir = true; // 描画側で「つぶれていた」ことを知りたいとき用
+}
+// sg の中にあるハンドル（handle / handles / pathHandles / opening.handles …）を
+// まとめて走査する。今後ハンドルを増やしてもここを直せば済むようにしている。
+function normalizeScreenHandles(sg) {
+    if (!sg || typeof sg !== "object") return sg;
+    const seen = new Set(),
+        found = [],
+        walk = (v, depth) => {
+            if (!v || typeof v !== "object" || depth > 3 || seen.has(v)) return;
+            seen.add(v);
+            if (v.s && v.dir) {
+                fixScreenHandleDir(v);
+                found.push(v);
+            }
+            if (Array.isArray(v)) {
+                v.forEach((q) => walk(q, depth + 1));
+                return;
+            }
+            Object.keys(v).forEach((k) => {
+                if (k === "o" || k === "bounds") return; // 図形データ自身は辿らない
+                walk(v[k], depth + 1);
+            });
+        };
+    walk(sg, 0);
+    // 視線と平行な向きを持つハンドルどうしは、正投影すると画面上の同じ点に重なる
+    // （真上ビューの腰と首、前ビューの看板の上下など）。重なったままだと
+    // 手前の1つしか掴めないので、掴める間隔まで少しずつずらす。
+    spreadOverlappingHandles(found, 26 / Z);
+    return sg;
+}
 function specialGizmo(o) {
-    return o && o.type === "asset" && o.asset === "wallSideSign" && o.attachment?.wallSideSign
+    const sg = o && o.type === "asset" && o.asset === "wallSideSign" && o.attachment?.wallSideSign
         ? wallSideSignSpecialGizmo(o)
         : o && o.type === "asset" && o.asset === "cornerCutBox"
           ? cornerCutGizmo(o)
           : o && o.type === "asset" && o.asset === "wallSign"
           ? wallSignGizmo(o)
+          : o && o.type === "asset" && o.asset === "windowGrid"
+          ? windowGridGizmo(o)
           : o && o.type === "asset" && o.asset === "beveledBox"
           ? beveledBoxGizmo(o)
           : o && o.type === "asset" && o.asset === "recessedStackedBuilding"
@@ -2979,7 +3357,10 @@ function specialGizmo(o) {
                         ? coneGizmo(o)
                         : o && o.type === "asset" && o.asset === "sphere"
                           ? sphereGizmo(o)
-                          : null;
+                          : o && o.type === "asset" && o.asset === "person"
+                            ? personGizmo(o)
+                            : null;
+    return normalizeScreenHandles(sg);
 }
 function drawSpecialGizmo(c, o) {
     const sg = specialGizmo(o);
@@ -3003,99 +3384,96 @@ function drawSpecialGizmo(c, o) {
         c.fill();
         c.stroke();
     };
-    if (sg.o.asset === "wallSideSign") {
-        const drawHandle = (h, color, label, diamond = false) => {
-            if (!h?.s?.ok || !h?.anchor?.ok) return;
-            c.setLineDash([5 / Z, 4 / Z]);
+    // アセット専用ハンドルの共通表示：支点から破線 → ひし形（or 四角）→ 数値ラベル。
+    // 以前は同じ描画をアセットごとに書き写していた（見た目の微差も発生していた）。
+    const valueHandle = (h, opt = {}) => {
+        if (!h || !h.s || !h.s.ok) return;
+        const color = opt.color || h.color || "#ff9f68",
+            label = opt.label !== undefined ? opt.label : h.label || "",
+            dash = opt.dash || [5, 4],
+            width = opt.width || 1.5,
+            font = opt.font || 12,
+            textColor = opt.textColor || "#fff0b0",
+            gap = font > 11 ? 9 : 8;
+        if (h.anchor && h.anchor.ok) {
+            c.setLineDash([dash[0] / Z, dash[1] / Z]);
             c.strokeStyle = color;
-            c.lineWidth = 1.5 / Z;
+            c.lineWidth = width / Z;
             c.beginPath();
             c.moveTo(h.anchor.x, h.anchor.y);
             c.lineTo(h.s.x, h.s.y);
             c.stroke();
             c.setLineDash([]);
-            sq(h.s, color, diamond);
-            c.fillStyle = color === "#ff9f68" ? "#ffd0a8" : "#fff0a8";
-            c.font = `bold ${12 / Z}px system-ui`;
-            c.fillText(label, h.s.x + 9 / Z, h.s.y - 8 / Z);
-        };
-        drawHandle(sg.bracketHandle, "#ffd34d", `金具 ${Number(sg.bracketHandle?.start || 0).toFixed(2)}m`, false);
-        drawHandle(sg.handle, "#ff9f68", `ベベル ${Number(sg.handle?.start || 0).toFixed(2)}`, true);
-    } else if (sg.o.asset === "cornerCutBox") {
-        const h = sg.handle;
-        if (h?.s?.ok && h?.anchor?.ok) {
-            c.setLineDash([5 / Z, 4 / Z]);
-            c.strokeStyle = "rgba(226,75,75,.95)";
-            c.lineWidth = 1.5 / Z;
-            c.beginPath();
-            c.moveTo(h.anchor.x, h.anchor.y);
-            c.lineTo(h.s.x, h.s.y);
-            c.stroke();
-            c.setLineDash([]);
-            sq(h.s, "#e24b4b", true);
-            c.fillStyle = "#ffd0d0";
-            c.font = `bold ${12 / Z}px system-ui`;
-            c.fillText(`隅切り ${Number(h.start || 0).toFixed(2)}m`, h.s.x + 9 / Z, h.s.y - 8 / Z);
         }
-        const opening = sg.opening;
-        if (opening) {
-            Object.values(opening.handles).forEach((handle) => {
-                if (!handle?.s?.ok || !handle?.anchor?.ok) return;
+        sq(h.s, color, opt.diamond !== false);
+        if (!label) return;
+        c.fillStyle = textColor;
+        c.font = `bold ${font / Z}px system-ui`;
+        c.fillText(label, h.s.x + gap / Z, h.s.y - (gap - 1) / Z);
+    };
+    if (sg.o.asset === "wallSideSign") {
+        valueHandle(sg.bracketHandle, { color: "#ffd34d", label: `金具 ${Number(sg.bracketHandle?.start || 0).toFixed(2)}m`, diamond: false, textColor: "#fff0a8" });
+        valueHandle(sg.handle, { color: "#ff9f68", label: `ベベル ${Number(sg.handle?.start || 0).toFixed(2)}`, textColor: "#ffd0a8" });
+    } else if (sg.o.asset === "cornerCutBox") {
+        valueHandle(sg.handle, {
+            color: "#e24b4b",
+            label: `隅切り ${Number(sg.handle?.start || 0).toFixed(2)}m`,
+            textColor: "#ffd0d0",
+        });
+        Object.values(sg.opening?.handles || {}).forEach((handle) =>
+            valueHandle(handle, {
+                dash: [4, 3],
+                width: 1.4,
+                font: 11,
+                label: `${handle.label} ${Number(handle.start || 0).toFixed(2)}m`,
+            }),
+        );
+    } else if (sg.o.asset === "wallSign" || sg.o.asset === "windowGrid") {
+        // 壁付け看板（金具の長さ・ベベル幅）と窓グリッド（窓の幅・高さ）は、
+        // 同じ見た目（破線＋菱形）のハンドルをまとめて描く。
+        Object.values(sg.handles || {}).forEach((handle) =>
+            valueHandle(handle, { label: `${handle.label} ${Number(handle.start || 0).toFixed(2)}m` }),
+        );
+    } else if (sg.o.asset === "person") {
+        // 関節ハンドル：支点からハンドルへ破線を引き、丸いノブと角度を描く。
+        Object.values(sg.handles || {}).forEach((handle) => {
+            if (!handle?.s?.ok) return;
+            if (handle.anchor?.ok) {
                 c.setLineDash([4 / Z, 3 / Z]);
                 c.strokeStyle = handle.color;
-                c.lineWidth = 1.4 / Z;
+                c.lineWidth = 1.3 / Z;
                 c.beginPath();
                 c.moveTo(handle.anchor.x, handle.anchor.y);
                 c.lineTo(handle.s.x, handle.s.y);
                 c.stroke();
                 c.setLineDash([]);
-                sq(handle.s, handle.color, true);
-                c.fillStyle = "#fff0b0";
-                c.font = `bold ${11 / Z}px system-ui`;
-                c.fillText(
-                    `${handle.label} ${Number(handle.start || 0).toFixed(2)}m`,
-                    handle.s.x + 8 / Z,
-                    handle.s.y - 7 / Z,
-                );
-            });
-        }
-    } else if (sg.o.asset === "wallSign") {
-        // 金具の長さとベベル幅の2本を、同じ見た目（破線＋菱形）で描く。
-        Object.values(sg.handles || {}).forEach((handle) => {
-            if (!handle?.s?.ok || !handle?.anchor?.ok) return;
-            c.setLineDash([5 / Z, 4 / Z]);
-            c.strokeStyle = handle.color;
+            }
+            c.fillStyle = handle.color;
+            c.strokeStyle = "#102027";
             c.lineWidth = 1.5 / Z;
             c.beginPath();
-            c.moveTo(handle.anchor.x, handle.anchor.y);
-            c.lineTo(handle.s.x, handle.s.y);
+            c.arc(handle.s.x, handle.s.y, 6.5 / Z, 0, Math.PI * 2);
+            c.fill();
             c.stroke();
-            c.setLineDash([]);
-            sq(handle.s, handle.color, true);
+            // 回転方向が分かるよう、ノブから接線方向へ小さな矢じりを添える。
+            const d = handle.dir || { x: 1, y: 0 },
+                ax = handle.s.x + d.x * 11 / Z,
+                ay = handle.s.y + d.y * 11 / Z;
+            c.beginPath();
+            c.moveTo(ax + d.x * 5 / Z - d.y * 3.5 / Z, ay + d.y * 5 / Z + d.x * 3.5 / Z);
+            c.lineTo(ax, ay);
+            c.lineTo(ax + d.x * 5 / Z + d.y * 3.5 / Z, ay + d.y * 5 / Z - d.x * 3.5 / Z);
+            c.stroke();
             c.fillStyle = "#fff0b0";
-            c.font = `bold ${12 / Z}px system-ui`;
-            c.fillText(
-                `${handle.label} ${Number(handle.start || 0).toFixed(2)}m`,
-                handle.s.x + 8 / Z,
-                handle.s.y - 7 / Z,
-            );
+            c.font = `bold ${11 / Z}px system-ui`;
+            c.fillText(`${handle.label} ${Math.round(Number(handle.start) || 0)}°`, handle.s.x + 9 / Z, handle.s.y - 8 / Z);
         });
     } else if (sg.o.asset === "beveledBox") {
-        const h = sg.handle;
-        if (h?.s?.ok && h?.anchor?.ok) {
-            c.setLineDash([5 / Z, 4 / Z]);
-            c.strokeStyle = "rgba(255,159,104,.95)";
-            c.lineWidth = 1.5 / Z;
-            c.beginPath();
-            c.moveTo(h.anchor.x, h.anchor.y);
-            c.lineTo(h.s.x, h.s.y);
-            c.stroke();
-            c.setLineDash([]);
-            sq(h.s, "#ff9f68", true);
-            c.fillStyle = "#ffd0a8";
-            c.font = `bold ${12 / Z}px system-ui`;
-            c.fillText(`ベベル ${Number(h.start || 0).toFixed(2)}`, h.s.x + 9 / Z, h.s.y - 8 / Z);
-        }
+        valueHandle(sg.handle, {
+            color: "#ff9f68",
+            label: `ベベル ${Number(sg.handle?.start || 0).toFixed(2)}`,
+            textColor: "#ffd0a8",
+        });
     } else if (sg.o.asset === "recessedStackedBuilding") {
         const drawFrame = (frame, color) => {
             if (!frame?.every((q) => q && q.ok)) return;
@@ -3108,22 +3486,18 @@ function drawSpecialGizmo(c, o) {
         };
         drawFrame(sg.frame, "#8aaeb5");
         drawFrame(sg.backFrame, "#42616b");
-        Object.values(sg.handles || {}).forEach((handle) => {
-            if (!handle?.s?.ok || !handle?.anchor?.ok) return;
-            c.setLineDash([4 / Z, 3 / Z]);
-            c.strokeStyle = handle.color;
-            c.lineWidth = 1.4 / Z;
-            c.beginPath();
-            c.moveTo(handle.anchor.x, handle.anchor.y);
-            c.lineTo(handle.s.x, handle.s.y);
-            c.stroke();
-            c.setLineDash([]);
-            sq(handle.s, handle.color, true);
-            c.fillStyle = "#fff0b0";
-            c.font = `bold ${11 / Z}px system-ui`;
-            const valueLabel = handle.kind === "recessed-window-count" ? `${Math.round(handle.start)}枚` : `${Number(handle.start || 0).toFixed(2)}m`;
-            c.fillText(`${handle.label} ${valueLabel}`, handle.s.x + 8 / Z, handle.s.y - 7 / Z);
-        });
+        Object.values(sg.handles || {}).forEach((handle) =>
+            valueHandle(handle, {
+                dash: [4, 3],
+                width: 1.4,
+                font: 11,
+                label: `${handle.label} ${
+                    handle.kind === "recessed-window-count"
+                        ? `${Math.round(handle.start)}枚`
+                        : `${Number(handle.start || 0).toFixed(2)}m`
+                }`,
+            }),
+        );
     } else if (sg.o.asset === "pathPipe") {
         const h = sg.radiusHandle;
         c.setLineDash([5 / Z, 4 / Z]);
@@ -3154,19 +3528,7 @@ function drawSpecialGizmo(c, o) {
             c.fill();
             c.stroke();
         });
-        if (h?.s?.ok && h?.anchor?.ok) {
-            c.setLineDash([4 / Z, 3 / Z]);
-            c.strokeStyle = "#ff9f68";
-            c.beginPath();
-            c.moveTo(h.anchor.x, h.anchor.y);
-            c.lineTo(h.s.x, h.s.y);
-            c.stroke();
-            c.setLineDash([]);
-            sq(h.s, "#ff9f68", true);
-            c.fillStyle = "#ffd0a8";
-            c.font = `bold ${12 / Z}px system-ui`;
-            c.fillText("半径", h.s.x + 9 / Z, h.s.y - 8 / Z);
-        }
+        valueHandle(h, { color: "#ff9f68", label: "半径", dash: [4, 3], textColor: "#ffd0a8" });
     } else if (isStackedBuildingAsset(sg.o)) {
         const h = sg.handles,
             usable = Object.values(h).filter((handle) => Math.hypot(handle.dir.x, handle.dir.y) > 0.15);
@@ -3429,9 +3791,11 @@ function compoundGizmo(o) {
     const g = { o, C3, sC, axes: [], faces: [], ring: [], compound: true, bounds: b },
         nC = Math.hypot(...V.add(C3, CO()));
     [
+        // 上下方向を Z（青）、手前・奥を Y（緑）として表示する。
+        // 内部の座標計算（ワールドY＝高さ）は変えず、名前と色だけを揃えている。
         [1, 0, 0, "#e8743d", "X"],
-        [0, 1, 0, "#4a7be8", "Y"],
-        [0, 0, 1, "#2fb5a5", "Z"],
+        [0, 1, 0, "#4a7be8", "Z"],
+        [0, 0, 1, "#3fa45b", "Y"],
     ].forEach(([x, y, z, col, nm]) => {
         const a = [x, y, z],
             eps = 0.01 * Math.max(0.1, nC),
@@ -3479,7 +3843,7 @@ function wallSideSignBevelHandle(o) {
         length = Math.hypot(dx, dy),
         projected = !!raw?.ok && !!probe?.ok && Number.isFinite(length),
         hidden = projected && length <= 0.5 / Z,
-        fallback = orthView === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 },
+        fallback = hiddenHandleDir(),
         visibleDir = hidden ? fallback : { x: dx / (length || 1), y: dy / (length || 1) },
         displayGap = Math.max(48 / Z, 56 / Z),
         displayS = !raw?.ok
@@ -3497,7 +3861,7 @@ function wallSideSignBevelHandle(o) {
         anchor,
         dir: visibleDir,
         scale: hidden
-            ? Math.max(24, orthView ? orthScale() : 24)
+            ? hiddenHandleScale()
             : length / Math.max(0.0001, Math.min(step, max - start || step)),
         start,
         min: 0,
@@ -3526,7 +3890,7 @@ function wallSideSignBracketHandle(o) {
         dy = (probe?.y || 0) - (raw?.y || 0),
         px = Math.hypot(dx, dy),
         hidden = !raw?.ok || !probe?.ok || px <= 0.5 / Z,
-        fallback = orthView === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 },
+        fallback = hiddenHandleDir(),
         dir = hidden ? fallback : { x: dx / px, y: dy / px },
         display = raw?.ok
             ? hidden
@@ -3542,7 +3906,7 @@ function wallSideSignBracketHandle(o) {
         s: display,
         anchor,
         dir,
-        scale: hidden ? Math.max(24, orthView ? orthScale() : 24) : px / step,
+        scale: hidden ? hiddenHandleScale() : px / step,
         start: lengthValue,
         min: 0.05,
         max: 5,
@@ -3569,8 +3933,8 @@ function wallSideSignGizmo(o) {
         },
         nC = Math.hypot(...V.add(C3, CO())),
         defs = [
-            [basis?.u || [0, 1, 0], "#4a7be8", "Y"],
-            [basis?.n || [0, 0, 1], "#2fb5a5", "前後"],
+            [basis?.u || [0, 1, 0], "#4a7be8", "Z"],
+            [basis?.n || [0, 0, 1], "#3fa45b", "Y"],
         ],
         along = (base, axis, amount) => base.map((value, i) => value + axis[i] * amount),
         neg = (axis) => axis.map((value) => -value),
@@ -3647,6 +4011,13 @@ function gizmo() {
                     o.asset === "beveledBox" ||
                     o.asset === "cornerCutBox" ||
                     o.asset === "recessedStackedBuilding" ||
+                    o.asset === "wallSign" ||
+                    o.asset === "person" ||
+                    o.asset === "gableRoof" ||
+                    o.asset === "shedRoof" ||
+                    o.asset === "ramp" ||
+                    o.asset === "windowGrid" ||
+                    o.asset === "crosswalk" ||
                     isStackedBuildingAsset(o))),
         [z0, z1] = outerZRange(o),
         zc = solid ? (z0 + z1) / 2 : 0;
@@ -3656,9 +4027,11 @@ function gizmo() {
     const g = { o, C3, sC, axes: [], faces: [], ring: [] },
         nC = Math.hypot(...V.add(C3, CO()));
     [
+        // 上下方向を Z（青）、手前・奥を Y（緑）として表示する。
+        // 内部の座標計算（ワールドY＝高さ）は変えず、名前と色だけを揃えている。
         [1, 0, 0, "#e8743d", "X"],
-        [0, 1, 0, "#4a7be8", "Y"],
-        [0, 0, 1, "#2fb5a5", "Z"],
+        [0, 1, 0, "#4a7be8", "Z"],
+        [0, 0, 1, "#3fa45b", "Y"],
     ].forEach(([x, y, z, col, nm]) => {
         // 画面で約90pxになる長さの矢印
         const a = [x, y, z],
@@ -3703,7 +4076,25 @@ function gizmo() {
         const t = (i / 72) * 2 * Math.PI;
         g.ring.push(scrW(L2W(o, R * Math.cos(t), R * Math.sin(t), solid ? z0 : 0)));
     }
+    spreadFlatFaces(g.faces);
     return g;
+}
+// 高さ0の平らな形状（rect・circle・初期状態のbeveledBoxなど）では、
+// 上面と底面の白い四角が同じ画面上の点に重なり、さらに中央の移動ハンドルとも
+// 重なるため、押しても「移動」しか反応しなかった。
+// 上下の面がほぼ同じ点にあるときは、上下へ逃がして個別に掴めるようにする。
+// s（画面座標）だけをずらし、P3・法線・ドラッグ量の計算には触れない。
+function spreadFlatFaces(faces) {
+    if (!faces || faces.length < 2) return;
+    const top = faces.find((f) => f.id === "top"),
+        base = faces.find((f) => f.id === "base");
+    if (!top?.s?.ok || !base?.s?.ok) return;
+    const gap = 14 / Math.max(0.05, Z);
+    if (Math.hypot(top.s.x - base.s.x, top.s.y - base.s.y) >= gap) return;
+    const cx = (top.s.x + base.s.x) / 2,
+        cy = (top.s.y + base.s.y) / 2;
+    top.s = { x: cx, y: cy - gap, ok: true, depth: top.s.depth };
+    base.s = { x: cx, y: cy + gap, ok: true, depth: base.s.depth };
 }
 function drawGizmo(c) {
     const g = gizmo();
@@ -3833,10 +4224,51 @@ function insidePoly2D(p, poly) {
 // タッチした位置にあるハンドルを調べる（アセット専用→面→軸の矢印→回転の輪）
 // 画面上のクリックを、特殊アセット用→面→軸→回転リングの順で判定する。
 // 看板・階層建物・パスパイプなどはここで専用ハンドルへ分岐する。
+// 画面上の点 p に最も近いハンドルを返す（許容半径 R 以内、無ければ null）。
+// 「丸が重なったら押した位置に近い方を選ぶ」という同じ規則を、
+// アセットごとに書き写していたので1か所へまとめた。
+function nearestHandleOf(handles, p, R) {
+    let best = null,
+        bestD = R;
+    for (const h of handles || []) {
+        if (!h || !h.s || !h.s.ok) continue;
+        const d = Math.hypot(h.s.x - p.x, h.s.y - p.y);
+        if (d < bestD) {
+            bestD = d;
+            best = { handle: h, d };
+        }
+    }
+    return best;
+}
 function hitGizmo(p) {
     const active = sel && obOf(sel),
         special = active && specialGizmo(active),
         R = 20 / Z;
+    // 白い面ハンドル（通常ギズモ）のうち押した点に最も近いもの。
+    // アセット専用ハンドルと重なったときは「押した位置に近い方」を採用したいので、
+    // 専用ハンドルだけを先に返さず、両方の距離を比べる。
+    let faceCache;
+    const nearestFaceHit = () => {
+        if (faceCache !== undefined) return faceCache;
+        const g0 = gizmo();
+        faceCache =
+            (g0
+                ? (g0.faces || [])
+                      .filter((f) => f.s?.ok)
+                      .map((f) => ({ f, g: g0, d: Math.hypot(f.s.x - p.x, f.s.y - p.y) }))
+                      .filter((q) => q.d < R)
+                      .sort((a, b) => a.d - b.d)[0]
+                : null) || null;
+        return faceCache;
+    };
+    // 専用ハンドルと面ハンドルの勝負。同じくらいなら専用ハンドルを優先する
+    // （専用ハンドルは手前に描いていて、狭い範囲を指しているため）。
+    const handleOrFace = (nearest, mk) => {
+        if (!nearest) return null;
+        const face = nearestFaceHit();
+        if (!face || nearest.d <= face.d + 1.5 / Z) return mk(nearest);
+        return { t: "face", f: face.f, g: face.g };
+    };
     if (special) {
         if (active.asset === "wallSideSign") {
             const handles = [
@@ -3874,8 +4306,12 @@ function hitGizmo(p) {
                     .filter((q) => q.d < R)
                     .sort((a, b) => a.d - b.d);
                 if (openingHits.length) {
-                    const hit = openingHits[0];
-                    return { t: hit.t, sign: hit.handle, g: { o: active, C3: opening.C3 } };
+                    // 開口ハンドルと外形の白い面ハンドルが重なるときは近い方へ渡す。
+                    const hit = openingHits[0],
+                        face = nearestFaceHit();
+                    if (!face || hit.d <= face.d + 1.5 / Z)
+                        return { t: hit.t, sign: hit.handle, g: { o: active, C3: opening.C3 } };
+                    return { t: "face", f: face.f, g: face.g };
                 }
                 if (opening.panelFrame?.every((q) => q?.ok) && insidePoly2D(p, opening.panelFrame))
                     return {
@@ -3884,20 +4320,19 @@ function hitGizmo(p) {
                         g: { o: active, C3: opening.C3 },
                     };
             }
-            const h = special.handle;
-            if (h?.s?.ok && Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
-                return { t: "cornerCut-offset", sign: h, g: { o: active, C3: special.C3 } };
+            const h = special.handle,
+                cut = h?.s?.ok ? nearestHandleOf([h], p, R) : null,
+                cutHit = handleOrFace(cut, (q) => ({ t: "cornerCut-offset", sign: q.handle, g: { o: active, C3: special.C3 } }));
+            if (cutHit) return cutHit;
         }
         if (active.asset === "recessedStackedBuilding") {
-            const hits = Object.entries(special.handles || {})
-                .filter(([, handle]) => handle?.s?.ok)
-                .map(([, handle]) => ({ handle, d: Math.hypot(handle.s.x - p.x, handle.s.y - p.y) }))
-                .filter((q) => q.d < R)
-                .sort((a, b) => a.d - b.d);
-            if (hits.length) {
-                const hit = hits[0].handle;
-                return { t: hit.kind, sign: hit, g: { o: active, C3: special.C3 } };
-            }
+            const nearest = nearestHandleOf(Object.values(special.handles || {}), p, R),
+                depthHit = handleOrFace(nearest, (q) => ({
+                    t: q.handle.kind,
+                    sign: q.handle,
+                    g: { o: active, C3: special.C3 },
+                }));
+            if (depthHit) return depthHit;
             if (special.frame?.every((q) => q?.ok) && insidePoly2D(p, special.frame))
                 return {
                     t: "recessed-window-depth",
@@ -3905,40 +4340,46 @@ function hitGizmo(p) {
                     g: { o: active, C3: special.C3 },
                 };
         }
-        if (active.asset === "wallSign") {
-            const hits = Object.entries(special.handles || {})
-                .filter(([, handle]) => handle?.s?.ok)
-                .map(([key, handle]) => ({ key, handle, d: Math.hypot(handle.s.x - p.x, handle.s.y - p.y) }))
-                .filter((q) => q.d < R)
-                .sort((a, b) => a.d - b.d);
-            if (hits.length) {
-                const hit = hits[0].handle;
-                return { t: hit.kind, sign: hit, g: { o: active, C3: special.C3 } };
-            }
+        if (active.asset === "wallSign" || active.asset === "windowGrid") {
+            const nearest = nearestHandleOf(Object.values(special.handles || {}), p, R),
+                hit = handleOrFace(nearest, (q) => ({
+                    t: q.handle.kind,
+                    sign: q.handle,
+                    g: { o: active, C3: special.C3 },
+                }));
+            if (hit) return hit;
+        }
+        if (active.asset === "person") {
+            // 小さい図形なので、関節の丸が重なるときは押した位置に近い方を選ぶ。
+            // 白い面ハンドル（胴の正面など）と重なる場合も同じ規則で選ぶ。
+            const nearest = nearestHandleOf(Object.values(special.handles || {}), p, R),
+                hit = handleOrFace(nearest, (q) => ({
+                    t: q.handle.kind,
+                    sign: q.handle,
+                    g: { o: active, C3: special.C3 },
+                }));
+            if (hit) return hit;
         }
         if (active.asset === "beveledBox") {
-            const h = special.handle;
-            if (h?.s?.ok && Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
-                return { t: "beveled-offset", sign: h, g: { o: active, C3: special.C3 } };
+            const h = special.handle,
+                bevel = h?.s?.ok ? nearestHandleOf([h], p, R) : null,
+                bevelHit = handleOrFace(bevel, (q) => ({
+                    t: "beveled-offset",
+                    sign: q.handle,
+                    g: { o: active, C3: special.C3 },
+                }));
+            if (bevelHit) return bevelHit;
         }
         if (active.asset === "pathPipe") {
             // 扇状に分けた隣接点のハンドルが許容半径へ少し重なることがある。
             // 配列の先頭ではなく、押した位置に最も近いハンドルを返して
             // 奥側の制御点を手前の点へ誤配分しない。
-            const pathHits = special.pathHandles
-                .filter((h) => h.s?.ok)
-                .map((h) => ({ h, d: Math.hypot(h.s.x - p.x, h.s.y - p.y), t: h.kind }))
-                .filter((q) => q.d < R);
-            const radius = special.radiusHandle;
-            if (radius?.s?.ok) {
-                const d = Math.hypot(radius.s.x - p.x, radius.s.y - p.y);
-                if (d < R) pathHits.push({ h: radius, d, t: "path-radius" });
-            }
-            pathHits.sort((a, b) => a.d - b.d);
-            if (pathHits.length) {
-                const q = pathHits[0];
-                return { t: q.t, sign: q.h, g: { o: active, C3: special.C3 } };
-            }
+            const nearest = nearestHandleOf(
+                [...(special.pathHandles || []), special.radiusHandle].filter(Boolean),
+                p,
+                R,
+            );
+            if (nearest) return { t: nearest.handle.kind, sign: nearest.handle, g: { o: active, C3: special.C3 } };
         }
         if (isStackedBuildingAsset(active)) {
             const opening = special.opening;
@@ -3970,7 +4411,10 @@ function hitGizmo(p) {
             // 矢印の先端が階の箱の中に見える3D視点でも、1Fだけの移動へ落とさない。
             const moveG = gizmo();
             if (moveG && Math.hypot(moveG.sC.x - p.x, moveG.sC.y - p.y) > R * 0.8)
-                for (const a of moveG.axes) if (segd(p, moveG.sC, a.sT) < R * 0.7) return { t: "axis", a, g: moveG };
+                for (const a of moveG.axes) {
+                    const seg = axisGrabSeg(moveG, a);
+                    if (segd(p, seg.a, seg.b) < R * 0.7) return { t: "axis", a, g: moveG };
+                }
             const floor = stackedFloorHit(active, p);
             if (floor) return { t: "stack-floor", floorIndex: floor.index, floor, g: { o: active, C3: special.C3 } };
         }
@@ -3978,18 +4422,20 @@ function hitGizmo(p) {
             // 看板付き建物では、開口ハンドルの判定範囲が外形の白い面ハンドルへ
             // 重なることがある。押した点に近い方を優先し、外形の幅・奥行き・高さ
             // 編集を開口奥面へ誤配分しない。
-            const openingHits = Object.values(special.handles)
-                    .filter((h) => h?.s?.ok)
-                    .map((h) => ({ h, d: Math.hypot(h.s.x - p.x, h.s.y - p.y) }))
-                    .filter((q) => q.d < R)
-                    .sort((a, b) => a.d - b.d),
+            const openingHits = (() => {
+                    const nearest = nearestHandleOf(Object.values(special.handles), p, R);
+                    return nearest ? [{ h: nearest.handle, d: nearest.d }] : [];
+                })(),
                 generic = gizmo(),
                 faceHits = (generic?.faces || [])
                     .filter((f) => f.s?.ok)
                     .map((f) => ({ f, d: Math.hypot(f.s.x - p.x, f.s.y - p.y) }))
                     .filter((q) => q.d < R)
                     .sort((a, b) => a.d - b.d);
-            if (openingHits.length && (!faceHits.length || openingHits[0].d < faceHits[0].d - 0.5 / Z)) {
+            // 開口ハンドル（ひし形）は面ハンドル（白い四角）より手前に描いているので、
+            // 同じくらい近ければ開口を優先する。真上ビューのように高さ方向が
+            // つぶれて面ハンドルと重なる場合でも、開口の高さを掴める。
+            if (openingHits.length && (!faceHits.length || openingHits[0].d <= faceHits[0].d + 1.5 / Z)) {
                 const h = openingHits[0].h;
                 return { t: "building-" + h.kind, sign: h, g: { o: active, C3: special.C3 } };
             }
@@ -3998,25 +4444,40 @@ function hitGizmo(p) {
                 return { t: "building-backFace", sign: special.handles.backFace, g: { o: active, C3: special.C3 } };
         }
         if (active.asset === "awning") {
-            for (const h of Object.values(special.handles))
-                if (Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
-                    return { t: "awning-" + h.kind, sign: h, g: { o: active, C3: special.C3 } };
+            // 手前の高さ（edgeZ）と奥行き（edgeY）は近い位置に並ぶので、
+            // 配列の順ではなく押した位置に近い方を掴む。
+            // 白い面ハンドルと重なる場合も同じ規則（近い方）で選ぶ。
+            const nearest = nearestHandleOf(Object.values(special.handles), p, R),
+                edgeHit = handleOrFace(nearest, (q) => ({
+                    t: "awning-" + q.handle.kind,
+                    sign: q.handle,
+                    g: { o: active, C3: special.C3 },
+                }));
+            if (edgeHit) return edgeHit;
             if (
                 special.frame &&
                 special.frame[0]?.ok &&
                 special.frame[1]?.ok &&
-                segd(p, special.frame[0], special.frame[1]) < R * 0.8
+                segd(p, special.frame[0], special.frame[1]) < R * 0.8 &&
+                // 白い面ハンドル（白い四角）が押した点にあれば、辺の救済より面を優先する。
+                !nearestFaceHit()
             )
                 return { t: "awning-edgeZ", sign: special.handles.edgeZ, g: { o: active, C3: special.C3 } };
         }
-        if (active.asset === "sign")
-            for (const h of Object.values(special.handles))
-                if (Math.hypot(h.s.x - p.x, h.s.y - p.y) < R)
-                    return { t: "sign-" + h.kind, sign: h, g: { o: active, C3: special.C3 } };
-        if (active.asset === "cone" && Math.hypot(special.handle.s.x - p.x, special.handle.s.y - p.y) < R)
-            return { t: "cone-height", sign: special.handle, g: { o: active, C3: special.C3 } };
-        if (active.asset === "sphere" && Math.hypot(special.handle.s.x - p.x, special.handle.s.y - p.y) < R)
-            return { t: "sphere-radius", sign: special.handle, g: { o: active, C3: special.C3 } };
+        if (active.asset === "sign") {
+            const nearest = nearestHandleOf(Object.values(special.handles), p, R);
+            if (nearest) return { t: "sign-" + nearest.handle.kind, sign: nearest.handle, g: { o: active, C3: special.C3 } };
+        }
+        if (active.asset === "cone" || active.asset === "sphere") {
+            const h = special.handle,
+                near = h?.s?.ok ? nearestHandleOf([h], p, R) : null,
+                hh = handleOrFace(near, (q) => ({
+                    t: active.asset === "cone" ? "cone-height" : "sphere-radius",
+                    sign: q.handle,
+                    g: { o: active, C3: special.C3 },
+                }));
+            if (hh) return hh;
+        }
     }
     const g = gizmo();
     if (!g) return null;
@@ -4031,14 +4492,18 @@ function hitGizmo(p) {
             .sort((a, b) => a.d - b.d);
         if (wallFaceHits.length) return { t: "wallSideSign-face", f: wallFaceHits[0].f, g };
     }
-    // 軸矢印を面ハンドルより先に判定する。特にY軸の先端は上面の
-    // 白い四角と重なりやすく、面を拾うと移動ではなく拡大へ切り替わる。
-    if (Math.hypot(g.sC.x - p.x, g.sC.y - p.y) > R * 0.8)
-        for (const a of g.axes) if (segd(p, g.sC, a.sT) < R * 0.7) return { t: "axis", a, g };
+    // 面ハンドル（白い四角）と軸矢印が重なるときは「押した位置に近い方」を採用する。
+    // 以前は軸矢印を無条件で先に判定していたため、上面の中心にある白い四角が
+    // Y軸の線分に奪われ、「面を押したのに大きさではなく位置が動く」状態になっていた。
+    // 面ハンドルは軸より後に描いていて手前に見えるので、同じくらい近ければ面を優先する。
     const faceHits = g.faces
         .filter((f) => f.s.ok)
         .map((f) => ({ f, d: Math.hypot(f.s.x - p.x, f.s.y - p.y) }))
         .filter((q) => q.d < Rg);
+    if (Math.hypot(g.sC.x - p.x, g.sC.y - p.y) > R * 0.8) {
+        const ax = axisHitAt(g, p, R * 0.7);
+        if (ax && (!faceHits.length || ax.d + 1.5 / Z < faceHits[0].d)) return { t: "axis", a: ax.a, g };
+    }
     if (faceHits.length) {
         // 表裏の面ハンドルが重なるときは、画面に近い面を優先する。
         // 配列の先頭順だけで選ぶと、裏面の法線を拾ってドラッグ方向が反転する。
@@ -4388,10 +4853,13 @@ function beginGizmo(h, p) {
         h.t === "recessed-floor-gap" ||
         h.t === "wall-sign-bracket-length" ||
         h.t === "wall-sign-bevel" ||
+        h.t === "window-grid-width" ||
+        h.t === "window-grid-height" ||
         h.t === "wallSideSign-beveled-offset" ||
         h.t === "wallSideSign-bracket-length" ||
         h.t === "cone-height" ||
-        h.t === "sphere-radius"
+        h.t === "sphere-radius" ||
+        h.t.startsWith("person-joint-")
     )
         ed = { ...base, t: h.t, sign: h.sign, p0: p };
     else if (h.t === "axis") {
@@ -4425,9 +4893,34 @@ function beginGizmo(h, p) {
         ed = { ...base, t: "ring", sC: h.g.sC, ang0: Math.atan2(p.y - h.g.sC.y, p.x - h.g.sC.x) };
     else {
         const dd = o.d - o.d * o.lift,
-            P1 = hit3(r, o.k, dd, cloc(o)),
-            [iu, iv] = PL[o.k];
-        if (P1) ed = { ...base, t: "ring", dd, ang0: Math.atan2(P1[iv] - o.cb, P1[iu] - o.ca) };
+            C0 = cloc(o),
+            P1 = hit3(r, o.k, dd, C0),
+            [iu, iv] = PL[o.k],
+            s0 = scrW(C0),
+            unit = (j) => [j === 0 ? 1 : 0, j === 1 ? 1 : 0, j === 2 ? 1 : 0],
+            pu = s0?.ok ? scrW(V.add(C0, unit(iu), 1, 1)) : null,
+            pv = s0?.ok ? scrW(V.add(C0, unit(iv), 1, 1)) : null,
+            // 面内2軸の画面上の伸び。正投影では画面移動量→面内座標の逆算に使う。
+            plane =
+                s0?.ok && pu?.ok && pv?.ok
+                    ? {
+                          s0,
+                          su: { x: pu.x - s0.x, y: pu.y - s0.y },
+                          sv: { x: pv.x - s0.x, y: pv.y - s0.y },
+                      }
+                    : null,
+            uv = plane ? ringPlaneUV(plane, p) : null;
+        if (P1)
+            ed = { ...base, t: "ring", dd, ang0: Math.atan2(P1[iv] - o.cb, P1[iu] - o.ca), plane };
+        else if (orthView && plane) {
+            // 正投影では視線が面と平行になり、面との交点が取れない（前ビューの床面など）。
+            // 画面の移動量をそのまま面内座標へ分解して角度を出せば、
+            // どのビューでもリングを掴んで回せる。
+            const ang0 = uv
+                ? Math.atan2(uv.v, uv.u)
+                : Math.atan2(p.y - s0.y, p.x - s0.x);
+            ed = { ...base, t: "ring", dd, ang0, plane, screenRing: !uv };
+        }
     }
 }
 // キャンバス上のドラッグで編集（ed=いまの編集操作）。磁石スナップがONなら他の図形・地面にくっつく
@@ -4494,6 +4987,23 @@ function dragEdit(p, freeRotation = false) {
             deltaY = p.y - ed.p0.y,
             value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
         patch = ed.t === "wall-sign-bevel" ? { wallSignBevelOffset: value } : { wallSignBracketLength: value };
+    } else if (ed.t === "window-grid-width" || ed.t === "window-grid-height") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        // 窓の幅・高さは寸法そのものなので、そのまま数値を書き換える。
+        patch = ed.t === "window-grid-width" ? { windowW: value } : { windowH: value };
+    } else if (ed.t.startsWith("person-joint-")) {
+        // 関節は「支点からの回転」なので、画面の接線方向のドラッグ量を
+        // そのまま角度（度）へ換算する。0.5度刻みに丸める。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1),
+            value = clamp(h.start + amount, h.min, h.max);
+        // 関節を回したらプリセットからは外れる（数値欄も「カスタム」表示になる）。
+        patch = { [h.key]: Math.round(value * 2) / 2, pose: "custom" };
     } else if (ed.t === "beveled-offset") {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -4712,8 +5222,7 @@ function dragEdit(p, freeRotation = false) {
     } // 矢印＝その軸に沿って移動
     else if (ed.t === "wallSideSign-face") {
         let dl = null;
-        if (ed.faceGuide?.hidden) dl = 0;
-        else if (ed.faceGuide) {
+        if (ed.faceGuide) {
             const dx = p.x - ed.p0.x,
                 dy = p.y - ed.p0.y;
             dl = (dx * ed.faceGuide.dir.x + dy * ed.faceGuide.dir.y) / (ed.faceGuide.scale || 1);
@@ -4724,8 +5233,9 @@ function dragEdit(p, freeRotation = false) {
         if (dl != null) patch = wallSideSignFacePatch(o, ed.fid, dl);
     } else if (ed.t === "face") {
         let dl = null;
-        if (ed.faceGuide?.hidden) dl = 0;
-        else if (ed.faceGuide) {
+        // faceGuide が hidden でも dir/scale は画面の上向きへの逃がし値が入っている。
+        // （以前は hidden のとき dl=0 にして、そのビューでは編集できないようにしていた）
+        if (ed.faceGuide) {
             const dx = p.x - ed.p0.x,
                 dy = p.y - ed.p0.y;
             dl = (dx * ed.faceGuide.dir.x + dy * ed.faceGuide.dir.y) / (ed.faceGuide.scale || 1);
@@ -4750,10 +5260,21 @@ function dragEdit(p, freeRotation = false) {
                 target = freeRotation ? base + raw : Math.round((base + raw) / 15) * 15;
             patch = rotateCompoundBy(ed.o0 || o, target - base);
         } else {
-            const P1 = hit3(r, o.k, ed.dd, cloc(o));
-            if (P1) {
-                const raw = (Math.atan2(P1[iv] - o.cb, P1[iu] - o.ca) - ed.ang0) / DG,
-                    target = freeRotation ? Number(o.rot || 0) + raw : Math.round((Number(o.rot || 0) + raw) / 15) * 15;
+            let raw = null;
+            if (!orthView) {
+                // 3Dは従来どおり、視線と面が交わる点の角度を使う。
+                const P1 = hit3(r, o.k, ed.dd, cloc(o));
+                if (P1) raw = (Math.atan2(P1[iv] - o.cb, P1[iu] - o.ca) - ed.ang0) / DG;
+            } else if (ed.plane) {
+                // 正投影は画面の移動量を面内座標へ分解して角度を出す
+                // （前ビューの床面のように面が真横を向く場合は画面角度で代用）。
+                const uv = ed.screenRing ? null : ringPlaneUV(ed.plane, p);
+                raw = uv
+                    ? (Math.atan2(uv.v, uv.u) - ed.ang0) / DG
+                    : (Math.atan2(p.y - ed.plane.s0.y, p.x - ed.plane.s0.x) - ed.ang0) / DG;
+            }
+            if (raw != null) {
+                const target = freeRotation ? Number(o.rot || 0) + raw : Math.round((Number(o.rot || 0) + raw) / 15) * 15;
                 patch = { rot: wrap180(target) };
             }
         }
@@ -5583,47 +6104,31 @@ function exportSurfaceTriangles(o) {
         return out;
     }
     if (kind === "person") {
-        // 人物は包絡箱ではなく、線画と同じ胴体・脚・頭の形へ面を付ける。
-        // これで面ON時に人物全体が大きな直方体で塗りつぶされない。
-        const bodyScale = clamp(Number(o.bodyScale) || 1, 0.6, 1.8),
-            shoulderScale = clamp(Number(o.shoulderScale) || 1, 0.6, 1.6),
-            headScale = clamp(Number(o.headScale) || 1, 0.7, 1.5),
-            legSpread = clamp(Number(o.legSpread) || 1, 0.6, 1.8),
-            pose = o.pose || "stand";
-        const defaults = { stand: [0, 0, 0], walk: [0.22, 0, 0], crouch: [0.04, 0.65, 0], sit: [0.1, 0.35, 0] },
-            def = defaults[pose] || defaults.stand;
-        const stride = clamp(Number.isFinite(Number(o.poseStride)) ? Number(o.poseStride) : def[0], 0, 0.5),
-            crouch = clamp(Number.isFinite(Number(o.poseCrouch)) ? Number(o.poseCrouch) : def[1], 0, 1),
-            lean = clamp(Number.isFinite(Number(o.poseLean)) ? Number(o.poseLean) : def[2], -0.35, 0.35),
-            headTilt = clamp(Number(o.headTilt) || 0, -25, 25);
-        const bw = 0.28 * h * bodyScale * shoulderScale,
-            bd = 0.16 * h * bodyScale,
-            leg = 0.055 * h * bodyScale,
-            headR = 0.095 * h * headScale;
-        const legTop = (0.47 - 0.16 * crouch) * h,
-            torso0 = (0.44 - 0.16 * crouch) * h,
-            torso1 = (0.78 - 0.18 * crouch) * h,
-            head0 = (0.84 - 0.18 * crouch) * h,
-            head1 = (0.99 - 0.18 * crouch) * h,
-            footY = [-stride, stride],
-            kneeY = [-0.02 * h, 0.02 * h],
-            kneeX = [-0.09 * h * legSpread, 0.09 * h * legSpread],
-            bodyY = lean * 0.18,
-            headY = lean * 0.42,
-            headTopX = Math.sin(headTilt * DG) * 0.06 * h;
-        const torsoR = Math.max(0.012, Math.min(leg * 0.72, bd * 0.22));
-        boxAt(0, 0, leg * 1.5, bd * 0.85, 0, 0.08 * h);
-        if (pose === "sit") {
-            segment([-0.09 * h * legSpread, bodyY, 0.32 * h], [kneeX[0], kneeY[0], 0.3 * h], torsoR);
-            segment([kneeX[0], kneeY[0], 0.3 * h], [kneeX[0], footY[0], 0], torsoR);
-            segment([0.09 * h * legSpread, bodyY, 0.32 * h], [kneeX[1], kneeY[1], 0.3 * h], torsoR);
-            segment([kneeX[1], kneeY[1], 0.3 * h], [kneeX[1], footY[1], 0], torsoR);
-        } else {
-            segment([kneeX[0], footY[0], 0], [kneeX[0], kneeY[0], legTop], torsoR);
-            segment([kneeX[1], footY[1], 0], [kneeX[1], kneeY[1], legTop], torsoR);
-        }
-        boxAt(0, 0, bw, bd, torso0, torso1);
-        ellipsoid(headTopX / 2, headY + 0.01 * h, (head0 + head1) / 2, headR, headR * 0.9, (head1 - head0) / 2, 8, 12);
+        // 線画と同じ骨格（asset.js の personPose）から面を作る。
+        // 関節を回すと線と面が同じように動く。
+        const p = personPose(o),
+            h = p.h,
+            legR = Math.max(0.012, Math.min(p.legR * 0.9, p.bd * 0.3)),
+            prism = (b, tp) => {
+                quad(b[0], b[1], b[2], b[3]);
+                quad(tp[3], tp[2], tp[1], tp[0]);
+                for (let i = 0; i < 4; i++) quad(b[i], tp[i], tp[(i + 1) % 4], b[(i + 1) % 4]);
+            };
+        // 台座は作らない（線画の linesPerson と同じ扱い）。
+        // ここに箱を残していたため、線が消えても面表示では足元に立方体が出ていた。
+        // 脚（股関節→膝→足）
+        p.legs.forEach((leg) => {
+            segment([leg.hip.x, leg.hip.y, leg.hip.z], [leg.knee.x, leg.knee.y, leg.knee.z], legR);
+            segment([leg.knee.x, leg.knee.y, leg.knee.z], [leg.foot.x, leg.foot.y, leg.foot.z], legR * 0.92);
+        });
+        // 胴（腰を支点に傾く四角柱）
+        prism(p.torsoBottom, p.torsoTop);
+        // 頭（首の角度ぶん傾いた位置へ置く）
+        const headCy = (p.headC0.y + p.headC1.y) * 0.5,
+            headCz = (p.headC0.z + p.headC1.z) * 0.5,
+            headRy = p.headR * 0.9,
+            headRz = Math.max(0.02, Math.hypot(p.headC1.y - p.headC0.y, p.headC1.z - p.headC0.z) * 0.5);
+        ellipsoid(p.headTopX * 0.5, headCy, headCz, p.headR, headRy, headRz, 8, 12);
         return out;
     }
     if (kind === "stairs") {
@@ -5651,6 +6156,79 @@ function exportSurfaceTriangles(o) {
         quad([-x, d / 2, 0], [x, d / 2, 0], [x, d / 2, h], [-x, d / 2, h]);
         return out;
     }
+    // 屋根・スロープ・窓グリッドは、包絡箱ではなく実際の断面を押し出して面を作る。
+    // （箱で近似すると、面表示や背面処理で勾配が消えてしまうため）
+    if (
+        (kind === "gableRoof" || kind === "shedRoof" || kind === "ramp" || kind === "windowGrid") &&
+        typeof roofParams === "function"
+    ) {
+        // 断面（2つの軸の座標）を、もう1つの軸方向へ ±half 押し出して閉じた立体にする。
+        // cross は断面の多角形、axis は押し出す軸（"x" か "y"）。
+        const extrudeCross = (cross, axis, half) => {
+            const at = (u, z, s) => (axis === "x" ? [s, u, z] : [u, s, z]),
+                n = cross.length,
+                cu = cross.reduce((a, q) => a + q[0], 0) / n,
+                cz = cross.reduce((a, q) => a + q[1], 0) / n;
+            // 両端の面は断面を多角形として分割する。
+            // 山形の屋根板のように「く」の字に凹んだ断面では、重心からの扇状分割だと
+            // 図形の外へはみ出した三角形ができ、線の外側まで色が塗られてしまう。
+            // そのため凹みに強い耳切り法（asset.js の polygonEarClip）を使う。
+            const tris2d =
+                typeof polygonEarClip === "function"
+                    ? polygonEarClip(cross.map((q) => [q[0], q[1]]))
+                    : (() => {
+                          const fan = [];
+                          for (let i = 0; i < n; i++) fan.push([[cu, cz], cross[i], cross[(i + 1) % n]]);
+                          return fan;
+                      })();
+            [-half, half].forEach((side) => {
+                tris2d.forEach((t) => {
+                    if (!t || t.length !== 3) return;
+                    tri(at(t[0][0], t[0][1], side), at(t[1][0], t[1][1], side), at(t[2][0], t[2][1], side));
+                });
+            });
+            // 側面は断面の各辺を押し出した四角形。
+            for (let i = 0; i < n; i++) {
+                const a = cross[i],
+                    b = cross[(i + 1) % n];
+                quad(at(a[0], a[1], -half), at(b[0], b[1], -half), at(b[0], b[1], half), at(a[0], a[1], half));
+            }
+        };
+        if (kind === "gableRoof" || kind === "shedRoof") {
+            // 線画と同じ断面（roofSlab）を使うので、面と線で形がずれない。
+            const slab = roofSlab(o, kind);
+            extrudeCross(slab.cross, slab.axis, slab.half);
+        } else if (kind === "ramp") {
+            const p = rampParams(o),
+                hw = p.w * 0.5,
+                hd = p.d * 0.5;
+            // 手前（-y）が床、奥（+y）が立ち上がり上がりの楔。
+            extrudeCross(
+                [
+                    [-hd, 0],
+                    [hd, p.h],
+                    [hd, 0],
+                ],
+                "x",
+                hw,
+            );
+        } else {
+            const ww = Math.max(0.2, Math.abs(Number(w) || 0.2)),
+                hh = Math.max(0.05, Math.abs(Number(h) || 0.2)),
+                t = Math.max(0.01, Math.abs(Number(d) || 0.01));
+            extrudeCross(
+                [
+                    [-t * 0.5, 0],
+                    [t * 0.5, 0],
+                    [t * 0.5, hh],
+                    [-t * 0.5, hh],
+                ],
+                "x",
+                ww * 0.5,
+            );
+        }
+        return out;
+    }
     // 人物以外の細分化された線画は、全体の包絡箱で背面線を落とす安全側の近似。
     addExportBoxFaces(out, o, w, d, h * 0.02, h);
     return out;
@@ -5666,9 +6244,50 @@ function exportPoint(v, tf) {
           : cam(rel)[2];
     return { x: q.x * tf[0] + tf[4], y: q.y * tf[3] + tf[5], depth };
 }
+// 画面座標と深度を「1回の投影」でまとめて求める。
+// 以前は strokeWVisible が同じ点を scr3() と exportPoint() で2回投影していた
+// （どちらも cam() を通るため、線の点数が多いほど無駄が大きかった）。
+function projPoint(v, tf) {
+    const rel = V.add(v, CO());
+    if (orthView) {
+        const q = orthPoint(rel);
+        return { x: q.x * tf[0] + tf[4], y: q.y * tf[3] + tf[5], sx: q.x, sy: q.y, depth: q.depth, ok: true };
+    }
+    const c = cam(rel),
+        len = Math.hypot(c[0], c[1], c[2]);
+    if (!(len > 1e-9)) return { ok: false };
+    const u = [c[0] / len, c[1] / len, c[2] / len],
+        f = (W * P.lens) / 36;
+    if (T === "f") {
+        // 魚眼は向きだけを使う（scr3()→scr()→pf() と同じ計算）。
+        const q = pf(u);
+        return q.ok ? { x: q.x * tf[0] + tf[4], y: q.y * tf[3] + tf[5], sx: q.x, sy: q.y, depth: len, ok: true } : { ok: false };
+    }
+    if (u[2] <= 0.02) return { ok: false };
+    const x = W / 2 + (f * u[0]) / u[2],
+        y = (H * P.hz) / 100 - (f * u[1]) / u[2];
+    return { x: x * tf[0] + tf[4], y: y * tf[3] + tf[5], sx: x, sy: y, depth: c[2], ok: true };
+}
+// 深度バッファは毎フレーム作り直さず、同じ大きさなら使い回す。
+// さらに「前回書き込んだ行」だけを Infinity へ戻す（全面fillは毎回 canvas 全体＝
+// 100万要素以上を書き直すことになり、その割に実際に使う行はごく一部だった）。
+let depthBuffer = null,
+    depthBufferLen = 0,
+    depthUsedY0 = Infinity,
+    depthUsedY1 = -Infinity;
 function buildExportDepth(cw, ch, tf) {
-    const depth = new Float32Array(cw * ch);
-    depth.fill(Infinity);
+    const need = cw * ch;
+    if (!depthBuffer || depthBufferLen !== need) {
+        depthBuffer = new Float32Array(need);
+        depthBufferLen = need;
+        depthUsedY0 = Infinity;
+        depthUsedY1 = -Infinity;
+    }
+    const depth = depthBuffer;
+    if (depthUsedY1 >= depthUsedY0)
+        depth.fill(Infinity, Math.max(0, depthUsedY0) * cw, Math.min(ch, depthUsedY1 + 1) * cw);
+    depthUsedY0 = Infinity;
+    depthUsedY1 = -Infinity;
     const tris = [],
         seen = new Set();
     S.forEach((s) => {
@@ -5686,6 +6305,10 @@ function buildExportDepth(cw, ch, tf) {
             x1 = Math.min(cw - 1, Math.ceil(Math.max(p[0].x, p[1].x, p[2].x))),
             y0 = Math.max(0, Math.floor(Math.min(p[0].y, p[1].y, p[2].y))),
             y1 = Math.min(ch - 1, Math.ceil(Math.max(p[0].y, p[1].y, p[2].y)));
+        if (y1 >= y0) {
+            if (y0 < depthUsedY0) depthUsedY0 = y0;
+            if (y1 > depthUsedY1) depthUsedY1 = y1;
+        }
         for (let y = y0; y <= y1; y++)
             for (let x = x0; x <= x1; x++) {
                 const px = x + 0.5,
@@ -5714,10 +6337,8 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     c.beginPath();
     let on = false;
     const put = (v) => {
-        const rel = V.add(v, CO()),
-            q = scr3(rel),
-            e = exportPoint(v, tf);
-        if (!e || !q.ok) {
+        const e = projPoint(v, tf);
+        if (!e.ok) {
             on = false;
             return;
         }
@@ -5733,7 +6354,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
             on = false;
             return;
         }
-        on ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y);
+        on ? c.lineTo(e.sx, e.sy) : c.moveTo(e.sx, e.sy);
         on = true;
     };
     s.p.forEach((v, i) => {
@@ -5751,6 +6372,34 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
 let LC = null;
 // 書き出し用の線だけを別キャンバスへ描く。
 // hidden=trueでは面の深度情報を使って、背面に隠れる線を除去する。
+// 実際に線を引いた範囲（デバイスpx）。二値化の対象を絞るために使う。
+// 線が1本も無ければ null。
+function strokeBox(cw, ch, tf) {
+    let x0 = Infinity,
+        y0 = Infinity,
+        x1 = -Infinity,
+        y1 = -Infinity;
+    const add = (e) => {
+        if (!e.ok) return;
+        if (e.x < x0) x0 = e.x;
+        if (e.y < y0) y0 = e.y;
+        if (e.x > x1) x1 = e.x;
+        if (e.y > y1) y1 = e.y;
+    };
+    S.forEach((s) => {
+        if (s.ob && !objectVisible(s.ob)) return;
+        for (let i = 0; i < s.p.length; i++) add(projPoint(s.p[i], tf));
+    });
+    if (prev) prev.forEach((s) => { for (let i = 0; i < s.p.length; i++) add(projPoint(s.p[i], tf)); });
+    if (!(x1 >= x0 && y1 >= y0)) return null;
+    const pad = 3,
+        bx = Math.max(0, Math.floor(x0) - pad),
+        by = Math.max(0, Math.floor(y0) - pad),
+        bx1 = Math.min(cw, Math.ceil(x1) + pad),
+        by1 = Math.min(ch, Math.ceil(y1) + pad);
+    if (bx1 <= bx || by1 <= by) return null;
+    return { x: bx, y: by, w: bx1 - bx, h: by1 - by };
+}
 function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     // tf=書き出し用の変換 [拡大,0,0,拡大,ずれx,ずれy]
     if (!LC || LC.width !== cw || LC.height !== ch) {
@@ -5771,13 +6420,18 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     if (withCur) drawCur(x);
     if (withCur && prev) prev.forEach((s) => strokeW(x, s));
     if ($("bin").checked) {
-        // 二値化：しきい値以上の画素だけ完全に不透明にする
+        // 二値化：しきい値以上の画素だけ完全に不透明にする。
+        // 以前は毎フレーム canvas 全体（例 1600×900＝144万画素）を読み書きしていた。
+        // 実際に線がある範囲だけを処理すれば同じ結果で、はるかに軽い。
         x.setTransform(1, 0, 0, 1, 0, 0);
-        const im = x.getImageData(0, 0, cw, ch),
-            d = im.data,
-            t = P.bt;
-        for (let i = 3; i < d.length; i += 4) d[i] = d[i] < t ? 0 : 255;
-        x.putImageData(im, 0, 0);
+        const box = strokeBox(cw, ch, tf || [Z, 0, 0, Z, ox, oy]);
+        if (box) {
+            const im = x.getImageData(box.x, box.y, box.w, box.h),
+                d = im.data,
+                t = P.bt;
+            for (let i = 3; i < d.length; i += 4) d[i] = d[i] < t ? 0 : 255;
+            x.putImageData(im, box.x, box.y);
+        }
     }
     return LC;
 }
@@ -7402,11 +8056,15 @@ migrateDefaultViewOnce();
    このファイルは「アセットの見た目」と「アセットの寸法の正規化」を担当する。
 
    読み方の目安
-   1. ASSETS                 : アセット棚に表示する名前・初期サイズ・色
-   2. 座標／線画ヘルパー     : ローカル座標をワールド座標の線へ変換
-   3. assetLines             : アセットごとの線画を作る本体
-   4. normalizedAsset         : 古い保存データや入力値を安全な値へ整える
-   5. genAsset / obBounds     : 既存エンジンの描画・選択処理へ接続する橋
+   1. ASSETS                  : アセット棚に表示する名前・初期サイズ・色
+   2. 名前・アイコン          : 棚と選択パネルへ出すラベル
+   3. 座標／線画ヘルパー      : ローカル座標をワールド座標の線へ変換
+   4. 実用ヘルパー            : 寸法・鏡映・反復・窓グリッド・屋根合わせ
+   5. パスパイプ             : 折れ線と円管の計算
+   6. アセット別の線画        : 1形状=1関数（ASSET_LINE_BUILDERS の表から呼ぶ）
+   7. 保存データの正規化      : 古い保存データや入力値を安全な値へ整える
+   8. 既存エンジンへの接続    : genShape / obBounds をアセット対応へ差し替える
+   9. 初期化                 : 自動保存データを新しい線画へ作り直す
 
    UIのボタンや編集イベントは studio-ui.js、3Dギズモと移動処理は
    engine-tools.js が担当する。このファイルでは主に「何を描くか」を決める。 */
@@ -7501,6 +8159,38 @@ const ASSETS = {
         accent: "#ff9f68",
     },
     crosswalk: { label: "横断歩道", glyph: "▥", w: 3.2, d: 4.2, h: 0.02, accent: "#668cff" },
+    gableRoof: {
+        label: "切妻屋根",
+        glyph: "⋀",
+        w: 4.2,
+        d: 3.2,
+        h: 1.35,
+        roofOverhang: 0.18,
+        roofThickness: 0.12,
+        roofRidgeAxis: "x",
+        accent: "#e8b86d",
+    },
+    shedRoof: {
+        label: "片流れ屋根",
+        glyph: "◢",
+        w: 4.2,
+        d: 3.2,
+        h: 1.1,
+        roofOverhang: 0.16,
+        roofThickness: 0.12,
+        accent: "#d98b68",
+    },
+    ramp: { label: "スロープ", glyph: "◣", w: 1.45, d: 3.6, h: 0.78, accent: "#8ce6c2" },
+    windowGrid: {
+        label: "窓グリッド",
+        glyph: "▦",
+        w: 3.6,
+        d: 0.12,
+        h: 2.4,
+        windowRows: 2,
+        windowCols: 4,
+        accent: "#76d9ff",
+    },
 };
 // ===== 2. 棚・選択パネルに表示する名前とアイコン =====
 // 接続パーツや結合オブジェクトは、元アセット名ではなく役割名を返す。
@@ -7770,7 +8460,7 @@ function beveledBoxFootprint(width, depth, offset, segmentCount) {
     });
     return out;
 }
-// ===== 壁付け看板（単体）=====
+// ===== 3.1 壁付け看板（単体）=====
 // 看板は板を立てた形状で、ローカル座標は x=板の幅、y=板厚、z=高さ。
 // 取付金具は板の裏側（+y）へ張り出し、先端の取付板で壁へ当たる形にする。
 // 座標系を通常アセットと同じ向きにしているため、幅・奥行き・高さの
@@ -8349,7 +9039,7 @@ function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
         ];
     return out;
 }
-// ===== 4. パスパイプ用のベクトル計算 =====
+// ===== 5. パスパイプ用のベクトル計算 =====
 // パスパイプは制御点を丸めて中心線を作り、その周囲に円形断面を並べる。
 // 以下の小さな関数群は、その中心線・接線・法線を計算するためのもの。
 function pathVecSub(a, b) {
@@ -8533,6 +9223,315 @@ function ringA(o, rx, ry, z, n = 8, color = o.c || "#e7fff4") {
     }
     return polyA(o, a, color);
 }
+// ===== 6. 実用ヘルパー =====
+// 建物を強くするための共通計算。線画からも、UI／ツール側からも呼べる。
+// ・寸法    assetDimensions / assetFootprintArea / assetVolume
+// ・変形    mirrorLocalPoints / translateLocalPoints / scaledAssetProps
+// ・並べる  evenSpaced / linearRepeatOffsets
+// ・衝突    aabbOverlaps / assetsOverlap
+// ・窓      facadeWindowGridRects / appendFacadeWindows
+// ・屋根    roofParams / roofFitFromHost / rampParams
+function finiteNumber(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+}
+function assetDimensions(o) {
+    const q = o || {};
+    return {
+        w: Math.max(0, Math.abs(finiteNumber(q.ra, 0.5)) * 2),
+        d: Math.max(0, Math.abs(finiteNumber(q.rb, 0.5)) * 2),
+        h: Math.max(0, Math.abs(finiteNumber(q.h, 0))),
+    };
+}
+// ここから下は「アセットを足すときの下請け」として用意した関数。
+// 現在のアセット定義では未使用（面積・体積・点列の移動や反転・等間隔配置など）。
+// 新しくアセットを作るときに使う想定で残している。
+function assetFootprintArea(o) {
+    const { w, d } = assetDimensions(o);
+    return w * d;
+}
+function assetVolume(o) {
+    const { w, d, h } = assetDimensions(o);
+    return w * d * h;
+}
+function translateLocalPoints(pts, dx = 0, dy = 0, dz = 0) {
+    return (pts || []).map((p) => [p[0] + dx, p[1] + dy, p[2] + dz]);
+}
+function mirrorLocalPoints(pts, axis = "x") {
+    const sx = axis === "x" ? -1 : 1,
+        sy = axis === "y" ? -1 : 1,
+        sz = axis === "z" ? -1 : 1;
+    return (pts || []).map((p) => [p[0] * sx, p[1] * sy, p[2] * sz]);
+}
+function scaledAssetProps(o, scale = 1) {
+    const s = Math.max(0.01, finiteNumber(scale, 1)),
+        { w, d, h } = assetDimensions(o);
+    return { ra: w * 0.5 * s, rb: d * 0.5 * s, h: h * s };
+}
+// 2Dの折れ線を、進行方向の左手前（zが下向き）へ一定距離ずらす。
+// 屋根板の「板厚を斜面に直角で一定」にするための計算。
+// 折れ点は2本の平行線の交点（マイター）で求めるので、角も途切れない。
+function offsetPolyline2D(points, distance) {
+    const pts = (points || []).filter((p) => Array.isArray(p) && p.length >= 2).map((p) => [Number(p[0]) || 0, Number(p[1]) || 0]),
+        d = finiteNumber(distance, 0);
+    if (pts.length < 2 || Math.abs(d) < 1e-9) return pts.map((p) => [...p]);
+    // 各線分を法線方向へずらした直線（点＋方向）を作る。
+    const normals = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+        const dx = pts[i + 1][0] - pts[i][0],
+            dz = pts[i + 1][1] - pts[i][1],
+            len = Math.hypot(dx, dz);
+        if (len < 1e-9) {
+            normals.push(normals[normals.length - 1] || [0, -1]);
+            continue;
+        }
+        // 進行方向を -90 度回すと「下向き」の法線になる。
+        normals.push([dz / len, -dx / len]);
+    }
+    const lines = pts.map((p, i) => {
+        const n = normals[Math.min(i, normals.length - 1)] || [0, -1];
+        return { p: [p[0] + n[0] * d, p[1] + n[1] * d], dir: i < pts.length - 1 ? [pts[i + 1][0] - p[0], pts[i + 1][1] - p[1]] : [p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]] };
+    });
+    const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
+    // 隣り合う2直線の交点＝ずらした折れ点。
+    return lines.map((line, i) => {
+        if (i === 0) return line.p;
+        const prev = lines[i - 1],
+            den = cross(prev.dir, line.dir);
+        if (Math.abs(den) < 1e-9) return line.p;
+        const t = cross([line.p[0] - prev.p[0], line.p[1] - prev.p[1]], line.dir) / den;
+        return [prev.p[0] + prev.dir[0] * t, prev.p[1] + prev.dir[1] * t];
+    });
+}
+function evenSpaced(count, span) {
+    const n = clamp(Math.round(finiteNumber(count, 1)), 1, 64),
+        s = finiteNumber(span, 0);
+    if (n === 1) return [0];
+    return Array.from({ length: n }, (_, i) => -s * 0.5 + (s * i) / (n - 1));
+}
+function linearRepeatOffsets(count, spacing, axis = "x") {
+    const n = clamp(Math.round(finiteNumber(count, 1)), 1, 64),
+        gap = finiteNumber(spacing, 0),
+        ax = axis === "y" ? 1 : axis === "z" ? 2 : 0,
+        origin = -((n - 1) * gap) * 0.5;
+    return Array.from({ length: n }, (_, i) => {
+        const v = [0, 0, 0];
+        v[ax] = origin + i * gap;
+        return v;
+    });
+}
+function aabbOverlaps(a, b, pad = 0) {
+    if (!a?.lo || !a?.hi || !b?.lo || !b?.hi) return false;
+    const p = Math.max(0, finiteNumber(pad, 0));
+    for (let i = 0; i < 3; i++) {
+        if (a.hi[i] + p < b.lo[i] - p || b.hi[i] + p < a.lo[i] - p) return false;
+    }
+    return true;
+}
+function assetsOverlap(a, b, pad = 0) {
+    if (!a || !b) return false;
+    return aabbOverlaps(obBounds(a), obBounds(b), pad);
+}
+function windowGridOptions(o, wallW, wallH) {
+    const rows = clamp(Math.round(finiteNumber(o?.windowRows, 0)), 0, 20),
+        cols = clamp(Math.round(finiteNumber(o?.windowCols, 0)), 0, 20),
+        mx = clamp(finiteNumber(o?.windowMarginX, wallW * 0.12), 0, wallW * 0.45),
+        sill = clamp(finiteNumber(o?.windowSill, wallH * 0.22), 0, wallH * 0.7),
+        head = clamp(finiteNumber(o?.windowHead, wallH * 0.12), 0, wallH * 0.45),
+        gx = clamp(finiteNumber(o?.windowGapX, wallW * 0.06), 0, wallW * 0.4),
+        gz = clamp(finiteNumber(o?.windowGapZ, wallH * 0.1), 0, wallH * 0.4),
+        // 窓1枚の大きさ。0は「割り付けから自動で決める」の意味。
+        ww = clamp(finiteNumber(o?.windowW, 0), 0, Math.max(0.03, wallW)),
+        wh = clamp(finiteNumber(o?.windowH, 0), 0, Math.max(0.03, wallH));
+    return { rows, cols, mx, sill, head, gx, gz, ww, wh };
+}
+function normalizedWindowFields(q) {
+    const { w, h } = assetDimensions(q),
+        opts = windowGridOptions(q, w, h);
+    return {
+        windowRows: opts.rows,
+        windowCols: opts.cols,
+        windowMarginX: opts.mx,
+        windowSill: opts.sill,
+        windowHead: opts.head,
+        windowGapX: opts.gx,
+        windowGapZ: opts.gz,
+        windowW: opts.ww,
+        windowH: opts.wh,
+        windowSides: q?.windowSides === true,
+        windowBack: q?.windowBack === true,
+    };
+}
+function facadeWindowGridRects(wallW, wallH, options) {
+    const q = options || {},
+        rows = q.rows || 0,
+        cols = q.cols || 0,
+        out = [];
+    if (rows < 1 || cols < 1 || wallW < 0.05 || wallH < 0.05) return out;
+    const mx = q.mx || 0,
+        sill = q.sill || 0,
+        head = q.head || 0,
+        gx = q.gx || 0,
+        gz = q.gz || 0,
+        usableW = Math.max(0.04, wallW - mx * 2),
+        usableH = Math.max(0.04, wallH - sill - head),
+        cellW = Math.max(0.03, (usableW - gx * Math.max(0, cols - 1)) / cols),
+        cellH = Math.max(0.03, (usableH - gz * Math.max(0, rows - 1)) / rows),
+        x0 = -wallW * 0.5 + mx,
+        z0 = sill,
+        // 窓1枚の大きさ（指定があればその寸法、無ければセルいっぱい）。
+        winW = Math.min(cellW, Math.max(0.03, q.ww || cellW)),
+        winH = Math.min(cellH, Math.max(0.03, q.wh || cellH)),
+        // セルの中央へ置くので、窓を小さくすると四方の壁が均等に増える。
+        padX = (cellW - winW) * 0.5,
+        padZ = (cellH - winH) * 0.5;
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const x = x0 + c * (cellW + gx) + padX,
+                z = z0 + r * (cellH + gz) + padZ;
+            out.push({ x0: x, x1: x + winW, z0: z, z1: z + winH });
+        }
+    }
+    return out;
+}
+function windowRectHitsOpening(rect, opening) {
+    if (!opening) return false;
+    const cx = (rect.x0 + rect.x1) * 0.5,
+        cz = (rect.z0 + rect.z1) * 0.5,
+        hw = Math.max(0, finiteNumber(opening.w, 0) * 0.5),
+        oh = Math.max(0, finiteNumber(opening.h, 0));
+    return Math.abs(cx) <= hw && cz >= 0 && cz <= oh;
+}
+function appendFacadeWindows(o, out, w, d, h, color, opening) {
+    const opts = windowGridOptions(o, w, h);
+    if (opts.rows < 1 || opts.cols < 1) return;
+    const yFront = -d * 0.5,
+        yBack = d * 0.5,
+        rects = facadeWindowGridRects(w, h, opts),
+        pushAtY = (y) => {
+            rects.forEach((rect) => {
+                if (windowRectHitsOpening(rect, opening)) return;
+                out.push(
+                    lineA(
+                        o,
+                        [
+                            [rect.x0, y, rect.z0],
+                            [rect.x1, y, rect.z0],
+                            [rect.x1, y, rect.z1],
+                            [rect.x0, y, rect.z1],
+                            [rect.x0, y, rect.z0],
+                        ],
+                        color,
+                        1.05,
+                    ),
+                );
+            });
+        };
+    pushAtY(yFront);
+    if (o.windowBack === true) pushAtY(yBack);
+    if (o.windowSides === true) {
+        const sideOpts = windowGridOptions(o, d, h),
+            sideRects = facadeWindowGridRects(d, h, sideOpts);
+        [-w * 0.5, w * 0.5].forEach((x) =>
+            sideRects.forEach((rect) => {
+                out.push(
+                    lineA(
+                        o,
+                        [
+                            [x, rect.x0, rect.z0],
+                            [x, rect.x1, rect.z0],
+                            [x, rect.x1, rect.z1],
+                            [x, rect.x0, rect.z1],
+                            [x, rect.x0, rect.z0],
+                        ],
+                        color,
+                        1.05,
+                    ),
+                );
+            }),
+        );
+    }
+}
+function roofParams(o) {
+    const w = Math.max(0.2, Math.abs(finiteNumber(o?.ra, 2)) * 2),
+        d = Math.max(0.2, Math.abs(finiteNumber(o?.rb, 1.5)) * 2),
+        h = Math.max(0.12, Math.abs(finiteNumber(o?.h, 1.2))),
+        overhang = clamp(finiteNumber(o?.roofOverhang, 0.18), 0, Math.min(w, d) * 0.45),
+        thickness = clamp(finiteNumber(o?.roofThickness, 0.12), 0.02, Math.max(0.02, h * 0.5)),
+        ridgeAxis = o?.roofRidgeAxis === "y" ? "y" : "x",
+        lowZ = clamp(finiteNumber(o?.roofLowZ, 0), 0, h - 0.05);
+    return { w, d, h, overhang, thickness, ridgeAxis, lowZ };
+}
+// 屋根板の断面（棟に直交する平面の形）と、押し出す向き・長さを返す。
+// 板厚は斜面に直角な距離で一定にする。内側の面は offsetPolyline2D で
+// 外側の面を法線方向へずらして作るので、勾配が強くても薄さが変わらない。
+function roofSlab(o, kind = o?.asset) {
+    const p = roofParams(o),
+        halfW = p.w * 0.5 + p.overhang,
+        halfD = p.d * 0.5 + p.overhang,
+        ridgeAlongX = p.ridgeAxis !== "y",
+        // 棟に直交する方向の半長（勾配が走る向き）。
+        halfSpan = ridgeAlongX ? halfD : halfW,
+        // 棟に沿って押し出す向きと半長。
+        axis = ridgeAlongX ? "x" : "y",
+        half = ridgeAlongX ? halfW : halfD,
+        outerPath =
+            kind === "shedRoof"
+                ? [
+                      [-halfSpan, p.lowZ],
+                      [halfSpan, p.h],
+                  ]
+                : [
+                      [-halfSpan, p.lowZ],
+                      [0, p.h],
+                      [halfSpan, p.lowZ],
+                  ],
+        innerPath = offsetPolyline2D(outerPath, p.thickness),
+        // 断面は「外側を進んで、内側を戻る」閉じた多角形。側面が板厚の面になる。
+        cross = [...outerPath, ...[...innerPath].reverse()];
+    // 両端（軒先）は法線方向ではなく「鉛直に切る」（垂木の小口を垂直に切るのと同じ）。
+    // 法線オフセットのままだと軒先が棟方向へ伸び、屋根の中心がずれてしまう。
+    // 鉛直に切るときの下げ量は t / cosθ（θ＝勾配の角度）。
+    // こうすると斜面上の垂距離は、端でも中央でもちょうど t のまま保たれる。
+    [
+        [0, 0], // 手前の軒先（最初の線分）
+        [outerPath.length - 1, outerPath.length - 2], // 奥の軒先（最後の線分）
+    ].forEach(([i, seg]) => {
+        const a = outerPath[seg],
+            b = outerPath[seg + 1],
+            run = Math.abs(b[0] - a[0]),
+            len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (run <= 1e-6 || len <= 1e-6) return;
+        // 端の点は外側と同じ位置（u）に置き、高さだけ下げる。
+        innerPath[i][0] = outerPath[i][0];
+        innerPath[i][1] = outerPath[i][1] - (p.thickness * len) / run;
+    });
+    return { p, axis, half, halfSpan, outerPath, innerPath, cross, thickness: p.thickness };
+}
+function roofFitFromHost(host, kind = "gableRoof") {
+    const { w, d, h } = assetDimensions(host),
+        ridgeAxis = w >= d ? "x" : "y",
+        roofH =
+            kind === "shedRoof" || kind === "shed" ? Math.max(0.4, d * 0.28) : Math.max(0.5, Math.min(w, d) * 0.35);
+    return {
+        ra: w * 0.5,
+        rb: d * 0.5,
+        h: roofH,
+        roofOverhang: 0.18,
+        roofThickness: 0.12,
+        roofRidgeAxis: ridgeAxis,
+        roofLowZ: 0,
+        liftHint: h,
+    };
+}
+function rampParams(o) {
+    const w = Math.max(0.2, Math.abs(finiteNumber(o?.ra, 0.72)) * 2),
+        d = Math.max(0.4, Math.abs(finiteNumber(o?.rb, 1.8)) * 2),
+        h = Math.max(0.08, Math.abs(finiteNumber(o?.h, 0.78))),
+        rail = o?.handrail === true,
+        railH = clamp(finiteNumber(o?.rampRailHeight, 0.42), 0.12, 1.8);
+    return { w, d, h, rail, railH };
+}
 // 開口建物の寸法を、描画に使いやすい形へまとめる。
 function buildingParams(o) {
     const g = buildingGeometry(o),
@@ -8578,6 +9577,412 @@ function closedBuildingLines(o, w, d, h, color = o.c || "#222222") {
         lineA(o, [front[3], back[3]], color),
     ];
 }
+// ===== 6.2 新しいアセットを作るときの下請け（2026-10-29 追加） =====
+// 「アセットを1つ足すたびに、同じような点列・同じような窓割り付け・同じような
+// 数値クランプを書き写す」のをやめるために用意した共通部品。
+// どの関数も asset.js のローカル座標（x=幅 / y=奥行き / z=高さ）だけを扱い、
+// ワールド変換は lineA / polyA が行う。つまり genShape・面メッシュ・当たり判定の
+// 仕組みは一切変えずに、線画の組み立てだけを短く書ける。
+//
+//   A. 値の取り出し      assetNum / assetBool
+//     補間・丸め        lerp / inverseLerp / roundTo / snapValue / smoothUnit
+//     範囲              boundsOfPoints
+//   B. 並べる            spanSplit
+//   C. 1本で描ける面     rect2DOutlineA / quadFaceA / arcPointsA / discOutlineA
+//   D. 立体をまとめて     wireCylinderA / wirePrismA / wirePyramidA
+//   E. 建具・部品        stairsRunA / latticePanelA
+//   F. 登録と確認        registerAsset / describeAsset
+//
+// 使い方は ASSET_JS_GUIDE.md の「6-3. 新規アセットの作り方（写経）」を参照。
+
+// --- A. 値の取り出し -------------------------------------------------------
+// 数値プロパティを「有限値・範囲内」で取り出す。0 は 0 として扱い、
+// undefined / "" / "abc" / NaN は fallback になる。
+// min/max を渡すと clamp するので、寸法が 0 や負になって線が消える事故を防げる。
+function assetNum(o, key, fallback = 0, min = -Infinity, max = Infinity) {
+    const raw = o?.[key],
+        n = raw === "" || raw === null || raw === undefined ? NaN : Number(raw),
+        v = Number.isFinite(n) ? n : finiteNumber(fallback, 0);
+    return clamp(v, min, max);
+}
+// 真偽プロパティ。JSON から戻した "false" / 0 / "off" も false として読む。
+function assetBool(o, key, fallback = false) {
+    const raw = o?.[key];
+    if (raw === undefined || raw === null || raw === "") return !!fallback;
+    if (typeof raw === "boolean") return raw;
+    if (typeof raw === "number") return raw !== 0;
+    const t = String(raw).trim().toLowerCase();
+    if (["false", "0", "off", "no", "none"].includes(t)) return false;
+    if (["true", "1", "on", "yes"].includes(t)) return true;
+    return !!fallback;
+}
+// 値を step の倍数へ丸める（数値スピナーの刻みと同じ丸め方に揃える）。
+// step<=0 のときは丸めない。負の値でも 0 をまたいで正しく丸まる。
+// 0.1 刻みで 1.2000000000000002 のような値が出ると数値欄が読みにくいので、
+// 最後に小数6桁へ丸めて返す。
+function snapValue(v, step = 0.1) {
+    const value = finiteNumber(v, 0),
+        s = Math.abs(finiteNumber(step, 0));
+    if (s < 1e-9) return value;
+    return roundTo(Math.round(value / s) * s, 6);
+}
+// 小数 digits 桁へ丸める。数値欄・ラベル表示用（内部計算には使わない）。
+function roundTo(v, digits = 2) {
+    const d = clamp(Math.round(finiteNumber(digits, 2)), 0, 9),
+        n = finiteNumber(v, 0);
+    return Number(n.toFixed(d));
+}
+// 線形補間。t=0 で a、t=1 で b。t は 0..1 に丸めない（外挿したいとき用）。
+function lerp(a, b, t) {
+    const A = finiteNumber(a, 0),
+        B = finiteNumber(b, 0);
+    return A + (B - A) * finiteNumber(t, 0);
+}
+// lerp の逆算。値 v が a→b のどこにあるかを 0..1 で返す（a===b のときは 0）。
+function inverseLerp(a, b, v) {
+    const A = finiteNumber(a, 0),
+        B = finiteNumber(b, 0),
+        d = B - A;
+    if (Math.abs(d) < 1e-9) return 0;
+    return (finiteNumber(v, 0) - A) / d;
+}
+// 点列（[x,y] でも [x,y,z] でもよい）の軸並行バウンディングボックス。
+// 線画を作る前に「どこまで広がるか」を確かめたいとき、当たり判定の下見に使う。
+// 点が1つも無いときは lo=[0,0,0], hi=[0,0,0] を返す（NaN を返さない）。
+function boundsOfPoints(pts) {
+    const lo = [Infinity, Infinity, Infinity],
+        hi = [-Infinity, -Infinity, -Infinity];
+    let n = 0;
+    (pts || []).forEach((p) => {
+        if (!Array.isArray(p)) return;
+        n++;
+        for (let i = 0; i < 3; i++) {
+            const v = finiteNumber(p[i], 0);
+            if (v < lo[i]) lo[i] = v;
+            if (v > hi[i]) hi[i] = v;
+        }
+    });
+    if (!n) return { lo: [0, 0, 0], hi: [0, 0, 0] };
+    return { lo, hi };
+}
+// 0..1 の入力を、両端でなめらかに加減速する 0..1 に変換する（smoothstep）。
+// 段差のあるアニメーション的な形（屋根の反り・テーパー・曲線の分割）に使う。
+function smoothUnit(t) {
+    const x = clamp(finiteNumber(t, 0), 0, 1);
+    return x * x * (3 - 2 * x);
+}
+
+// --- B. 並べる -------------------------------------------------------------
+// 長さ total の区間に、同じ大きさの部品を count 個、隙間 gap で並べる。
+// 返り値の centers は「中心が 0 の左右対称」な座標なので、そのまま
+// x 座標（または y 座標）として使える。窓・横断歩道の縞・柵・梁に使う。
+//   size  … 1個の大きさ
+//   gap   … 実際に使った隙間（minSize を確保するために詰めた場合は小さくなる）
+//   centers … 各ピースの中心座標
+// size が minSize を下回る場合は、隙間を詰めて minSize を確保する。
+function spanSplit(total, count, gap = 0, minSize = 0) {
+    const len = Math.max(0, finiteNumber(total, 0)),
+        n = clamp(Math.round(finiteNumber(count, 1)), 1, 64),
+        g0 = Math.max(0, finiteNumber(gap, 0)),
+        minS = Math.max(0, finiteNumber(minSize, 0));
+    if (n === 1) return { size: Math.max(minS, len), gap: 0, centers: [0], total: len };
+    let g = g0,
+        size = (len - g * (n - 1)) / n;
+    if (size < minS) {
+        g = Math.max(0, (len - minS * n) / (n - 1));
+        size = (len - g * (n - 1)) / n;
+    }
+    size = Math.max(0, size);
+    const centers = Array.from({ length: n }, (_, i) => -len / 2 + size / 2 + i * (size + g));
+    return { size, gap: g, centers, total: len };
+}
+
+// --- C. 1本で描ける面 -------------------------------------------------------
+// 水平な長方形の輪郭1本。cx/cy は中心、w/d は幅・奥行き、z は高さ。
+// 「板を1枚置く」「床・天板・影」のような一番よく使う形を1行で書くため。
+function rect2DOutlineA(o, cx, cy, w, d, z, color, width) {
+    const x = Math.abs(finiteNumber(w, 0)) / 2,
+        y = Math.abs(finiteNumber(d, 0)) / 2,
+        X = finiteNumber(cx, 0),
+        Y = finiteNumber(cy, 0),
+        Z = finiteNumber(z, 0);
+    return polyA(
+        o,
+        [
+            [X - x, Y - y, Z],
+            [X + x, Y - y, Z],
+            [X + x, Y + y, Z],
+            [X - x, Y + y, Z],
+        ],
+        color,
+        width,
+    );
+}
+// 任意の4点（[x,y,z] を4つ）を閉じた四角として描く。面を斜めにしたいとき
+// （切妻屋根の妻面・スロープの側面・テントの垂れ）に使う。
+function quadFaceA(o, a, b, c, d, color, width) {
+    const pts = [a, b, c, d].filter((q) => Array.isArray(q) && q.length >= 3);
+    if (pts.length < 3) return null;
+    return polyA(o, pts, color, width);
+}
+// 円弧（閉じない）の折れ線。a0→a1 はラジアン。
+// アーチ窓・ドーム・パイプの曲がり・影の表現に使う。
+function arcPointsA(o, cx, cy, rx, ry, z, a0 = 0, a1 = Math.PI, segments = 16, color, width) {
+    const n = clamp(Math.round(finiteNumber(segments, 16)), 2, 128),
+        X = finiteNumber(cx, 0),
+        Y = finiteNumber(cy, 0),
+        RX = Math.abs(finiteNumber(rx, 0)),
+        RY = Math.abs(finiteNumber(ry, RX)),
+        A0 = finiteNumber(a0, 0),
+        A1 = finiteNumber(a1, Math.PI),
+        Z = finiteNumber(z, 0),
+        pts = [];
+    for (let i = 0; i <= n; i++) {
+        const t = A0 + ((A1 - A0) * i) / n;
+        pts.push([X + RX * Math.cos(t), Y + RY * Math.sin(t), Z]);
+    }
+    return lineA(o, pts, color, width);
+}
+// 円・楕円の輪郭1本（中心を指定できる ringA）。z を2つ渡すと上下2本を返す。
+// 既存の ringA は中心が必ず原点なので、部品を原点以外へ置くときに使う。
+function discOutlineA(o, cx, cy, rx, ry, z, segments = 16, color) {
+    const line = arcPointsA(o, cx, cy, rx, ry, z, 0, Math.PI * 2, segments, color);
+    return line;
+}
+
+// --- D. 立体をまとめて -----------------------------------------------------
+// ワイヤーフレームの円柱（下の円・上の円・縦の稜線 n 本）。
+// 既存の ringA + spokesA を1回で呼ぶだけだが、部品として使う回数が多いので用意。
+function wireCylinderA(o, cx, cy, r, z0, z1, segments = 12, color) {
+    const n = clamp(Math.round(finiteNumber(segments, 12)), 3, 64),
+        X = finiteNumber(cx, 0),
+        Y = finiteNumber(cy, 0),
+        R = Math.abs(finiteNumber(r, 0)),
+        Z0 = finiteNumber(z0, 0),
+        Z1 = finiteNumber(z1, 0),
+        out = [
+            arcPointsA(o, X, Y, R, R, Z0, 0, Math.PI * 2, n, color),
+            arcPointsA(o, X, Y, R, R, Z1, 0, Math.PI * 2, n, color),
+        ];
+    for (let i = 0; i < n; i++) {
+        const t = (i / n) * Math.PI * 2,
+            px = X + R * Math.cos(t),
+            py = Y + R * Math.sin(t);
+        out.push(
+            lineA(
+                o,
+                [
+                    [px, py, Z0],
+                    [px, py, Z1],
+                ],
+                color,
+            ),
+        );
+    }
+    return out;
+}
+// 2D多角形（[[x,y], …]）を z0→z1 へ押し出したワイヤー。
+// 柱・看板の枠・風変わりな建物など「任意の断面」をそのまま立体にできる。
+function wirePrismA(o, polygon, z0, z1, color) {
+    const poly = (polygon || []).filter((q) => Array.isArray(q) && q.length >= 2);
+    if (poly.length < 3) return [];
+    const Z0 = finiteNumber(z0, 0),
+        Z1 = finiteNumber(z1, 0),
+        out = [
+            polyA(
+                o,
+                poly.map(([x, y]) => [x, y, Z0]),
+                color,
+            ),
+            polyA(
+                o,
+                poly.map(([x, y]) => [x, y, Z1]),
+                color,
+            ),
+        ];
+    poly.forEach(([x, y]) =>
+        out.push(
+            lineA(
+                o,
+                [
+                    [x, y, Z0],
+                    [x, y, Z1],
+                ],
+                color,
+            ),
+        ),
+    );
+    return out;
+}
+// 2D多角形を底面にして、1点（apex）へ集めるワイヤー（錐・ドーム・尖塔）。
+function wirePyramidA(o, polygon, zBase, apexZ, color, apexX = 0, apexY = 0) {
+    // 多角形は2D（[x,y]）でも3D（[x,y,z]）でも受け取れる。x/y だけを使う。
+    const poly = (polygon || []).filter((q) => Array.isArray(q) && q.length >= 2);
+    if (poly.length < 3) return [];
+    const Z0 = finiteNumber(zBase, 0),
+        Z1 = finiteNumber(apexZ, Z0 + 1),
+        apex = [finiteNumber(apexX, 0), finiteNumber(apexY, 0), Z1],
+        out = [
+            polyA(
+                o,
+                poly.map(([x, y]) => [x, y, Z0]),
+                color,
+            ),
+        ];
+    poly.forEach(([x, y]) =>
+        out.push(
+            lineA(
+                o,
+                [
+                    [x, y, Z0],
+                    apex,
+                ],
+                color,
+            ),
+        ),
+    );
+    return out;
+}
+
+// --- E. 建具・部品 ---------------------------------------------------------
+// 直階段。width=幅、depth=奥行き、steps=段数、baseZ→topZ へ上がる。
+// 各段の踏面（水平）と蹴上げ（垂直）を幅いっぱいに引き、両側面の階段状の
+// 輪郭も描くので、どのビューでも階段だと分かる。
+function stairsRunA(o, opt = {}) {
+    const w = Math.max(0.05, finiteNumber(opt.width, 1)),
+        d = Math.max(0.05, finiteNumber(opt.depth, 2)),
+        z0 = finiteNumber(opt.baseZ, 0),
+        z1 = finiteNumber(opt.topZ, z0 + 1),
+        n = clamp(Math.round(finiteNumber(opt.steps, 6)), 1, 48),
+        color = opt.color,
+        x = w / 2,
+        run = d / n,
+        rise = (z1 - z0) / n,
+        out = [],
+        // 奥（+y）へ上がる向き。i段目の踏面は z = z0 + rise*(i+1)。
+        treadZ = (i) => z0 + rise * (i + 1),
+        edgeY = (i) => -d / 2 + run * i;
+    for (let i = 0; i < n; i++) {
+        out.push(
+            lineA(
+                o,
+                [
+                    [-x, edgeY(i), treadZ(i)],
+                    [x, edgeY(i), treadZ(i)],
+                ],
+                color,
+            ),
+        );
+        out.push(
+            lineA(
+                o,
+                [
+                    [-x, edgeY(i), treadZ(i) - rise],
+                    [-x, edgeY(i), treadZ(i)],
+                ],
+                color,
+            ),
+        );
+        out.push(
+            lineA(
+                o,
+                [
+                    [x, edgeY(i), treadZ(i) - rise],
+                    [x, edgeY(i), treadZ(i)],
+                ],
+                color,
+            ),
+        );
+    }
+    // 左右の側面（階段状の輪郭）
+    [-x, x].forEach((sx) => {
+        const pts = [];
+        for (let i = 0; i < n; i++) {
+            pts.push([sx, edgeY(i), treadZ(i)]);
+            pts.push([sx, edgeY(i) + run, treadZ(i)]);
+        }
+        pts.push([sx, d / 2, z0]);
+        pts.unshift([sx, -d / 2, z0]);
+        out.push(lineA(o, pts, color));
+    });
+    return out;
+}
+// 格子パネル（柵・フェンス・窓の桟）。y を固定した x-z 平面に、
+// 縦棒 cols 本と横棒 rows 本を等間隔で引く。
+function latticePanelA(o, opt = {}) {
+    const w = Math.max(0.05, finiteNumber(opt.width, 1)),
+        z0 = finiteNumber(opt.z0, 0),
+        z1 = finiteNumber(opt.z1, z0 + 1),
+        y = finiteNumber(opt.y, 0),
+        cols = clamp(Math.round(finiteNumber(opt.cols, 3)), 1, 64),
+        rows = clamp(Math.round(finiteNumber(opt.rows, 2)), 1, 64),
+        color = opt.color,
+        x = w / 2,
+        out = [];
+    for (let i = 0; i < cols; i++) {
+        const px = -x + (w * i) / (cols - 1 || 1);
+        out.push(
+            lineA(
+                o,
+                [
+                    [cols === 1 ? 0 : px, y, z0],
+                    [cols === 1 ? 0 : px, y, z1],
+                ],
+                color,
+            ),
+        );
+    }
+    for (let i = 0; i < rows; i++) {
+        const pz = z0 + ((z1 - z0) * i) / (rows - 1 || 1);
+        out.push(
+            lineA(
+                o,
+                [
+                    [-x, y, rows === 1 ? (z0 + z1) / 2 : pz],
+                    [x, y, rows === 1 ? (z0 + z1) / 2 : pz],
+                ],
+                color,
+            ),
+        );
+    }
+    return out;
+}
+
+// --- F. 登録と確認 ---------------------------------------------------------
+// 新しいアセットを「カタログ（ASSETS）」と「線画の表（ASSET_LINE_BUILDERS）」へ
+// 同時に登録する。両方に書くのを忘れて「棚に出るのに形が出ない」事故を防ぐ。
+//   registerAsset("fence", { label: "フェンス", glyph: "‖", w: 2, d: 0.1, h: 1.2 }, linesFence)
+// 既に同じ名前がある場合は上書きせず false を返す（既存アセットの保護）。
+function registerAsset(kind, meta = {}, builder) {
+    if (!kind || typeof kind !== "string" || typeof builder !== "function") return false;
+    if (ASSETS[kind] || ASSET_LINE_BUILDERS[kind]) return false;
+    ASSETS[kind] = {
+        label: meta.label || kind,
+        glyph: meta.glyph || "◆",
+        w: Math.max(0.05, finiteNumber(meta.w, 1)),
+        d: Math.max(0.05, finiteNumber(meta.d, 1)),
+        h: Math.max(0, finiteNumber(meta.h, 0)),
+        accent: meta.accent || "#66e3c8",
+        ...meta,
+    };
+    ASSET_LINE_BUILDERS[kind] = builder;
+    return true;
+}
+// デバッグ用の1行要約。寸法・アセット名・線画の本数をまとめて出す。
+// コンソールで describeAsset(obOf(sel)) と打てば、いまの寸法を確認できる。
+function describeAsset(o) {
+    if (!o) return "（オブジェクトなし）";
+    const { w, d, h } = assetDimensions(o);
+    let lines = 0;
+    try {
+        lines = o.type === "asset" ? assetLines(o).length : 0;
+    } catch (e) {
+        lines = -1;
+    }
+    return `${assetLabel(o)} / ${o.asset || o.type} / ${w.toFixed(2)}×${d.toFixed(2)}×${h.toFixed(2)}m / 線画${lines}本`;
+}
+
+// ===== 7. アセットごとの線画生成本体 =====
 // 形ごとの処理は ASSET_LINE_BUILDERS の表から呼び出す。1形状=1関数にして、
 // 追加・修正するときに触る範囲をその形の中だけに閉じ込める。
 function assetLines(o) {
@@ -8616,9 +10021,13 @@ const ASSET_LINE_BUILDERS = {
     person: linesPerson,
     building: linesBuilding,
     awning: linesAwning,
+    gableRoof: linesGableRoof,
+    shedRoof: linesShedRoof,
+    ramp: linesRamp,
+    windowGrid: linesWindowGrid,
 };
 
-    // --- 作成サイトから読み込んだ任意形状 ---
+// --- 作成サイトから読み込んだ任意形状 ---
 // geometry.vertices / edges / loops を、そのまま3D線画へ変換する。
 function linesCustom(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
@@ -8665,20 +10074,19 @@ function linesCustom(ctx) {
                 Number(style.width) || width,
             );
     });
-    // --- 直方体 ---
-    // ベベルなしの基準形状。ベベル直方体とは別アセットとして選べる。
 }
 
-
+// --- 直方体 ---
+// ベベルなしの基準形状。ベベル直方体とは別アセットとして選べる。
 function linesBox(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     out.push(...wireBoxA(o, 0, 0, w, d, 0, Math.max(0.01, h), c));
-    // --- 壁付け看板（単体）---
-    // 板の表裏の輪郭を同じ点列から作り、対応する頂点を結んで板厚を出す。
-    // 取付金具は板の左側面から横へ伸びる直方体として並べる。
+    appendFacadeWindows(o, out, w, d, Math.max(0.01, h), a);
 }
 
-
+// --- 壁付け看板（単体）---
+// 板の表裏の輪郭を同じ点列から作り、対応する頂点を結んで板厚を出す。
+// 取付金具は板の左側面から横へ伸びる直方体として並べる。
 function linesWallSign(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const params = wallSignParams(o),
@@ -8704,7 +10112,8 @@ function linesWallSign(ctx) {
     );
 }
 
-
+// --- 隅切り直方体 ---
+// 隅を1か所切り落とした箱と、赤い断面に開けた開口を描く。
 function linesCornerCutBox(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const q = cornerCutOpeningParams(o),
@@ -8714,12 +10123,11 @@ function linesCornerCutBox(ctx) {
         out.push(
             ...cornerCutWireBoxA(o, q.w, q.d, 0, z1, q.cornerOffset, q.cornerCutCorner, c, o.cutColor || "#e24b4b"),
         );
-    // --- 横壁看板 ---
-    // 看板本体を縦長の箱として描き、必要なら壁からの
-    // 面のある取付金具を0〜3本、看板の裏側へ追加する。
 }
 
-
+// --- 横壁看板 ---
+// 看板本体を縦長の箱として描き、必要なら壁からの
+// 面のある取付金具を0〜3本、看板の裏側へ追加する。
 function linesWallSideSign(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const boardH = Math.max(0.05, Math.abs(Number(o.ra) || 0.9) * 2),
@@ -8751,11 +10159,10 @@ function linesWallSideSign(ctx) {
         // ベベルは看板本体だけに適用し、取付金具は普通の直方体で描く。
         out.push(...wireBoxA(o, x, bracketCenter, bracketV, bracketSpan, -thickness * 0.5, thickness * 0.5, c));
     }
-    // --- ベベル直方体 ---
-    // footprintを底面・上面へ複製し、押し出し後だけ縦辺を追加する。
 }
 
-
+// --- ベベル直方体 ---
+// footprintを底面・上面へ複製し、押し出し後だけ縦辺を追加する。
 function linesBeveledBox(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const q = beveledBoxParams(o),
@@ -8792,11 +10199,10 @@ function linesBeveledBox(ctx) {
             ),
         );
     }
-    // --- パスパイプ ---
-    // 丸めた中心線のリングを描き、リング間の縦線でパイプらしさを出す。
 }
 
-
+// --- パスパイプ ---
+// 丸めた中心線のリングを描き、リング間の縦線でパイプらしさを出す。
 function linesPathPipe(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const mesh = pathPipeMesh(o);
@@ -8810,19 +10216,17 @@ function linesPathPipe(ctx) {
                 0.85,
             ),
         );
-    // --- 凹窓階層建物 ---
-    // 各階に同じ矩形凹窓を反復し、正面・右側面のファサードを描く。
 }
 
-
+// --- 凹窓階層建物 ---
+// 各階に同じ矩形凹窓を反復し、正面・右側面のファサードを描く。
 function linesRecessedStackedBuilding(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     out.push(...recessedStackedBuildingLines(o));
-    // --- 階層建物／ベベル階層建物 ---
-    // floors配列を階ごとに描く。開口はopeningEnabledがtrueの1Fだけへ追加する。
 }
 
-
+// --- 階層建物／ベベル階層建物 ---
+// floors配列を階ごとに描く。開口はopeningEnabledがtrueの1Fだけへ追加する。
 function linesStackedBuilding(ctx) {
     const { o, w, d, h, c, a, out, kind } = ctx;
     const floors =
@@ -9028,11 +10432,10 @@ function linesStackedBuilding(ctx) {
             addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
         }
     });
-    // --- 壁付けベランダ ---
-    // 床スラブ、前面の腰壁、左右の腰壁、支持ブラケットを別々に描く。
 }
 
-
+// --- 壁付けベランダ ---
+// 床スラブ、前面の腰壁、左右の腰壁、支持ブラケットを別々に描く。
 function linesBalcony(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     // 壁側（+Y）を建物外壁へ合わせ、床を外側（-Y）へ張り出すU字型のベランダ。
@@ -9065,11 +10468,10 @@ function linesBalcony(ctx) {
             ),
         ),
     );
-    // --- 階段 ---
-    // stepsの数だけ段板と蹴上げを作り、必要なら手すりも追加する。
 }
 
-
+// --- 階段 ---
+// stepsの数だけ段板と蹴上げを作り、必要なら手すりも追加する。
 function linesStairs(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const n = Math.max(2, Math.min(24, Math.round(o.steps || 6))),
@@ -9187,11 +10589,10 @@ function linesStairs(ctx) {
                 );
             }
         });
-    // --- 横断歩道 ---
-    // 道路の面へ白いストライプを並べる。
 }
 
-
+// --- 横断歩道 ---
+// 道路の面へ白いストライプを並べる。
 function linesCrosswalk(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const n = Math.max(3, Math.min(16, Math.round(o.stripes || 7))),
@@ -9235,18 +10636,16 @@ function linesCrosswalk(ctx) {
             0.9,
         ),
     );
-    // --- 円柱・円錐・球 ---
-    // 円柱は上下輪郭、円錐は底面とシルエット、球は正面向きの円だけを描く。
 }
 
-
+// --- 円柱・円錐・球 ---
+// 円柱は上下輪郭、円錐は底面とシルエット、球は正面向きの円だけを描く。
 function linesCylinder(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     // 円柱は上下の輪郭だけ。側面の縦エッジは描かない。
     out.push(ringA(o, w * 0.5, d * 0.5, 0, 12, c));
     out.push(ringA(o, w * 0.5, d * 0.5, h, 12, c));
 }
-
 
 function linesCone(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
@@ -9287,7 +10686,6 @@ function linesCone(ctx) {
     );
 }
 
-
 function linesSphere(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     // 球は緯度線・経線を描かず、円形の外周輪郭だけを描く。
@@ -9323,7 +10721,6 @@ function linesSphere(ctx) {
     out.push(lineA(o, pts, c, 1.1));
 }
 
-
 function linesTriPrism(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const x = w / 2,
@@ -9343,7 +10740,6 @@ function linesTriPrism(ctx) {
     for (let i = 0; i < 3; i++) out.push(lineA(o, [front[i], back[i]], a, 1.1));
 }
 
-
 function linesTriPyramid(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     const x = w / 2,
@@ -9357,7 +10753,6 @@ function linesTriPyramid(ctx) {
     out.push(polyA(o, base, c));
     base.forEach((v) => out.push(lineA(o, [v, apex], a, 1.1)));
 }
-
 
 function linesLantern(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
@@ -9396,11 +10791,10 @@ function linesLantern(ctx) {
     );
     // Two inner bands suggest a glowing paper lantern without requiring a texture.
     [0.36, 0.56].forEach((z) => out.push(ringA(o, rx * 1.02, ry * 1.02, z * h, 8, a, 0.8)));
-    // --- 看板 ---
-    // 外枠と、faceW / faceHで編集できる内側の絵枠を描く。
 }
 
-
+// --- 看板 ---
+// 外枠と、faceW / faceHで編集できる内側の絵枠を描く。
 function linesSign(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     // 看板外側は通常の直方体。内側の絵枠だけを追加編集できる。
@@ -9421,31 +10815,41 @@ function linesSign(ctx) {
         [-ix, fy, iz1],
     ];
     out.push(polyA(o, q, a, 1.1));
-    // --- 人物 ---
-    // 身長・体格・頭身・脚の開き・簡易ポーズを線画へ反映する。
 }
 
-
-function linesPerson(ctx) {
-    const { o, w, d, h, c, a, out } = ctx;
-    // 人物は配置後も高さ・体格・頭身・脚の開き・簡易ポーズを編集できる。
-    // 腕は既存仕様どおり描かず、立体感は胴体・脚・頭の線だけで表現する。
-    const bodyScale = clamp(Number(o.bodyScale) || 1, 0.6, 1.8),
-        shoulderScale = clamp(Number(o.shoulderScale) || 1, 0.6, 1.6),
-        headScale = clamp(Number(o.headScale) || 1, 0.7, 1.5),
-        legSpread = clamp(Number(o.legSpread) || 1, 0.6, 1.8),
-        pose = o.pose || "stand";
-    const defaults = { stand: [0, 0, 0], walk: [0.22, 0, 0], crouch: [0.04, 0.65, 0], sit: [0.1, 0.35, 0] },
-        def = defaults[pose] || defaults.stand;
-    const stride = clamp(Number.isFinite(Number(o.poseStride)) ? Number(o.poseStride) : def[0], 0, 0.5),
-        crouch = clamp(Number.isFinite(Number(o.poseCrouch)) ? Number(o.poseCrouch) : def[1], 0, 1),
-        lean = clamp(Number.isFinite(Number(o.poseLean)) ? Number(o.poseLean) : def[2], -0.35, 0.35),
-        headTilt = clamp(Number(o.headTilt) || 0, -25, 25);
+// --- 人物 ---
+// 人形の骨格を1か所で決める。線画（linesPerson）と面メッシュ
+// （engine-tools.js の exportSurfaceTriangles）が同じ値を使うので、
+// 関節を回しても線と面が食い違わない。
+// 角度はすべて度。正の値が「前に振る（-y 側）」。膝だけは正が「曲げる（かかとが後ろ）」。
+function personPose(o) {
+    const q = o || {},
+        bodyScale = clamp(finiteNumber(q.bodyScale, 1), 0.6, 1.8),
+        shoulderScale = clamp(finiteNumber(q.shoulderScale, 1), 0.6, 1.6),
+        headScale = clamp(finiteNumber(q.headScale, 1), 0.7, 1.5),
+        legSpread = clamp(finiteNumber(q.legSpread, 1), 0.6, 1.8),
+        h = Math.max(0.2, Math.abs(finiteNumber(q.h, 1.7))),
+        pose = q.pose === "walk" || q.pose === "crouch" || q.pose === "sit" ? q.pose : "stand",
+        stride = clamp(finiteNumber(q.poseStride, pose === "walk" ? 0.22 : pose === "sit" ? 0.1 : pose === "crouch" ? 0.04 : 0), 0, 0.5),
+        crouch = clamp(finiteNumber(q.poseCrouch, pose === "crouch" ? 0.65 : pose === "sit" ? 0.35 : 0), 0, 1),
+        lean = clamp(finiteNumber(q.poseLean, 0), -0.35, 0.35),
+        headTilt = clamp(finiteNumber(q.headTilt, 0), -25, 25),
+        // 関節の角度（画面上のギズモでもパネルでも同じ値を使う）
+        waistAngle = clamp(finiteNumber(q.personWaist, 0), -60, 60),
+        neckAngle = clamp(finiteNumber(q.personNeck, 0), -40, 40),
+        hipAngles = [
+            clamp(finiteNumber(q.personHipL, 0), -80, 80),
+            clamp(finiteNumber(q.personHipR, 0), -80, 80),
+        ],
+        kneeAngles = [
+            clamp(finiteNumber(q.personKneeL, 0), 0, 120),
+            clamp(finiteNumber(q.personKneeR, 0), 0, 120),
+        ];
     const bw = 0.28 * h * bodyScale * shoulderScale,
         bd = 0.16 * h * bodyScale,
-        leg = 0.055 * h * bodyScale,
-        headR = 0.095 * h * headScale;
-    let legTop = (0.47 - 0.16 * crouch) * h,
+        legR = 0.055 * h * bodyScale,
+        headR = 0.095 * h * headScale,
+        legTop = (0.47 - 0.16 * crouch) * h,
         torso0 = (0.44 - 0.16 * crouch) * h,
         torso1 = (0.78 - 0.18 * crouch) * h,
         head0 = (0.84 - 0.18 * crouch) * h,
@@ -9453,88 +10857,139 @@ function linesPerson(ctx) {
         footY = [-stride, stride],
         kneeY = [-0.02 * h, 0.02 * h],
         kneeX = [-0.09 * h * legSpread, 0.09 * h * legSpread],
+        bodyY = lean * 0.18,
+        headTopX = Math.sin(headTilt * DG) * 0.06 * h,
         poseTop = (1 - 0.18 * crouch) * h;
-    const bodyY = lean * 0.18,
-        headY = lean * 0.42,
-        headTopX = Math.sin(headTilt * DG) * 0.06 * h;
-    if (pose === "walk") {
-        kneeY = [-0.05 * h, 0.06 * h];
-        kneeX = [-0.07 * h * legSpread, 0.08 * h * legSpread];
-    }
-    if (pose === "crouch") {
-        kneeY = [-0.06 * h, 0.06 * h];
-        kneeX = [-0.1 * h * legSpread, 0.1 * h * legSpread];
-    }
+    if (pose === "walk") kneeY = [-0.05 * h, 0.06 * h];
+    if (pose === "crouch") kneeX = [-0.1 * h * legSpread, 0.1 * h * legSpread];
     if (pose === "sit") {
         kneeY = [0.2 * h, 0.26 * h];
         kneeX = [-0.11 * h * legSpread, 0.11 * h * legSpread];
     }
-    // 足元の小さな台座と脚。歩幅・しゃがみ量・脚の開きを連続的に反映する。
-    out.push(...boxA(o, leg * 1.5, bd * 0.85, 0, 0.08 * h, c));
-    if (pose === "sit") {
-        out.push(
-            lineA(
-                o,
-                [
-                    [-0.09 * h * legSpread, bodyY, 0.32 * h],
-                    [kneeX[0], kneeY[0], 0.3 * h],
-                    [kneeX[0], footY[0], 0],
-                ],
-                c,
-                1.4,
-            ),
-        );
-        out.push(
-            lineA(
-                o,
-                [
-                    [0.09 * h * legSpread, bodyY, 0.32 * h],
-                    [kneeX[1], kneeY[1], 0.3 * h],
-                    [kneeX[1], footY[1], 0],
-                ],
-                c,
-                1.4,
-            ),
-        );
-    } else {
-        out.push(
-            lineA(
-                o,
-                [
-                    [kneeX[0], footY[0], 0],
-                    [kneeX[0], kneeY[0], legTop],
-                ],
-                c,
-                1.4,
-            ),
-        );
-        out.push(
-            lineA(
-                o,
-                [
-                    [kneeX[1], footY[1], 0],
-                    [kneeX[1], kneeY[1], legTop],
-                ],
-                c,
-                1.4,
-            ),
-        );
-    }
-    // Torso and shoulders. leanは肩・首・頭の位置へ反映する。
-    out.push(...boxA(o, bw, bd, torso0, torso1, c));
-    out.push(
-        lineA(
-            o,
+    // 2D（前後 y・上下 z）の回転。正で前（-y）へ振れる。
+    const rot = (dy, dz, deg) => {
+            const a = -deg * DG,
+                cs = Math.cos(a),
+                sn = Math.sin(a);
+            return [dy * cs - dz * sn, dy * sn + dz * cs];
+        },
+        // 脚：もとの姿勢の「股→膝」「膝→足」の向きを測り、そこから関節角度ぶん回す。
+        // 長さを変えないので、回しても脚が伸び縮みしない。
+        legs = [0, 1].map((i) => {
+            const x = kneeX[i],
+                sit = pose === "sit",
+                hip = { x, y: sit ? bodyY : kneeY[i], z: sit ? 0.32 * h : legTop },
+                knee0 = { x, y: kneeY[i], z: sit ? 0.3 * h : (legTop + 0) * 0.5 },
+                foot0 = { x, y: footY[i], z: 0 },
+                dv = (a, b) => [b.y - a.y, b.z - a.z],
+                len = (v) => Math.hypot(v[0], v[1]) || 1e-6,
+                vThigh = dv(hip, knee0),
+                vShin = dv(knee0, foot0),
+                thighLen = len(vThigh),
+                shinLen = len(vShin),
+                dirThigh = rot(vThigh[0] / thighLen, vThigh[1] / thighLen, hipAngles[i]),
+                dirShin = rot(dirThigh[0], dirThigh[1], -kneeAngles[i]),
+                knee = { x, y: hip.y + dirThigh[0] * thighLen, z: hip.z + dirThigh[1] * thighLen },
+                foot = { x, y: knee.y + dirShin[0] * shinLen, z: knee.z + dirShin[1] * shinLen };
+            return { hip, knee, foot };
+        }),
+        // 腰の支点。ここを中心に上体（胴の上面・首・頭）を回す。
+        waistPivot = { y: 0, z: torso0 },
+        tiltAbout = (y, z, deg, py = waistPivot.y, pz = waistPivot.z) => {
+            const v = rot(y - py, z - pz, deg);
+            return { y: py + v[0], z: pz + v[1] };
+        },
+        // 胴の4すみ。下の面は固定、上の面だけ腰の角度ぶん回す。
+        halfW = bw * 0.5,
+        halfD = bd * 0.5,
+        torsoBottom = [
+            [-halfW, -halfD, torso0],
+            [halfW, -halfD, torso0],
+            [halfW, halfD, torso0],
+            [-halfW, halfD, torso0],
+        ],
+        torsoTop = [
+            [-halfW, -halfD],
+            [halfW, -halfD],
+            [halfW, halfD],
+            [-halfW, halfD],
+        ].map(([x, y]) => {
+            const p = tiltAbout(y, torso1, waistAngle);
+            return [x, p.y, p.z];
+        }),
+        neckBase = (() => {
+            const p = tiltAbout(bodyY, torso1, waistAngle);
+            return { y: p.y, z: p.z };
+        })(),
+        // 頭は「首の根元から、腰＋首の角度ぶん傾いた向き」へ積む。
+        headAxis = rot(0, 1, waistAngle + neckAngle),
+        headPoint = (z) => ({
+            y: neckBase.y + headAxis[0] * (z - torso1),
+            z: neckBase.z + headAxis[1] * (z - torso1),
+        }),
+        headC0 = headPoint(head0),
+        headC1 = headPoint(head1);
+    return {
+        h, bw, bd, legR, headR, legTop, torso0, torso1, head0, head1,
+        bodyY, headY: headC0.y, headTopX, poseTop, headTilt, pose, stride, crouch, lean,
+        waistAngle, neckAngle, hipAngles, kneeAngles,
+        waistPivot, neckBase, headAxis, headC0, headC1,
+        torsoBottom, torsoTop, legs,
+    };
+}
+// 身長・体格・頭身・脚の開き・ポーズ・関節角度を線画へ反映する。
+function linesPerson(ctx) {
+    const { o, c, a, out } = ctx,
+        p = personPose(o),
+        h = p.h,
+        line = (pts, col = c, width = 1.4) => out.push(lineA(o, pts, col, width));
+    // 足元の台座（立方体）は描かない。人物は「そのまま立っている」形にして、
+    // 配置したときに足元の箱が他のアセットと重ならないようにする。
+    // 脚：股関節 → 膝 → 足。関節角度は personPose() の中で反映済み。
+    p.legs.forEach((leg) => {
+        line(
             [
-                [-bw * 0.48, bodyY, torso1 - 0.02 * h],
-                [bw * 0.48, bodyY, torso1 - 0.02 * h],
+                [leg.hip.x, leg.hip.y, leg.hip.z],
+                [leg.knee.x, leg.knee.y, leg.knee.z],
+                [leg.foot.x, leg.foot.y, leg.foot.z],
+            ],
+            c,
+            1.4,
+        );
+        // 膝の関節が分かるよう、小さな点を打つ
+        line(
+            [
+                [leg.knee.x - 0.012 * h, leg.knee.y, leg.knee.z],
+                [leg.knee.x + 0.012 * h, leg.knee.y, leg.knee.z],
             ],
             a,
-            1,
-        ),
+            0.9,
+        );
+    });
+    // 胴：下の面は固定、上の面は腰の角度ぶん傾けた四角柱
+    const bottom = p.torsoBottom,
+        top = p.torsoTop;
+    line([...bottom, bottom[0]], c, 1.15);
+    line([...top, top[0]], c, 1.15);
+    bottom.forEach((q, i) => line([q, top[i]], a, 0.95));
+    // 肩の線と首
+    line(
+        [
+            [p.torsoTop[0][0], p.torsoTop[0][1], p.torsoTop[0][2]],
+            [p.torsoTop[1][0], p.torsoTop[1][1], p.torsoTop[1][2]],
+        ],
+        a,
+        1,
     );
-    // 腕は省略。小さな人物シルエットとして使えるよう胴体と脚だけ残す。
-    // Head rings are shifted/tilted without adding arms.
+    line(
+        [
+            [0, p.neckBase.y, p.neckBase.z],
+            [0, p.headC0.y, p.headC0.z],
+        ],
+        c,
+        1.1,
+    );
+    // 頭：首の角度ぶん傾いた2つのリングと縦の骨
     const ringAt = (rx, ry, x0, y0, z, n, color) => {
         const pts = [];
         for (let i = 0; i < n; i++) {
@@ -9543,79 +10998,48 @@ function linesPerson(ctx) {
         }
         return polyA(o, pts, color);
     };
+    out.push(ringAt(p.headR, p.headR * 0.9, 0, p.headC0.y, p.headC0.z, 8, c));
+    out.push(ringAt(p.headR * 0.86, p.headR * 0.78, p.headTopX, p.headC1.y, p.headC1.z, 8, c));
     out.push(
-        lineA(
-            o,
-            [
-                [0, bodyY, torso1],
-                [headTopX, headY, head0],
-            ],
-            c,
-            1.1,
-        ),
+        ...spokesA(o, [0, p.headC0.y], [p.headR, p.headR * 0.9], p.headC0.z, [p.headTopX, p.headC1.y], [p.headR * 0.86, p.headR * 0.78], p.headC1.z, 8, c, 0.85),
     );
-    out.push(ringAt(headR, headR * 0.9, 0, headY, head0, 8, c));
-    out.push(ringAt(headR * 0.86, headR * 0.78, headTopX, headY + 0.02 * h, head1, 8, c));
-    out.push(
-        ...spokesA(
-            o,
-            [0, headY],
-            [headR, headR * 0.9],
-            head0,
-            [headTopX, headY + 0.02 * h],
-            [headR * 0.86, headR * 0.78],
-            head1,
-            8,
-            c,
-            0.85,
-        ),
-    );
-    // A small measurement tick makes the current pose height reference visible.
+    // 姿勢の高さ目盛り
     const mx = 0.42 * h;
-    out.push(
-        lineA(
-            o,
-            [
-                [mx, 0, 0],
-                [mx, 0, poseTop],
-            ],
-            a,
-            0.75,
-        ),
+    line(
+        [
+            [mx, 0, 0],
+            [mx, 0, p.poseTop],
+        ],
+        a,
+        0.75,
     );
-    out.push(
-        lineA(
-            o,
-            [
-                [mx - 0.045 * h, 0, 0],
-                [mx + 0.045 * h, 0, 0],
-            ],
-            a,
-            0.75,
-        ),
+    line(
+        [
+            [mx - 0.045 * h, 0, 0],
+            [mx + 0.045 * h, 0, 0],
+        ],
+        a,
+        0.75,
     );
-    out.push(
-        lineA(
-            o,
-            [
-                [mx - 0.045 * h, 0, poseTop],
-                [mx + 0.045 * h, 0, poseTop],
-            ],
-            a,
-            0.75,
-        ),
+    line(
+        [
+            [mx - 0.045 * h, 0, p.poseTop],
+            [mx + 0.045 * h, 0, p.poseTop],
+        ],
+        a,
+        0.75,
     );
-    // --- 開口のある建物 ---
-    // 外枠に加え、開口の左右柱・上梁・内側面・奥面を描く。
 }
 
-
+// --- 開口のある建物 ---
+// 外枠に加え、開口の左右柱・上梁・内側面・奥面を描く。
 function linesBuilding(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     // チェックを外したリンク建物は、開口のない通常の閉じた箱へ戻す。
     if (o.openingEnabled === false) {
         // 閉じた箱は形が別なので、専用の関数の結果をそのまま返す。
         out.push(...closedBuildingLines(o, w, d, h, c));
+        appendFacadeWindows(o, out, w, d, h, a);
         return;
     }
     // 外側は直方体の輪郭を保ちながら、正面から背面まで抜ける開口を作る。
@@ -9733,11 +11157,11 @@ function linesBuilding(ctx) {
             1.0,
         ),
     );
-    // --- 店舗テント ---
-    // awningGeometry()が返す手前上辺・奥側・底辺をつないでテントを描く。
+    appendFacadeWindows(o, out, w, d, h, a, { w: ow, h: oh });
 }
 
-
+// --- 店舗テント ---
+// awningGeometry()が返す手前上辺・奥側・底辺をつないでテントを描く。
 function linesAwning(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     // 店舗テント：初期状態は直方体。手前上辺だけを高さ・奥行き方向へ動かせる。
@@ -9830,7 +11254,141 @@ function linesAwning(ctx) {
     );
 }
 
-// ===== 6. 保存データ・入力値の正規化 =====
+// --- 切妻屋根・片流れ屋根 ---
+// どちらも「勾配のついた板」なので、断面（roofSlab）を棟方向へ押し出した形で描く。
+// 板厚は斜面に直角方向で一定。断面の外形・内形・両端の輪郭を線にする。
+function roofSlabLines(ctx, kind) {
+    const { o, c, a, out } = ctx,
+        slab = roofSlab(o, kind),
+        { axis, half } = slab,
+        // 断面の(u,z)を3Dへ。u は押し出す軸と直交する水平軸。
+        at = (u, z, s) => (axis === "x" ? [s, u, z] : [u, s, z]),
+        line = (pts, col = c, width = 1.1) => out.push(lineA(o, pts, col, width)),
+        profOuter = slab.outerPath.map(([u, z]) => at(u, z, -half)),
+        profBack = slab.outerPath.map(([u, z]) => at(u, z, half)),
+        profInnerF = slab.innerPath.map(([u, z]) => at(u, z, -half)),
+        profInnerB = slab.innerPath.map(([u, z]) => at(u, z, half));
+    // 両端の断面（板厚まで含めた輪郭）。これで「薄さ」が断面で読める。
+    const ring = (front, back) => [...front, ...[...back].reverse(), front[0]];
+    line(ring(profOuter, profInnerF), c, 1.15);
+    line(ring(profBack, profInnerB), c, 1.15);
+    // 棟と軒に沿った縦の稜線（外側・内側の両方）。
+    slab.outerPath.forEach(([u, z]) => line([at(u, z, -half), at(u, z, half)], a, 1.05));
+    slab.innerPath.forEach(([u, z]) => line([at(u, z, -half), at(u, z, half)], a, 0.85));
+    // 軒先の見付け（外側の軒と内側の軒をつなぐ短い線）。
+    [0, slab.outerPath.length - 1].forEach((i) => {
+        const [ou, oz] = slab.outerPath[i],
+            [iu, iz] = slab.innerPath[i] || slab.innerPath[0];
+        line([at(ou, oz, -half), at(iu, iz, -half)], a, 0.9);
+        line([at(ou, oz, half), at(iu, iz, half)], a, 0.9);
+    });
+}
+// --- 切妻屋根 ---
+// 棟を中心に左右へ下る山形の板。overhangで軒の出、thicknessで板厚を決める。
+function linesGableRoof(ctx) {
+    roofSlabLines(ctx, "gableRoof");
+}
+// --- 片流れ屋根 ---
+// 低い側から高い側へ一枚で上がる板。lowZで低い側の高さを決める。
+function linesShedRoof(ctx) {
+    roofSlabLines(ctx, "shedRoof");
+}
+// --- スロープ ---
+// 手前が床、奥が立ち上がり高さの楔。手すりを付けると支柱も描く。
+function linesRamp(ctx) {
+    const { o, c, a, out } = ctx,
+        q = rampParams(o),
+        x = q.w * 0.5,
+        y0 = -q.d * 0.5,
+        y1 = q.d * 0.5,
+        line = (pts, col = c, width = 1.05) => out.push(lineA(o, pts, col, width)),
+        fl = [-x, y0, 0],
+        fr = [x, y0, 0],
+        bl = [-x, y1, q.h],
+        br = [x, y1, q.h],
+        bl0 = [-x, y1, 0],
+        br0 = [x, y1, 0];
+    line([fl, fr, br, bl, fl]);
+    line([fl, fr, br0, bl0, fl], a, 0.9);
+    line([fl, bl, bl0, fl], a);
+    line([fr, br, br0, fr], a);
+    line([bl0, br0, br, bl, bl0], a);
+    if (q.rail)
+        [-x, x].forEach((px) => {
+            line(
+                [
+                    [px, y0, q.railH],
+                    [px, y1, q.h + q.railH],
+                ],
+                a,
+                1.1,
+            );
+            for (let i = 0; i <= 3; i++) {
+                const t = i / 3,
+                    y = y0 + (y1 - y0) * t,
+                    zDeck = q.h * t;
+                line(
+                    [
+                        [px, y, zDeck],
+                        [px, y, zDeck + q.railH],
+                    ],
+                    a,
+                    0.8,
+                );
+            }
+        });
+}
+// --- 窓グリッド ---
+// 厚みのある板の表裏へ、行×列の窓枠を並べる。窓は窓グリッドの共通計算を使う。
+function linesWindowGrid(ctx) {
+    const { o, w, d, h, c, a, out } = ctx,
+        hh = Math.max(0.2, Math.abs(Number(h) || 0.2)),
+        ww = Math.max(0.2, Math.abs(Number(w) || 0.2)),
+        thick = Math.max(0.01, Math.abs(Number(d) || 0.01)),
+        y0 = -thick * 0.5,
+        y1 = thick * 0.5;
+    out.push(
+        lineA(
+            o,
+            [
+                [-ww / 2, y0, 0],
+                [ww / 2, y0, 0],
+                [ww / 2, y0, hh],
+                [-ww / 2, y0, hh],
+                [-ww / 2, y0, 0],
+            ],
+            c,
+            1.15,
+        ),
+        lineA(
+            o,
+            [
+                [-ww / 2, y1, 0],
+                [ww / 2, y1, 0],
+                [ww / 2, y1, hh],
+                [-ww / 2, y1, hh],
+                [-ww / 2, y1, 0],
+            ],
+            a,
+            0.9,
+        ),
+    );
+    [
+        [-ww / 2, 0],
+        [ww / 2, 0],
+        [ww / 2, hh],
+        [-ww / 2, hh],
+    ].forEach(([x, z]) => out.push(lineA(o, [[x, y0, z], [x, y1, z]], a, 0.8)));
+    const panel = {
+        ...o,
+        windowRows: Math.max(1, Math.round(Number(o.windowRows) || 2)),
+        windowCols: Math.max(1, Math.round(Number(o.windowCols) || 4)),
+        windowBack: true,
+    };
+    appendFacadeWindows(panel, out, ww, thick, hh, c);
+}
+
+// ===== 8. 保存データ・入力値の正規化 =====
 // 描画前に、寸法の下限・ベベル値・階数・パス値などを整える。
 // ここでは見た目を作らず、後段のassetLines()が安全に読める形へ変換する。
 function normalizedAsset(o) {
@@ -9998,7 +11556,36 @@ function normalizedAsset(o) {
             n = { ...q, openingW, openingH };
         if (Number.isFinite(Number(q.openingBack)))
             n.openingBack = clamp(Number(q.openingBack), -d / 2 + 0.025, d / 2 - 0.025);
-        return n;
+        return { ...n, ...normalizedWindowFields(n) };
+    }
+    if (q && q.asset === "box") return { ...q, ...normalizedWindowFields(q) };
+    if (q && (q.asset === "gableRoof" || q.asset === "shedRoof")) {
+        const p = roofParams(q);
+        return {
+            ...q,
+            ra: p.w * 0.5,
+            rb: p.d * 0.5,
+            h: p.h,
+            roofOverhang: p.overhang,
+            roofThickness: p.thickness,
+            roofRidgeAxis: p.ridgeAxis,
+            roofLowZ: p.lowZ,
+        };
+    }
+    if (q && q.asset === "ramp") {
+        const p = rampParams(q);
+        return { ...q, ra: p.w * 0.5, rb: p.d * 0.5, h: p.h, rampRailHeight: p.railH };
+    }
+    if (q && q.asset === "windowGrid") {
+        const rows = Math.max(1, Math.round(Number(q.windowRows) || 2)),
+            cols = Math.max(1, Math.round(Number(q.windowCols) || 4));
+        return {
+            ...q,
+            ...normalizedWindowFields({ ...q, windowRows: rows, windowCols: cols }),
+            h: Math.max(0.2, Math.abs(Number(q.h) || 2.4)),
+            // 板なので既定は裏表とも窓を描く。パネルから片側だけにもできる。
+            windowBack: q.windowBack !== false,
+        };
     }
     return q;
 }
@@ -10008,7 +11595,7 @@ function genAsset(o) {
     return assetLines(q).map((s) => ({ ...s, ob: q, d3: true, cs: sigNow() }));
 }
 
-// ===== 7. 既存エンジンへの接続 =====
+// ===== 9. 既存エンジンへの接続 =====
 // engine-core.jsのgenShapeを置き換えず、元の関数を退避してから
 // assetだけをgenAssetへ振り分ける。通常のrect/box/circは従来処理のまま。
 const baseGenShape = genShape;
@@ -10104,6 +11691,17 @@ obBounds = function (o) {
             add(w, d, 0, h);
             add(w + ro * 2, d + ro * 2, h - rh, h);
         });
+    } else if (q.asset === "gableRoof" || q.asset === "shedRoof") {
+        // 屋根は断面（roofSlab）の外形・内形の両方を両端へ置いて範囲を取る。
+        // 包絡箱で代用すると、板厚のぶん軒先が下がることや棟の位置が枠から外れる。
+        const slab = roofSlab(q, q.asset),
+            at = (u, z, s) => (slab.axis === "x" ? [s, u, z] : [u, s, z]);
+        [-slab.half, slab.half].forEach((side) =>
+            [...slab.outerPath, ...slab.innerPath].forEach(([u, z]) => {
+                const v = at(u, z, side);
+                pts.push(pt(q, v[0], v[1], v[2]));
+            }),
+        );
     } else {
         const hs = [0, q.h],
             xs = [-q.ra, q.ra],
@@ -10120,7 +11718,7 @@ obBounds = function (o) {
     );
     return { lo, hi };
 };
-// ===== 8. 初期化 =====
+// ===== 10. 初期化 =====
 // すでに自動保存されているオブジェクトも、今回の円柱・球・看板の新しい線画へ更新する。
 regenObjects();
 
@@ -10387,6 +11985,42 @@ window.cityGridInstallAssetUI = function (bridge) {
                 cornerCutOpeningDepth: info.cornerCutOpeningDepth,
                 cutColor: info.cutColor,
             };
+        // 屋根・スロープ・窓グリッドは、定義表の固有値（軒の出・板厚・棟の向き・
+        // 窓の行×列など）をそのまま初期値として持たせる。数値は画面から編集できる。
+        if (kind === "gableRoof" || kind === "shedRoof" || kind === "ramp" || kind === "windowGrid") {
+            const extra = {};
+            [
+                "roofOverhang",
+                "roofThickness",
+                "roofRidgeAxis",
+                "roofLowZ",
+                "windowRows",
+                "windowCols",
+                "windowMarginX",
+                "windowSill",
+                "windowHead",
+                "windowGapX",
+                "windowGapZ",
+                "handrail",
+                "rampRailHeight",
+            ].forEach((key) => {
+                if (info[key] !== undefined) extra[key] = info[key];
+            });
+            // 窓グリッドは板なので、既定で裏表の両方へ窓を描く。
+            if (kind === "windowGrid") extra.windowBack = true;
+            return {
+                ...base,
+                ...extra,
+                type: "asset",
+                asset: kind,
+                assetId: kind,
+                assetName: info.label,
+                ra: info.w / 2,
+                rb: info.d / 2,
+                h: Math.max(0.05, info.h),
+                extrude: true,
+            };
+        }
         // 壁付け看板（単体）は、板を立てて地面に置き、取付金具を裏側へ出す。
         // 取付金具の本数・長さ・ベベル形状は配置後に画面と数値の両方から編集できる。
         if (kind === "wallSign")
@@ -11301,8 +12935,14 @@ window.cityGridInstallAssetUI = function (bridge) {
       <div class="quickField"><span>しゃがみ量</span><input id="personPoseCrouch" type="number" min="0" max="1" step="0.05" value="0"><em>倍</em></div>
       <div class="quickField"><span>体の傾き</span><input id="personPoseLean" type="number" min="-0.35" max="0.35" step="0.01" value="0"><em>m</em></div>
       <div class="quickField"><span>頭の傾き</span><input id="personHeadTilt" type="number" min="-25" max="25" step="1" value="0"><em>°</em></div>
+      <div class="quickField"><span>腰の回転</span><input id="personWaist" type="number" min="-60" max="60" step="1" value="0"><em>°</em></div>
+      <div class="quickField"><span>首の回転</span><input id="personNeck" type="number" min="-40" max="40" step="1" value="0"><em>°</em></div>
+      <div class="quickField"><span>左股関節</span><input id="personHipL" type="number" min="-80" max="80" step="1" value="0"><em>°</em></div>
+      <div class="quickField"><span>右股関節</span><input id="personHipR" type="number" min="-80" max="80" step="1" value="0"><em>°</em></div>
+      <div class="quickField"><span>左膝</span><input id="personKneeL" type="number" min="0" max="120" step="1" value="0"><em>°</em></div>
+      <div class="quickField"><span>右膝</span><input id="personKneeR" type="number" min="0" max="120" step="1" value="0"><em>°</em></div>
       <div class="quickRow"><button id="applyPersonPoseDetail" class="primary">ポーズを微調整</button></div>
-      <div class="sceneNote">プリセット後に歩幅・しゃがみ量・体の傾き・頭の傾きを調整できます。身長・体型は保持されます。</div>
+      <div class="sceneNote">プリセット後に歩幅・しゃがみ量・体の傾き・頭の傾きを調整できます。腰・首・股関節・膝の角度は3Dビューの関節ギズモ（丸ハンドル）でも回せます。身長・体型は保持されます。</div>
     </section>
 
     <section class="workspaceScreen" data-workspace-screen="floorplan" hidden>
@@ -11393,7 +13033,16 @@ window.cityGridInstallAssetUI = function (bridge) {
     const personPoseStrideInput = el("personPoseStride"),
         personPoseCrouchInput = el("personPoseCrouch"),
         personPoseLeanInput = el("personPoseLean"),
-        personHeadTiltInput = el("personHeadTilt");
+        personHeadTiltInput = el("personHeadTilt"),
+        // 関節角度（3Dビューの関節ギズモと同じ値）
+        personJointInputs = {
+            personWaist: el("personWaist"),
+            personNeck: el("personNeck"),
+            personHipL: el("personHipL"),
+            personHipR: el("personHipR"),
+            personKneeL: el("personKneeL"),
+            personKneeR: el("personKneeR"),
+        };
     const poseButtons = [...quick.querySelectorAll("[data-person-pose]")];
     const poseDefaults = {
         stand: { stride: 0, crouch: 0, lean: 0, headTilt: 0 },
@@ -11436,6 +13085,9 @@ window.cityGridInstallAssetUI = function (bridge) {
             personPoseLeanInput.value = Number(o?.poseLean ?? pd.lean).toFixed(2);
         if (personHeadTiltInput && document.activeElement !== personHeadTiltInput)
             personHeadTiltInput.value = Number(o?.headTilt ?? pd.headTilt).toFixed(0);
+        Object.entries(personJointInputs).forEach(([key, input]) => {
+            if (input && document.activeElement !== input) input.value = Number(o?.[key] ?? 0).toFixed(0);
+        });
         if (personStatus)
             personStatus.textContent = o
                 ? `選択中：人物アセット（身長 ${h.toFixed(2)} m）`
@@ -11481,7 +13133,20 @@ window.cityGridInstallAssetUI = function (bridge) {
         const d = poseDefaults[pose] || poseDefaults.stand;
         HU.push(S);
         RD = [];
-        setOb(o.id, { pose, poseStride: d.stride, poseCrouch: d.crouch, poseLean: d.lean, headTilt: d.headTilt });
+        // プリセットは姿勢を丸ごと決めるので、関節角度も0へ戻す。
+        setOb(o.id, {
+            pose,
+            poseStride: d.stride,
+            poseCrouch: d.crouch,
+            poseLean: d.lean,
+            headTilt: d.headTilt,
+            personWaist: 0,
+            personNeck: 0,
+            personHipL: 0,
+            personHipR: 0,
+            personKneeL: 0,
+            personKneeR: 0,
+        });
         setStudioWorkspace("pose");
         render();
     }
@@ -11494,10 +13159,19 @@ window.cityGridInstallAssetUI = function (bridge) {
         const stride = clamp(parseFloat(personPoseStrideInput.value) || 0, 0, 0.5),
             crouch = clamp(parseFloat(personPoseCrouchInput.value) || 0, 0, 1),
             lean = clamp(parseFloat(personPoseLeanInput.value) || 0, -0.35, 0.35),
-            headTilt = clamp(parseFloat(personHeadTiltInput.value) || 0, -25, 25);
+            headTilt = clamp(parseFloat(personHeadTiltInput.value) || 0, -25, 25),
+            // 関節角度も同時に反映する（ギズモで回した値と数値欄は同じ項目）
+            joints = {
+                personWaist: clamp(parseFloat(personJointInputs.personWaist.value) || 0, -60, 60),
+                personNeck: clamp(parseFloat(personJointInputs.personNeck.value) || 0, -40, 40),
+                personHipL: clamp(parseFloat(personJointInputs.personHipL.value) || 0, -80, 80),
+                personHipR: clamp(parseFloat(personJointInputs.personHipR.value) || 0, -80, 80),
+                personKneeL: clamp(parseFloat(personJointInputs.personKneeL.value) || 0, 0, 120),
+                personKneeR: clamp(parseFloat(personJointInputs.personKneeR.value) || 0, 0, 120),
+            };
         HU.push(S);
         RD = [];
-        setOb(o.id, { pose: "custom", poseStride: stride, poseCrouch: crouch, poseLean: lean, headTilt });
+        setOb(o.id, { pose: "custom", poseStride: stride, poseCrouch: crouch, poseLean: lean, headTilt, ...joints });
         setStudioWorkspace("pose");
         render();
     }
@@ -13033,6 +14707,228 @@ window.cityGridInstallAssetUI = function (bridge) {
             });
             wallSignEditSession = false;
         };
+    // ===== 3.3 屋根・スロープ・窓グリッドのパネル =====
+    // 3つのアセットは共通の編集パターン（編集セッション＋setOb）を使う。
+    function newAssetPanelObject(kinds, prop) {
+        const o = sel && obOf(sel);
+        return o && o.type === "asset" && kinds.includes(o.asset) ? o : null;
+    }
+    function makeAssetEditSession() {
+        return {
+            open(o, patch) {
+                if (!this.active) {
+                    HU.push(S);
+                    RD = [];
+                    this.active = true;
+                }
+                setOb(o.id, patch);
+                render();
+            },
+            end() {
+                this.active = false;
+            },
+            active: false,
+        };
+    }
+    const roofSession = makeAssetEditSession(),
+        rampSession = makeAssetEditSession(),
+        windowSession = makeAssetEditSession();
+    const roofPanelObject = () => newAssetPanelObject(["gableRoof", "shedRoof"], "roof"),
+        rampPanelObject = () => newAssetPanelObject(["ramp"], "ramp"),
+        windowPanelObject = () => newAssetPanelObject(["windowGrid"], "window");
+    function syncRoofPanel() {
+        const panel = el("roofP"),
+            o = roofPanelObject();
+        if (!panel) return;
+        panel.style.display = o ? "" : "none";
+        if (!o) return;
+        const p = roofParams(o),
+            isGable = o.asset === "gableRoof",
+            overhang = el("roofOverhang"),
+            thickness = el("roofThickness"),
+            ridge = el("roofRidgeAxis"),
+            low = el("roofLowZ");
+        if (overhang && document.activeElement !== overhang) overhang.value = p.overhang.toFixed(3);
+        if (thickness && document.activeElement !== thickness) thickness.value = p.thickness.toFixed(3);
+        if (ridge) {
+            ridge.disabled = !isGable;
+            if (document.activeElement !== ridge) ridge.value = p.ridgeAxis;
+        }
+        if (low) {
+            low.disabled = isGable;
+            if (document.activeElement !== low) low.value = p.lowZ.toFixed(3);
+        }
+    }
+    function applyRoofProp(patch) {
+        const o = roofPanelObject();
+        if (o && patch && Object.keys(patch).length) roofSession.open(o, patch);
+    }
+    // 選んだ屋根を、近くにある建物の上面へ合わせる。
+    // 建物の寸法から屋根の大きさ・高さ・位置を決めるので、
+    // 数値を手で合わせる必要がない。
+    function fitRoofToHost() {
+        const o = roofPanelObject();
+        if (!o) return;
+        const b = obBounds(o),
+            centerX = (b.lo[0] + b.hi[0]) * 0.5,
+            centerZ = (b.lo[2] + b.hi[2]) * 0.5,
+            hosts = [];
+        S.forEach((s) => {
+            const q = s.ob;
+            if (!q || q === o || q.type !== "asset") return;
+            if (!["building", "box", "stackedBuilding", "beveledStackedBuilding", "recessedStackedBuilding"].includes(q.asset))
+                return;
+            const hb = obBounds(q),
+                hx = (hb.lo[0] + hb.hi[0]) * 0.5,
+                hz = (hb.lo[2] + hb.hi[2]) * 0.5;
+            hosts.push({ q, hb, top: hb.hi[1], dist: Math.hypot(hx - centerX, hz - centerZ) });
+        });
+        if (!hosts.length) return;
+        // 真下に近い建物を優先する。
+        hosts.sort((a, c) => a.dist - c.dist);
+        const host = hosts[0],
+            fit = roofFitFromHost(host.q, o.asset),
+            k = Number(o.k) || 1,
+            d = Number(o.d) || -1,
+            off = [...(o.off || [0, 0, 0])],
+            [iu, iv] = PL[k],
+            hostX = (host.hb.lo[0] + host.hb.hi[0]) * 0.5,
+            hostZ = (host.hb.lo[2] + host.hb.hi[2]) * 0.5;
+        // 水平位置は建物の中心へ寄せる（offはローカル中心への足し込み）。
+        off[iu] = hostX - (Number(o.ca) || 0);
+        off[iv] = hostZ - (Number(o.cb) || 0);
+        // 鉛直位置は、屋根の「いちばん低い面」が建物の上面へ来るようにする。
+        // 板厚は斜面に直角で取るので、軒先の下面は基準面より少し下がる。
+        // その分（slabDrop）を持ち上げないと、軒が建物へめり込む。
+        const slab = typeof roofSlab === "function" ? roofSlab({ ...o, h: fit.h, ra: fit.ra, rb: fit.rb, roofThickness: fit.roofThickness, roofLowZ: 0 }, o.asset) : null,
+            slabDrop = slab ? Math.min(...slab.innerPath.map((p) => p[1]), 0) : 0;
+        off[k] = host.top - d - slabDrop;
+        roofSession.open(o, {
+            ra: fit.ra,
+            rb: fit.rb,
+            h: fit.h,
+            roofOverhang: fit.roofOverhang,
+            roofThickness: fit.roofThickness,
+            roofRidgeAxis: fit.roofRidgeAxis,
+            roofLowZ: 0,
+            lift: 0,
+            off,
+        });
+        roofSession.end();
+    }
+    [
+        ["roofOverhang", (v) => ({ roofOverhang: v })],
+        ["roofThickness", (v) => ({ roofThickness: v })],
+        ["roofLowZ", (v) => ({ roofLowZ: v })],
+    ].forEach(([id, toPatch]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => {
+            const value = Number(input.value);
+            if (Number.isFinite(value)) applyRoofProp(toPatch(value));
+        };
+        input.onchange = () => roofSession.end();
+    });
+    const roofRidgeAxis = el("roofRidgeAxis");
+    if (roofRidgeAxis)
+        roofRidgeAxis.onchange = () => {
+            applyRoofProp({ roofRidgeAxis: roofRidgeAxis.value === "y" ? "y" : "x" });
+            roofSession.end();
+        };
+    const roofFitHost = el("roofFitHost");
+    if (roofFitHost) roofFitHost.onclick = fitRoofToHost;
+
+    function syncRampPanel() {
+        const panel = el("rampP"),
+            o = rampPanelObject();
+        if (!panel) return;
+        panel.style.display = o ? "" : "none";
+        if (!o) return;
+        const p = rampParams(o),
+            rail = el("rampHandrail"),
+            height = el("rampRailHeight");
+        if (rail) rail.checked = p.rail;
+        if (height) {
+            height.disabled = !p.rail;
+            if (document.activeElement !== height) height.value = p.railH.toFixed(3);
+        }
+    }
+    const rampHandrail = el("rampHandrail"),
+        rampRailHeight = el("rampRailHeight");
+    if (rampHandrail)
+        rampHandrail.onchange = () => {
+            const o = rampPanelObject();
+            if (o) rampSession.open(o, { handrail: rampHandrail.checked });
+            rampSession.end();
+        };
+    if (rampRailHeight)
+        rampRailHeight.oninput = () => {
+            const o = rampPanelObject(),
+                value = Number(rampRailHeight.value);
+            if (o && Number.isFinite(value)) rampSession.open(o, { rampRailHeight: clamp(value, 0.12, 1.8) });
+        };
+    if (rampRailHeight) rampRailHeight.onchange = () => rampSession.end();
+
+    function syncWindowGridPanel() {
+        const panel = el("windowGridP"),
+            o = windowPanelObject();
+        if (!panel) return;
+        panel.style.display = o ? "" : "none";
+        if (!o) return;
+        const f = normalizedWindowFields(o),
+            rows = el("windowRows"),
+            cols = el("windowCols"),
+            back = el("windowBack"),
+            sides = el("windowSides");
+        [
+            ["windowW", f.windowW],
+            ["windowH", f.windowH],
+            ["windowMarginX", f.windowMarginX],
+            ["windowSill", f.windowSill],
+            ["windowHead", f.windowHead],
+            ["windowGapX", f.windowGapX],
+            ["windowGapZ", f.windowGapZ],
+        ].forEach(([id, value]) => {
+            const input = el(id);
+            if (input && document.activeElement !== input) input.value = Number(value).toFixed(3);
+        });
+        if (rows && document.activeElement !== rows) rows.value = String(f.windowRows);
+        if (cols && document.activeElement !== cols) cols.value = String(f.windowCols);
+        if (back) back.checked = f.windowBack;
+        if (sides) sides.checked = f.windowSides;
+    }
+    const applyWindowProp = (patch) => {
+        const o = windowPanelObject();
+        if (o && patch && Object.keys(patch).length) windowSession.open(o, patch);
+    };
+    [
+        ["windowRows", (v) => ({ windowRows: clamp(Math.round(v), 0, 20) })],
+        ["windowCols", (v) => ({ windowCols: clamp(Math.round(v), 0, 20) })],
+        ["windowW", (v) => ({ windowW: Math.max(0, v) })],
+        ["windowH", (v) => ({ windowH: Math.max(0, v) })],
+        ["windowMarginX", (v) => ({ windowMarginX: Math.max(0, v) })],
+        ["windowSill", (v) => ({ windowSill: Math.max(0, v) })],
+        ["windowHead", (v) => ({ windowHead: Math.max(0, v) })],
+        ["windowGapX", (v) => ({ windowGapX: Math.max(0, v) })],
+        ["windowGapZ", (v) => ({ windowGapZ: Math.max(0, v) })],
+    ].forEach(([id, toPatch]) => {
+        const input = el(id);
+        if (!input) return;
+        input.oninput = () => {
+            const value = Number(input.value);
+            if (Number.isFinite(value)) applyWindowProp(toPatch(value));
+        };
+        input.onchange = () => windowSession.end();
+    });
+    ["windowBack", "windowSides"].forEach((id) => {
+        const input = el(id);
+        if (!input) return;
+        input.onchange = () => {
+            applyWindowProp({ [id]: input.checked });
+            windowSession.end();
+        };
+    });
+
     let beveledBoxEditSession = false;
     function syncBeveledBoxPanel() {
         const panel = el("beveledBoxP"),
@@ -13190,6 +15086,9 @@ window.cityGridInstallAssetUI = function (bridge) {
         syncBalconyPanel();
         syncPathPipePanel();
         syncWallSignPanel();
+        syncRoofPanel();
+        syncRampPanel();
+        syncWindowGridPanel();
         syncBeveledBoxPanel();
         syncCornerCutPanel();
         syncRecessedStackedPanel();
@@ -14756,19 +16655,23 @@ window.cityGridInstallAssetUI = function (bridge) {
             drawFloorMoveGizmo(c, h.object.o);
             const editHandles = floorPlanEditHandles();
             if (editHandles?.special) {
-                // 壁横看板はengine-tools側の専用ギズモを描画する。
-                // ここで再描画すると黄色の金具ハンドルが二重になる。
-                if (h.object.o?.asset !== "wallSideSign") drawSpecialGizmo(c, h.object.o);
+                // 専用ギズモを持つアセット（積層建物・パスパイプなど）は
+                // 幅／奥行／高さの汎用ハンドルを出さない。
             } else {
                 drawFloorPlanEditHandles(c);
-                // ベベル直方体は通常の幅／奥行／高さハンドルに加えて、
-                // 断面オフセット用の専用ハンドルも同じビューへ表示する。
-                if (
-                    tool === "edit" &&
-                    (h.object.o.asset === "beveledBox" || h.object.o.asset === "wallSign")
-                )
-                    drawSpecialGizmo(c, h.object.o);
             }
+            // アセット専用ハンドル（窓の幅・高さの青い菱形、人物の関節の丸、
+            // 金具・ベベルなど）は、間取りの汎用ハンドルの有無に関わらず
+            // どのビューでも同じように描く。
+            // 以前は「専用ギズモを持つアセット」と「ベベル直方体・壁付け看板」だけを
+            // ここで描いていたため、人物や窓グリッドは 3D でしか見えず、
+            // 前／横／上では「編集できるのにハンドルが無い」状態だった。
+            // 壁横看板だけは engine-tools 側の drawGizmo が担当するので二重に描かない。
+            // ツールが「編集」以外でも、選択中なら3Dビューと同じように専用ハンドルを描く。
+            // 3D側（engine-tools の drawGizmo）はツールに関係なく描画するため、
+            // ここで tool === "edit" を条件にすると「3Dでは出るが前／横／上では出ない」
+            // という差が生まれる（実際にその状態になっていた）。
+            if (h.object.o?.asset !== "wallSideSign") drawSpecialGizmo(c, h.object.o);
         }
         // カメラ：本体をドラッグして位置、先端の丸をドラッグして向き
         const k = h.camera,
@@ -15268,17 +17171,26 @@ window.cityGridInstallAssetUI = function (bridge) {
             }
             // 看板の絵枠ハンドルは通常の3Dギズモと同じ編集経路へ渡す。
             // これを家具の間取り判定より後にすると、横／上ビューで本体移動として処理される。
-            if (tool === "edit" && sel) {
+            if (sel) {
+                // アセット専用の寸法ハンドル（窓の大きさ・人物の関節・ベベル・
+                // 金具・階の高さなど）は、3Dビューと同じ beginGizmo 経路へ渡す。
+                // 以前はアセット名を1つずつ並べた表で振り分けていたため、
+                // 表に無い新しいハンドル（人物の関節・窓グリッドなど）が
+                // 前／横／上ビューでだけ効かなかった。
+                // 面・軸・回転リングだけは間取り側の専用ハンドルが受け持つので除く。
                 const special = hitGizmo(p),
-                    customAsset = special?.g?.o?.asset,
-                    customFloorGizmo =
-                        ["stackedBuilding", "beveledStackedBuilding"].includes(customAsset) ||
-                        customAsset === "pathPipe" ||
-                        customAsset === "wallSideSign" ||
-                        (customAsset === "beveledBox" && special?.t === "beveled-offset") ||
-                        (customAsset === "wallSign" && special?.t?.startsWith("wall-sign-")) ||
-                        special?.t?.startsWith("sign-") ||
-                        (special?.t === "face" && customAsset === "sign");
+                    specialT = special?.t || "",
+                    specialAsset = special?.g?.o?.asset,
+                    // 看板（sign）だけは絵枠と同じ扱いで、面ハンドルも3D経路へ渡す。
+                    // 回転リングも3D経路へ渡す。以前は「間取り側の専用ハンドルが
+                    // 受け持つ」として除外していたが、3Dで描かれているリングを
+                    // 前／横／上で押すと何も起きず、「3Dでしか回せない」状態だった。
+                    // dragEdit 側は正投影でもリングを回せる（ringPlaneUV）。
+                    genericGizmo =
+                        (specialT === "face" && specialAsset !== "sign") ||
+                        specialT === "axis" ||
+                        specialT === "mv",
+                    customFloorGizmo = !!special && !genericGizmo;
                 const activeFloorObject = sel && obOf(sel),
                     wallPlaneSelection = !!(activeFloorObject && activeFloorObject.k !== 1),
                     signBounds = wallPlaneSelection ? obBounds(activeFloorObject) : null,
@@ -15297,7 +17209,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                             !signBodyCenterHit &&
                             special?.sign?.s?.ok &&
                             Math.hypot(special.sign.s.x - p.x, special.sign.s.y - p.y) <= 12 / Z);
-                if (special && customFloorGizmo && !(wallPlaneSelection && special.t === "face") && signHandleClose) {
+                if (customFloorGizmo && signHandleClose) {
                     e.preventDefault();
                     e.stopImmediatePropagation();
                     ptr = e.pointerId;
@@ -15312,7 +17224,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             // 正面／横ビューにも、上面と同じ回転ハンドルを用意する。
             // これまではこの2ビューだけ先に高さ／移動判定へ落ち、回転丸を
             // 押しても通常の面編集として扱われていた。
-            if (tool === "edit" && sel && (orthView === "front" || orthView === "side")) {
+            if (sel && (orthView === "front" || orthView === "side")) {
                 const turn = floorPlanHandles(),
                     turnLimit = 24 / Z;
                 if (turn.object?.s?.ok && Math.hypot(turn.object.s.x - p.x, turn.object.s.y - p.y) < turnLimit) {

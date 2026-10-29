@@ -190,6 +190,33 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>ベベル分割数</span><input type=number class=nv id=wallSignBevelSegments min=1 max=4 step=1 style="width:100px"><span class="un">分割</span></label>
 <div class="note">看板は板を立てた形状で、取付金具は裏側の壁へ向かって出ます。幅・奥行き（板厚）・高さは共通の面ハンドルまたは数値欄で編集できます。金具の長さとベベル幅は画面上のハンドルからも変更できます。</div>
 </div>
+<div id=roofP style="display:none"><h3>屋根</h3>
+<label><span>軒の出</span><input type=number class=nv id=roofOverhang min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>板の厚さ</span><input type=number class=nv id=roofThickness min=0.02 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>棟の向き</span><select id=roofRidgeAxis style="width:120px"><option value="x">幅方向（左右）</option><option value="y">奥行方向（前後）</option></select></label>
+<label><span>低い側の高さ</span><input type=number class=nv id=roofLowZ min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><button type=button id=roofFitHost class=primary>下の建物に合わせる</button></label>
+<div class="note">幅・奥行き・高さは共通の面ハンドルまたは数値欄で編集できます。軒の出は外形の広がり、板の厚さは屋根板の厚みです。棟の向きは切妻屋根だけに効きます。</div>
+</div>
+<div id=rampP style="display:none"><h3>スロープ</h3>
+<label><input type=checkbox id=rampHandrail> 手すりを付ける</label>
+<label><span>手すりの高さ</span><input type=number class=nv id=rampRailHeight min=0.12 step=0.02 style="width:100px"><span class=un>m</span></label>
+<div class="note">高さは奥側の立ち上がり、奥行きは勾配の長さです。手すりは左右の立ち上がりへ支柱付きで描きます。</div>
+</div>
+<div id=windowGridP style="display:none"><h3>窓グリッド</h3>
+<label><span>行</span><input type=number class=nv id=windowRows min=0 max=20 step=1 style="width:100px"></label>
+<label><span>列</span><input type=number class=nv id=windowCols min=0 max=20 step=1 style="width:100px"></label>
+<label><span>窓の幅</span><input type=number class=nv id=windowW min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>窓の高さ</span><input type=number class=nv id=windowH min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>左右の余白</span><input type=number class=nv id=windowMarginX min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>窓台の高さ</span><input type=number class=nv id=windowSill min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>上部の余白</span><input type=number class=nv id=windowHead min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>横の間隔</span><input type=number class=nv id=windowGapX min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>縦の間隔</span><input type=number class=nv id=windowGapZ min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><input type=checkbox id=windowBack> 裏側にも窓を描く</label>
+<label><input type=checkbox id=windowSides> 左右の側面にも窓を描く</label>
+<div class="note">行×列で窓を並べます。窓の幅・高さは各セルの中央へ置かれ、0にするとセルいっぱいまで自動で広がります。余白と間隔は壁の大きさに対する上限で自動的に収まります。同じ設定は直方体と建物にも使えます（行・列が0のときは窓を描きません）。</div>
+</div>
 <div id=beveledBoxP style="display:none"><h3>ベベル直方体</h3>
 <label><span>ベベルオフセット</span><input type=number class=nv id=beveledBoxOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
 <label><span>ベベルセグメント数</span><input type=number class=nv id=beveledBoxSegments min=1 max=4 step=1 style="width:100px"><span class=un>分割</span></label>
@@ -613,6 +640,7 @@ function orthBasis() {
     if (orthView === "top") return { right: [1, 0, 0], up: [0, 0, 1], depth: [0, -1, 0] };
     return { right: [1, 0, 0], up: [0, 1, 0], depth: [0, 0, 1] };
 }
+const ZERO2 = [0, 0];
 const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 // 間取りモードだけ、オブジェクト群を画面中央へ自動フィットする。
 // 通常の9=真上は従来どおり原点中心の正投影を維持する。
@@ -624,27 +652,57 @@ const orthScale = () =>
         : Math.min(W, H) / 7.2;
 // 正面／横／上の間取りビュー専用の正投影。
 // right / up / depth の基底を変えるだけで3方向を同じ処理で描画する。
-function orthPoint(v) {
-    const b = orthBasis(),
-        sc = orthScale(),
-        pc =
-            window.cityFloorPlanActive && (orthView === "top" || orthView === "side" || orthView === "front")
-                ? orthPlanCenter()
-                : [0, 0];
-    let rx = dot3(v, b.right),
-        ry = dot3(v, b.up);
+//
+// 投影の係数（基底・倍率・画面上の原点）は、ビュー・倍率・中心・カメラが
+// 変わらない間ずっと同じ。以前は点1つごとに orthBasis() / orthScale() /
+// orthPlanCenter() を呼び、配列を3つずつ作っていたので、線の点数が多いほど
+// 無駄が増えていた。ここでは署名が同じ間だけ計算結果を使い回す。
+let orthSetupKey = "",
+    orthSetupVal = null;
+function orthSetup() {
+    const sc = orthScale(),
+        active = !!window.cityFloorPlanActive,
+        pc = active ? orthPlanCenter() : ZERO2,
+        key =
+            orthView + "|" + sc + "|" + W + "|" + H + "|" +
+            (active ? 1 : 0) + "|" + pc[0] + "|" + pc[1] + "|" + P.cx + "|" + P.cz + "|" + P.ch;
+    if (orthSetupVal && key === orthSetupKey) return orthSetupVal;
+    const b = orthBasis();
     // scrW() は先にカメラ原点へ移すため、正投影では表示軸だけワールド原点へ戻す。
-    if (window.cityFloorPlanActive && orthView === "top") {
-        rx += P.cx;
-        ry += P.cz;
-    } else if (window.cityFloorPlanActive && orthView === "side") {
-        rx += P.cz;
-        ry += P.ch - 1;
-    } else if (window.cityFloorPlanActive && orthView === "front") {
-        rx += P.cx;
-        ry += P.ch - 1;
+    let sx = 0,
+        sy = 0;
+    if (active && orthView === "top") {
+        sx = P.cx;
+        sy = P.cz;
+    } else if (active && orthView === "side") {
+        sx = P.cz;
+        sy = P.ch - 1;
+    } else if (active && orthView === "front") {
+        sx = P.cx;
+        sy = P.ch - 1;
     }
-    return { x: W / 2 + (rx - pc[0]) * sc, y: H / 2 - (ry - pc[1]) * sc, depth: dot3(v, b.depth), ok: true };
+    // x = ax + dot(v,right)*sc / y = ay - dot(v,up)*sc
+    orthSetupVal = {
+        right: b.right,
+        up: b.up,
+        depth: b.depth,
+        sc,
+        ax: W / 2 + (sx - pc[0]) * sc,
+        ay: H / 2 - (sy - pc[1]) * sc,
+    };
+    orthSetupKey = key;
+    return orthSetupVal;
+}
+function orthPoint(v) {
+    const s = orthSetup(),
+        rx = v[0] * s.right[0] + v[1] * s.right[1] + v[2] * s.right[2],
+        ry = v[0] * s.up[0] + v[1] * s.up[1] + v[2] * s.up[2];
+    return {
+        x: s.ax + rx * s.sc,
+        y: s.ay - ry * s.sc,
+        depth: v[0] * s.depth[0] + v[1] * s.depth[1] + v[2] * s.depth[2],
+        ok: true,
+    };
 }
 // ワールドの向き→画面（今のグリッド種類の投影）。okがfalseなら画角の外/カメラの後ろ
 function scr(v) {
@@ -710,8 +768,11 @@ function strokeW(c, s) {
         on ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y);
         on = true;
     };
+    // 正投影ビューでは投影が線形なので、点の間を球面上で補間する必要がない。
+    // （以前は全ビューで角度分割していたため、1本の線が最大200点に増えていた）
+    const subdivide = !orthView;
     s.p.forEach((v, i) => {
-        if (i) {
+        if (i && subdivide) {
             const a = s.p[i - 1],
                 n = Math.ceil(Math.acos(Math.max(-1, Math.min(1, V.dot(V.nrm(rl(a)), V.nrm(rl(v)))))) / 0.03);
             for (let j = 1; j < n; j++) put(co ? V.add(a, v, 1 - j / n, j / n) : V.nrm(V.add(a, v, 1 - j / n, j / n)));
