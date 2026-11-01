@@ -709,6 +709,106 @@ function awningGizmo(o) {
         handle: null,
     };
 }
+// ===== 壁付けベランダの寸法（線画・面・ハンドルで同じ値を使う） =====
+// asset.js の linesBalcony もこの関数を呼ぶ。丸め方を1か所に集約しないと
+// 「ハンドルで変えたのに線が変わらない」というズレが出る。
+// 床スラブと腰壁の厚さは同じ1つの値（2026-11-01：分ける必要が無いとの指示）。
+function balconyGeometry(o) {
+    const w = Math.max(0.2, Math.abs(Number(o?.ra) || 0.5) * 2),
+        d = Math.max(0.2, Math.abs(Number(o?.rb) || 0.5) * 2),
+        h = Math.max(0.12, Number(o?.h) || 1.25),
+        thickness = clamp(
+            Number(o?.balconyThickness) || Number(o?.balconyRailThickness) || Number(o?.balconyFloorThickness) || 0.14,
+            0.035,
+            Math.min(w, d) * 0.35,
+        ),
+        railH = clamp(
+            Number(o?.balconyRailHeight) || Math.max(0.12, h - thickness),
+            0.12,
+            Math.max(0.12, h - 0.01),
+        );
+    return {
+        w,
+        d,
+        h,
+        thickness,
+        railH,
+        frontRail: o?.balconyFrontRail !== false,
+        sideRail: o?.balconySideRail !== false,
+    };
+}
+// ===== コの字壁（コの字をZ軸＝高さ方向へ押し出した壁） =====
+// 前面＋左右の3枚の壁が、同じ厚さで立ち上がる形。床スラブは持たない。
+// 壁付けベランダと同じく、開口は壁側（+Y）を向く。
+function uWallGeometry(o) {
+    const w = Math.max(0.2, Math.abs(Number(o?.ra) || 1.6) * 2),
+        d = Math.max(0.2, Math.abs(Number(o?.rb) || 0.9) * 2),
+        h = Math.max(0.12, Number(o?.h) || 1.1),
+        // 厚さの上限は「幅・奥行きに対して太すぎない」ことに加え、
+        // 「高さより厚くならない」ことも必要（屋根の下面が床より下へ抜けて形が壊れるため）。
+        maxThickness = Math.max(0.035, Math.min(Math.min(w, d) * 0.35, h * 0.45)),
+        thickness = clamp(Number(o?.uWallThickness) || 0.12, 0.035, maxThickness);
+    return { w, d, h, thickness, maxThickness };
+}
+// 壁付けベランダ／コの字壁の画面ハンドル。
+// 掴むのは腰壁（コの字壁では前面の壁）の外側の面。外へ引くと厚くなる。
+// 3Dと間取り（前・横・上）の両方で同じハンドルを出すため、
+// 位置は「ワールド座標」で返し、呼び出し側でscrWに通す。
+function uWallGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "uWall") return null;
+    const g = uWallGeometry(o),
+        // 厚さは屋根板の厚み（上下方向）。ハンドルは屋根の手前角の少し外側へ出す。
+        // 面の上に置くと、横（真横）ビューで屋根のシルエットと重なり、
+        // オブジェクトの移動に負けて掴めないため。
+        out = Math.max(0.1, g.thickness),
+        handle = screenHandle(
+            o,
+            "uWall-thickness",
+            [g.w * 0.4, -g.d / 2 + g.thickness * 0.5, g.h],
+            [g.w * 0.4, -g.d / 2 - out, g.h],
+            [g.w * 0.4, -g.d / 2 - out, g.h - g.thickness],
+            g.thickness,
+            0.035,
+            g.maxThickness,
+            "屋根の厚さ",
+            { x: 0, y: -1 },
+            "#ff9f68",
+        );
+    return { o, C3: L2W(o, 0, 0, g.h - g.thickness * 0.5), handles: { thickness: handle } };
+}
+function balconyGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "balcony") return null;
+    const g = balconyGeometry(o),
+        zRail = g.thickness + g.railH * 0.5,
+        // 腰壁の外側の面がどの面にあるか（前面の腰壁が無ければ左右の腰壁を使う）。
+        rail = g.frontRail
+            ? {
+                  anchor: [g.w * 0.4, -g.d / 2 + g.thickness * 0.5, zRail],
+                  sample: [g.w * 0.4, -g.d / 2, zRail],
+                  probe: [g.w * 0.4, -g.d / 2 + g.thickness, zRail],
+                  fallback: { x: 0, y: 1 },
+              }
+            : {
+                  anchor: [-g.w / 2 + g.thickness * 0.5, g.d * 0.3, zRail],
+                  sample: [-g.w / 2, g.d * 0.3, zRail],
+                  probe: [-g.w / 2 + g.thickness, g.d * 0.3, zRail],
+                  fallback: { x: 1, y: 0 },
+              },
+        handle = screenHandle(
+            o,
+            "balcony-thickness",
+            rail.anchor,
+            rail.sample,
+            rail.probe,
+            g.thickness,
+            0.035,
+            Math.min(g.w, g.d) * 0.35,
+            "壁の厚さ",
+            rail.fallback,
+            "#ff9f68",
+        );
+    return { o, C3: L2W(o, 0, 0, zRail), handles: { thickness: handle } };
+}
 function stackedIndividualEdit(o) {
     // 新形式はindividualEditを優先し、旧JSONのsyncFirst=falseも個別編集として読む。
     return o?.individualEdit === true || (o?.individualEdit == null && o?.syncFirst === false);
@@ -1475,7 +1575,10 @@ function screenHandle(o, kind, anchor3, sample3, probe3, start, min, max, label,
         s: hidden && from?.ok ? { x: from.x + dir.x * gap, y: from.y + dir.y * gap, ok: true } : from,
         anchor,
         dir,
-        scale: hidden ? hiddenHandleScale() : length,
+        // 薄い板・壁の厚さのように、画面上の長さが数pxしかない寸法は、
+        // そのまま倍率にすると数十pxのドラッグで最大値まで飛んでしまう。
+        // 画面 60px で 1m 動く程度の下限を置き、細かい値も掴めるようにする。
+        scale: hidden ? hiddenHandleScale() : Math.max(length, 60),
         start,
         min,
         max,
@@ -1804,6 +1907,10 @@ function specialGizmo(o) {
                   ? buildingGizmo(o)
                   : o && o.type === "asset" && o.asset === "awning"
                     ? awningGizmo(o)
+                    : o && o.type === "asset" && o.asset === "balcony"
+                      ? balconyGizmo(o)
+                      : o && o.type === "asset" && o.asset === "uWall"
+                        ? uWallGizmo(o)
                     : o && o.type === "asset" && o.asset === "sign"
                       ? signGizmo(o)
                       : o && o.type === "asset" && o.asset === "cone"
@@ -2119,6 +2226,26 @@ function drawSpecialGizmo(c, o) {
         c.fillStyle = "#ffd0a8";
         c.font = `bold ${12 / Z}px system-ui`;
         c.fillText("前縁Y", hz.s.x + 9 / Z, hz.s.y - 8 / Z);
+    } else if (sg.o.asset === "balcony" || sg.o.asset === "uWall") {
+        // 厚さの四角を1つだけ描く。掴む四角から寸法の向きへ破線を引き、
+        // 現在値を添えて、何を動かしているかが分かるようにする。
+        const h = sg.handles.thickness;
+        if (h?.s?.ok) {
+            c.strokeStyle = h.color || "#ff9f68";
+            c.lineWidth = 1.4 / Z;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.beginPath();
+            if (h.anchor?.ok) {
+                c.moveTo(h.anchor.x, h.anchor.y);
+                c.lineTo(h.s.x, h.s.y);
+            }
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, h.color || "#ff9f68");
+            c.fillStyle = h.color || "#ff9f68";
+            c.font = `bold ${12 / Z}px system-ui`;
+            c.fillText(`${h.label} ${Number(h.start || 0).toFixed(2)}`, h.s.x + 9 / Z, h.s.y - 8 / Z);
+        }
     } else if (sg.o.asset === "sign") {
         const h = sg.handles;
         c.setLineDash([5 / Z, 4 / Z]);
@@ -2453,6 +2580,9 @@ function gizmo() {
                     o.asset === "building" ||
                     o.asset === "awning" ||
                     o.asset === "balcony" ||
+                    // コの字壁は高さ方向の面（屋根・底面）を持つので、
+                    // 3Dでも上下の面ハンドルで高さを変えられるようにする。
+                    o.asset === "uWall" ||
                     o.asset === "pathPipe" ||
                     o.asset === "box" ||
                     o.asset === "beveledBox" ||
@@ -2861,7 +2991,12 @@ function hitGizmo(p) {
                     g: { o: active, C3: special.C3 },
                 };
         }
-        if (active.asset === "wallSign" || active.asset === "windowGrid") {
+        if (
+            active.asset === "wallSign" ||
+            active.asset === "windowGrid" ||
+            active.asset === "balcony" ||
+            active.asset === "uWall"
+        ) {
             const nearest = nearestHandleOf(Object.values(special.handles || {}), p, R),
                 hit = handleOrFace(nearest, (q) => ({
                     t: q.handle.kind,
@@ -3389,6 +3524,8 @@ function beginGizmo(h, p) {
         h.t === "wall-sign-bevel" ||
         h.t === "window-grid-width" ||
         h.t === "window-grid-height" ||
+        h.t === "balcony-thickness" ||
+        h.t === "uWall-thickness" ||
         h.t === "wallSideSign-beveled-offset" ||
         h.t === "wallSideSign-bracket-length" ||
         h.t === "cone-height" ||
@@ -3535,6 +3672,19 @@ function dragEdit(p, freeRotation = false) {
             deltaY = p.y - ed.p0.y,
             value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
         patch = ed.t === "wall-sign-bevel" ? { wallSignBevelOffset: value } : { wallSignBracketLength: value };
+    } else if (ed.t === "balcony-thickness" || ed.t === "uWall-thickness") {
+        // ベランダ／コの字壁の厚さ。ドラッグ量は画面の向きに投影済み。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        if (ed.t === "uWall-thickness") patch = { uWallThickness: value };
+        else {
+            // ベランダは床と壁が同じ厚さなので、厚くすると全体の高さもその分だけ伸びる
+            //（数値パネルと同じ扱い）。
+            const g = balconyGeometry(o);
+            patch = { balconyThickness: value, h: value + g.railH };
+        }
     } else if (ed.t === "window-grid-width" || ed.t === "window-grid-height") {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -4506,15 +4656,28 @@ function exportSurfaceTriangles(o) {
         return out;
     }
     if (kind === "balcony") {
-        const floorT = clamp(Number(o.balconyFloorThickness) || 0.16, 0.04, Math.max(0.05, h * 0.7)),
-            railH = clamp(Number(o.balconyRailHeight) || Math.max(0.18, h - floorT), 0.12, Math.max(0.12, h - 0.01)),
-            railT = clamp(Number(o.balconyRailThickness) || 0.12, 0.035, Math.min(w, d) * 0.35);
-        boxAt(0, 0, w, d, 0, floorT);
-        if (o.balconyFrontRail !== false) boxAt(0, -d / 2 + railT / 2, w, railT, floorT, floorT + railH);
-        if (o.balconySideRail !== false) {
-            boxAt(-w / 2 + railT / 2, 0, railT, d, floorT, floorT + railH);
-            boxAt(w / 2 - railT / 2, 0, railT, d, floorT, floorT + railH);
+        const g = balconyGeometry(o);
+        // 床スラブと腰壁を別の箱として作る（厚さは共通）。
+        boxAt(0, 0, g.w, g.d, 0, g.thickness);
+        if (g.frontRail) boxAt(0, -g.d / 2 + g.thickness / 2, g.w, g.thickness, g.thickness, g.thickness + g.railH);
+        if (g.sideRail) {
+            // 左右の腰壁は前面の腰壁と角で重ならないよう、前面の後ろ側から詰める
+            //（重ねると半透明の塗りが二重になって濃くなる）。
+            const sideY0 = g.frontRail ? -g.d / 2 + g.thickness : -g.d / 2,
+                sideD = g.d / 2 - sideY0;
+            boxAt(-g.w / 2 + g.thickness / 2, (sideY0 + g.d / 2) / 2, g.thickness, sideD, g.thickness, g.thickness + g.railH);
+            boxAt(g.w / 2 - g.thickness / 2, (sideY0 + g.d / 2) / 2, g.thickness, sideD, g.thickness, g.thickness + g.railH);
         }
+        return out;
+    }
+    if (kind === "uWall") {
+        const g = uWallGeometry(o);
+        // コの字（断面）を奥行きへ押し出した形＝屋根が上・左右が側壁。
+        // 面は重ならないように分ける（屋根は側壁の上に載せる）。
+        // 重ねると半透明の塗りが二重になって濃くなるため。
+        boxAt(0, 0, g.w, g.d, g.h - g.thickness, g.h);
+        boxAt(-g.w / 2 + g.thickness / 2, 0, g.thickness, g.d, 0, g.h - g.thickness);
+        boxAt(g.w / 2 - g.thickness / 2, 0, g.thickness, g.d, 0, g.h - g.thickness);
         return out;
     }
     if (kind === "awning") {
@@ -5196,46 +5359,145 @@ function surfaceLayerCanvasFor(w, h) {
     }
     return surfaceLayerCanvas;
 }
+// 面描画用の投影器を作る。
+// 従来は1頂点ごとに V.add() → V.nrm() → scr() → exportPoint() と配列を4個作り、
+// 三角関数もその都度計算していた（140オブジェクトで毎フレーム約17万個の配列）。
+// ここではカメラの三角関数と係数を1回だけ求め、使い回しの点へ書き込む。
+// 戻り値が null のとき（魚眼）は従来の exportPoint() 経路を使う。
+function surfaceProjector() {
+    const cx = -P.cx,
+        cy = 1 - P.ch,
+        cz = -P.cz;
+    if (orthView) {
+        const s = orthSetup(),
+            r = s.right,
+            u = s.up,
+            dp = s.depth,
+            sc = s.sc,
+            ax = s.ax,
+            ay = s.ay;
+        return (v, out) => {
+            const x = v[0] + cx,
+                y = v[1] + cy,
+                z = v[2] + cz;
+            out.x = ax + (x * r[0] + y * r[1] + z * r[2]) * sc;
+            out.y = ay - (x * u[0] + y * u[1] + z * u[2]) * sc;
+            out.depth = x * dp[0] + y * dp[1] + z * dp[2];
+            return true;
+        };
+    }
+    if (T === "f") return null;
+    const cth = Math.cos(P.yaw * DG),
+        sth = Math.sin(P.yaw * DG),
+        cph = Math.cos(P.pitch * DG),
+        sph = Math.sin(P.pitch * DG),
+        f = (W * P.lens) / 36,
+        hx = W / 2,
+        hy = (H * P.hz) / 100;
+    return (v, out) => {
+        const x = v[0] + cx,
+            y = v[1] + cy,
+            z = v[2] + cz,
+            x1 = x * cth + z * sth,
+            z1 = -x * sth + z * cth,
+            y2 = y * cph - z1 * sph,
+            z2 = y * sph + z1 * cph;
+        if (z2 <= 0.02) return false;
+        out.x = hx + (f * x1) / z2;
+        out.y = hy - (f * y2) / z2;
+        out.depth = z2;
+        return true;
+    };
+}
+// 面描画用の使い回しの点（毎フレームのオブジェクト生成を避ける）。
+const SURF_IDENT = [1, 0, 0, 1, 0, 0],
+    SURF_P0 = { x: 0, y: 0, depth: 0 },
+    SURF_P1 = { x: 0, y: 0, depth: 0 },
+    SURF_P2 = { x: 0, y: 0, depth: 0 },
+    // 画面上 0.3px² 未満の三角形は塗っても見えないので捨てる。
+    SURF_MIN_AREA = 0.3,
+    // 継ぎ目隠しの縁取りは、画面上 4px² 以上の三角形だけに絞る。
+    // 小さい三角形は縁取りしても継ぎ目が画素に埋もれるため、描くだけ無駄になる。
+    SURF_STROKE_AREA = 4,
+    // 画面外の三角形を捨てる余白（px）。
+    SURF_CULL_PAD = 8;
 function drawObjectSurfaces(c) {
     if (!P.surfaceMode) return;
-    const tris = [],
+    const proj = surfaceProjector(),
+        tris = [],
         seen = new Set();
     S.forEach((s) => {
         const o = s && s.ob;
         if (!o || !objectVisible(o) || seen.has(o.id)) return;
         seen.add(o.id);
-        surfaceTriangles(o).forEach((tr) => {
-            const p = tr.map((v) => exportPoint(v, [1, 0, 0, 1, 0, 0]));
-            if (p.some((q) => !q || !Number.isFinite(q.x) || !Number.isFinite(q.y) || !Number.isFinite(q.depth)))
-                return;
-            const area = (p[1].x - p[0].x) * (p[2].y - p[0].y) - (p[1].y - p[0].y) * (p[2].x - p[0].x);
-            if (Math.abs(area) < 0.001) return;
-            tris.push({ o, p, depth: (p[0].depth + p[1].depth + p[2].depth) / 3 });
-        });
+        const list = surfaceTriangles(o);
+        if (!list.length) return;
+        // 色と不透明度はオブジェクトごとに1回だけ求める。
+        // 従来は三角形ごとに surfaceColor() / surfaceAlpha().toFixed(3) を呼んでいた。
+        const color = surfaceColor(o),
+            alpha = Number(surfaceAlpha(o).toFixed(3));
+        for (let i = 0; i < list.length; i++) {
+            const tr = list[i];
+            let a, b, e;
+            if (proj) {
+                if (!proj(tr[0], SURF_P0) || !proj(tr[1], SURF_P1) || !proj(tr[2], SURF_P2)) continue;
+                a = SURF_P0;
+                b = SURF_P1;
+                e = SURF_P2;
+            } else {
+                a = exportPoint(tr[0], SURF_IDENT);
+                b = exportPoint(tr[1], SURF_IDENT);
+                e = exportPoint(tr[2], SURF_IDENT);
+                if (!a || !b || !e) continue;
+            }
+            // 画面の外に丸ごと出ている三角形は塗らない。
+            if (
+                (a.x < -SURF_CULL_PAD && b.x < -SURF_CULL_PAD && e.x < -SURF_CULL_PAD) ||
+                (a.x > W + SURF_CULL_PAD && b.x > W + SURF_CULL_PAD && e.x > W + SURF_CULL_PAD) ||
+                (a.y < -SURF_CULL_PAD && b.y < -SURF_CULL_PAD && e.y < -SURF_CULL_PAD) ||
+                (a.y > H + SURF_CULL_PAD && b.y > H + SURF_CULL_PAD && e.y > H + SURF_CULL_PAD)
+            )
+                continue;
+            const area = (b.x - a.x) * (e.y - a.y) - (b.y - a.y) * (e.x - a.x);
+            if (Math.abs(area) < SURF_MIN_AREA) continue;
+            tris.push({
+                color,
+                alpha,
+                depth: (a.depth + b.depth + e.depth) / 3,
+                area,
+                x0: a.x,
+                y0: a.y,
+                x1: b.x,
+                y1: b.y,
+                x2: e.x,
+                y2: e.y,
+            });
+        }
     });
     // 遠い面から描く簡易ペインター法。半透明の面でもオブジェクト同士の重なりが自然になる。
     tris.sort((a, b) => b.depth - a.depth);
     // 不透明度が同じ面をまとめる（通常は全部 0.22 なので1グループ）。
     const groups = new Map();
     tris.forEach((t) => {
-        const key = surfaceAlpha(t.o).toFixed(3);
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(t);
+        if (!groups.has(t.alpha)) groups.set(t.alpha, []);
+        groups.get(t.alpha).push(t);
     });
-    groups.forEach((list, key) => {
+    groups.forEach((list, alpha) => {
         // 面が写っている範囲だけを層にする。画面全体を毎回消して重ねると重いため。
         let minX = Infinity,
             minY = Infinity,
             maxX = -Infinity,
             maxY = -Infinity;
-        list.forEach(({ p }) =>
-            p.forEach((q) => {
-                if (q.x < minX) minX = q.x;
-                if (q.y < minY) minY = q.y;
-                if (q.x > maxX) maxX = q.x;
-                if (q.y > maxY) maxY = q.y;
-            }),
-        );
+        list.forEach((t) => {
+            const ax = Math.min(t.x0, t.x1, t.x2),
+                bx = Math.max(t.x0, t.x1, t.x2),
+                ay = Math.min(t.y0, t.y1, t.y2),
+                by = Math.max(t.y0, t.y1, t.y2);
+            if (ax < minX) minX = ax;
+            if (ay < minY) minY = ay;
+            if (bx > maxX) maxX = bx;
+            if (by > maxY) maxY = by;
+        });
         if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
         const dx0 = Math.max(0, Math.floor(minX * Z + ox) - 2),
             dy0 = Math.max(0, Math.floor(minY * Z + oy) - 2),
@@ -5251,17 +5513,16 @@ function drawObjectSurfaces(c) {
         // 本番のキャンバスと同じズーム／移動を掛け、切り出した範囲の左上が原点に来るようにする。
         lc.setTransform(Z, 0, 0, Z, ox - dx0, oy - dy0);
         lc.lineJoin = "round";
+        lc.globalAlpha = 1; // 層の中は不透明。重なっても濃くならない。
         // 色ごとに1本のパスへまとめてから塗る。三角形ごとに fill すると
         // パス生成の回数が面の数だけ増えて重いので、同じ色はまとめる。
         // 塗ったあと同色で縁をなぞるのは、隣り合う三角形の継ぎ目が
         // 透けて細い筋に見えるのを防ぐため（塗りと同色なので線には見えない）。
         const byColor = new Map();
-        list.forEach(({ o, p }) => {
-            const col = surfaceColor(o);
-            if (!byColor.has(col)) byColor.set(col, []);
-            byColor.get(col).push(p);
+        list.forEach((t) => {
+            if (!byColor.has(t.color)) byColor.set(t.color, []);
+            byColor.get(t.color).push(t);
         });
-        lc.globalAlpha = 1; // 層の中は不透明。重なっても濃くならない。
         byColor.forEach((trisOfColor, col) => {
             // 1本のパスへまとめすぎると、三角形が数千枚あるアセット（球・ベベル階層など）で
             // パス構築が重くなる。400枚ずつに区切って塗る。
@@ -5273,27 +5534,41 @@ function drawObjectSurfaces(c) {
             lc.lineWidth = 1 / Math.max(0.25, Z);
             for (let i = 0; i < trisOfColor.length; i += chunk) {
                 const path = new Path2D(),
+                    edge = new Path2D(),
                     end = Math.min(i + chunk, trisOfColor.length);
+                let hasEdge = false;
                 for (let k = i; k < end; k++) {
-                    const p = trisOfColor[k],
+                    const t = trisOfColor[k],
                         // 同じパスへ複数の三角形を入れると、巻き方向が逆の三角形どうしが
                         // 打ち消し合って塗りが抜ける（裏表の面が重なる立体で顕著）。
                         // 全三角形の巻き方向をそろえてから1本のパスにする。
-                        area = (p[1].x - p[0].x) * (p[2].y - p[0].y) - (p[1].y - p[0].y) * (p[2].x - p[0].x),
-                        q1 = area < 0 ? p[2] : p[1],
-                        q2 = area < 0 ? p[1] : p[2];
-                    path.moveTo(p[0].x, p[0].y);
-                    path.lineTo(q1.x, q1.y);
-                    path.lineTo(q2.x, q2.y);
-                    path.closePath();
+                        flip = t.area < 0,
+                        q1x = flip ? t.x2 : t.x1,
+                        q1y = flip ? t.y2 : t.y1,
+                        q2x = flip ? t.x1 : t.x2,
+                        q2y = flip ? t.y1 : t.y2;
+                    // closePath() は fill() が自動で閉じるので呼ばない。
+                    // Chromium の Path2D.closePath() は1回あたり約16µsかかり、
+                    // 1万枚の三角形で200ms以上を占めていた（実測）。
+                    path.moveTo(t.x0, t.y0);
+                    path.lineTo(q1x, q1y);
+                    path.lineTo(q2x, q2y);
+                    // 縁取りは辺を描くので、閉じる辺は lineTo で戻す（closePath は使わない）。
+                    if (Math.abs(t.area) >= SURF_STROKE_AREA) {
+                        edge.moveTo(t.x0, t.y0);
+                        edge.lineTo(q1x, q1y);
+                        edge.lineTo(q2x, q2y);
+                        edge.lineTo(t.x0, t.y0);
+                        hasEdge = true;
+                    }
                 }
                 lc.fill(path, "nonzero");
-                lc.stroke(path);
+                if (hasEdge) lc.stroke(edge);
             }
         });
         c.save();
         c.setTransform(1, 0, 0, 1, 0, 0);
-        c.globalAlpha = Number(key);
+        c.globalAlpha = alpha;
         c.drawImage(layer, 0, 0, dw, dh, dx0, dy0, dw, dh);
         c.restore();
     });

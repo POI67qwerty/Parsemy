@@ -341,12 +341,14 @@ window.cityGridInstallAssetUI = function (bridge) {
             awningFrontBottom: kind === "awning" ? 0 : undefined,
             awningBackBottom: kind === "awning" ? 0 : undefined,
             awningEdgeEdited: kind === "awning" ? false : undefined,
-            balconyFloorThickness: kind === "balcony" ? 0.16 : undefined,
-            balconyRailHeight: kind === "balcony" ? Math.max(0.12, height - 0.16) : undefined,
-            balconyRailThickness: kind === "balcony" ? 0.12 : undefined,
+            // 床スラブと腰壁の厚さは共通の1つ（画面のハンドルも1本）。
+            balconyThickness: kind === "balcony" ? 0.14 : undefined,
+            balconyRailHeight: kind === "balcony" ? Math.max(0.12, height - 0.14) : undefined,
             balconyFrontRail: kind === "balcony" ? true : undefined,
             balconySideRail: kind === "balcony" ? true : undefined,
             balconyRailHeightEdited: kind === "balcony" ? false : undefined,
+            // コの字壁：3枚の壁の厚さを1本の値で持つ。
+            uWallThickness: kind === "uWall" ? 0.12 : undefined,
             path: kind === "pathPipe" ? pathPipeDefaultPoints() : undefined,
             pipeRadius: kind === "pathPipe" ? 0.18 : undefined,
             cornerRadius: kind === "pathPipe" ? 0.55 : undefined,
@@ -983,7 +985,17 @@ window.cityGridInstallAssetUI = function (bridge) {
         {
             key: "street",
             label: "街・パーツ",
-            kinds: ["stairs", "crosswalk", "ramp", "pathPipe", "awning", "balcony", "wallSign", "windowGrid"],
+            kinds: [
+            "stairs",
+            "crosswalk",
+            "ramp",
+            "pathPipe",
+            "awning",
+            "balcony",
+            "uWall",
+            "wallSign",
+            "windowGrid",
+        ],
         },
         { key: "person", label: "人間", kinds: ["person"] },
     ];

@@ -86,7 +86,7 @@
       <div class="quickRow"><button id="openFloorPlan" class="primary">開く</button><button id="closeFloorPlan">3Dへ戻る</button></div>
       <div id="floorPlanSelectionStatus" class="sceneNote">未選択</div>
       <div class="quickRow floorPlanRotateRow"><button id="floorRotateLeft" disabled>↺</button><button id="floorRotateRight" disabled>↻</button><button id="floorRotate90" disabled>90°</button><button id="floorDelete" disabled>削除</button></div>
-      <div class="sceneNote">間取りでは全ての生成面のオブジェクトをドラッグ移動できます。正面・上・横の移動ギズモ、選択中の前側の丸をドラッグした回転、カメラ本体のドラッグ移動、先端の丸のドラッグで向きの変更ができます。回転は3本のリング（上下＝オレンジの破線／左右＝X／手前奥＝Y）をドラッグすると15°刻み（30°・45°・90°も選べ）、Shiftを押しながらドラッグすると自由な角度です。矢印キーで移動、Q/Eで15°ずつ回転します。幅・奥行き・高さの編集も生成面に関係なく利用できます。テントの前縁Yを一番下まで下げる／前後を一番奥まで寄せると、断面が三角形の三角柱になります。接続テントは接着を保つため本体の移動は上下方向に制限されますが、テントの形（前縁Y＝上下＋手前奥、前後）は店舗テントと同じように編集できます。横壁看板は上下＋壁沿いの前後方向へ移動できます。</div>
+      <div class="sceneNote">間取りでは全ての生成面のオブジェクトをドラッグ移動できます。正面・上・横の移動ギズモ、選択中の前側の丸をドラッグした回転、カメラ本体のドラッグ移動、先端の丸のドラッグで向きの変更ができます。回転は3本のリング（上下＝オレンジの破線／左右＝X／手前奥＝Y）をドラッグすると15°刻み（30°・45°・90°も選べ）、Shiftを押しながらドラッグすると自由な角度です。矢印キーで移動、Q/Eで15°ずつ回転します。幅・奥行き・高さの編集も生成面に関係なく利用できます。テントの前縁Yを一番下まで下げる／前後を一番奥まで寄せると、断面が三角形の三角柱になります。接続テントは接着を保つため本体の移動は上下方向に制限されますが、テントの形（前縁Y＝上下＋手前奥、前後）は店舗テントと同じように編集できます。横壁看板は上下＋壁沿いの前後方向へ移動できます。壁付きベランダとコの字壁は、腰壁（コの字壁は前面の壁）の外側面にあるオレンジの四角をドラッグしても厚さを変えられます。ベランダは床と壁が同じ厚さで、厚くすると全体の高さも伸びます。</div>
     </section>
 
     <section class="workspaceScreen" data-workspace-screen="perspective">
@@ -1787,13 +1787,16 @@
         if (!panel) return;
         panel.style.display = isBalcony ? "" : "none";
         if (!isBalcony) return;
-        const floorT = Number(o.balconyFloorThickness) || 0.16,
-            railH = Number(o.balconyRailHeight) || Math.max(0.12, (Number(o.h) || 1.25) - floorT),
-            railT = Number(o.balconyRailThickness) || 0.12;
+        const thickness =
+                Number(o.balconyThickness) ||
+                Number(o.balconyRailThickness) ||
+                Number(o.balconyFloorThickness) ||
+                0.14,
+            railH = Number(o.balconyRailHeight) || Math.max(0.12, (Number(o.h) || 1.25) - thickness);
         [
             ["balconyRailHeight", railH],
-            ["balconyFloorThickness", floorT],
-            ["balconyRailThickness", railT],
+            // 床と壁の厚さは1本の値なので、入力欄も1つ。
+            ["balconyThickness", thickness],
         ].forEach(([id, v]) => {
             const n = el(id);
             if (n && document.activeElement !== n) n.value = Number(v).toFixed(3);
@@ -1811,24 +1814,25 @@
             RD = [];
             balconyEditSession = true;
         }
-        const floorT = Math.max(0.04, Number(o.balconyFloorThickness) || 0.16),
-            railH = Math.max(0.12, Number(o.balconyRailHeight) || Math.max(0.12, (Number(o.h) || 1.25) - floorT)),
+        const thickness =
+                Number(o.balconyThickness) || Number(o.balconyRailThickness) || Number(o.balconyFloorThickness) || 0.14,
+            railH = Math.max(0.12, Number(o.balconyRailHeight) || Math.max(0.12, (Number(o.h) || 1.25) - thickness)),
             patch = {};
         if (name === "balconyRailHeight") {
             patch.balconyRailHeight = clamp(value, 0.12, 30);
             patch.balconyRailHeightEdited = true;
-            patch.h = floorT + patch.balconyRailHeight;
-        } else if (name === "balconyFloorThickness") {
-            patch.balconyFloorThickness = clamp(value, 0.04, 10);
-            patch.h = patch.balconyFloorThickness + railH;
-        } else if (name === "balconyRailThickness") patch.balconyRailThickness = clamp(value, 0.035, 10);
+            patch.h = thickness + patch.balconyRailHeight;
+        } else if (name === "balconyThickness") {
+            // 厚さを変えると全体の高さ（床＋腰壁）もその分だけ伸びる。
+            patch.balconyThickness = clamp(value, 0.035, 10);
+            patch.h = patch.balconyThickness + railH;
+        }
         setOb(sel, patch);
         render();
     }
     [
         ["balconyRailHeight", "balconyRailHeight"],
-        ["balconyFloorThickness", "balconyFloorThickness"],
-        ["balconyRailThickness", "balconyRailThickness"],
+        ["balconyThickness", "balconyThickness"],
     ].forEach(([id, name]) => {
         const n = el(id);
         if (!n) return;
@@ -1852,6 +1856,38 @@
             render();
         };
     });
+    // ===== コの字壁（3枚の壁をまとめて1本の厚さで編集） =====
+    let uWallEditSession = false;
+    function syncUWallPanel() {
+        const panel = el("uWallP"),
+            o = sel && obOf(sel),
+            isWall = !!(o && o.type === "asset" && o.asset === "uWall");
+        if (!panel) return;
+        panel.style.display = isWall ? "" : "none";
+        if (!isWall) return;
+        const n = el("uWallThickness");
+        if (n && document.activeElement !== n) n.value = (Number(o.uWallThickness) || 0.12).toFixed(3);
+    }
+    function applyUWallProp(name, value) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || o.asset !== "uWall" || !Number.isFinite(value)) return;
+        if (!uWallEditSession) {
+            HU.push(S);
+            RD = [];
+            uWallEditSession = true;
+        }
+        // コの字壁は壁の高さがそのまま h なので、厚さを変えても高さは動かさない。
+        if (name === "uWallThickness") setOb(sel, { uWallThickness: clamp(value, 0.035, 10) });
+        render();
+    }
+    (() => {
+        const n = el("uWallThickness");
+        if (!n) return;
+        n.oninput = () => applyUWallProp("uWallThickness", parseFloat(n.value));
+        n.onchange = () => {
+            uWallEditSession = false;
+        };
+    })();
     let pathPipeEditSession = false;
     function pathPipeText(path) {
         return (Array.isArray(path) ? path : pathPipeDefaultPoints())
@@ -2439,6 +2475,7 @@
         syncBuildingPanel();
         syncWallSideSignPanel();
         syncBalconyPanel();
+        syncUWallPanel();
         syncPathPipePanel();
         syncWallSignPanel();
         syncRoofPanel();
@@ -3595,6 +3632,18 @@
             const edge = floorAwningEdgeHandle(o);
             if (edge.length) handles.push(...edge);
         }
+        // 壁付けベランダの「壁の厚さ」「床の厚さ」も間取りから編集できるようにする。
+        // 3Dと同じ balconyGizmo() の位置を使うので、ビューで能力差が出ない。
+        if (
+            o.type === "asset" &&
+            (o.asset === "balcony" || o.asset === "uWall") &&
+            typeof specialGizmo === "function"
+        ) {
+            const special = specialGizmo(o);
+            Object.values(special?.handles || {}).forEach((h) => {
+                if (h?.s?.ok) handles.push({ ...h, inner: true });
+            });
+        }
         return { o, base: centerWorld, center, handles };
     }
     // 選択オブジェクトの寸法ハンドルを生成する。
@@ -3744,6 +3793,12 @@
         if (o.type === "asset" && o.asset === "awning") {
             const edge = floorAwningEdgeHandle(o);
             if (edge.length) handles.push(...edge);
+        }
+        if (o.type === "asset" && o.asset === "balcony" && typeof balconyGizmo === "function") {
+            const special = balconyGizmo(o);
+            Object.values(special?.handles || {}).forEach((h) => {
+                if (h?.s?.ok) handles.push({ ...h, inner: true });
+            });
         }
         return { o, base, center, handles, panel };
     }
@@ -5016,7 +5071,15 @@
                                               awningFrontBottom: h.frontBottom,
                                               awningEdgeEdited: true,
                                           }
-                                        : h.kind === "awningEdgeY"
+                                        : h.kind === "balcony-thickness"
+                                          ? {
+                                                // 床と壁で共通の厚さ。全体の高さも同じだけ伸びる。
+                                                balconyThickness: value,
+                                                h: value + balconyGeometry(o).railH,
+                                            }
+                                          : h.kind === "uWall-thickness"
+                                            ? { uWallThickness: value }
+                                            : h.kind === "awningEdgeY"
                                           ? {
                                                 // 前面が垂直（＝直方体）と、一番奥（＝三角柱）へ吸着
                                                 awningEdgeY: snapAwningEdge(

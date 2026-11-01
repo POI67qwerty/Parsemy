@@ -167,11 +167,14 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 </div>
 <div id=balconyP style="display:none"><h3>壁付けベランダ</h3>
 <label><span>手すり／腰壁の高さ</span><input type=number class=nv id=balconyRailHeight min=0.12 step=0.05 style="width:100px"><span class=un>m</span></label>
-<label><span>床スラブの厚さ</span><input type=number class=nv id=balconyFloorThickness min=0.04 step=0.02 style="width:100px"><span class=un>m</span></label>
-<label><span>壁の厚さ</span><input type=number class=nv id=balconyRailThickness min=0.035 step=0.02 style="width:100px"><span class=un>m</span></label>
+<label><span>厚さ（床・壁）</span><input type=number class=nv id=balconyThickness min=0.035 step=0.02 style="width:100px"><span class=un>m</span></label>
 <label><input type=checkbox id=balconyFrontRail checked> 前面の腰壁を表示</label>
 <label><input type=checkbox id=balconySideRail checked> 左右の側壁を表示</label>
 <div class="note">建物を選択して棚の「壁付けベランダ」を押すと、建物の正面壁へ2階相当の高さで接着します。接着後は親建物の移動・幅・奥行き・高さに追従し、ベランダ単体の幅・奥行き・手すり高さを編集できます。</div>
+</div>
+<div id=uWallP style="display:none"><h3>コの字壁</h3>
+<label><span>厚さ（屋根・壁）</span><input type=number class=nv id=uWallThickness min=0.035 step=0.02 style="width:100px"><span class=un>m</span></label>
+<div class="note">コの字（断面）を奥行き方向へ押し出した形で、上＝屋根板、左右＝側壁の3枚が同じ厚さでつながります。正面・背面・下面は開いています。厚さは数値欄と、屋根の手前角にあるオレンジの四角（3D・間取りの両方）のどちらからでも変えられます。幅・奥行き・高さは寸法ハンドルで編集します。</div>
 </div>
 <div id=pathPipeP style="display:none"><h3>パスパイプ</h3>
 <label><span>パターン</span><select id=pathPipePreset style="width:150px"><option value="custom">手動入力</option><option value="straight">真っ直ぐ</option><option value="l">L字</option><option value="u">U字</option><option value="z">Z字</option><option value="step3d">立体折れ</option></select><button type=button id=pathPipeApplyPreset>適用</button></label>

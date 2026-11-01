@@ -60,6 +60,8 @@ const ASSETS = {
     wallSideSign: { label: "横壁看板", glyph: "▥", w: 1.5, d: 0.16, h: 1.8, accent: "#76d9ff" },
     awning: { label: "店舗テント", glyph: "▱", w: 3, d: 1, h: 0.35, accent: "#d98b68" },
     balcony: { label: "壁付けベランダ", glyph: "▱", w: 3.2, d: 1.8, h: 1.25, accent: "#e6a36f" },
+    // コの字をZ軸（高さ方向）へ押し出した壁。前面＋左右の3枚で、床スラブは無い。
+    uWall: { label: "コの字壁", glyph: "⊔", w: 3.2, d: 1.8, h: 1.1, accent: "#9db8d6" },
     pathPipe: { label: "パスパイプ", glyph: "◉", w: 4.8, d: 4.2, h: 1.5, accent: "#ff9f68" },
     person: { label: "人物", glyph: "♙", w: 0.46, d: 0.3, h: 1.7, accent: "#ad9cff" },
     stairs: { label: "階段", glyph: "▰", w: 1.45, d: 2.4, h: 0.78, accent: "#ffb36f" },
@@ -1946,6 +1948,7 @@ const ASSET_LINE_BUILDERS = {
     stackedBuilding: linesStackedBuilding,
     beveledStackedBuilding: linesStackedBuilding,
     balcony: linesBalcony,
+    uWall: linesUWall,
     stairs: linesStairs,
     crosswalk: linesCrosswalk,
     cylinder: linesCylinder,
@@ -2372,39 +2375,113 @@ function linesStackedBuilding(ctx) {
 }
 
 // --- 壁付けベランダ ---
-// 床スラブ、前面の腰壁、左右の腰壁、支持ブラケットを別々に描く。
+// 床スラブ＋コの字の腰壁（前・左・右）を、1つの立体として描く。
+// 箱を3枚重ねると ①角で線が二重になり ②重なった面が手前の線を隠して途中で欠け
+// ③奥の面の線が透ける（2026-11-01 の指摘）。重ならない1つの形として線を引く。
+// 寸法は engine-tools の balconyGeometry() に集約している（線・面・ハンドルで同じ値）。
 function linesBalcony(ctx) {
-    const { o, w, d, h, c, a, out } = ctx;
-    // 壁側（+Y）を建物外壁へ合わせ、床を外側（-Y）へ張り出すU字型のベランダ。
-    // 床スラブ＋左右の腰壁＋前面の腰壁を別箱として描くため、面編集後も形状が崩れない。
-    const floorT = clamp(Number(o.balconyFloorThickness) || 0.16, 0.04, Math.max(0.05, h * 0.7)),
-        railH = clamp(Number(o.balconyRailHeight) || Math.max(0.18, h - floorT), 0.12, Math.max(0.12, h - 0.01)),
-        railT = clamp(Number(o.balconyRailThickness) || 0.12, 0.035, Math.min(w, d) * 0.35),
-        frontRail = o.balconyFrontRail !== false,
-        sideRail = o.balconySideRail !== false;
-    out.push(...wireBoxA(o, 0, 0, w, d, 0, floorT, c));
-    if (frontRail) out.push(...wireBoxA(o, 0, -d / 2 + railT / 2, w, railT, floorT, floorT + railH, c));
-    if (sideRail) {
-        out.push(...wireBoxA(o, -w / 2 + railT / 2, 0, railT, d, floorT, floorT + railH, c));
-        out.push(...wireBoxA(o, w / 2 - railT / 2, 0, railT, d, floorT, floorT + railH, c));
-    }
-    // 壁付け面の床下に短い支持ブラケットを入れ、正面／3D線画で張り出し方向を読み取りやすくする。
-    const bracketZ = Math.max(0.02, floorT * 0.18),
-        wallY = d / 2 - railT * 0.5,
-        frontY = -d / 2 + railT * 0.5;
-    [-w * 0.34, w * 0.34].forEach((x) =>
+    const { o, c, out } = ctx,
+        g = balconyGeometry(o),
+        { w, d, thickness: t, railH } = g,
+        hw = w / 2,
+        hd = d / 2,
+        topZ = t + railH,
+        frontRail = g.frontRail,
+        sideRail = g.sideRail,
+        zTop = frontRail || sideRail ? topZ : t;
+    // 床が見えている範囲（腰壁の内側）。壁側（+Y）は開いている。
+    const x0 = sideRail ? -hw + t : -hw,
+        x1 = sideRail ? hw - t : hw,
+        y0 = frontRail ? -hd + t : -hd;
+    // 1) 床スラブの底面。
+    out.push(polyA(o, [[-hw, -hd, 0], [hw, -hd, 0], [hw, hd, 0], [-hw, hd, 0]], c));
+    // 2) 腰壁の上面（コの字のリング。外側の輪郭＋内側の輪郭を1本の線で）。
+    if (frontRail && sideRail)
         out.push(
-            lineA(
+            polyA(
                 o,
                 [
-                    [x, wallY, bracketZ],
-                    [x, frontY, 0],
+                    [-hw, -hd, topZ],
+                    [hw, -hd, topZ],
+                    [hw, hd, topZ],
+                    [hw - t, hd, topZ],
+                    [hw - t, -hd + t, topZ],
+                    [-hw + t, -hd + t, topZ],
+                    [-hw + t, hd, topZ],
+                    [-hw, hd, topZ],
                 ],
                 c,
-                0.85,
             ),
-        ),
-    );
+        );
+    else if (frontRail) out.push(polyA(o, [[-hw, -hd, topZ], [hw, -hd, topZ], [hw, -hd + t, topZ], [-hw, -hd + t, topZ]], c));
+    else if (sideRail) {
+        out.push(polyA(o, [[-hw, -hd, topZ], [-hw + t, -hd, topZ], [-hw + t, hd, topZ], [-hw, hd, topZ]], c));
+        out.push(polyA(o, [[hw - t, -hd, topZ], [hw, -hd, topZ], [hw, hd, topZ], [hw - t, hd, topZ]], c));
+    }
+    // 3) 床の見えている範囲の縁（腰壁の足元）。腰壁と接する所だけに線が入る。
+    out.push(polyA(o, [[x0, y0, t], [x1, y0, t], [x1, hd, t], [x0, hd, t]], c));
+    // 4) 縦の稜線。同じ位置の角は1本にまとめる（床下から立つ外側の角と、
+    //    床から立つ腰壁の内側の角）。
+    const vs = new Map(),
+        addV = (x, y, z0) => {
+            const k = `${x.toFixed(3)}|${y.toFixed(3)}`,
+                prev = vs.get(k);
+            if (!prev || z0 < prev[2]) vs.set(k, [x, y, z0]);
+        };
+    [
+        [-hw, -hd],
+        [hw, -hd],
+        [hw, hd],
+        [-hw, hd],
+    ].forEach(([x, y]) => addV(x, y, 0));
+    if (sideRail) {
+        addV(x0, y0, t);
+        addV(x1, y0, t);
+        addV(x0, hd, t);
+        addV(x1, hd, t);
+    } else if (frontRail) {
+        addV(-hw, -hd + t, t);
+        addV(hw, -hd + t, t);
+    }
+    vs.forEach(([x, y, z0]) => out.push(lineA(o, [[x, y, z0], [x, y, zTop]], c)));
+    // 5) 壁付け面の床下に短い支持ブラケットを入れ、正面／3D線画で張り出し方向を読み取る。
+    const bracketZ = Math.max(0.02, t * 0.18),
+        wallY = d / 2 - t * 0.5,
+        frontY = -d / 2 + t * 0.5;
+    [-w * 0.34, w * 0.34].forEach((x) => out.push(lineA(o, [[x, wallY, bracketZ], [x, frontY, 0]], c)));
+}
+// --- コの字壁 ---
+// コの字（∩の断面）を奥行き方向（Y軸）へ押し出した1つの立体として描く。
+// 上＝屋根板、左右＝側壁が同じ厚さでつながり、正面・背面・下面は開いている。
+// 初期の向きは「壁が立ったコの字」をX軸まわりに時計回りへ90°回したもの。
+//
+// 【重要】箱を3つ重ねて描くと、屋根と側壁が重なる所（上端の角）に
+// ・同じ位置の線が二重に描かれる
+// ・側壁の上面の四角が屋根の表面を横切る
+// という余計な線が出る（2026-11-01 の指摘）。断面の輪郭を1本の閉じた線として
+// 押し出し、角を通る奥行き方向の稜線だけを足すことで、実際の立体の稜線だけになる。
+function linesUWall(ctx) {
+    const { o, c, out } = ctx,
+        { w, d, h, thickness: t } = uWallGeometry(o),
+        hw = w / 2,
+        hd = d / 2,
+        // 断面（XZ平面）の8点。左の脚の底 → 左外側 → 屋根の上 → 右外側 →
+        // 右の脚の底 → 右の内側 → 屋根の裏 → 左の内側 → 左の脚の底へ戻る。
+        profile = [
+            [-hw, 0],
+            [-hw, h],
+            [hw, h],
+            [hw, 0],
+            [hw - t, 0],
+            [hw - t, h - t],
+            [-hw + t, h - t],
+            [-hw + t, 0],
+        ];
+    // 前後の面：同じ断面を閉じた線で1本ずつ。
+    out.push(polyA(o, profile.map(([px, pz]) => [px, -hd, pz]), c));
+    out.push(polyA(o, profile.map(([px, pz]) => [px, hd, pz]), c));
+    // 断面の角8か所を通る、奥行き方向の稜線。
+    profile.forEach(([px, pz]) => out.push(lineA(o, [[px, -hd, pz], [px, hd, pz]], c)));
 }
 
 // --- 階段 ---
@@ -3444,20 +3521,26 @@ function normalizedAsset(o) {
             h: Math.max(0.1, Math.max(...zs) - Math.min(...zs) + radius * 2),
         };
     }
-    // ベランダの床厚・手すり厚・手すり高さを正規化する。
+    // ベランダの厚さ（床と腰壁で共通）と手すり高さを正規化する。
     if (q && q.asset === "balcony") {
-        const floorT = clamp(Number(q.balconyFloorThickness) || 0.16, 0.04, 10),
-            railT = clamp(Number(q.balconyRailThickness) || 0.12, 0.035, 10),
+        const thickness = clamp(
+                Number(q.balconyThickness) || Number(q.balconyRailThickness) || Number(q.balconyFloorThickness) || 0.14,
+                0.035,
+                10,
+            ),
             railH = q.balconyRailHeightEdited
                 ? clamp(Number(q.balconyRailHeight) || 0.9, 0.12, 30)
-                : Math.max(0.12, (Number(q.h) || 1.25) - floorT);
+                : Math.max(0.12, (Number(q.h) || 1.25) - thickness);
         q = {
             ...q,
-            balconyFloorThickness: floorT,
-            balconyRailThickness: railT,
+            balconyThickness: thickness,
             balconyRailHeight: railH,
-            h: floorT + railH,
+            h: thickness + railH,
         };
+    }
+    // コの字壁の厚さを正規化する（高さhは壁の高さそのもの）。
+    if (q && q.asset === "uWall") {
+        q = { ...q, uWallThickness: clamp(Number(q.uWallThickness) || 0.12, 0.035, 10) };
     }
     // 球は3方向の半径をそろえ、必ず真球として扱う。
     if (q && q.asset === "sphere") {
