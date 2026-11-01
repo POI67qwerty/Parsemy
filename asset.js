@@ -13,7 +13,7 @@
    9. 初期化                 : 自動保存データを新しい線画へ作り直す
 
    UIのボタンや編集イベントは studio-ui.js、3Dギズモと移動処理は
-   engine-tools.js が担当する。このファイルでは主に「何を描くか」を決める。 */
+   engine-gizmo.js / engine-render.js が担当する。このファイルでは主に「何を描くか」を決める。 */
 "use strict";
 // ===== 1. アセットのカタログ =====
 // ここは棚に並ぶアセットの「定義表」。実際の線画を描く場所ではない。
@@ -292,7 +292,9 @@ function beveledWireBoxA(o, cx, cy, w, d, z0, z1, offset = 0.06, segments = 3, c
             color,
         ),
     );
-    footprint.forEach(([x, y]) =>
+    // ベベルの弧の途中は縦辺を描かない（面だけで見せる）。
+    footprint.forEach(([x, y], index) => {
+        if (bevelSeamPoint(index, offset, segments)) return;
         out.push(
             lineA(
                 o,
@@ -302,8 +304,8 @@ function beveledWireBoxA(o, cx, cy, w, d, z0, z1, offset = 0.06, segments = 3, c
                 ],
                 color,
             ),
-        ),
-    );
+        );
+    });
     return out;
 }
 // 隅切り直方体の底面・上面と縦辺を描く。切り口の辺だけを赤くして、
@@ -417,6 +419,18 @@ function beveledBoxFootprint(width, depth, offset, segmentCount) {
         }
     });
     return out;
+}
+// ベベル（角の丸め）の弧の「途中」にある輪郭点かどうか。
+// ベベルは面として見せ、弧の途中の縦の稜線は描かない（凹窓階層建物の扱いと揃える）。
+// 弧の両端は平らな側面と接する所なので、形の輪郭として残す。
+// 今後ベベルのあるアセットを足すときも、縦辺を描く前にこの関数で判定すること。
+function bevelSeamPoint(index, offset, segments) {
+    const b = Math.abs(Number(offset) || 0);
+    if (b <= 0.000001) return false;
+    const n = beveledBoxSegments(segments) + 1;
+    if (n <= 2) return false;
+    const i = ((index % n) + n) % n;
+    return i !== 0 && i !== n - 1;
 }
 // ===== 3.1 壁付け看板（単体）=====
 // 看板は板を立てた形状で、ローカル座標は x=板の幅、y=板厚、z=高さ。
@@ -2148,7 +2162,10 @@ function linesBeveledBox(ctx) {
                 c,
             ),
         );
-        footprint.forEach(([x, y]) =>
+        // ベベルの弧の途中は縦辺を描かない。以前は1つの角につき
+        // (分割数+1) 本の縦線が並び、角が黒く潰れていた。
+        footprint.forEach(([x, y], index) => {
+            if (bevelSeamPoint(index, q.bevelOffset, q.bevelSegments)) return;
             out.push(
                 lineA(
                     o,
@@ -2158,8 +2175,8 @@ function linesBeveledBox(ctx) {
                     ],
                     c,
                 ),
-            ),
-        );
+            );
+        });
     }
 }
 
@@ -2260,7 +2277,9 @@ function linesStackedBuilding(ctx) {
             top = footprint.map(([x, y]) => [x + ox, y + oy, z + h + oz]);
         if (caps.bottom) out.push(customLineA(o, [...bottom, bottom[0]], color));
         if (caps.top) out.push(customLineA(o, [...top, top[0]], color));
-        footprint.forEach(([x, y]) =>
+        // ベベルの弧の途中は縦辺を描かない（面だけで見せる）。
+        footprint.forEach(([x, y], index) => {
+            if (bevelSeamPoint(index, bevelOffset, bevelSegments)) return;
             out.push(
                 customLineA(
                     o,
@@ -2270,8 +2289,8 @@ function linesStackedBuilding(ctx) {
                     ],
                     color,
                 ),
-            ),
-        );
+            );
+        });
     };
     // 開口ON/OFFの判定はここで一度だけ行う。OFFなら通常の閉じた建物になる。
     const openingEnabled = stackedOpeningEnabled(o);
@@ -2544,7 +2563,7 @@ function stoolSilhouetteAngles(o) {
 // 床スラブ＋コの字の腰壁（前・左・右）を、1つの立体として描く。
 // 箱を3枚重ねると ①角で線が二重になり ②重なった面が手前の線を隠して途中で欠け
 // ③奥の面の線が透ける（2026-11-01 の指摘）。重ならない1つの形として線を引く。
-// 寸法は engine-tools の balconyGeometry() に集約している（線・面・ハンドルで同じ値）。
+// 寸法は engine-gizmo.js の balconyGeometry() に集約している（線・面・ハンドルで同じ値）。
 function linesBalcony(ctx) {
     const { o, c, out } = ctx,
         g = balconyGeometry(o),
@@ -2652,7 +2671,7 @@ function linesUWall(ctx) {
 
 // --- 手すり ---
 // 柱・上の横桟・下の横桟・縦の棒を、すべて「細い直方体の線画」で組む。
-// 寸法の決定は railingGeometry()（engine-tools.js）に任せ、ここでは描くだけ。
+// 寸法の決定は railingGeometry()（engine-gizmo.js）に任せ、ここでは描くだけ。
 // 形（コの字・L字・直線）と本数の配分も railingGeometry() が計算済みなので、
 // 画面のハンドル・数値パネル・線画が同じ値を見ることになる。
 function linesRailing(ctx) {
@@ -3073,7 +3092,7 @@ function linesSign(ctx) {
 
 // --- 人物 ---
 // 人形の骨格を1か所で決める。線画（linesPerson）と面メッシュ
-// （engine-tools.js の exportSurfaceTriangles）が同じ値を使うので、
+// （engine-render.js の exportSurfaceTriangles）が同じ値を使うので、
 // 関節を回しても線と面が食い違わない。
 // 角度はすべて度。正の値が「前に振る（-y 側）」。膝だけは正が「曲げる（かかとが後ろ）」。
 function personPose(o) {

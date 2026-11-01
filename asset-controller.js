@@ -10,7 +10,7 @@
    5. 棚UI                 : ボタン入力を上記処理へ接続する
 
    線画の形状は asset.js、基本のオブジェクト編集は engine-core.js、
-   ギズモ操作は engine-tools.js が担当する。 */
+   ギズモ操作は engine-gizmo.js / engine-render.js が担当する。 */
 "use strict";
 
 // studio-ui.jsから受け取ったDOM・状態ブリッジを使って、アセット操作を登録する。

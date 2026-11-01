@@ -8,7 +8,7 @@
    - presets / touch         : カメラプリセットとタッチジェスチャー
 
    エンジンの共有状態・座標計算は engine-core.js、ギズモ本体は
-   engine-tools.js、アセット生成とJSON処理は asset.js / asset-controller.js が担当する。 */
+   engine-gizmo.js / engine-render.js / engine-input.js / engine-io.js、アセット生成とJSON処理は asset.js / asset-controller.js が担当する。 */
 (function () {
     "use strict";
     const el = (id) => document.getElementById(id);
@@ -2008,7 +2008,7 @@
     });
     // ===== 手すり（柱＋上下の横桟＋縦の棒） =====
     // 形（コの字／L字／直線）と4つの寸法を、数値欄と「−／＋」ボタンで編集する。
-    // 実際の寸法計算は railingGeometry()（engine-tools.js）が唯一の源なので、
+    // 実際の寸法計算は railingGeometry()（engine-gizmo.js）が唯一の源なので、
     // 画面ハンドル・数値欄・線画がすべて同じ値になる。
     let railingEditSession = false;
     const RAILING_PROPS = [
@@ -2922,7 +2922,7 @@
     window.cityFloorPlanEnter = enterFloorPlan;
     window.cityFloorPlanExit = exitFloorPlan;
     window.cityFloorPlanView = showFloorPlan;
-    // engine-tools.jsは別スクリプト／別スコープで読み込まれるため、
+    // engine-gizmo.js は別スクリプト／別スコープで読み込まれるため、
     // ボックス選択から間取りのドラッグ状態を操作するときはこの橋を使う。
     window.cityFloorPlanGetDrag = () => floorPlanDrag;
     window.cityFloorPlanSetDrag = (value) => {
@@ -4130,7 +4130,7 @@
             c.lineTo(a.sT.x - ux * h + uy * h * 0.65, a.sT.y - uy * h - ux * h * 0.65);
             c.closePath();
             c.fill();
-            c.fillText(a.name, a.sT.x + ux * h + 4 / Z, a.sT.y + uy * h + 4 / Z);
+            gzLabel(c, a.name, a.sT.x + ux * h + 4 / Z, a.sT.y + uy * h + 4 / Z, "#ff9f68", 12);
         });
         c.fillStyle = "#fff";
         c.strokeStyle = "#102027";
@@ -4190,9 +4190,8 @@
             c.closePath();
             c.fill();
             c.stroke();
-            c.fillStyle = fill;
             const handleLabel = h.kind === "recessed-window-count" ? `${h.label} ${Math.round(h.start)}枚` : h.kind === "recessed-floor-gap" ? `${h.label} ${Number(h.start).toFixed(2)}m` : h.label;
-            c.fillText(handleLabel, h.s.x + 8 / Z, h.s.y - 7 / Z);
+            gzLabel(c, handleLabel, h.s.x + 8 / Z, h.s.y - 7 / Z, fill, 12);
         });
         c.restore();
     }
@@ -4341,9 +4340,9 @@
             // 以前は「専用ギズモを持つアセット」と「ベベル直方体・壁付け看板」だけを
             // ここで描いていたため、人物や窓グリッドは 3D でしか見えず、
             // 前／横／上では「編集できるのにハンドルが無い」状態だった。
-            // 壁横看板だけは engine-tools 側の drawGizmo が担当するので二重に描かない。
+            // 壁横看板だけは engine-gizmo.js 側の drawGizmo が担当するので二重に描かない。
             // ツールが「編集」以外でも、選択中なら3Dビューと同じように専用ハンドルを描く。
-            // 3D側（engine-tools の drawGizmo）はツールに関係なく描画するため、
+            // 3D側（engine-gizmo.js の drawGizmo）はツールに関係なく描画するため、
             // ここで tool === "edit" を条件にすると「3Dでは出るが前／横／上では出ない」
             // という差が生まれる（実際にその状態になっていた）。
             if (h.object.o?.asset !== "wallSideSign") drawSpecialGizmo(c, h.object.o);
@@ -4408,9 +4407,7 @@
             c.closePath();
             c.fill();
             c.stroke();
-            c.fillStyle = "#ffe6a1";
-            c.font = `bold ${10 / Z}px system-ui`;
-            c.fillText("レンズ", q.x + 8 / Z, q.y - 7 / Z);
+            gzLabel(c, "レンズ", q.x + 8 / Z, q.y - 7 / Z, "#ffe6a1", 10);
         }
         c.restore();
     }
@@ -4824,12 +4821,30 @@
         },
         true,
     );
-    // canvasのIDLイベントハンドラ（engine-tools.js）がstudio-uiの後付け
+    // canvasのIDLイベントハンドラ（engine-input.js）がstudio-uiの後付け
     // listenerより先に呼ばれるブラウザでも、間取りの専用経路を優先する。
     document.addEventListener(
         "pointerdown",
         (e) => {
-            if (window.cityFloorPlanActive && e.target === cv) e.__cityFloorPlanPreempt = true;
+            if (!(window.cityFloorPlanActive && e.target === cv)) return;
+            // 回転ギズモ（Blender 風の輪）を掴んだときは、間取りの操作より先に
+            // ギズモの回転を優先する。間取りビューでも3Dと同じように回せるようにするため
+            // （ビューによって編集できる項目が変わらない、という決めごと）。
+            let gizmoRing = false;
+            try {
+                const hit =
+                    typeof hitGizmo === "function" && tool === "edit" && mode === "draw"
+                        ? hitGizmo(pos(e))
+                        : null;
+                gizmoRing = !!hit && (hit.t === "ring" || hit.t === "tiltring");
+            } catch (err) {
+                gizmoRing = false;
+            }
+            if (gizmoRing) {
+                e.__cityGizmoTakes = true;
+                return; // プリエンプトしない＝engine-input.js がギズモのドラッグを始める
+            }
+            e.__cityFloorPlanPreempt = true;
         },
         true,
     );
@@ -4837,6 +4852,8 @@
         "pointerdown",
         (e) => {
             if (!window.cityFloorPlanActive) return;
+            // 回転ギズモを掴んだ操作は engine-input.js 側で処理する（ここでは何もしない）。
+            if (e.__cityGizmoTakes) return;
             if (floorTouchDown(e)) return;
             const p = pos(e),
                 panGesture = e.button === 1 || e.button === 2 || e.altKey || floorPlanPanMode;
@@ -4865,7 +4882,7 @@
                     // 間取りビュー（前／横／上）では、3Dの汎用ギズモ（回転の輪・軸・面）は
                     // 描画されていない。描かれていない輪の当たり判定だけが残っていると、
                     // 見えないリングが寸法ハンドルを奪い、「幅＋−を押すと回転する」
-                    // 「押しても何も動かない」状態になる。看板だけは engine-tools 側が
+                    // 「押しても何も動かない」状態になる。看板だけは engine-gizmo.js 側が
                     // 前／横／上でもギズモを描くので除外する。
                     genericGizmo =
                         (specialT === "face" && specialAsset !== "sign") ||

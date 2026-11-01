@@ -8,7 +8,7 @@
    4. setOb / regenObjects で定義変更と線画再生成を行う
    5. 保存・読込は末尾のpack / unpack系から呼び出す
 
-   アセット固有の線画は asset.js、ギズモ・ドラッグ・描画は engine-tools.js、
+   アセット固有の線画は asset.js、ギズモ・ドラッグは engine-gizmo.js、描画は engine-render.js、
    パネルと間取りUIは studio-ui.js に分離している。 */
 const $ = (id) => document.getElementById(id);
 function isStackedBuildingAsset(o) {
@@ -531,15 +531,51 @@ const camPos = () => [P.cx, P.ch - 1, P.cz],
     CO = () => [-P.cx, 1 - P.ch, -P.cz],
     sigNow = () => P.ch + "," + P.cx + "," + P.cz + "," + P.yaw + "," + P.pitch + "," + P.roll + "," + T; // カメラの位置／ワールド→カメラからの相対への足し算
 // ワールドのベクトル→カメラ座標（水平回転→上下→ロール）
+// カメラの回転（ワールド→視点）を行列にして使い回す。
+// 以前は点1つごとに sin/cos を6回呼んでいたため、線や面の点数が多いほど
+// 三角関数の呼び出しだけで時間を使っていた（1フレームで数万回）。
+// 行列はヨー・ピッチ・ロール・視点の種類が変わったときだけ作り直す。
+let CAMM = null,
+    CAMKEY = null;
+function camMatrix() {
+    const y = P.yaw,
+        p = P.pitch,
+        r = T === "f" ? P.roll : 0;
+    if (CAMKEY && CAMKEY[0] === y && CAMKEY[1] === p && CAMKEY[2] === r && CAMKEY[3] === T) return CAMM;
+    const th = y * DG,
+        ph = p * DG,
+        ro = r * DG,
+        ct = Math.cos(th),
+        st = Math.sin(th),
+        cp = Math.cos(ph),
+        sp = Math.sin(ph),
+        cr = Math.cos(ro),
+        sr = Math.sin(ro);
+    // ヨー → ピッチ → ロールの順（元の式と同じ）。3x3 を1本の配列で持つ。
+    CAMM = [
+        cr * ct - sr * sp * st,
+        -sr * cp,
+        cr * st + sr * sp * ct,
+        sr * ct + cr * sp * st,
+        cr * cp,
+        sr * st - cr * sp * ct,
+        -cp * st,
+        sp,
+        cp * ct,
+    ];
+    CAMKEY = [y, p, r, T];
+    return CAMM;
+}
 function cam(v) {
-    const th = P.yaw * DG,
-        ph = P.pitch * DG,
-        ro = (T === "f" ? P.roll : 0) * DG;
-    const x1 = v[0] * Math.cos(th) + v[2] * Math.sin(th),
-        z1 = -v[0] * Math.sin(th) + v[2] * Math.cos(th);
-    const y2 = v[1] * Math.cos(ph) - z1 * Math.sin(ph),
-        z2 = v[1] * Math.sin(ph) + z1 * Math.cos(ph);
-    return [x1 * Math.cos(ro) - y2 * Math.sin(ro), x1 * Math.sin(ro) + y2 * Math.cos(ro), z2];
+    const m = camMatrix(),
+        x = v[0],
+        y = v[1],
+        z = v[2];
+    return [
+        m[0] * x + m[1] * y + m[2] * z,
+        m[3] * x + m[4] * y + m[5] * z,
+        m[6] * x + m[7] * y + m[8] * z,
+    ];
 }
 // 魚眼投影（等距離射影）：単位ベクトル→画面。okは画角内かどうか
 function pf(v) {
@@ -820,7 +856,10 @@ function strokeW(c, s) {
     let pna = null;
     s.p.forEach((v, i) => {
         const pnv = subdivide ? V.nrm(rl(v)) : null;
-        if (i && subdivide && pna) {
+        // 同じ線分を2回描かない（印は genShape が付けている）。
+        // 間引いた区間は線を切るだけなので、見た目は1本ぶんになる。
+        if (i && s.dup && s.dup[i - 1]) on = false;
+        else if (i && subdivide && pna) {
             const a = s.p[i - 1],
                 n = Math.ceil(Math.acos(Math.max(-1, Math.min(1, V.dot(pna, pnv)))) / 0.03);
             for (let j = 1; j < n; j++) put(co ? V.add(a, v, 1 - j / n, j / n) : V.nrm(V.add(a, v, 1 - j / n, j / n)));
@@ -956,10 +995,19 @@ function compoundPartsAt(o) {
     const d = [Number(o?.tx) || 0, Number(o?.ty) || 0, Number(o?.tz) || 0];
     return (o?.parts || []).map((part) => detachPart(translateDefinition(part, d)));
 }
+// 結合体の部品1つぶんの線を作る。
+// アセット（type:"asset"）は asset.js が genShape を差し替えて genAsset へ振り分けるため、
+// ここでも同じ入口を通す。以前は genShapeCore を直接呼んでいたため、
+// アセットの部品だけ線が出ず、アセットだけの結合体は丸ごと消えていた（旧JSONで発生）。
+// 重複よけの印は、部品をまたいで付けたいので呼び出し元の genShape でまとめて行う。
+function partShape(part) {
+    if (part && part.type === "asset" && typeof genAsset === "function") return genAsset(part);
+    return genShapeCore(part);
+}
 function genCompoundShape(ob) {
     const out = [];
     compoundPartsAt(ob).forEach((part) =>
-        genShape(part).forEach((s) => out.push({ ...s, ob, c: s.c || ob.c, w: s.w || ob.w })),
+        partShape(part).forEach((s) => out.push({ ...s, ob, c: s.c || ob.c, w: s.w || ob.w })),
     );
     return out;
 }
@@ -972,7 +1020,13 @@ const hit3 = (r, k, d, c = [0, 0, 0]) => {
 }; // 視線rが面(k座標=d)と交わる3D点（cはカメラ位置）
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 // 図形の定義 ob（面の向きk・中心・半径・回転・大きさ・浮かせ量…）から線を作る。ob を直せば作り直せる＝移動・回転ができる
+// 線の重複の印（.dup）を付けてから返す。
+// 同じ稜線を2本持つアセット（屋台271本・建物254本など）でも、描画は1本ぶんになる。
+// 計算は「形が変わったとき」の1回だけ（毎フレームやると描画が重くなる）。
 function genShape(ob) {
+    return CG.lineDedup.mark(genShapeCore(ob));
+}
+function genShapeCore(ob) {
     if (ob?.type === "compound") return genCompoundShape(ob);
     const { type, k, d, ca, cb, wf } = ob,
         off = ob.off || [0, 0, 0],

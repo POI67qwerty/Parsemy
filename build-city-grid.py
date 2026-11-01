@@ -2,8 +2,12 @@
 """City Grid Studio のソースを結合する小さなビルドスクリプト。
 
 ソースの役割:
+- engine-lib.js        : 共通の小さな道具箱（隠線の許容量・線の重複よけ）
 - engine-core.js       : 共有状態・投影・基本図形
-- engine-tools.js      : ギズモ・描画・入力・保存
+- engine-gizmo.js      : ギズモ・当たり判定・ドラッグ・アセットの寸法
+- engine-render.js     : 書き出し範囲・隠れ線・線画レイヤー・グリッド・描画
+- engine-input.js      : ポインター・ピンチ・消しゴム・モード切替
+- engine-io.js         : 画像書き出し・参考写真・保存/読み込み・起動
 - asset.js             : アセット形状・正規化
 - asset-controller.js  : アセット配置・JSON・棚UI
 - studio-ui.js         : パネル・間取り・プリセット
@@ -46,14 +50,18 @@ def inject_style(html: str, marker: str, content: str) -> str:
 
 def main() -> None:
     """ソース順を固定して、配布用の単体HTMLを更新する。"""
+    lib = read("engine-lib.js")
     core = read("engine-core.js")
-    tools = read("engine-tools.js")
+    tools = "\n".join(
+        read(name)
+        for name in ("engine-gizmo.js", "engine-render.js", "engine-input.js", "engine-io.js")
+    )
     asset = read("asset.js")
     controller = read("asset-controller.js")
     ui = read("studio-ui.js")
 
     # 単体HTMLの「engine」ブロック＝コア＋入力／描画ツール。
-    engine = core + "\n" + tools
+    engine = lib + "\n" + core + "\n" + tools
 
     # 単体HTMLは、engineとstudio-uiの2ブロックへ同じソースを埋め込む。
     html = read("cyberpunk-city-studio.html")
