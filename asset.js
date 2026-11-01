@@ -179,21 +179,12 @@ const assetGlyph = (o) =>
 const pt = (o, x, y, z) => L2W(o, x, y, z);
 // customアセットだけは、作成サイトと同じ x=左右／y=奥行き／z=高さの
 // ワールド座標で保持する。既存アセットの面座標系（k/PL）は変更しない。
-const customPt = (o, x, y, z) => {
-    const a = (Number(o.rot) || 0) * DG,
-        cs = Math.cos(a),
-        sn = Math.sin(a),
-        rx = x * cs - y * sn,
-        ry = x * sn + y * cs,
-        off = o.off || [0, 0, 0],
-        // custom geometry is still an asset object, so normal object movement is stored
-        // in ca/cb/lift. Include those values here or the line mesh stays behind while
-        // the generic surface mesh (L2W) moves with the object.
-        baseX = Number(o.ca) || 0,
-        baseZ = Number(o.cb) || 0,
-        baseY = (Number(o.d) || -1) - (Number(o.d) || -1) * (Number(o.lift) || 0);
-    return [rx + baseX + (Number(off[0]) || 0), baseY + z + (Number(off[1]) || 0), ry + baseZ + (Number(off[2]) || 0)];
-};
+// 積層建物などは寸法を各階の配列（floors[]）で持つため、線画は「x=幅／y=奥行き／
+// z=高さ」のローカル座標で組み立ててからワールドへ移す。その変換が customPt。
+// k=1・rot・ca/cb/lift・off の扱いは L2W とまったく同じなので、L2W へ委譲する。
+// 委譲しないと、生成面（k=0／2）を選んでも積層建物だけ向きが変わらない、
+// 画面の回転ギズモで傾けても積層建物だけ傾かない、という差が出る。
+const customPt = (o, x, y, z) => L2W(o, x, y, z);
 // 3Dの折れ線を1本の線画オブジェクトへ包む。
 // genShape() が返す形式に合わせることで、既存の描画エンジンへ渡せる。
 const lineA = (o, pts, color = o.c || "#e7fff4", width = o.w || 2) => ({

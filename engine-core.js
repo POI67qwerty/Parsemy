@@ -1228,16 +1228,21 @@ function syncAttachedPart(o, parentOverride = null) {
     const attachedNormal = Math.abs(Number(o.rb) || 0.1) + 0.008;
     const faceY = side * (Math.abs(Number(parent.rb) || 0.5) + attachedNormal),
         p = L2W(parent, px, faceY, z),
-        rot = Number(parent.rot || 0) + Number(a.rotOffset || 0);
+        rot = Number(parent.rot || 0) + Number(a.rotOffset || 0),
+        // 子は親と同じ生成面（k）に載せる。以前は必ず k=1 にしていたため、
+        // 親の生成面を X／Z にすると子だけ元の向きに残って壁から浮いていた。
+        // 同じ k にそろえると、親を傾けても同じ面の上に貼り付いたまま追従する。
+        pk = Number.isFinite(Number(parent.k)) ? Number(parent.k) : 1,
+        [piu, piv] = PL[pk];
     return {
         ...o,
         attachment: linkedFace ? { ...a, side: -1 } : { ...a, side },
-        k: 1,
+        k: pk,
         d: -1,
         rot,
-        ca: p[0],
-        cb: p[2],
-        lift: p[1] + 1,
+        ca: p[piu],
+        cb: p[piv],
+        lift: p[pk] + 1,
         off: [0, 0, 0],
     };
 }
@@ -1432,6 +1437,54 @@ function pickOb(p, includeLocked = false) {
 // 図形のローカル座標(x=幅方向,y=奥行き方向,z=高さ方向)→ワールドの3D点
 // オブジェクト固有のローカル座標をワールド座標へ変換する。
 // x=幅、y=面内の奥行き、z=法線方向の押し出しとして、k/rot/d/liftを反映する。
+// 画面の回転ギズモで作る「傾き」の回転行列。
+// rotX / rotZ はワールド軸まわりの角度（度）。Y軸（上下）まわりは従来の rot が
+// そのまま担当するので、ここでは扱わない（既存データの見た目を変えないため）。
+// 回転の中心はオブジェクトのローカル原点（底面の中心）で、地面に接したまま傾く。
+function objectTiltMatrix(o) {
+    const ax = (Number(o?.rotX) || 0) * DG,
+        az = (Number(o?.rotZ) || 0) * DG;
+    if (!ax && !az) return null;
+    const cx = Math.cos(ax),
+        sx = Math.sin(ax),
+        cz = Math.cos(az),
+        sz = Math.sin(az);
+    // R = Rz(az) · Rx(ax)
+    return [
+        [cz, -sz * cx, sz * sx],
+        [sz, cz * cx, -cz * sx],
+        [0, sx, cx],
+    ];
+}
+// 傾きの回転を、ローカル原点を中心に1点へ適用する。
+function applyObjectTilt(o, v, base) {
+    const M = objectTiltMatrix(o);
+    if (!M) return v;
+    // 回転の中心はオブジェクトの高さの真ん中。底面基準にすると、傾けたときに
+    // 下の角が地面へ潜り込んで「倒れた」ように見えるため、その場で回す。
+    const h = Math.max(0, Number(o?.h) || 0);
+    const b = base || l2wRaw(o, 0, 0, h * 0.5),
+        dx = v[0] - b[0],
+        dy = v[1] - b[1],
+        dz = v[2] - b[2];
+    return [
+        b[0] + M[0][0] * dx + M[0][1] * dy + M[0][2] * dz,
+        b[1] + M[1][0] * dx + M[1][1] * dy + M[1][2] * dz,
+        b[2] + M[2][0] * dx + M[2][1] * dy + M[2][2] * dz,
+    ];
+}
+// 傾きを掛ける前の座標（従来の L2W と同じ計算）。傾きの中心を出すのにも使う。
+function l2wRaw(o, x, y, z) {
+    const [iu, iv] = PL[o.k],
+        cs = Math.cos(o.rot * DG),
+        sn = Math.sin(o.rot * DG),
+        v = [0, 0, 0];
+    v[o.k] = o.d - o.d * o.lift - o.d * z;
+    v[iu] = o.ca + x * cs - y * sn;
+    const f = o.off || [0, 0, 0];
+    v[iv] = o.cb + x * sn + y * cs;
+    return [v[0] + f[0], v[1] + f[1], v[2] + f[2]];
+}
 function L2W(o, x, y, z) {
     if (o?.attachment) o = syncAttachedPart(o);
     // 横壁看板は、通常の「水平面＋上下押し出し」だけでは表せないため、
@@ -1442,17 +1495,9 @@ function L2W(o, x, y, z) {
         const add = (base, axis, scale) => base.map((value, i) => value + axis[i] * scale),
             p = add(wb.origin, wb.u, Number(x) || 0),
             q = add(p, wb.v, Number(y) || 0);
-        return add(q, wb.n, Number(z) || 0);
+        return applyObjectTilt(o, add(q, wb.n, Number(z) || 0), wb.origin);
     }
-    const [iu, iv] = PL[o.k],
-        cs = Math.cos(o.rot * DG),
-        sn = Math.sin(o.rot * DG),
-        v = [0, 0, 0];
-    v[o.k] = o.d - o.d * o.lift - o.d * z;
-    v[iu] = o.ca + x * cs - y * sn;
-    const f = o.off || [0, 0, 0];
-    v[iv] = o.cb + x * sn + y * cs;
-    return [v[0] + f[0], v[1] + f[1], v[2] + f[2]];
+    return applyObjectTilt(o, l2wRaw(o, x, y, z));
 }
 // 古い保存データ（大きさ%・高さ%）を、幅・奥行き・高さの形に直す
 function fixOb(o) {

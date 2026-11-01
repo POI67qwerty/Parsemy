@@ -86,7 +86,7 @@
       <div class="quickRow"><button id="openFloorPlan" class="primary">開く</button><button id="closeFloorPlan">3Dへ戻る</button></div>
       <div id="floorPlanSelectionStatus" class="sceneNote">未選択</div>
       <div class="quickRow floorPlanRotateRow"><button id="floorRotateLeft" disabled>↺</button><button id="floorRotateRight" disabled>↻</button><button id="floorRotate90" disabled>90°</button><button id="floorDelete" disabled>削除</button></div>
-      <div class="sceneNote">間取りでは全ての生成面のオブジェクトをドラッグ移動できます。正面・上・横の移動ギズモ、選択中の前側の丸をドラッグした回転、カメラ本体のドラッグ移動、先端の丸のドラッグで向きの変更ができます。回転は15°刻みで30°・45°・90°も選べ、Shiftを押しながらドラッグすると自由な角度です。矢印キーで移動、Q/Eで15°ずつ回転します。幅・奥行き・高さの編集も生成面に関係なく利用できます。テントの前縁Yを一番下まで下げる／前後を一番奥まで寄せると、断面が三角形の三角柱になります。接続テントは接着を保つため本体の移動は上下方向に制限されますが、テントの形（前縁Y＝上下＋手前奥、前後）は店舗テントと同じように編集できます。横壁看板は上下＋壁沿いの前後方向へ移動できます。</div>
+      <div class="sceneNote">間取りでは全ての生成面のオブジェクトをドラッグ移動できます。正面・上・横の移動ギズモ、選択中の前側の丸をドラッグした回転、カメラ本体のドラッグ移動、先端の丸のドラッグで向きの変更ができます。回転は3本のリング（上下＝オレンジの破線／左右＝X／手前奥＝Y）をドラッグすると15°刻み（30°・45°・90°も選べ）、Shiftを押しながらドラッグすると自由な角度です。矢印キーで移動、Q/Eで15°ずつ回転します。幅・奥行き・高さの編集も生成面に関係なく利用できます。テントの前縁Yを一番下まで下げる／前後を一番奥まで寄せると、断面が三角形の三角柱になります。接続テントは接着を保つため本体の移動は上下方向に制限されますが、テントの形（前縁Y＝上下＋手前奥、前後）は店舗テントと同じように編集できます。横壁看板は上下＋壁沿いの前後方向へ移動できます。</div>
     </section>
 
     <section class="workspaceScreen" data-workspace-screen="perspective">
@@ -360,6 +360,13 @@
     }
     function setAssetAxis(value) {
         P.assetAxis = clamp(Math.round(Number(value)), 0, 2);
+        // 左パネルの「生成方向」から変えたときも、棚のセレクトと同じ処理を通す
+        // （選択中のオブジェクトも新しい生成面へ移し替える）。
+        if (window.cityGridSetAssetAxis) {
+            window.cityGridSetAssetAxis(value);
+            syncAssetAxis();
+            return;
+        }
         syncAssetAxis();
         render();
     }

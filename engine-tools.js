@@ -59,6 +59,40 @@ function axisHitAt(g, p, rad) {
     }
     return best;
 }
+// 回転リング用：軸に直交する2本の単位ベクトル（u × v = axis）。
+// リング上の点は C + R(u cos t + v sin t) と表せるので、
+// 「掴んだ位置の t」を読めば、そのまま軸まわりの回転角になる。
+function ringBasis(axis) {
+    const a = V.nrm(axis),
+        ref = Math.abs(a[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0],
+        u = V.nrm(V.crs(ref, a)),
+        v = V.crs(a, u);
+    return { u, v };
+}
+// 画面上の折れ線（リング）のうち、点 p に最も近い位置のパラメータ角 t を返す。
+// リングが画面で線に潰れている（真横から見ている）ときは null。
+function ringParamAt(poly, p) {
+    if (!poly || poly.length < 3) return null;
+    let best = null;
+    for (let i = 1; i < poly.length; i++) {
+        const a = poly[i - 1],
+            b = poly[i];
+        if (!a?.ok || !b?.ok) continue;
+        const dx = b.x - a.x,
+            dy = b.y - a.y,
+            l2 = dx * dx + dy * dy;
+        if (l2 < 1e-6) continue;
+        const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)),
+            d = Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t));
+        if (!best || d < best.d) best = { d, t: (i - 1 + t) / (poly.length - 1) * 2 * Math.PI };
+    }
+    return best ? best.t : null;
+}
+// 角度差を -180..180 に畳む（連続ドラッグで回り続けても破綻しないように使う）。
+function wrapPi(a) {
+    const t = ((a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+    return t - Math.PI;
+}
 // 回転リングの「画面の点 → 面内の座標」変換。
 // 面内の2軸（iu,iv）が画面上でどちらへ伸びるか（su/sv）が分かっていれば、
 // 画面の移動量を2元連立で面内の (u,v) に戻せる。正投影はアフィンなので誤差が出ない。
@@ -567,16 +601,17 @@ function awningGeometry(o) {
         // 手前の上辺は「建物の手前面（-d/2）」と「屋根の高さ h」まで届かせる。
         // 以前は 0.025／0.02 の余白を残していたため、ハンドルを最大まで動かしても
         // 上辺が水平にならず、前面もわずかに傾いたまま（直方体にならない）だった。
+        // 手前の上辺は「建物の手前面（-d/2）」から「奥の上辺（d/2）」まで動かせる。
+        // 一番奥まで寄せると手前の上辺が奥の上辺に重なり、断面が三角形＝三角柱になる。
         edgeY = clamp(
             Number.isFinite(Number(o.awningEdgeY)) ? Number(o.awningEdgeY) : -half,
             -half,
-            Math.max(-half, half - 0.025),
+            half,
         ),
-        edgeZ = clamp(
-            Number.isFinite(Number(o.awningEdgeZ)) ? Number(o.awningEdgeZ) : h,
-            0.05,
-            Math.max(0.05, h),
-        ),
+        // 高さは 0（＝手前の下端）まで下げられる。0 にすると手前の上辺が下端に重なり、
+        // こちらも断面が三角形＝三角柱になる。以前は 0.05 の余白を残していたため、
+        // 一番下まで下げても薄い板が残り、三角柱にならなかった。
+        edgeZ = clamp(Number.isFinite(Number(o.awningEdgeZ)) ? Number(o.awningEdgeZ) : h, 0, Math.max(0, h)),
         thickness = clamp(Number(o.awningThickness) || Math.max(0.05, h * 0.14), 0.03, Math.max(0.03, h * 0.45)),
         frontBottom = clamp(
             Number.isFinite(Number(o.awningFrontBottom)) ? Number(o.awningFrontBottom) : 0,
@@ -588,7 +623,25 @@ function awningGeometry(o) {
             0,
             Math.max(0, h - 0.03),
         );
-    return { w, d, h, half, baseFrontY: -half, edgeY, edgeZ, thickness, frontBottom, backBottom };
+    // 手前の上辺が奥の上辺の真下へ来たら、上辺を奥の高さへ揃えて
+    // 「奥が垂直な三角柱」として閉じる（斜めの上辺が残って形が濁るのを防ぐ）。
+    const triangleBack = edgeY >= half - 0.02,
+        frontTop = triangleBack ? h : edgeZ;
+    return {
+        w,
+        d,
+        h,
+        half,
+        baseFrontY: -half,
+        edgeY,
+        edgeZ: frontTop,
+        thickness,
+        frontBottom,
+        backBottom,
+        triangleBack,
+        // 一番下まで下げた状態（手前の上辺＝下端）も三角柱。
+        triangleFront: frontTop <= 0.001 && edgeY <= -half + 0.02,
+    };
 }
 function awningGizmo(o) {
     if (!o || o.type !== "asset" || o.asset !== "awning") return null;
@@ -596,6 +649,8 @@ function awningGizmo(o) {
         edgeY = g.edgeY,
         pr = (x, y, z) => scrW(L2W(o, x, y, z)),
         s = pr(0, edgeY, g.edgeZ),
+        // 前縁Yの2軸目（手前奥）の向きを出すためのサンプル点。「前後」ハンドルは廃止したが、
+        // 前縁Yを斜めに引くと上下と手前奥が同時に動くので、この点は残す。
         qz = pr(0, edgeY, g.edgeZ + 0.1),
         qy = pr(0, edgeY + 0.1, g.edgeZ),
         zdx = qz.x - s.x,
@@ -611,21 +666,35 @@ function awningGizmo(o) {
             dir: { x: zdx / zpx, y: zdy / zpx },
             scale: zpx / 0.1 || 1,
             start: g.edgeZ,
-            min: 0.05,
+            // 一番下（0）まで下げると手前の上辺が下端に重なり、断面が三角形＝三角柱になる。
+            // 間取りの正面・横ビューと同じ値にして、ビューごとに三角柱にできたり
+            // できなかったりする差を作らない。
+            min: 0,
             max: g.h,
             frontBottom: g.frontBottom,
         },
     };
-    if (!o.attachment?.verticalOnly)
-        handles.edgeY = {
-            kind: "edgeY",
-            s: qy,
-            dir: { x: ydx / ypx, y: ydy / ypx },
-            scale: ypx / 0.1 || 1,
-            start: g.edgeY,
-            min: -g.d / 2,
-            max: g.d / 2 - 0.025,
-        };
+    // 前縁（手前の上辺）は上下だけでなく手前奥へも動かせる。
+    // 2本目の軸を同じハンドルへ持たせ、斜めに引いても両方いっぺんに変わる。
+    // ただし2軸目は1軸目と直交させておく。斜め投影では手前奥の向きが
+    // 画面上で斜めになるため、そのままだと「真下へ引いたのに手前奥も動く」状態になり、
+    // 高さを下げ切ったつもりでも三角柱にならない（＝3Dだけ三角柱にできない）原因だった。
+    const dot12 = (ydx * zdx + ydy * zdy) / (zpx * zpx),
+        ox2 = ydx - zdx * dot12,
+        oy2 = ydy - zdy * dot12,
+        opx2 = Math.hypot(ox2, oy2);
+    if (opx2 > 0.01) {
+        handles.edgeZ.dir2 = { x: ox2 / opx2, y: oy2 / opx2 };
+        handles.edgeZ.scale2 = opx2 / 0.1 || 1;
+    } else {
+        handles.edgeZ.dir2 = { x: ydx / ypx, y: ydy / ypx };
+        handles.edgeZ.scale2 = ypx / 0.1 || 1;
+    }
+    handles.edgeZ.start2 = g.edgeY;
+    handles.edgeZ.min2 = -g.d / 2;
+    handles.edgeZ.max2 = g.d / 2; // 一番奥まで寄せられる（三角柱）
+    // 「前後」ハンドルは廃止した。手前奥は前縁Y（edgeZ）の2軸目で動かせるため、
+    // 同じ場所に2つ並べると掴み間違えるだけだった。
     return {
         o,
         C3: L2W(o, 0, 0, (g.edgeZ + g.h) * 0.5),
@@ -2034,8 +2103,7 @@ function drawSpecialGizmo(c, o) {
         }
         c.setLineDash([]);
     } else if (sg.o.asset === "awning") {
-        const hz = sg.handles.edgeZ,
-            hy = sg.handles.edgeY;
+        const hz = sg.handles.edgeZ;
         c.setLineDash([5 / Z, 4 / Z]);
         c.strokeStyle = "rgba(255,179,111,.9)";
         c.lineWidth = 1.5 / Z;
@@ -2045,17 +2113,12 @@ function drawSpecialGizmo(c, o) {
             c.closePath();
             c.stroke();
         }
-        c.beginPath();
-        c.moveTo(hz.s.x, hz.s.y);
-        if (hy) c.lineTo(hy.s.x, hy.s.y);
-        c.stroke();
         c.setLineDash([]);
+        // テントのハンドルは菱形1つ（前縁Y）。上下と手前奥の両方へ動く。
         sq(hz.s, "#ffb36f", true);
-        if (hy) sq(hy.s, "#ffb36f");
         c.fillStyle = "#ffd0a8";
         c.font = `bold ${12 / Z}px system-ui`;
         c.fillText("前縁Y", hz.s.x + 9 / Z, hz.s.y - 8 / Z);
-        if (hy) c.fillText("前後", hy.s.x + 9 / Z, hy.s.y - 8 / Z);
     } else if (sg.o.asset === "sign") {
         const h = sg.handles;
         c.setLineDash([5 / Z, 4 / Z]);
@@ -2431,12 +2494,24 @@ function gizmo() {
     if (o.attachment?.verticalOnly) g.axes = g.axes.filter((a) => Math.abs(a.a[1]) > 0.9);
     const en = [0, 0, 0],
         eu = [0, 0, 0],
-        ev = [0, 0, 0];
+        ev = [0, 0, 0],
+        tiltM = typeof objectTiltMatrix === "function" ? objectTiltMatrix(o) : null,
+        // 傾き（rotX/rotZ）が入っているときは、面の法線も同じだけ回して
+        // 白い四角が実際の面の上に来るようにする。
+        tiltDir = (v) => (tiltM ? tiltM.map((row) => row[0] * v[0] + row[1] * v[1] + row[2] * v[2]) : v);
     en[o.k] = -o.d;
     eu[iu] = cs;
     eu[iv] = sn;
     ev[iu] = -sn;
     ev[iv] = cs; // 高さ方向・幅方向・奥行き方向の単位ベクトル
+    if (tiltM) {
+        const eu2 = tiltDir(eu),
+            ev2 = tiltDir(ev),
+            en2 = tiltDir(en);
+        eu[0] = eu2[0], eu[1] = eu2[1], eu[2] = eu2[2];
+        ev[0] = ev2[0], ev[1] = ev2[1], ev[2] = ev2[2];
+        en[0] = en2[0], en[1] = en2[1], en[2] = en2[2];
+    }
     const F = (id, x, y, z, n) => {
             const P3 = L2W(o, x, y, z),
                 s = scrW(P3);
@@ -2460,6 +2535,40 @@ function gizmo() {
         const t = (i / 72) * 2 * Math.PI;
         g.ring.push(scrW(L2W(o, R * Math.cos(t), R * Math.sin(t), solid ? z0 : 0)));
     }
+    // 画面の回転ギズモ：上下（ワールドY）は従来のリング、左右（X）と手前奥（Z）は
+    // ワールド軸まわりのリングを追加する。3つそろうと、どの向きにも回せる。
+    g.rings = [];
+    // リングの大きさは「オブジェクトの半分の対角」に合わせる。大きすぎると
+    // 画面いっぱいに広がって他のハンドルを隠し、小さすぎると本体に埋もれる。
+    const bb = obBounds(o),
+        diag = Math.hypot(
+            Math.max(0.2, bb.hi[0] - bb.lo[0]),
+            Math.max(0.2, bb.hi[1] - bb.lo[1]),
+            Math.max(0.2, bb.hi[2] - bb.lo[2]),
+        ),
+        ringR = clamp(diag * 0.42 + 0.2, 0.45, 60);
+    [
+        [[1, 0, 0], "#e8743d", "X", "x"],
+        [[0, 0, 1], "#3fa45b", "Y", "z"],
+    ].forEach(([axis, col, nm, key]) => {
+        const { u, v } = ringBasis(axis),
+            poly = [];
+        for (let i = 0; i <= 72; i++) {
+            const t = (i / 72) * 2 * Math.PI,
+                s2 = scrW([
+                    C3[0] + ringR * (u[0] * Math.cos(t) + v[0] * Math.sin(t)),
+                    C3[1] + ringR * (u[1] * Math.cos(t) + v[1] * Math.sin(t)),
+                    C3[2] + ringR * (u[2] * Math.cos(t) + v[2] * Math.sin(t)),
+                ]);
+            poly.push(s2?.ok ? s2 : { ok: false });
+        }
+        // 画面で線に潰れているリング（真横から見た輪）は掴めないので描かない。
+        const span = poly.reduce(
+            (acc, q) => (q?.ok ? Math.max(acc, Math.hypot(q.x - sC.x, q.y - sC.y)) : acc),
+            0,
+        );
+        if (span > 18 / Z) g.rings.push({ axis, col, nm, key, poly });
+    });
     spreadFlatFaces(g.faces);
     return g;
 }
@@ -2504,6 +2613,34 @@ function drawGizmo(c) {
         on = true;
     });
     c.stroke();
+    // 傾き用のリング（左右X・手前奥Y）。掴めることが分かるよう、
+    // リングの色はその軸の色に合わせる。
+    (g.rings || []).forEach((ring) => {
+        c.strokeStyle = ring.col;
+        c.globalAlpha = 0.9;
+        c.lineWidth = 1.8 / Z;
+        c.setLineDash([6 / Z, 4 / Z]);
+        c.beginPath();
+        let on = false;
+        ring.poly.forEach((q) => {
+            if (!q?.ok) {
+                on = false;
+                return;
+            }
+            on ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y);
+            on = true;
+        });
+        c.stroke();
+        c.globalAlpha = 1;
+        // リングの一番上に軸名を小さく添える（どの向きに回るかが分かる）。
+        const label = ring.poly.find((q) => q?.ok);
+        if (label) {
+            c.setLineDash([]);
+            c.fillStyle = ring.col;
+            c.font = `bold ${12 / Z}px system-ui`;
+            c.fillText(ring.nm, label.x + 4 / Z, label.y - 4 / Z);
+        }
+    });
     c.setLineDash([]);
     g.axes.forEach((a) => {
         const dx = a.sT.x - g.sC.x,
@@ -2903,6 +3040,19 @@ function hitGizmo(p) {
             g,
         };
     }
+    // 傾き用のリング（左右X・手前奥Y）を先に調べる。中心から離れた位置にあるので、
+    // 白い四角や専用ハンドルを奪うことはない。
+    let tiltBest = null;
+    (g.rings || []).forEach((ring) => {
+        for (let i = 1; i < ring.poly.length; i++) {
+            const a = ring.poly[i - 1],
+                b = ring.poly[i];
+            if (!a?.ok || !b?.ok) continue;
+            const d = segd(p, a, b);
+            if (d < R * 0.8 && (!tiltBest || d < tiltBest.d)) tiltBest = { d, ring };
+        }
+    });
+    if (tiltBest) return { t: "tiltring", g, ring: tiltBest.ring };
     for (let i = 1; i < g.ring.length; i++) {
         const a = g.ring[i - 1],
             b = g.ring[i];
@@ -3273,6 +3423,20 @@ function beginGizmo(h, p) {
                 p0: p,
             };
         }
+    } else if (h.t === "tiltring") {
+        // リング上の掴んだ位置のパラメータ角を覚えておき、ドラッグ中の角との差を
+        // そのまま「軸まわりの回転角」として使う（どの向きから見ても同じ操作になる）。
+        const t0 = ringParamAt(h.ring.poly, p);
+        ed = {
+            ...base,
+            t: "tiltring",
+            axisKey: h.ring.key,
+            start: h.ring.key === "x" ? Number(o.rotX) || 0 : Number(o.rotZ) || 0,
+            t0: t0 == null ? 0 : t0,
+            tLast: t0 == null ? 0 : t0,
+            acc: 0,
+            deg: 0,
+        };
     } else if (o.type === "compound")
         ed = { ...base, t: "ring", sC: h.g.sC, ang0: Math.atan2(p.y - h.g.sC.y, p.x - h.g.sC.x) };
     else {
@@ -3534,20 +3698,23 @@ function dragEdit(p, freeRotation = false) {
             deltaY = p.y - ed.p0.y,
             amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1);
         // 直方体（上辺が水平・前面が垂直）へ近づいたら、ぴったり吸着させる。
+        // 上辺が水平（＝直方体）と、一番下（＝三角柱）の両方へ吸着させる。
         patch = {
-            awningEdgeZ: snapAwningEdge(clamp(h.start + amount, h.min, h.max), h.max),
+            awningEdgeZ: snapAwningEdge(
+                snapAwningEdge(clamp(h.start + amount, h.min, h.max), h.max),
+                h.min,
+            ),
             awningFrontBottom: h.frontBottom,
             awningEdgeEdited: true,
         };
-    } else if (ed.t === "awning-edgeY") {
-        const h = ed.sign,
-            deltaX = p.x - ed.p0.x,
-            deltaY = p.y - ed.p0.y,
-            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1);
-        patch = {
-            awningEdgeY: snapAwningEdge(clamp(h.start + amount, h.min, h.max), h.min),
-            awningEdgeEdited: true,
-        };
+        // 2軸目（手前奥）も一緒に動かす。前縁の点を画面の好きな方向へ引ける。
+        if (h.dir2) {
+            const amount2 = (deltaX * h.dir2.x + deltaY * h.dir2.y) / (h.scale2 || 1);
+            patch.awningEdgeY = snapAwningEdge(
+                snapAwningEdge(clamp(h.start2 + amount2, h.min2, h.max2 ?? 20), h.min2),
+                h.max2,
+            );
+        }
     } else if (ed.t === "sign-faceW" || ed.t === "sign-faceH") {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -3641,6 +3808,22 @@ function dragEdit(p, freeRotation = false) {
                       : facePatch(o, ed.fid, moved);
         }
     } // 白い四角＝面の押し引き
+    else if (ed.t === "tiltring") {
+        // 掴んだリングをもう一度クリックした位置のパラメータ角を読む。
+        const ring = (ed.ringSel ||= (() => {
+                const g = gizmo();
+                return (g?.rings || []).find((q) => q.key === ed.axisKey) || null;
+            })()),
+            t = ring ? ringParamAt(ring.poly, p) : null;
+        if (t != null) {
+            // 連続で回せるよう、前回との差を積算する（0°/360°をまたいでも飛ばない）。
+            ed.acc += wrapPi(t - ed.tLast);
+            ed.tLast = t;
+            const raw = ed.acc / DG,
+                target = freeRotation ? ed.start + raw : Math.round((ed.start + raw) / 15) * 15;
+            patch = { [ed.axisKey === "x" ? "rotX" : "rotZ"]: wrap180(target) };
+        }
+    } // リング＝傾き（左右X・手前奥Y）
     else if (ed.t === "ring") {
         if (o.type === "compound") {
             const raw = wrap180((Math.atan2(p.y - ed.sC.y, p.x - ed.sC.x) - ed.ang0) / DG),
@@ -3754,7 +3937,7 @@ function setTool(t) {
     const HT = {
         border: "書き出し範囲：ドラッグで枠を指定。範囲指定はPNG保存・コピーに反映されます",
         erase: "消しゴム：なぞったところを消します",
-        edit: "図形編集：線にさわって選択。空白を長押ししてドラッグするとボックス選択。Shift/Ctrl/⌘クリックでも複数選択でき、選択済みの線をドラッグするとまとめて移動。iPadは指またはApple Pencilで長押しドラッグ。矢印＝軸に沿って移動／白い四角＝面を押し引き／点線の輪＝回転／線をドラッグ＝面の上で移動。看板は絵枠W・絵枠Hと外形の面ハンドル、建物は開口W/H・奥面と外側面、円錐は高さ、球体は半径ハンドルをドラッグできます",
+        edit: "図形編集：線にさわって選択。空白を長押ししてドラッグするとボックス選択。Shift/Ctrl/⌘クリックでも複数選択でき、選択済みの線をドラッグするとまとめて移動。iPadは指またはApple Pencilで長押しドラッグ。矢印＝軸に沿って移動／白い四角＝面を押し引き／点線の輪＝回転（上下＝オレンジの輪／左右＝Xのリング／手前奥＝Yのリング）／線をドラッグ＝面の上で移動。看板は絵枠W・絵枠Hと外形の面ハンドル、建物は開口W/H・奥面と外側面、円錐は高さ、球体は半径ハンドルをドラッグできます",
     };
     if (HT[tool]) $("hint").textContent = HT[tool] + " ／ ⌘(Ctrl)+ドラッグ＝視点移動";
 }
@@ -4996,6 +5179,23 @@ function surfaceAlpha(o) {
     const v = Number(o.surfaceAlpha);
     return Number.isFinite(v) ? clamp(v, 0.04, 0.9) : 0.22;
 }
+// 面表示を「1回だけ半透明で重ねる」ためのオフスクリーン。
+// 三角形を1枚ずつ半透明で塗ると、同じオブジェクトの面が重なる場所だけ
+// 透明度が積み上がって乗算したように濃くなる（開口の奥の壁・柱の裏など）。
+// そこで不透明度ごとに1枚の層へ不透明で描き、最後にまとめて1回だけ合成する。
+let surfaceLayerCanvas = null;
+function surfaceLayerCanvasFor(w, h) {
+    // 毎フレーム大きさが変わると再確保が続くので、64px 単位に丸めて使い回す。
+    const step = 64,
+        cw = Math.max(step, Math.ceil(w / step) * step),
+        ch = Math.max(step, Math.ceil(h / step) * step);
+    if (!surfaceLayerCanvas) surfaceLayerCanvas = document.createElement("canvas");
+    if (surfaceLayerCanvas.width !== cw || surfaceLayerCanvas.height !== ch) {
+        surfaceLayerCanvas.width = cw;
+        surfaceLayerCanvas.height = ch;
+    }
+    return surfaceLayerCanvas;
+}
 function drawObjectSurfaces(c) {
     if (!P.surfaceMode) return;
     const tris = [],
@@ -5015,19 +5215,98 @@ function drawObjectSurfaces(c) {
     });
     // 遠い面から描く簡易ペインター法。半透明の面でもオブジェクト同士の重なりが自然になる。
     tris.sort((a, b) => b.depth - a.depth);
-    c.save();
-    c.lineJoin = "round";
-    tris.forEach(({ o, p }) => {
-        c.globalAlpha = surfaceAlpha(o);
-        c.fillStyle = surfaceColor(o);
-        c.beginPath();
-        c.moveTo(p[0].x, p[0].y);
-        c.lineTo(p[1].x, p[1].y);
-        c.lineTo(p[2].x, p[2].y);
-        c.closePath();
-        c.fill();
+    // 不透明度が同じ面をまとめる（通常は全部 0.22 なので1グループ）。
+    const groups = new Map();
+    tris.forEach((t) => {
+        const key = surfaceAlpha(t.o).toFixed(3);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(t);
     });
-    c.restore();
+    groups.forEach((list, key) => {
+        // 面が写っている範囲だけを層にする。画面全体を毎回消して重ねると重いため。
+        let minX = Infinity,
+            minY = Infinity,
+            maxX = -Infinity,
+            maxY = -Infinity;
+        list.forEach(({ p }) =>
+            p.forEach((q) => {
+                if (q.x < minX) minX = q.x;
+                if (q.y < minY) minY = q.y;
+                if (q.x > maxX) maxX = q.x;
+                if (q.y > maxY) maxY = q.y;
+            }),
+        );
+        if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
+        const dx0 = Math.max(0, Math.floor(minX * Z + ox) - 2),
+            dy0 = Math.max(0, Math.floor(minY * Z + oy) - 2),
+            dx1 = Math.min(W, Math.ceil(maxX * Z + ox) + 2),
+            dy1 = Math.min(H, Math.ceil(maxY * Z + oy) + 2),
+            dw = dx1 - dx0,
+            dh = dy1 - dy0;
+        if (dw <= 0 || dh <= 0) return;
+        const layer = surfaceLayerCanvasFor(dw, dh),
+            lc = layer.getContext("2d");
+        lc.setTransform(1, 0, 0, 1, 0, 0);
+        lc.clearRect(0, 0, dw, dh);
+        // 本番のキャンバスと同じズーム／移動を掛け、切り出した範囲の左上が原点に来るようにする。
+        lc.setTransform(Z, 0, 0, Z, ox - dx0, oy - dy0);
+        lc.lineJoin = "round";
+        // 色ごとに1本のパスへまとめてから塗る。三角形ごとに fill すると
+        // パス生成の回数が面の数だけ増えて重いので、同じ色はまとめる。
+        // 塗ったあと同色で縁をなぞるのは、隣り合う三角形の継ぎ目が
+        // 透けて細い筋に見えるのを防ぐため（塗りと同色なので線には見えない）。
+        const byColor = new Map();
+        list.forEach(({ o, p }) => {
+            const col = surfaceColor(o);
+            if (!byColor.has(col)) byColor.set(col, []);
+            byColor.get(col).push(p);
+        });
+        lc.globalAlpha = 1; // 層の中は不透明。重なっても濃くならない。
+        byColor.forEach((trisOfColor, col) => {
+            // 1本のパスへまとめすぎると、三角形が数千枚あるアセット（球・ベベル階層など）で
+            // パス構築が重くなる。400枚ずつに区切って塗る。
+            const chunk = 400;
+            lc.fillStyle = col;
+            lc.strokeStyle = col;
+            // 継ぎ目の隙間を埋める縁取りは「画面上で1px」になる太さにする。
+            // 変換に Z が掛かっているので、1/Z で1pxになる。
+            lc.lineWidth = 1 / Math.max(0.25, Z);
+            for (let i = 0; i < trisOfColor.length; i += chunk) {
+                const path = new Path2D(),
+                    end = Math.min(i + chunk, trisOfColor.length);
+                for (let k = i; k < end; k++) {
+                    const p = trisOfColor[k],
+                        // 同じパスへ複数の三角形を入れると、巻き方向が逆の三角形どうしが
+                        // 打ち消し合って塗りが抜ける（裏表の面が重なる立体で顕著）。
+                        // 全三角形の巻き方向をそろえてから1本のパスにする。
+                        area = (p[1].x - p[0].x) * (p[2].y - p[0].y) - (p[1].y - p[0].y) * (p[2].x - p[0].x),
+                        q1 = area < 0 ? p[2] : p[1],
+                        q2 = area < 0 ? p[1] : p[2];
+                    path.moveTo(p[0].x, p[0].y);
+                    path.lineTo(q1.x, q1.y);
+                    path.lineTo(q2.x, q2.y);
+                    path.closePath();
+                }
+                lc.fill(path, "nonzero");
+                lc.stroke(path);
+            }
+        });
+        c.save();
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        c.globalAlpha = Number(key);
+        c.drawImage(layer, 0, 0, dw, dh, dx0, dy0, dw, dh);
+        c.restore();
+    });
+}
+// アセットを置いた直後の1回目の描画は、キャンバスの再ラスタライズが間に合わず
+// 輪郭線が欠けて見えることがある（クリックして描き直すと出る）。
+// 追加系の操作ではこちらを使い、次のフレームでもう一度描いて確実に線を出す。
+function renderFresh() {
+    render();
+    // 追加直後の1回目の描画は、同じイベント処理の中で続けて描いても
+    // 輪郭線が欠けたまま残ることがある（ラスタライズが間に合わない）。
+    // イベント処理が終わったあとのタスクでもう一度描くと確実に出る。
+    setTimeout(() => render(), 0);
 }
 function render() {
     dirty = true;

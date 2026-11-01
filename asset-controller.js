@@ -90,7 +90,9 @@ window.cityGridInstallAssetUI = function (bridge) {
             q = [q[0] + ((n % 4) - 1.5) * fan, q[1], q[2] + Math.floor(n / 4) * fan * 1.2];
         }
         // 生成方向は「その軸に立つ面」の法線。Y=地面、X/Z=壁面として配置する。
-        const k = kind === "balcony" ? 1 : clamp(Math.round(Number(P.assetAxis ?? 1)), 0, 2),
+        // 生成面はアセット共通の設定なので、種類ごとに固定しない
+        // （以前はベランダだけY面に固定していたため、生成面を変えても変化しなかった）。
+        const k = clamp(Math.round(Number(P.assetAxis ?? 1)), 0, 2),
             d = -1,
             [iu, iv] = PL[k],
             off = [0, 0, 0];
@@ -126,11 +128,10 @@ window.cityGridInstallAssetUI = function (bridge) {
                 asset: kind,
                 assetId: "recessed-stacked-building",
                 assetName: info.label,
-                k: 1,
+                // 生成面（k）は共通設定に従う。各階の z は L2W が面の法線方向へ
+                // 積み上げるので、k を変えれば建物ごと向きが変わる。
+                k,
                 d: -1,
-                off: [q[0], 0, q[2]],
-                ca: 0,
-                cb: 0,
                 ra: info.w / 2,
                 rb: info.d / 2,
                 h: totalH,
@@ -178,11 +179,9 @@ window.cityGridInstallAssetUI = function (bridge) {
                 asset: kind,
                 assetId: beveled ? "beveled-stacked-building" : "stacked-building",
                 assetName: info.label,
-                k: 1,
+                // 生成面（k）は共通設定に従う（凹窓階層建物と同じ扱い）。
+                k,
                 d: -1,
-                off: [q[0], 0, q[2]],
-                ca: 0,
-                cb: 0,
                 h: floors[floors.length - 1].z + floorHeight,
                 ra: info.w / 2,
                 rb: info.d / 2,
@@ -306,11 +305,9 @@ window.cityGridInstallAssetUI = function (bridge) {
                 asset: kind,
                 assetId: "wall-sign",
                 assetName: info.label,
-                k: 1,
+                // 生成面（k）は共通設定に従う。看板の向きは k と rot で決まる。
+                k,
                 d: -1,
-                off: [q[0], 0, q[2]],
-                ca: 0,
-                cb: 0,
                 ra: info.w / 2,
                 rb: info.d / 2,
                 h: height,
@@ -369,15 +366,16 @@ window.cityGridInstallAssetUI = function (bridge) {
             parent = newAsset("building", null, q),
             child = newAsset(childKind, null, q),
             groupId = "linked-" + uid();
-        // テント／看板付き建物は、親建物を必ずY面（地面に立つ向き）で作る。
-        // assetAxisがX/Zでも親まで壁面向きにすると、parent.rbが高さ扱いになり、
-        // 子テントの接着計算が建物の中央へ入り込むため、ここで座標系を固定する。
+        // 親建物は生成面（P.assetAxis）に従って作る。子テント／看板は
+        // syncAttachedPart() が親と同じ k で貼り付けるため、親をX／Z面へ
+        // 生成しても壁の上に載ったまま一緒に傾く。
         if (kind === "buildingAwning" || kind === "buildingSign") {
-            parent.k = 1;
+            parent.k = clamp(Math.round(Number(P.assetAxis ?? 1)), 0, 2);
             parent.d = -1;
-            parent.ca = Number(q[0]) || 0;
-            parent.cb = Number(q[2]) || 0;
-            parent.lift = 0;
+            const [piu, piv] = PL[parent.k];
+            parent.ca = Number(q[piu]) || 0;
+            parent.cb = Number(q[piv]) || 0;
+            parent.lift = 1 + (Number(q[parent.k]) || 0);
             parent.off = [0, 0, 0];
         }
         if (kind === "buildingAwning") {
@@ -1068,11 +1066,46 @@ window.cityGridInstallAssetUI = function (bridge) {
 
     const assetAxisTrayInput = el("assetAxisTray");
     window.cityGridAssetAxisTray = assetAxisTrayInput;
+    // 生成面を変えたとき、選択中のオブジェクトも同じ面へ移し替える。
+    // 位置は変わらない（いまのローカル原点のワールド位置を新しい面の座標へ入れ直す）。
+    // 接着パーツ（子）と、子を持つ親は、貼り付けの基準が崩れるので対象から外す。
+    function replaneSelectionToAssetAxis(k) {
+        if (!sel) return 0;
+        const ids = [...selIds];
+        const hasChild = new Set(
+            sceneObjects()
+                .map((o) => o?.attachment?.parentId)
+                .filter(Boolean),
+        );
+        let moved = 0;
+        ids.forEach((id) => {
+            const o = obOf(id);
+            if (!o || o.type === "compound" || o.attachment?.parentId || hasChild.has(o.id)) return;
+            if (Number(o.k) === k) return;
+            const anchor = L2W(o, 0, 0, 0),
+                [niu, niv] = PL[k],
+                d = -1;
+            setOb(id, {
+                k,
+                d,
+                off: [0, 0, 0],
+                ca: anchor[niu],
+                cb: anchor[niv],
+                lift: 1 + anchor[k],
+            });
+            moved++;
+        });
+        return moved;
+    }
     const setAssetAxis = (value) => {
         P.assetAxis = clamp(Math.round(Number(value)), 0, 2);
+        // 新しいアセットの生成面を決める設定なので、既存の選択にも同じ面を適用する。
+        // 「生成面を変えても何も起きない」と感じる状態を無くすため。
+        replaneSelectionToAssetAxis(P.assetAxis);
         if (bridge.syncAssetAxis) bridge.syncAssetAxis();
-        render();
+        renderFresh();
     };
+    window.cityGridSetAssetAxis = (value) => setAssetAxis(value);
     assetAxisTrayInput.onchange = () => setAssetAxis(assetAxisTrayInput.value);
     if (bridge.syncAssetAxis) bridge.syncAssetAxis();
     tray.addEventListener("click", (e) => {
