@@ -349,6 +349,20 @@ window.cityGridInstallAssetUI = function (bridge) {
             balconyRailHeightEdited: kind === "balcony" ? false : undefined,
             // コの字壁：3枚の壁の厚さを1本の値で持つ。
             uWallThickness: kind === "uWall" ? 0.12 : undefined,
+            // 屋台：寸法はすべて比率の既定値（0 を入れると既定値へ戻る扱い）。
+            // 触っていない間は比率で追従するので、幅・高さを変えても形が崩れない。
+            stallWallThickness: kind === "stall" ? Math.max(0.03, info.w * 0.0375) : undefined,
+            stallCounterHeight: kind === "stall" ? height * 0.44 : undefined,
+            stallCounterDepth: kind === "stall" ? Math.max(0.05, info.d * 0.34) : undefined,
+            stallRoofThickness: kind === "stall" ? height * 0.09 : undefined,
+            stallRoofOverhang: kind === "stall" ? info.d * 0.24 : undefined,
+            // 座面の半径＝幅の半分（正円）。寸法ハンドルで幅を変えたときも
+            // 同じ値になるよう ra / rb と別々には持たせない。
+            stoolSeatRadius: kind === "stool" ? info.w / 2 : undefined,
+            stoolSeatThickness: kind === "stool" ? height * 0.13 : undefined,
+            stoolLegRadius: kind === "stool" ? Math.min(info.w, info.d) * 0.11 : undefined,
+            stoolBaseRadius: kind === "stool" ? Math.min(info.w, info.d) * 0.3 : undefined,
+            stoolBaseHeight: kind === "stool" ? height * 0.09 : undefined,
             path: kind === "pathPipe" ? pathPipeDefaultPoints() : undefined,
             pipeRadius: kind === "pathPipe" ? 0.18 : undefined,
             cornerRadius: kind === "pathPipe" ? 0.55 : undefined,
@@ -977,6 +991,8 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "stackedBuilding",
                 "recessedStackedBuilding",
                 "beveledStackedBuilding",
+                // 屋台は「建物として置くもの」なので建物グループへ入れる。
+                "stall",
             ],
         },
         { key: "roof", label: "屋根", kinds: ["gableRoof", "shedRoof"] },
@@ -993,6 +1009,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             "awning",
             "balcony",
             "uWall",
+            // 丸椅子は街の小物として「街・パーツ」へ。
+            "stool",
             "wallSign",
             "windowGrid",
         ],

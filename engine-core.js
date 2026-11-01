@@ -176,6 +176,23 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>厚さ（屋根・壁）</span><input type=number class=nv id=uWallThickness min=0.035 step=0.02 style="width:100px"><span class=un>m</span></label>
 <div class="note">コの字（断面）を奥行き方向へ押し出した形で、上＝屋根板、左右＝側壁の3枚が同じ厚さでつながります。正面・背面・下面は開いています。厚さは数値欄と、屋根の手前角にあるオレンジの四角（3D・間取りの両方）のどちらからでも変えられます。幅・奥行き・高さは寸法ハンドルで編集します。</div>
 </div>
+<div id=stallP style="display:none"><h3>屋台</h3>
+<label><span>壁の厚さ</span><input type=number class=nv id=stallWallThickness min=0.03 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>カウンターの高さ</span><input type=number class=nv id=stallCounterHeight min=0.1 step=0.02 style="width:100px"><span class=un>m</span></label>
+<label><span>カウンターの奥行き</span><input type=number class=nv id=stallCounterDepth min=0.05 step=0.02 style="width:100px"><span class=un>m</span></label>
+<label><span>屋根の厚さ</span><input type=number class=nv id=stallRoofThickness min=0.04 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>屋根の張り出し</span><input type=number class=nv id=stallRoofOverhang min=0 step=0.02 style="width:100px"><span class=un>m</span></label>
+<div class="note">コの字の壁（奥＋左右）の手前下へカウンター箱、真上へ屋根箱を載せた売店です。カウンターの奥行きは手前の面だけが動き、奥の面はコの字に付いたままです。カウンターの高さは上の面だけが動きます（床は動きません）。屋根の張り出しは手前の面だけ、屋根の厚さは下の面だけが動きます（屋根の上面＝全体の高さは動きません）。幅・奥行き・全体の高さは寸法ハンドルで編集します。</div>
+</div>
+<div id=stoolP style="display:none"><h3>丸椅子</h3>
+<label><span>座面の半径</span><input type=number class=nv id=stoolSeatRadius min=0.02 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>座面の高さ（厚み）</span><input type=number class=nv id=stoolSeatThickness min=0.02 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>ポールの半径</span><input type=number class=nv id=stoolLegRadius min=0.005 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>ポールの高さ</span><input type=number class=nv id=stoolLegHeight min=0.02 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>台座の半径</span><input type=number class=nv id=stoolBaseRadius min=0.01 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>台座の高さ</span><input type=number class=nv id=stoolBaseHeight min=0.01 step=0.01 style="width:100px"><span class=un>m</span></label>
+<div class="note">台座・ポール・座面の3つの円柱でできた丸椅子です。半径はどれも正円なので1つの値で決まります（幅と奥行きは別々に変わりません）。半径3本は外向き、高さ3本は上下の四角で、画面上から直接編集できます。屋台のカウンター（高さ約1.05m）に合わせて、座面の高さ0.45m・半径0.18mを初期値にしています。</div>
+</div>
 <div id=pathPipeP style="display:none"><h3>パスパイプ</h3>
 <label><span>パターン</span><select id=pathPipePreset style="width:150px"><option value="custom">手動入力</option><option value="straight">真っ直ぐ</option><option value="l">L字</option><option value="u">U字</option><option value="z">Z字</option><option value="step3d">立体折れ</option></select><button type=button id=pathPipeApplyPreset>適用</button></label>
 <label><span>パイプ半径</span><input type=number class=nv id=pathPipeRadius min=0.02 step=0.02 style="width:100px"><span class=un>m</span></label>
@@ -875,8 +892,13 @@ function genShape(ob) {
         v[k] = d - d * ob.lift + ee;
         v[iu] = ca + x * cs - y * sn;
         v[iv] = cb + x * sn + y * cs;
-        return [v[0] + off[0], v[1] + off[1], v[2] + off[2]];
-    }; // 面内(a,b)を中心まわりに回転＋法線方向の3D点
+        const out3 = [v[0] + off[0], v[1] + off[1], v[2] + off[2]];
+        // ここで作る座標は L2W を通らない（面内の式を直接書いている）ので、
+        // オブジェクトの傾き（rotX / rotZ）をこの1か所で掛ける。掛けないと
+        // 傾けたときに面（塗り）だけが傾いて、線画が元の向きに取り残される。
+        // 傾きが0のときは applyObjectTilt がそのまま返すので費用はほぼ掛からない。
+        return typeof applyObjectTilt === "function" ? applyObjectTilt(ob, out3) : out3;
+    }; // 面内(a,b)を中心まわりに回転＋法線方向の3D点（＋オブジェクトの傾き）
     const e = -d * ob.h,
         L = []; // eは押し出し量（カメラ側へ）
     const ring = (ee, t0 = 0, t1 = 2 * Math.PI) => {

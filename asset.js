@@ -62,6 +62,10 @@ const ASSETS = {
     balcony: { label: "壁付けベランダ", glyph: "▱", w: 3.2, d: 1.8, h: 1.25, accent: "#e6a36f" },
     // コの字をZ軸（高さ方向）へ押し出した壁。前面＋左右の3枚で、床スラブは無い。
     uWall: { label: "コの字壁", glyph: "⊔", w: 3.2, d: 1.8, h: 1.1, accent: "#9db8d6" },
+    // 屋台：コの字の壁＋手前下のカウンター箱＋真上の屋根箱。写真のような売店。
+    stall: { label: "屋台", glyph: "⛺", w: 2.4, d: 1.4, h: 2.4, accent: "#e6a36f" },
+    // 丸椅子：座面＋脚＋台座。屋台のカウンター（高さ約1.05m）に合わせた座面高0.45m。
+    stool: { label: "丸椅子", glyph: "◍", w: 0.36, d: 0.36, h: 0.45, accent: "#c9a27a" },
     pathPipe: { label: "パスパイプ", glyph: "◉", w: 4.8, d: 4.2, h: 1.5, accent: "#ff9f68" },
     person: { label: "人物", glyph: "♙", w: 0.46, d: 0.3, h: 1.7, accent: "#ad9cff" },
     stairs: { label: "階段", glyph: "▰", w: 1.45, d: 2.4, h: 0.78, accent: "#ffb36f" },
@@ -1949,6 +1953,8 @@ const ASSET_LINE_BUILDERS = {
     beveledStackedBuilding: linesStackedBuilding,
     balcony: linesBalcony,
     uWall: linesUWall,
+    stall: linesStall,
+    stool: linesStool,
     stairs: linesStairs,
     crosswalk: linesCrosswalk,
     cylinder: linesCylinder,
@@ -2374,6 +2380,138 @@ function linesStackedBuilding(ctx) {
     });
 }
 
+// --- 屋台 ---
+// コの字の壁（奥＋左右）＋手前下のカウンター箱＋真上の屋根箱を、1つの立体として描く。
+// ・箱を重ねて描くと角に線が二重に出て、重なった面が手前の線を隠して欠ける
+//   （コの字壁・壁付けベランダと同じ理由）。
+// ・壁の上面は屋根の底面に隠れるので描かない。カウンターの奥の面はコの字に
+//   付いているので、奥の縦の稜線はコの字の前の縁の線と1本にまとめる。
+function linesStall(ctx) {
+    const { o, c, out } = ctx,
+        g = stallGeometry(o),
+        { w, d, t, ch, cd, ro, roofBottom } = g,
+        h = g.h,
+        hw = w / 2,
+        hd = d / 2,
+        counterFrontY = -hd - cd,
+        roofFrontY = -hd - ro;
+    // 1) コの字の手前の縁（U字の断面。上端は屋根の下面まで）。
+    out.push(
+        polyA(
+            o,
+            [
+                [-hw, -hd, 0],
+                [-hw, -hd, roofBottom],
+                [hw, -hd, roofBottom],
+                [hw, -hd, 0],
+                [hw - t, -hd, 0],
+                [hw - t, -hd, roofBottom],
+                [-hw + t, -hd, roofBottom],
+                [-hw + t, -hd, 0],
+            ],
+            c,
+        ),
+    );
+    // 2) コの字の奥の面（奥の壁。全面が閉じている）。
+    out.push(polyA(o, [[-hw, hd, 0], [hw, hd, 0], [hw, hd, roofBottom], [-hw, hd, roofBottom]], c));
+    // 3) 奥行き方向の稜線：外側4本（床から屋根の下面まで）と内側4本。
+    [
+        [-hw, -hd],
+        [hw, -hd],
+        [hw, hd],
+        [-hw, hd],
+        [-hw + t, -hd],
+        [hw - t, -hd],
+        [hw - t, hd],
+        [-hw + t, hd],
+    ].forEach(([x, y]) => out.push(lineA(o, [[x, y, 0], [x, y, roofBottom]], c)));
+    // 4) カウンター：上面と底面の四角、手前の縦2本。
+    //    奥の縦2本は 3) の外側の稜線と同じ位置なので描かない。
+    out.push(polyA(o, [[-hw, counterFrontY, ch], [hw, counterFrontY, ch], [hw, -hd, ch], [-hw, -hd, ch]], c));
+    out.push(polyA(o, [[-hw, counterFrontY, 0], [hw, counterFrontY, 0], [hw, -hd, 0], [-hw, -hd, 0]], c));
+    out.push(lineA(o, [[-hw, counterFrontY, 0], [-hw, counterFrontY, ch]], c));
+    out.push(lineA(o, [[hw, counterFrontY, 0], [hw, counterFrontY, ch]], c));
+    // 4b) 壁の内側の見えている範囲（壁側＋左右）の床。カウンターと左右の壁で
+    //     囲まれた所に線を入れると、床と壁の境が読める。
+    out.push(
+        polyA(
+            o,
+            [
+                [-hw + t, -hd, 0],
+                [hw - t, -hd, 0],
+                [hw - t, hd, 0],
+                [-hw + t, hd, 0],
+            ],
+            c,
+        ),
+    );
+    // 5) 屋根：上面と底面の四角、前後の縦4本（後ろの2本はコの字の奥の稜線の続き）。
+    out.push(polyA(o, [[-hw, roofFrontY, h], [hw, roofFrontY, h], [hw, hd, h], [-hw, hd, h]], c));
+    out.push(
+        polyA(o, [[-hw, roofFrontY, roofBottom], [hw, roofFrontY, roofBottom], [hw, hd, roofBottom], [-hw, hd, roofBottom]], c),
+    );
+    [
+        [-hw, roofFrontY],
+        [hw, roofFrontY],
+        [hw, hd],
+        [-hw, hd],
+    ].forEach(([x, y]) => out.push(lineA(o, [[x, y, roofBottom], [x, y, h]], c)));
+}
+
+// --- 丸椅子 ---
+// 台座・ポール・座面の3つの円柱を、それぞれ「上下の輪」＋「視線に直角な位置の
+// 側面2本」で描く。輪だけだと段の境目が分からず、側面の線が無いと筒に見えない。
+// 円柱はどれも正円なので、半径は1つ（座面・ポール・台座で別々の値）。
+function linesStool(ctx) {
+    const { o, c, out } = ctx,
+        g = stoolGeometry(o),
+        // 視線の水平成分に直角な向き＝円柱のシルエットが出る角度。
+        // 回転（rot）・傾き（rotX/rotZ）が入っても、線はオブジェクトと一緒に動く。
+        t = stoolSilhouetteAngles(o),
+        at = (r, z, k) => [r * Math.cos(t + k * Math.PI), r * Math.sin(t + k * Math.PI), z];
+    // 1) 台座（下の円）
+    out.push(ringA(o, g.baseR, g.baseR, 0, 24, c));
+    out.push(ringA(o, g.baseR, g.baseR, g.baseTop, 24, c));
+    // 2) ポール（真ん中）
+    out.push(ringA(o, g.legR, g.legR, g.baseTop, 14, c));
+    out.push(ringA(o, g.legR, g.legR, g.poleTop, 14, c));
+    // 3) 座面（上の円）
+    out.push(ringA(o, g.seatR, g.seatR, g.seatBottom, 24, c));
+    out.push(ringA(o, g.seatR, g.seatR, g.h, 24, c));
+    // 4) 側面の線（左右2本ずつ）。同じ段の中だけを結ぶ。
+    [
+        [g.baseR, 0, g.baseTop],
+        [g.legR, g.baseTop, g.poleTop],
+        [g.seatR, g.seatBottom, g.h],
+    ].forEach(([r, z0, z1]) => {
+        [0, 1].forEach((k) => {
+            const a = at(r, z0, k),
+                b = at(r, z1, k);
+            out.push(lineA(o, [a, b], c));
+        });
+    });
+}
+// 円柱のシルエットが出る角度（ローカルの面内角）。
+// カメラの水平方向をオブジェクトの面内軸へ落として、その直角を返す。
+function stoolSilhouetteAngles(o) {
+    const [iu, iv] = PL[o.k],
+        cs = Math.cos(o.rot * DG),
+        sn = Math.sin(o.rot * DG),
+        eu = [0, 0, 0],
+        ev = [0, 0, 0],
+        cen = L2W(o, 0, 0, Math.max(0.01, Number(o.h) || 0.45) * 0.5),
+        rel = V.add(camPos(), cen, 1, -1);
+    eu[iu] = cs;
+    eu[iv] = sn;
+    ev[iu] = -sn;
+    ev[iv] = cs;
+    const du = V.dot(rel, eu),
+        dv = V.dot(rel, ev),
+        // 真上から見ているときは水平成分が消えるので、その時は 0 を使う。
+        ph = Math.abs(du) + Math.abs(dv) < 1e-6 ? 0 : Math.atan2(dv, du);
+    return ph + Math.PI / 2;
+}
+
 // --- 壁付けベランダ ---
 // 床スラブ＋コの字の腰壁（前・左・右）を、1つの立体として描く。
 // 箱を3枚重ねると ①角で線が二重になり ②重なった面が手前の線を隠して途中で欠け
@@ -2726,13 +2864,32 @@ function linesSphere(ctx) {
             const rel = V.add(world, center, 1, -1);
             return [V.dot(rel, eu), V.dot(rel, ev), zc + V.dot(rel, ez)];
         };
+    // 輪郭の円は球の表面とちょうど重なるので、そのまま描くと面（塗り）との
+    // 前後判定で一部が隠れて破線のように途切れる。カメラ側へごくわずか
+    // （半径の2%）だけ手前へずらして、輪郭が必ず全部見えるようにする。
+    const toCam = V.nrm(V.add(camPos(), center, 1, -1)),
+        eps = Math.max(0.002, r * 0.01),
+        // 面（塗り）の球は多角形で近似しているため、輪郭を半径の1%外へ出しておくと
+        // 面の縁と重ならず、輪郭が破線のように途切れない。
+        rr = r * 1.04;
     for (let i = 0; i <= 48; i++) {
         const t = (i / 48) * Math.PI * 2,
             co = Math.cos(t),
             si = Math.sin(t);
-        pts.push(toLocal(V.add(center, V.add(right, up, r * co, r * si))));
+        pts.push(toLocal(V.add(V.add(center, toCam, 1, eps), V.add(right, up, rr * co, rr * si), 1, 1)));
     }
     out.push(lineA(o, pts, c, 1.1));
+    // 球は回しても輪郭が円のままなので、輪郭だけだと「回転が効いていない」ように見える。
+    // 回転が分かるように、オブジェクトの水平面（ローカルXY面）に赤道の線を1本入れる。
+    // これは向きを知るための補助線で、輪郭（シルエット）は上の円1本のまま。
+    // 赤道の線も表面の上にあるので、ほんの少し外側（半径の1%）へ広げて描く。
+    const eqR = r * 1.03,
+        eq = [];
+    for (let i = 0; i <= 48; i++) {
+        const t = (i / 48) * Math.PI * 2;
+        eq.push([eqR * Math.cos(t), eqR * Math.sin(t), zc]);
+    }
+    out.push(lineA(o, eq, a, 0.9));
 }
 
 function linesTriPrism(ctx) {

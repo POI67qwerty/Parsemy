@@ -1888,6 +1888,124 @@
             uWallEditSession = false;
         };
     })();
+    // ===== 屋台（コの字の壁＋カウンター箱＋屋根箱） =====
+    // 5つの寸法はどれも「動かす面が1つだけ」なので、数値欄と画面ハンドルの
+    // どちらから変えても同じ結果になる（stallGeometry が唯一の寸法源）。
+    let stallEditSession = false;
+    const STALL_PROPS = [
+        ["stallWallThickness", 0.03, 10],
+        ["stallCounterHeight", 0.1, 20],
+        ["stallCounterDepth", 0.05, 20],
+        ["stallRoofThickness", 0.04, 10],
+        ["stallRoofOverhang", 0, 20],
+    ];
+    // 入力欄のIDと stallGeometry() の戻り値の対応。
+    const STALL_KEYS = {
+        stallWallThickness: "t",
+        stallCounterHeight: "ch",
+        stallCounterDepth: "cd",
+        stallRoofThickness: "rt",
+        stallRoofOverhang: "ro",
+    };
+    function syncStallPanel() {
+        const panel = el("stallP"),
+            o = sel && obOf(sel),
+            isStall = !!(o && o.type === "asset" && o.asset === "stall");
+        if (!panel) return;
+        panel.style.display = isStall ? "" : "none";
+        if (!isStall) return;
+        const g = stallGeometry(o);
+        STALL_PROPS.forEach(([id]) => {
+            const n = el(id);
+            const key = STALL_KEYS[id];
+            if (n && document.activeElement !== n) n.value = Number(g[key] || 0).toFixed(3);
+        });
+    }
+    function applyStallProp(name, value) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || o.asset !== "stall" || !Number.isFinite(value)) return;
+        const spec = STALL_PROPS.find(([id]) => id === name);
+        if (!spec) return;
+        if (!stallEditSession) {
+            HU.push(S);
+            RD = [];
+            stallEditSession = true;
+        }
+        // 壁の厚さは「幅・奥行きに対して太すぎない」上限があり、その上限は
+        // 幅を変えると動く。画面ハンドルと同じ上限で止める。
+        const upper = name === "stallWallThickness" ? Math.min(stallGeometry(o).w, stallGeometry(o).d) * 0.3 : spec[2];
+        setOb(sel, { [name]: clamp(value, spec[1], Math.max(spec[1], upper)) });
+        render();
+    }
+    STALL_PROPS.forEach(([id]) => {
+        const n = el(id);
+        if (!n) return;
+        n.oninput = () => applyStallProp(id, parseFloat(n.value));
+        n.onchange = () => {
+            stallEditSession = false;
+        };
+    });
+    // ===== 丸椅子（座面・脚・台座） =====
+    let stoolEditSession = false;
+    // 座面・ポール・台座それぞれの「半径」と「高さ」。半径は正円を保つため
+    // ra と rb を同じ値へそろえる（楕円にしない）。
+    const STOOL_PROPS = [
+        ["stoolSeatRadius", 0.02, 10],
+        ["stoolSeatThickness", 0.02, 10],
+        ["stoolLegRadius", 0.005, 10],
+        ["stoolLegHeight", 0.02, 30],
+        ["stoolBaseRadius", 0.01, 10],
+        ["stoolBaseHeight", 0.01, 10],
+    ];
+    function syncStoolPanel() {
+        const panel = el("stoolP"),
+            o = sel && obOf(sel),
+            isStool = !!(o && o.type === "asset" && o.asset === "stool");
+        if (!panel) return;
+        panel.style.display = isStool ? "" : "none";
+        if (!isStool) return;
+        const g = stoolGeometry(o),
+            shown = {
+                stoolSeatRadius: g.seatR,
+                stoolSeatThickness: g.seatT,
+                stoolLegRadius: g.legR,
+                stoolLegHeight: g.legH,
+                stoolBaseRadius: g.baseR,
+                stoolBaseHeight: g.baseH,
+            };
+        STOOL_PROPS.forEach(([id]) => {
+            const n = el(id);
+            if (n && document.activeElement !== n) n.value = Number(shown[id]).toFixed(3);
+        });
+    }
+    function applyStoolProp(name, value) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || o.asset !== "stool" || !Number.isFinite(value)) return;
+        const spec = STOOL_PROPS.find(([id]) => id === name);
+        if (!spec) return;
+        if (!stoolEditSession) {
+            HU.push(S);
+            RD = [];
+            stoolEditSession = true;
+        }
+        const v = clamp(value, spec[1], spec[2]),
+            g = stoolGeometry(o);
+        // 座面の半径は幅・奥行きそのものなので、ra / rb も同じ値へそろえる
+        // （そろえないと外接範囲とハンドルが楕円のまま食い違う）。
+        if (name === "stoolSeatRadius") setOb(sel, { stoolSeatRadius: v, ra: v, rb: v });
+        // ポールの高さは真ん中の段なので、全体の高さで持つ（上下の段はそのまま）。
+        else if (name === "stoolLegHeight") setOb(sel, { h: v + g.seatT + g.baseH });
+        else setOb(sel, { [name]: v });
+        render();
+    }
+    STOOL_PROPS.forEach(([id]) => {
+        const n = el(id);
+        if (!n) return;
+        n.oninput = () => applyStoolProp(id, parseFloat(n.value));
+        n.onchange = () => {
+            stoolEditSession = false;
+        };
+    });
     let pathPipeEditSession = false;
     function pathPipeText(path) {
         return (Array.isArray(path) ? path : pathPipeDefaultPoints())
@@ -2476,6 +2594,8 @@
         syncWallSideSignPanel();
         syncBalconyPanel();
         syncUWallPanel();
+        syncStallPanel();
+        syncStoolPanel();
         syncPathPipePanel();
         syncWallSignPanel();
         syncRoofPanel();

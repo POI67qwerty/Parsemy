@@ -737,6 +737,64 @@ function balconyGeometry(o) {
         sideRail: o?.balconySideRail !== false,
     };
 }
+// ===== 屋台（コの字の壁＋手前下のカウンター箱＋真上の屋根箱） =====
+// 写真のような売店。奥の壁＋左右の壁でコの字を作り、その手前の下へカウンター箱、
+// 真上へ屋根箱を載せる。編集は「全体の幅・高さ・奥行き」＋
+// 「カウンターの奥行き（手前の面だけ動く）・高さ（下の面は動かない）」
+// 「屋根の手前の張り出し（手前の面だけ動く）・厚さ（上の面は動かない）」「壁の厚さ」。
+// 既定値は h・d に対する比率で持たせ、h や d を変えたときに形が崩れないようにする。
+function stallNum(v, dflt) {
+    const n = Number(v);
+    return Number.isFinite(n) && n !== 0 ? n : dflt;
+}
+function stallGeometry(o) {
+    const w = Math.max(0.8, Math.abs(Number(o?.ra) || 1.2) * 2),
+        d = Math.max(0.6, Math.abs(Number(o?.rb) || 0.7) * 2),
+        h = Math.max(1, Number(o?.h) || 2.4),
+        t = clamp(stallNum(o?.stallWallThickness, w * 0.0375), 0.03, Math.min(w, d) * 0.3),
+        // 屋根の厚さは「上の面を動かさない」ので、先に決める。
+        rt = clamp(stallNum(o?.stallRoofThickness, h * 0.09), 0.04, Math.max(0.05, h * 0.4)),
+        roofBottom = Math.max(0.2, h - rt),
+        // カウンターの高さは下の面（床）を動かさないので、上の面の位置＝そのまま値。
+        ch = clamp(stallNum(o?.stallCounterHeight, h * 0.44), 0.1, Math.max(0.12, roofBottom - 0.12)),
+        cd = Math.max(0.05, stallNum(o?.stallCounterDepth, d * 0.34)),
+        ro = Math.max(0, stallNum(o?.stallRoofOverhang, d * 0.24));
+    return { w, d, h, t, rt, roofBottom, ch, cd, ro };
+}
+// ===== 丸椅子（屋台の前に置く小物。座面＋ポール＋台座の3つの円柱） =====
+// 3つの円柱は「半径」と「高さ」を1つずつ持つ（合計6つ）。
+// ・台座：床から baseH まで
+// ・ポール：台座の上から座面の下まで（高さは全体の高さ h から決まる）
+// ・座面：いちばん上（上面が全体の高さ h）
+// 半径は必ず正円（ra と rb を別々には使わない）。楕円にならないようにするため。
+function stoolGeometry(o) {
+    const w = Math.max(0.12, Math.abs(Number(o?.ra) || 0.18) * 2),
+        d = Math.max(0.12, Math.abs(Number(o?.rb) || 0.18) * 2),
+        minWD = Math.min(w, d),
+        h = Math.max(0.12, Number(o?.h) || 0.45),
+        seatR = clamp(stallNum(o?.stoolSeatRadius, minWD * 0.5), 0.02, minWD),
+        baseR = clamp(stallNum(o?.stoolBaseRadius, minWD * 0.3), 0.01, minWD * 0.5),
+        // ポールは座面と台座からはみ出さない太さまで。
+        legR = clamp(stallNum(o?.stoolLegRadius, minWD * 0.11), 0.005, Math.max(0.005, Math.min(seatR, baseR))),
+        seatT = clamp(stallNum(o?.stoolSeatThickness, h * 0.13), 0.02, Math.max(0.03, h * 0.6)),
+        baseH = clamp(stallNum(o?.stoolBaseHeight, h * 0.09), 0.01, Math.max(0.02, h * 0.45)),
+        legH = Math.max(0.02, h - seatT - baseH);
+    return {
+        w,
+        d,
+        h,
+        seat: seatT,
+        seatT,
+        seatR,
+        legR,
+        baseR,
+        baseH,
+        legH,
+        baseTop: baseH,
+        poleTop: baseH + legH,
+        seatBottom: h - seatT,
+    };
+}
 // ===== コの字壁（コの字をZ軸＝高さ方向へ押し出した壁） =====
 // 前面＋左右の3枚の壁が、同じ厚さで立ち上がる形。床スラブは持たない。
 // 壁付けベランダと同じく、開口は壁側（+Y）を向く。
@@ -775,6 +833,230 @@ function uWallGizmo(o) {
             "#ff9f68",
         );
     return { o, C3: L2W(o, 0, 0, g.h - g.thickness * 0.5), handles: { thickness: handle } };
+}
+// 丸椅子の画面ハンドル。座面・ポール・台座それぞれの「半径」と「高さ」で6本。
+// 丸椅子は 0.45m しか高さが無く、6本を近くに置くと掴み間違えるので、
+//  ・半径の3本 … 右側（ローカル +X）に、それぞれの段の真ん中の高さで
+//  ・高さの3本 … 左側（ローカル -X）に、それぞれの段の真ん中の高さで
+// と、左右・上下に振り分ける。ラベルでどれがどれか分かるようにしてある。
+function stoolGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "stool") return null;
+    const g = stoolGeometry(o),
+        rMax = Math.max(g.w, g.d) * 0.5,
+        // 半径ハンドルは段の外周から少し外へ出す（本体の上に重ねない）。
+        // 高さハンドルは左側のさらに外へ出して、回転リングや面ハンドルと離す。
+        outR = Math.max(0.1, rMax * 0.5),
+        outL = Math.max(0.35, rMax * 2),
+        zBase = g.baseH * 0.5,
+        zPole = (g.baseTop + g.poleTop) * 0.5,
+        zSeat = (g.seatBottom + g.h) * 0.5,
+        handles = {
+            seatRadius: screenHandle(
+                o, "stool-seat-radius",
+                [g.seatR + outR, 0, zSeat],
+                [g.seatR, 0, zSeat],
+                [g.seatR + outR + 0.3, 0, zSeat],
+                g.seatR, 0.02, rMax * 2, "座面の半径", { x: 1, y: 0 }, "#ad9cff",
+            ),
+            legRadius: screenHandle(
+                o, "stool-leg-radius",
+                [g.legR + outR, 0, zPole],
+                [g.legR, 0, zPole],
+                [g.legR + outR + 0.3, 0, zPole],
+                g.legR, 0.005, rMax, "ポールの半径", { x: 1, y: 0 }, "#c3b6ff",
+            ),
+            baseRadius: screenHandle(
+                o, "stool-base-radius",
+                [g.baseR + outR, 0, zBase],
+                [g.baseR, 0, zBase],
+                [g.baseR + outR + 0.3, 0, zBase],
+                g.baseR, 0.01, rMax * 2, "台座の半径", { x: 1, y: 0 }, "#e0dbff",
+            ),
+            seatHeight: screenHandle(
+                o, "stool-seat-height",
+                [-outL, 0, zSeat],
+                [-outL, 0, zSeat],
+                [-outL, 0, zSeat + 0.3],
+                g.seatT, 0.02, Math.max(0.03, g.h * 0.6), "座面の高さ", { x: 0, y: -1 }, "#ff9f68",
+            ),
+            legHeight: screenHandle(
+                o, "stool-leg-height",
+                [-outL, 0, zPole],
+                [-outL, 0, zPole],
+                [-outL, 0, zPole + 0.3],
+                g.legH, 0.02, Math.max(0.05, g.h * 3), "ポールの高さ", { x: 0, y: -1 }, "#ffb36f",
+            ),
+            baseHeight: screenHandle(
+                o, "stool-base-height",
+                [-outL, 0, zBase],
+                [-outL, 0, zBase],
+                [-outL, 0, zBase + 0.3],
+                g.baseH, 0.01, Math.max(0.02, g.h * 0.45), "台座の高さ", { x: 0, y: -1 }, "#ffd0a8",
+            ),
+        };
+    // 感度：1m ドラッグすると画面上 1m ぶん動く（ほかの寸法ハンドルと同じ手ざわり）。
+    // 真横・真上から見て伸びが取れないビューでは既定の scale のままにする。
+    const pr = (x, y, z) => scrW(pt(o, x, y, z)),
+        span = (at, dz) => {
+            const a = pr(...at),
+                b = pr(at[0], at[1], at[2] + dz);
+            return a?.ok && b?.ok ? Math.hypot(b.x - a.x, b.y - a.y) : 0;
+        },
+        zSpan = (at) => span(at, 1),
+        xSpan = (at) => {
+            const a = pr(...at),
+                b = pr(at[0] + 1, at[1], at[2]);
+            return a?.ok && b?.ok ? Math.hypot(b.x - a.x, b.y - a.y) : 0;
+        };
+    [["seatRadius", [g.seatR + outR, 0, zSeat]], ["legRadius", [g.legR + outR, 0, zPole]], ["baseRadius", [g.baseR + outR, 0, zBase]]].forEach(
+        ([k, at]) => {
+            const v = xSpan(at);
+            if (v > 20) handles[k].scale = v;
+        },
+    );
+    [["seatHeight", [-outL, 0, zSeat]], ["legHeight", [-outL, 0, zPole]], ["baseHeight", [-outL, 0, zBase]]].forEach(([k, at]) => {
+        const v = zSpan(at);
+        if (v > 20) handles[k].scale = v;
+    });
+    return { o, C3: L2W(o, 0, 0, g.h * 0.5), handles };
+}
+// 円・円柱の画面ハンドル。半径を1本だけ出す。
+// 幅と奥行きは同じ値（＝正円）なので、どちらかを動かすと楕円になってしまう。
+// ここでは常に ra と rb を同じ値へ書き換え、高さは上下の面ハンドルで編集する。
+function circleGizmo(o) {
+    if (!o || o.type !== "circ") return null;
+    const r = Math.max(0.02, Math.abs(Number(o.ra) || 0.5)),
+        zc = Math.max(0, Number(o.h) || 0) * 0.5,
+        h = r / Math.max(0.1, r),
+        radius = screenHandle(
+            o,
+            "circle-radius",
+            [r, 0, zc],
+            [r * Math.cos(0), r * Math.sin(0), zc],
+            [(r + 0.5) * Math.cos(0), (r + 0.5) * Math.sin(0), zc],
+            r,
+            0.02,
+            60,
+            "半径",
+            { x: 1, y: 0 },
+            "#ad9cff",
+        );
+    // 1m 動かすのに画面 1m ぶん動かす（＝ほかの寸法ハンドルと同じ手ざわり）に直す。
+    const pr = (rr) => scrW(pt(o, rr, 0, zc)),
+        s0 = pr(r),
+        s1 = pr(r + 1);
+    if (s0?.ok && s1?.ok && Math.hypot(s1.x - s0.x, s1.y - s0.y) > 20)
+        radius.scale = Math.hypot(s1.x - s0.x, s1.y - s0.y);
+    return { o, C3: L2W(o, 0, 0, zc), handles: { radius } };
+}
+// 屋台の画面ハンドル。掴むのは
+//  ・カウンターの手前の面（奥行き。奥の面はコの字に付いたままなので手前だけ動く）
+//  ・カウンターの上面（高さ。下の面＝床は動かさない）
+//  ・屋根の手前の面（張り出し。手前だけ動く）
+//  ・屋根の下面（厚さ。上の面は動かさない）
+// 幅・奥行き・全体の高さは通常の寸法ハンドル（面）で編集する。
+function stallGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "stall") return null;
+    const g = stallGeometry(o),
+        hw = g.w / 2,
+        hd = g.d / 2,
+        // 壁の厚さハンドルは、左の壁の外側へ出した位置に置く。
+        // シルエットの上に置くと、面（幅）のハンドルや移動に負けて掴めないため。
+        wallOut = Math.max(0.12, g.t * 2),
+        // 掴み位置から外向きに置く「目盛りの長さ」。この距離が画面上の
+        // ドラッグ量の基準になるので、厚さのような小さい値でも細かく動かせるよう
+        // 幅に対して十分な長さを取る（短いと数十pxで最大まで飛ぶ）。
+        wallSpan = Math.max(0.6, g.w * 0.5),
+        wallMax = Math.min(g.w, g.d) * 0.3,
+        counterFrontY = -hd - g.cd,
+        roofFrontY = -hd - g.ro,
+        roofMidZ = (g.roofBottom + g.h) / 2,
+        handles = {
+            // 壁の厚さ（コの字の壁＝奥＋左右の3枚で共通）。
+            // 左の壁の手前の面から外側（−X）へ引くと厚くなる。
+            wallThickness: screenHandle(
+                o,
+                "stall-wall-thickness",
+                // 掴む四角は、壁の手前の縁より少し上（壁の外側の面の上）へ置く。
+                // カウンターの上面と重なると、そちらのハンドルに負けるため。
+                [-hw + g.t / 2, -hd, Math.max(g.ch + 0.12, g.roofBottom * 0.55)],
+                [-hw - wallOut, -hd, g.ch * 0.5],
+                [-hw - wallOut - wallSpan, -hd, g.ch * 0.5],
+                g.t,
+                0.03,
+                wallMax,
+                "壁の厚さ",
+                { x: -1, y: 0 },
+                "#ffb36f",
+            ),
+            counterFront: screenHandle(
+                o,
+                "stall-counter-front",
+                [0, counterFrontY, g.ch * 0.5],
+                [0, counterFrontY, g.ch * 0.5],
+                [0, counterFrontY - 0.25, g.ch * 0.5],
+                g.cd,
+                0.05,
+                Math.max(0.1, g.d * 3),
+                "カウンター奥行き",
+                { x: 0, y: 1 },
+                "#ff9f68",
+            ),
+            counterTop: screenHandle(
+                o,
+                "stall-counter-top",
+                [0, counterFrontY + g.cd * 0.5, g.ch],
+                [0, counterFrontY + g.cd * 0.5, g.ch],
+                [0, counterFrontY + g.cd * 0.5, g.ch + 0.25],
+                g.ch,
+                0.1,
+                Math.max(0.12, g.roofBottom - 0.12),
+                "カウンター高さ",
+                { x: 0, y: -1 },
+                "#ffd0a8",
+            ),
+            roofFront: screenHandle(
+                o,
+                "stall-roof-front",
+                [0, roofFrontY, roofMidZ],
+                [0, roofFrontY, roofMidZ],
+                [0, roofFrontY - 0.25, roofMidZ],
+                g.ro,
+                0,
+                Math.max(0.2, g.w),
+                "屋根の張り出し",
+                { x: 0, y: 1 },
+                "#7dd8ff",
+            ),
+            roofBottom: screenHandle(
+                o,
+                "stall-roof-bottom",
+                // 屋根の下面そのものの上に四角を置くと、面ハンドルと重なって
+                // 面の移動に負ける（コの字壁の厚さハンドルと同じ理由）。
+                // 四角だけ屋根の手前の外へ出し、破線で下面へ結ぶ。
+                [0, roofFrontY, g.roofBottom],
+                [0, roofFrontY - Math.max(0.12, g.ro * 0.5), g.roofBottom],
+                [0, roofFrontY - Math.max(0.12, g.ro * 0.5), g.roofBottom - 0.25],
+                g.rt,
+                0.04,
+                Math.max(0.06, g.h * 0.4),
+                "屋根の厚さ",
+                { x: 0, y: 1 },
+                "#9db8d6",
+            ),
+        };
+    // 壁の厚さは値の幅が狭い（0.03〜0.42m 程度）ので、ドラッグ量の基準を
+    // 画面上の長さから決め直す。1m 変えるのに画面 4m ぶん動かす想定にして、
+    // 数十px で最大まで飛ばないようにする（他のハンドルは自動のまま）。
+    const pr = (x, y, z) => scrW(pt(o, x, y, z)),
+        w0 = pr(-hw - wallOut, -hd, g.ch * 0.5),
+        w1 = pr(-hw - wallOut - 1, -hd, g.ch * 0.5);
+    if (w0?.ok && w1?.ok) {
+        const pxPerM = Math.hypot(w1.x - w0.x, w1.y - w0.y);
+        // 真横・真正面のように投影が潰れるビューでも操作量が暴れないよう、下限を置く。
+        handles.wallThickness.scale = pxPerM > 20 ? Math.max(300, pxPerM * 4) : 300;
+    }
+    return { o, C3: L2W(o, 0, 0, g.roofBottom * 0.5), handles };
 }
 function balconyGizmo(o) {
     if (!o || o.type !== "asset" || o.asset !== "balcony") return null;
@@ -1887,7 +2169,9 @@ function normalizeScreenHandles(sg) {
     return sg;
 }
 function specialGizmo(o) {
-    const sg = o && o.type === "asset" && o.asset === "wallSideSign" && o.attachment?.wallSideSign
+    const sg = o && o.type === "circ"
+        ? circleGizmo(o)
+        : o && o.type === "asset" && o.asset === "wallSideSign" && o.attachment?.wallSideSign
         ? wallSideSignSpecialGizmo(o)
         : o && o.type === "asset" && o.asset === "cornerCutBox"
           ? cornerCutGizmo(o)
@@ -1911,6 +2195,10 @@ function specialGizmo(o) {
                       ? balconyGizmo(o)
                       : o && o.type === "asset" && o.asset === "uWall"
                         ? uWallGizmo(o)
+                      : o && o.type === "asset" && o.asset === "stall"
+                        ? stallGizmo(o)
+                      : o && o.type === "asset" && o.asset === "stool"
+                        ? stoolGizmo(o)
                     : o && o.type === "asset" && o.asset === "sign"
                       ? signGizmo(o)
                       : o && o.type === "asset" && o.asset === "cone"
@@ -2246,6 +2534,67 @@ function drawSpecialGizmo(c, o) {
             c.font = `bold ${12 / Z}px system-ui`;
             c.fillText(`${h.label} ${Number(h.start || 0).toFixed(2)}`, h.s.x + 9 / Z, h.s.y - 8 / Z);
         }
+    } else if (sg.o.asset === "stool") {
+        // 半径（外向き）と高さ（上下）の6本を同じ見た目で描く。
+        Object.values(sg.handles).forEach((h) => {
+            if (!h?.s?.ok) return;
+            const col = h.color || "#ad9cff";
+            c.strokeStyle = col;
+            c.lineWidth = 1.3 / Z;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.beginPath();
+            if (h.anchor?.ok) {
+                c.moveTo(h.anchor.x, h.anchor.y);
+                c.lineTo(h.s.x, h.s.y);
+            }
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, col);
+            c.fillStyle = col;
+            c.font = `bold ${12 / Z}px system-ui`;
+            c.fillText(`${h.label} ${Number(h.start || 0).toFixed(2)}`, h.s.x + 8 / Z, h.s.y - 7 / Z);
+        });
+    } else if (sg.o.type === "circ") {
+        // 半径の四角1つ。中心から破線を引き、現在値を添える。
+        const hd = sg.handles.radius;
+        if (hd?.s?.ok) {
+            const col = hd.color || "#ad9cff";
+            c.strokeStyle = col;
+            c.lineWidth = 1.4 / Z;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.beginPath();
+            if (hd.anchor?.ok) {
+                c.moveTo(hd.anchor.x, hd.anchor.y);
+                c.lineTo(hd.s.x, hd.s.y);
+            }
+            c.stroke();
+            c.setLineDash([]);
+            sq(hd.s, col);
+            c.fillStyle = col;
+            c.font = `bold ${12 / Z}px system-ui`;
+            c.fillText(`半径 ${Number(hd.start || 0).toFixed(2)}`, hd.s.x + 9 / Z, hd.s.y - 8 / Z);
+        }
+    } else if (sg.o.asset === "stall") {
+        // 4つの四角（カウンター奥行き・カウンター高さ・屋根の張り出し・屋根の厚さ）を
+        // 同じ見た目で描く。掴む四角から寸法の向きへ破線を引き、現在値を添える。
+        Object.values(sg.handles).forEach((h) => {
+            if (!h?.s?.ok) return;
+            const col = h.color || "#ff9f68";
+            c.strokeStyle = col;
+            c.lineWidth = 1.4 / Z;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.beginPath();
+            if (h.anchor?.ok) {
+                c.moveTo(h.anchor.x, h.anchor.y);
+                c.lineTo(h.s.x, h.s.y);
+            }
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, col);
+            c.fillStyle = col;
+            c.font = `bold ${12 / Z}px system-ui`;
+            c.fillText(`${h.label} ${Number(h.start || 0).toFixed(2)}`, h.s.x + 9 / Z, h.s.y - 8 / Z);
+        });
     } else if (sg.o.asset === "sign") {
         const h = sg.handles;
         c.setLineDash([5 / Z, 4 / Z]);
@@ -2583,6 +2932,9 @@ function gizmo() {
                     // コの字壁は高さ方向の面（屋根・底面）を持つので、
                     // 3Dでも上下の面ハンドルで高さを変えられるようにする。
                     o.asset === "uWall" ||
+                    // 屋台・丸椅子も高さ方向の面を持つので、3Dで上下の面を掴める。
+                    o.asset === "stall" ||
+                    o.asset === "stool" ||
                     o.asset === "pathPipe" ||
                     o.asset === "box" ||
                     o.asset === "beveledBox" ||
@@ -2650,11 +3002,19 @@ function gizmo() {
         neg = (v) => v.map((t) => -t);
     // 外形の6面は、開口のある建物でも編集対象にする。
     // 積層建物だけはfloors[]を持つため、汎用面ハンドルを出さない。
+    // 円（type=circ）は幅と奥行きが同じ「半径」1つで決まる形なので、
+    // 幅・奥行きを別々に動かす面ハンドルは出さない（出すと楕円になってしまう）。
+    // 半径は画面の専用ハンドル（circleGizmo）、高さは上下の面で編集する。
+    // 丸椅子も幅・奥行きは「座面の半径」1つで決まるので、左右の面ハンドルは出さない
+    // （出すと座面だけ楕円になり、半径ハンドルの値とも食い違う）。
+    const isCircle = o.type === "circ" || (o.type === "asset" && o.asset === "stool");
     if (!stacked) {
-        F("u+", o.ra, 0, zc, eu);
-        F("u-", -o.ra, 0, zc, neg(eu));
-        F("v+", 0, o.rb, zc, ev);
-        F("v-", 0, -o.rb, zc, neg(ev));
+        if (!isCircle) {
+            F("u+", o.ra, 0, zc, eu);
+            F("u-", -o.ra, 0, zc, neg(eu));
+            F("v+", 0, o.rb, zc, ev);
+            F("v-", 0, -o.rb, zc, neg(ev));
+        }
         if (solid) {
             F("top", 0, 0, z1, en);
             F("base", 0, 0, z0, neg(en));
@@ -2992,10 +3352,15 @@ function hitGizmo(p) {
                 };
         }
         if (
+            active.type === "circ" ||
             active.asset === "wallSign" ||
             active.asset === "windowGrid" ||
             active.asset === "balcony" ||
-            active.asset === "uWall"
+            active.asset === "uWall" ||
+            // 屋台の5つ（壁の厚さ・カウンターの奥行きと高さ・屋根の張り出しと厚さ）、
+            // 丸椅子の6つ（3つの半径と3つの高さ）も、同じ規則で掴めるようにする。
+            active.asset === "stall" ||
+            active.asset === "stool"
         ) {
             const nearest = nearestHandleOf(Object.values(special.handles || {}), p, R),
                 hit = handleOrFace(nearest, (q) => ({
@@ -3252,6 +3617,47 @@ function obBounds(o) {
                 hi[j] = Math.max(hi[j], v);
             }),
         );
+        return { lo, hi };
+    }
+    // 屋台はカウンターと屋根が基準の奥行きより手前へ張り出すので、
+    // 実寸から外接範囲を作る（選択枠・吸着・ボックス選択がずれないように）。
+    if (o?.type === "asset" && o.asset === "stall" && typeof stallGeometry === "function") {
+        const g = stallGeometry(o),
+            hw = g.w / 2,
+            hd = g.d / 2,
+            lo = [1e9, 1e9, 1e9],
+            hi = [-1e9, -1e9, -1e9];
+        [-hw, hw].forEach((x) =>
+            [-hd - g.ro, hd].forEach((y) =>
+                [0, g.h].forEach((z) => {
+                    const v = L2W(o, x, y, z);
+                    for (let j = 0; j < 3; j++) {
+                        lo[j] = Math.min(lo[j], v[j]);
+                        hi[j] = Math.max(hi[j], v[j]);
+                    }
+                }),
+            ),
+        );
+        return { lo, hi };
+    }
+    // 丸椅子は円柱を積んだ形なので、3段のうち一番太い半径で外接範囲を取る。
+    if (o?.type === "asset" && o.asset === "stool" && typeof stoolGeometry === "function") {
+        const g = stoolGeometry(o),
+            r = Math.max(g.seatR, g.baseR),
+            lo = [1e9, 1e9, 1e9],
+            hi = [-1e9, -1e9, -1e9];
+        for (let i = 0; i < 32; i++) {
+            const t = (i / 32) * Math.PI * 2,
+                x = Math.cos(t) * r,
+                y = Math.sin(t) * r;
+            [0, g.h].forEach((z) => {
+                const v = L2W(o, x, y, z);
+                for (let j = 0; j < 3; j++) {
+                    lo[j] = Math.min(lo[j], v[j]);
+                    hi[j] = Math.max(hi[j], v[j]);
+                }
+            });
+        }
         return { lo, hi };
     }
     const sign = o.type === "asset" && o.asset === "sign",
@@ -3526,6 +3932,9 @@ function beginGizmo(h, p) {
         h.t === "window-grid-height" ||
         h.t === "balcony-thickness" ||
         h.t === "uWall-thickness" ||
+        h.t.startsWith("stall-") ||
+        h.t.startsWith("stool-") ||
+        h.t === "circle-radius" ||
         h.t === "wallSideSign-beveled-offset" ||
         h.t === "wallSideSign-bracket-length" ||
         h.t === "cone-height" ||
@@ -3672,6 +4081,43 @@ function dragEdit(p, freeRotation = false) {
             deltaY = p.y - ed.p0.y,
             value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
         patch = ed.t === "wall-sign-bevel" ? { wallSignBevelOffset: value } : { wallSignBracketLength: value };
+    } else if (ed.t.startsWith("stool-")) {
+        // 丸椅子の6つの寸法。半径は正円を保つため ra と rb を同じ値へそろえる。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max),
+            g = stoolGeometry(o);
+        if (ed.t === "stool-seat-radius") patch = { stoolSeatRadius: value, ra: value, rb: value };
+        else if (ed.t === "stool-base-radius") patch = { stoolBaseRadius: value };
+        else if (ed.t === "stool-leg-radius") patch = { stoolLegRadius: value };
+        else if (ed.t === "stool-seat-height") patch = { stoolSeatThickness: value };
+        else if (ed.t === "stool-base-height") patch = { stoolBaseHeight: value };
+        // ポールの高さは真ん中の段なので、全体の高さを変えて上下の段はそのまま残す。
+        else if (ed.t === "stool-leg-height") patch = { h: value + g.seatT + g.baseH };
+    } else if (ed.t === "circle-radius") {
+        // 円・円柱の半径。幅と奥行きを同じ値にして、常に正円を保つ。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { ra: value, rb: value };
+    } else if (ed.t.startsWith("stall-")) {
+        // 屋台の寸法（カウンターの奥行き・高さ、屋根の張り出し・厚さ）。
+        // どの値も「動かす面は1つだけ」なので、掴んだ向きの成分だけを足す。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max),
+            KEY = {
+                "stall-wall-thickness": "stallWallThickness",
+                "stall-counter-front": "stallCounterDepth",
+                "stall-counter-top": "stallCounterHeight",
+                "stall-roof-front": "stallRoofOverhang",
+                "stall-roof-bottom": "stallRoofThickness",
+            },
+            key = KEY[ed.t];
+        if (key) patch = { [key]: value };
     } else if (ed.t === "balcony-thickness" || ed.t === "uWall-thickness") {
         // ベランダ／コの字壁の厚さ。ドラッグ量は画面の向きに投影済み。
         const h = ed.sign,
@@ -4678,6 +5124,42 @@ function exportSurfaceTriangles(o) {
         boxAt(0, 0, g.w, g.d, g.h - g.thickness, g.h);
         boxAt(-g.w / 2 + g.thickness / 2, 0, g.thickness, g.d, 0, g.h - g.thickness);
         boxAt(g.w / 2 - g.thickness / 2, 0, g.thickness, g.d, 0, g.h - g.thickness);
+        return out;
+    }
+    if (kind === "stall") {
+        const g = stallGeometry(o),
+            hd = g.d / 2,
+            // 奥の壁・左右の壁（奥の壁の手前まで）・カウンター・屋根。
+            // どの箱も重ならないので、半透明の塗りが二重になって濃くならない。
+            sideD = g.d - g.t,
+            sideY = (hd - g.t + -hd) / 2;
+        boxAt(0, hd - g.t / 2, g.w, g.t, 0, g.roofBottom);
+        boxAt(-g.w / 2 + g.t / 2, sideY, g.t, sideD, 0, g.roofBottom);
+        boxAt(g.w / 2 - g.t / 2, sideY, g.t, sideD, 0, g.roofBottom);
+        boxAt(0, -hd - g.cd / 2, g.w, g.cd, 0, g.ch);
+        // 屋根は前へ張り出すので、中心は奥行き方向に ro/2 だけ手前へずれる。
+        boxAt(0, -g.ro / 2, g.w, g.d + g.ro, g.roofBottom, g.h);
+        return out;
+    }
+    if (kind === "stool") {
+        const g = stoolGeometry(o),
+            // 円柱（座面・脚・台座）を輪で分割して塗る。
+            cylinder = (r, z0, z1, n = 20) => {
+                for (let i = 0; i < n; i++) {
+                    const a0 = (i / n) * Math.PI * 2,
+                        a1 = ((i + 1) / n) * Math.PI * 2,
+                        x0 = Math.cos(a0) * r,
+                        y0 = Math.sin(a0) * r,
+                        x1 = Math.cos(a1) * r,
+                        y1 = Math.sin(a1) * r;
+                    quad([x0, y0, z0], [x1, y1, z0], [x1, y1, z1], [x0, y0, z1]);
+                    tri([0, 0, z1], [x0, y0, z1], [x1, y1, z1]);
+                    tri([0, 0, z0], [x1, y1, z0], [x0, y0, z0]);
+                }
+            };
+        cylinder(g.seatR, g.seatBottom, g.h);
+        cylinder(g.legR, g.baseTop, g.poleTop, 12);
+        cylinder(g.baseR, 0, g.baseH, 16);
         return out;
     }
     if (kind === "awning") {
