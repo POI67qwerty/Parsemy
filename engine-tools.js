@@ -866,6 +866,165 @@ function uWallGeometry(o) {
         thickness = clamp(Number(o?.uWallThickness) || 0.12, 0.035, maxThickness);
     return { w, d, h, thickness, maxThickness };
 }
+// ===== 手すり（柱＋上下の横桟＋縦の棒） =====
+// ローカル座標は x=幅、y=奥行き、z=高さ。手前は -Y（ベランダ・コの字壁と同じ向き）。
+// 形は3種類。
+//   line（直線）… 手前の1本だけ
+//   l（L字）   … 手前＋左の2本
+//   u（コの字）… 手前＋左右の3本
+// 横桟は「柱の中心を結ぶ折れ線」に沿って置き、縦の棒はその区間を等分した位置へ立てる。
+// 棒の本数は区間の長さに比例して配分するので、コの字でも1区間に固まらない。
+function railingGeometry(o) {
+    const w = Math.max(0.24, Math.abs(Number(o?.ra) || 1) * 2),
+        d = Math.max(0.24, Math.abs(Number(o?.rb) || 0.6) * 2),
+        h = Math.max(0.2, Number(o?.h) || 1.05),
+        shape = ["u", "l", "line"].includes(o?.railingShape) ? o.railingShape : "u",
+        requested = clamp(Math.round(Number(o?.railingCount) || 5), 1, 40),
+        // 角材（横桟）の太さ。幅・奥行き・高さに対して太すぎない所で止める。
+        maxT = Math.max(0.012, Math.min(Math.min(w, d) * 0.22, h * 0.22)),
+        t = clamp(Number(o?.railingThickness) || 0.045, 0.012, maxT),
+        // 柱は角材より太い。細くはできない（見た目が崩れるため）。
+        maxPost = Math.max(t, Math.min(Math.min(w, d) * 0.28, h * 0.5)),
+        post = clamp(Number(o?.railingPostSize) || 0.075, t, maxPost),
+        // 下の横桟の下端の高さ。上の横桟と棒の長さが残る範囲で止める。
+        maxBottom = Math.max(0.02, h - t * 3),
+        bottom = clamp(Number(o?.railingBottomGap) || 0.12, 0.02, maxBottom),
+        barT = Math.max(0.01, t * 0.55),
+        inset = post / 2,
+        x0 = -w / 2 + inset,
+        x1 = w / 2 - inset,
+        yF = -d / 2 + inset,
+        yB = d / 2 - inset,
+        // 柱の中心を結ぶ折れ線（端から端まで）。U は右奥から左奥へ回り込む。
+        line =
+            shape === "line"
+                ? [[x0, yF], [x1, yF]]
+                : shape === "l"
+                  ? [[x1, yF], [x0, yF], [x0, yB]]
+                  : [[x1, yB], [x1, yF], [x0, yF], [x0, yB]],
+        posts = [],
+        runs = [];
+    line.forEach((p, i) => {
+        const key = `${p[0].toFixed(4)}|${p[1].toFixed(4)}`;
+        if (!posts.some((q) => q.key === key)) posts.push({ key, x: p[0], y: p[1] });
+        if (!i) return;
+        const a = line[i - 1],
+            b = p,
+            len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (len > 0.02)
+            runs.push({
+                a,
+                b,
+                len,
+                alongX: Math.abs(b[0] - a[0]) >= Math.abs(b[1] - a[1]),
+            });
+    });
+    // 縦の棒の本数を区間の長さで配分する（合計が count 本になるように端数を寄せる）。
+    const totalLen = runs.reduce((s, r) => s + r.len, 0) || 1,
+        minCount = Math.max(1, runs.length),
+        // 区間ごとに最低1本立つので、指定がそれより少ないときは区間数まで引き上げる。
+        count = Math.max(minCount, requested),
+        raw = runs.map((r) => (count * r.len) / totalLen),
+        nums = raw.map((v) => Math.max(1, Math.floor(v)));
+    let sum = nums.reduce((a, b) => a + b, 0);
+    const frac = raw.map((v) => v - Math.floor(v));
+    while (sum < count && nums.length) {
+        let best = 0;
+        frac.forEach((f, i) => {
+            if (f > frac[best]) best = i;
+        });
+        nums[best]++;
+        frac[best] -= 1;
+        sum++;
+    }
+    while (sum > count) {
+        let worst = -1;
+        nums.forEach((v, i) => {
+            if (v > 1 && (worst < 0 || v > nums[worst])) worst = i;
+        });
+        if (worst < 0) break;
+        nums[worst]--;
+        sum--;
+    }
+    runs.forEach((r, i) => {
+        const n = Math.max(1, nums[i] || 1);
+        r.bars = [];
+        for (let j = 1; j <= n; j++) {
+            const f = j / (n + 1);
+            r.bars.push([r.a[0] + (r.b[0] - r.a[0]) * f, r.a[1] + (r.b[1] - r.a[1]) * f]);
+        }
+    });
+    // 実際に立った棒の本数を返す（区間ごとに最低1本なので、コの字では3本が下限）。
+    // 数値パネルにはこの実際の本数を表示し、入力もこの範囲へ丸める。
+    const actual = runs.reduce((sum, r) => sum + r.bars.length, 0) || 1;
+    return {
+        w, d, h, shape, count: actual, requested, minCount,
+        t, maxT, post, maxPost, bottom, maxBottom, barT, runs, posts,
+    };
+}
+// 手すりの画面ハンドル。寸法（幅・奥行き・高さ）は共通の面ハンドルが受け持つので、
+// ここでは「角材の太さ」と「下の横桟の高さ」の2本だけを出す。
+function railingGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "railing") return null;
+    const g = railingGeometry(o),
+        hw = g.w / 2,
+        hd = g.d / 2,
+        outY = Math.max(0.16, g.d * 0.45),
+        handles = {
+            // 角材の太さ：上の横桟の左端から手前（-Y）へ引くと太くなる。
+            thickness: screenHandle(
+                o,
+                "railing-thickness",
+                [-hw + g.post, -hd + g.post, g.h - g.t / 2],
+                [-hw + g.post, -hd - outY, g.h - g.t / 2],
+                [-hw + g.post, -hd - outY - 0.3, g.h - g.t / 2],
+                g.t,
+                0.012,
+                g.maxT,
+                "角材の太さ",
+                { x: -1, y: 0 },
+                "#ff9f68",
+            ),
+            // 下の横桟の高さ：手前の下の横桟の外側。上へ引くと高くなる。
+            bottom: screenHandle(
+                o,
+                "railing-bottom",
+                [0, -hd + g.post, g.bottom + g.t / 2],
+                [0, -hd - outY, g.bottom + g.t / 2],
+                [0, -hd - outY, g.bottom + g.t / 2 + 0.3],
+                g.bottom,
+                0.02,
+                g.maxBottom,
+                "下の横桟",
+                { x: 0, y: 1 },
+                "#ffb36f",
+            ),
+            // 縦の棒の本数：上の横桟の真ん中から真上へ引くと増える。
+            // 数値欄の −＋ と同じ値を動かすので、画面とパネルのどちらでも編集できる。
+            count: screenHandle(
+                o,
+                "railing-count",
+                [0, -hd + g.post, g.h],
+                [0, -hd + g.post, g.h + 0.26],
+                [0, -hd + g.post, g.h + 0.56],
+                Math.max(g.minCount, g.requested),
+                g.minCount,
+                40,
+                "本数",
+                { x: 0, y: 1 },
+                "#7dd8ff",
+            ),
+        };
+    // 角材の太さのような「数cmの値」は、既定の感度（画面60pxで1m）だと数pxで
+    // 振り切れてしまう。手すりの2本は指先の移動に対して細かく動くよう感度を落とす
+    // （scale は「1m動かすのに何px必要か」なので、値を大きくするほど繊細になる）。
+    handles.thickness.scale = Math.max(handles.thickness.scale, 1000);
+    handles.bottom.scale = Math.max(handles.bottom.scale, 420);
+    // 本数は「整数の段数」なので、40px で1本ぶん動かし、値は整数に丸める。
+    handles.count.scale = 40;
+    handles.count.integer = true;
+    return { o, C3: L2W(o, 0, 0, g.h * 0.5), handles };
+}
 // 壁付けベランダ／コの字壁の画面ハンドル。
 // 掴むのは腰壁（コの字壁では前面の壁）の外側の面。外へ引くと厚くなる。
 // 3Dと間取り（前・横・上）の両方で同じハンドルを出すため、
@@ -2253,6 +2412,8 @@ function specialGizmo(o) {
                       ? balconyGizmo(o)
                       : o && o.type === "asset" && o.asset === "uWall"
                         ? uWallGizmo(o)
+                      : o && o.type === "asset" && o.asset === "railing"
+                        ? railingGizmo(o)
                       : o && o.type === "asset" && o.asset === "stall"
                         ? stallGizmo(o)
                       : o && o.type === "asset" && o.asset === "stool"
@@ -2632,6 +2793,28 @@ function drawSpecialGizmo(c, o) {
             c.font = `bold ${12 / Z}px system-ui`;
             c.fillText(`半径 ${Number(hd.start || 0).toFixed(2)}`, hd.s.x + 9 / Z, hd.s.y - 8 / Z);
         }
+    } else if (sg.o.asset === "railing") {
+        // 角材の太さ・下の横桟の高さの2本。掴む四角から破線を引き、現在値を添える。
+        Object.values(sg.handles).forEach((h) => {
+            if (!h?.s?.ok) return;
+            const col = h.color || "#ff9f68";
+            c.strokeStyle = col;
+            c.lineWidth = 1.4 / Z;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.beginPath();
+            if (h.anchor?.ok) {
+                c.moveTo(h.anchor.x, h.anchor.y);
+                c.lineTo(h.s.x, h.s.y);
+            }
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, col);
+            c.fillStyle = col;
+            c.font = `bold ${12 / Z}px system-ui`;
+            // 本数のように整数の値は、小数を付けずにそのまま出す。
+            const shown = h.integer ? Math.round(Number(h.start) || 0) : Number(h.start || 0).toFixed(3);
+            c.fillText(`${h.label} ${shown}`, h.s.x + 9 / Z, h.s.y - 8 / Z);
+        });
     } else if (sg.o.asset === "stall") {
         // 4つの四角（カウンター奥行き・カウンター高さ・屋根の張り出し・屋根の厚さ）を
         // 同じ見た目で描く。掴む四角から寸法の向きへ破線を引き、現在値を添える。
@@ -3007,6 +3190,9 @@ function gizmo() {
                     // 屋台・丸椅子も高さ方向の面を持つので、3Dで上下の面を掴める。
                     o.asset === "stall" ||
                     o.asset === "stool" ||
+                    // 手すりは柱と横桟を上下に持つ立体なので、3Dでも上下の面で
+                    // 高さを変えられるようにする（ビューごとの差を作らない）。
+                    o.asset === "railing" ||
                     o.asset === "pathPipe" ||
                     o.asset === "box" ||
                     o.asset === "beveledBox" ||
@@ -3432,7 +3618,8 @@ function hitGizmo(p) {
             // 屋台の5つ（壁の厚さ・カウンターの奥行きと高さ・屋根の張り出しと厚さ）、
             // 丸椅子の6つ（3つの半径と3つの高さ）も、同じ規則で掴めるようにする。
             active.asset === "stall" ||
-            active.asset === "stool"
+            active.asset === "stool" ||
+            active.asset === "railing"
         ) {
             const nearest = nearestHandleOf(Object.values(special.handles || {}), p, R),
                 hit = handleOrFace(nearest, (q) => ({
@@ -4006,6 +4193,7 @@ function beginGizmo(h, p) {
         h.t === "uWall-thickness" ||
         h.t.startsWith("stall-") ||
         h.t.startsWith("stool-") ||
+        h.t.startsWith("railing-") ||
         h.t === "circle-radius" ||
         h.t === "wallSideSign-beveled-offset" ||
         h.t === "wallSideSign-bracket-length" ||
@@ -4190,6 +4378,21 @@ function dragEdit(p, freeRotation = false) {
             },
             key = KEY[ed.t];
         if (key) patch = { [key]: value };
+    } else if (ed.t.startsWith("railing-")) {
+        // 手すりの角材の太さ・下の横桟の高さ。ドラッグ量は画面の向きに投影済み。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max),
+            KEY = {
+                "railing-thickness": "railingThickness",
+                "railing-bottom": "railingBottomGap",
+                "railing-count": "railingCount",
+            },
+            key = KEY[ed.t],
+            // 本数は整数。ほかの2つは 0.001 刻みで扱う（数値欄と同じ桁）。
+            num = h.integer ? Math.round(value) : Math.round(value * 1000) / 1000;
+        if (key) patch = { [key]: num };
     } else if (ed.t === "balcony-thickness" || ed.t === "uWall-thickness") {
         // ベランダ／コの字壁の厚さ。ドラッグ量は画面の向きに投影済み。
         const h = ed.sign,
@@ -5211,6 +5414,35 @@ function exportSurfaceTriangles(o) {
         boxAt(0, -hd - g.cd / 2, g.w, g.cd, 0, g.ch);
         // 屋根は前へ張り出すので、中心は奥行き方向に ro/2 だけ手前へずれる。
         boxAt(0, -g.ro / 2, g.w, g.d + g.ro, g.roofBottom, g.h);
+        return out;
+    }
+    if (kind === "railing") {
+        const g = railingGeometry(o),
+            // 線画（linesRailing）と同じ部材を、同じ寸法で箱にする。
+            // 「包絡箱を1枚塗る」だけだと、実際の形の外側（棒と棒の間）まで
+            // 塗ってしまうので、部材ごとに分ける。
+            zTop0 = Math.max(0, g.h - g.t),
+            zBot1 = Math.min(g.h - g.t, g.bottom + g.t),
+            footH = Math.min(g.h, Math.min(0.03, Math.max(0.012, g.bottom * 0.35))),
+            footW = g.post * 1.5,
+            // 横桟は柱の間だけにする（柱と重ねると半透明の塗りが二重になって濃くなる）。
+            railLen = (r) => Math.max(0.001, r.len - g.post);
+        // 柱（足元の板の上から上端まで）と足元の板（床から足元の板の高さまで）。
+        g.posts.forEach(({ x, y }) => {
+            boxAt(x, y, g.post, g.post, Math.min(footH, g.h), g.h);
+            boxAt(x, y, footW, footW, 0, footH);
+        });
+        g.runs.forEach((r) => {
+            const cx = (r.a[0] + r.b[0]) / 2,
+                cy = (r.a[1] + r.b[1]) / 2,
+                len = railLen(r),
+                bw = r.alongX ? len : g.t,
+                bd = r.alongX ? g.t : len;
+            boxAt(cx, cy, bw, bd, zTop0, g.h);
+            if (zBot1 > g.bottom) boxAt(cx, cy, bw, bd, g.bottom, zBot1);
+            if (zTop0 - zBot1 > 0.001)
+                r.bars.forEach(([bx, by]) => boxAt(bx, by, g.barT, g.barT, zBot1, zTop0));
+        });
         return out;
     }
     if (kind === "stool") {

@@ -349,6 +349,13 @@ window.cityGridInstallAssetUI = function (bridge) {
             balconyRailHeightEdited: kind === "balcony" ? false : undefined,
             // コの字壁：3枚の壁の厚さを1本の値で持つ。
             uWallThickness: kind === "uWall" ? 0.12 : undefined,
+            // 手すり：形（コの字／L字／直線）と、本数・角材・柱・下の横桟の初期値。
+            // どれも比率ではなく実寸で持つ（形を変えても本数と太さは変わらない）。
+            railingShape: kind === "railing" ? "u" : undefined,
+            railingCount: kind === "railing" ? 5 : undefined,
+            railingThickness: kind === "railing" ? Math.max(0.02, Math.min(info.w, info.d) * 0.03) : undefined,
+            railingPostSize: kind === "railing" ? Math.max(0.04, Math.min(info.w, info.d) * 0.05) : undefined,
+            railingBottomGap: kind === "railing" ? Math.max(0.06, height * 0.12) : undefined,
             // 屋台：寸法はすべて比率の既定値（0 を入れると既定値へ戻る扱い）。
             // 触っていない間は比率で追従するので、幅・高さを変えても形が崩れない。
             stallWallThickness: kind === "stall" ? Math.max(0.03, info.w * 0.0375) : undefined,
@@ -1009,6 +1016,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             "awning",
             "balcony",
             "uWall",
+            // 手すりも街・パーツ（建物まわりの部材）へ。
+            "railing",
             // 丸椅子は街の小物として「街・パーツ」へ。
             "stool",
             "wallSign",

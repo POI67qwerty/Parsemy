@@ -2006,6 +2006,90 @@
             stoolEditSession = false;
         };
     });
+    // ===== 手すり（柱＋上下の横桟＋縦の棒） =====
+    // 形（コの字／L字／直線）と4つの寸法を、数値欄と「−／＋」ボタンで編集する。
+    // 実際の寸法計算は railingGeometry()（engine-tools.js）が唯一の源なので、
+    // 画面ハンドル・数値欄・線画がすべて同じ値になる。
+    let railingEditSession = false;
+    const RAILING_PROPS = [
+        ["railingCount", 1, 40],
+        ["railingThickness", 0.012, 10],
+        ["railingPostSize", 0.012, 10],
+        ["railingBottomGap", 0.02, 30],
+    ];
+    function syncRailingPanel() {
+        const panel = el("railingP"),
+            o = sel && obOf(sel),
+            isRail = !!(o && o.type === "asset" && o.asset === "railing");
+        if (!panel) return;
+        panel.style.display = isRail ? "" : "none";
+        if (!isRail) return;
+        const g = railingGeometry(o),
+            shown = {
+                railingCount: g.count,
+                railingThickness: g.t,
+                railingPostSize: g.post,
+                railingBottomGap: g.bottom,
+            },
+            shape = el("railingShape");
+        if (shape && document.activeElement !== shape) shape.value = g.shape;
+        RAILING_PROPS.forEach(([id]) => {
+            const n = el(id);
+            if (n && document.activeElement !== n)
+                n.value = id === "railingCount" ? String(shown[id]) : Number(shown[id]).toFixed(3);
+        });
+        const minus = el("railingCountMinus"),
+            plus = el("railingCountPlus");
+        // 下限は「区間の数」（直線=1・L字=2・コの字=3）。それ以下には減らせない。
+        if (minus) minus.disabled = g.count <= g.minCount;
+        if (plus) plus.disabled = g.count >= 40;
+    }
+    function applyRailingProp(name, value) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || o.asset !== "railing") return;
+        if (!railingEditSession) {
+            HU.push(S);
+            RD = [];
+            railingEditSession = true;
+        }
+        if (name === "railingShape") {
+            if (["u", "l", "line"].includes(value)) setOb(sel, { railingShape: value });
+            render();
+            return;
+        }
+        if (!Number.isFinite(value)) return;
+        const g = railingGeometry(o);
+        if (name === "railingCount") setOb(sel, { railingCount: clamp(Math.round(value), 1, 40) });
+        // 角材の太さは「幅・奥行き・高さに対して太すぎない」上限で止める（ハンドルと同じ）。
+        else if (name === "railingThickness") setOb(sel, { railingThickness: clamp(value, 0.012, g.maxT) });
+        else if (name === "railingPostSize") setOb(sel, { railingPostSize: clamp(value, 0.012, g.maxPost) });
+        else if (name === "railingBottomGap") setOb(sel, { railingBottomGap: clamp(value, 0.02, g.maxBottom) });
+        render();
+    }
+    RAILING_PROPS.forEach(([id]) => {
+        const n = el(id);
+        if (!n) return;
+        n.oninput = () => applyRailingProp(id, parseFloat(n.value));
+        n.onchange = () => {
+            // 本数は整数に丸めて表示し直す（打ち終わりに揃える）。
+            railingEditSession = false;
+            if (id === "railingCount") n.value = String(Math.round(parseFloat(n.value) || 1));
+        };
+    });
+    {
+        const shape = el("railingShape");
+        if (shape) shape.onchange = () => applyRailingProp("railingShape", shape.value);
+        const minus = el("railingCountMinus"),
+            plus = el("railingCountPlus"),
+            step = (d) => {
+                const o = sel && obOf(sel);
+                if (!o || o.asset !== "railing") return;
+                applyRailingProp("railingCount", railingGeometry(o).count + d);
+                railingEditSession = false;
+            };
+        if (minus) minus.onclick = () => step(-1);
+        if (plus) plus.onclick = () => step(1);
+    }
     let pathPipeEditSession = false;
     function pathPipeText(path) {
         return (Array.isArray(path) ? path : pathPipeDefaultPoints())
@@ -2596,6 +2680,7 @@
         syncUWallPanel();
         syncStallPanel();
         syncStoolPanel();
+        syncRailingPanel();
         syncPathPipePanel();
         syncWallSignPanel();
         syncRoofPanel();

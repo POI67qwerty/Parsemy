@@ -193,6 +193,14 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>台座の高さ</span><input type=number class=nv id=stoolBaseHeight min=0.01 step=0.01 style="width:100px"><span class=un>m</span></label>
 <div class="note">台座・ポール・座面の3つの円柱でできた丸椅子です。半径はどれも正円なので1つの値で決まります（幅と奥行きは別々に変わりません）。半径3本は外向き、高さ3本は上下の四角で、画面上から直接編集できます。屋台のカウンター（高さ約1.05m）に合わせて、座面の高さ0.45m・半径0.18mを初期値にしています。</div>
 </div>
+<div id=railingP style="display:none"><h3>手すり</h3>
+<label><span>形</span><select id=railingShape style="width:150px"><option value="u">コの字（3方向）</option><option value="l">L字（2方向）</option><option value="line">直線</option></select></label>
+<label><span>手すりの本数</span><button type=button id=railingCountMinus title="1本減らす">−</button><input type=number class=nv id=railingCount min=1 max=40 step=1 style="width:74px"><button type=button id=railingCountPlus title="1本増やす">＋</button><span class=un>本</span></label>
+<label><span>角材の太さ</span><input type=number class=nv id=railingThickness min=0.012 step=0.005 style="width:100px"><span class=un>m</span></label>
+<label><span>柱の太さ</span><input type=number class=nv id=railingPostSize min=0.012 step=0.005 style="width:100px"><span class=un>m</span></label>
+<label><span>下の横桟の高さ</span><input type=number class=nv id=railingBottomGap min=0.02 step=0.01 style="width:100px"><span class=un>m</span></label>
+<div class="note">床に立つ柱＋上下の横桟＋縦の棒の手すりです。形はコの字（手前＋左右）・L字（手前＋左）・直線の3種類で、切り替えても手前の横桟の位置は動きません。縦の棒の本数は区間の長さに比例して配分されるので、コの字にしても片側だけ詰まりません。幅・奥行き・高さは白い面ハンドル（3D・前・横・上）または数値欄、角材の太さと下の横桟の高さはオレンジの四角から変更できます。</div>
+</div>
 <div id=pathPipeP style="display:none"><h3>パスパイプ</h3>
 <label><span>パターン</span><select id=pathPipePreset style="width:150px"><option value="custom">手動入力</option><option value="straight">真っ直ぐ</option><option value="l">L字</option><option value="u">U字</option><option value="z">Z字</option><option value="step3d">立体折れ</option></select><button type=button id=pathPipeApplyPreset>適用</button></label>
 <label><span>パイプ半径</span><input type=number class=nv id=pathPipeRadius min=0.02 step=0.02 style="width:100px"><span class=un>m</span></label>

@@ -66,6 +66,21 @@ const ASSETS = {
     stall: { label: "屋台", glyph: "⛺", w: 2.4, d: 1.4, h: 2.4, accent: "#e6a36f" },
     // 丸椅子：座面＋脚＋台座。屋台のカウンター（高さ約1.05m）に合わせた座面高0.45m。
     stool: { label: "丸椅子", glyph: "◍", w: 0.36, d: 0.36, h: 0.45, accent: "#c9a27a" },
+    // 手すり：床に立つ柱＋上下の横桟＋縦の棒。形はコの字・L字・直線の3種類で、
+    // 棒の本数・角材の太さ・柱の太さ・下の横桟の高さを画面上で調整できる。
+    railing: {
+        label: "手すり",
+        glyph: "⌗",
+        w: 2,
+        d: 1.2,
+        h: 1.05,
+        railingShape: "u",
+        railingCount: 5,
+        railingThickness: 0.045,
+        railingPostSize: 0.075,
+        railingBottomGap: 0.12,
+        accent: "#e8a8c8",
+    },
     pathPipe: { label: "パスパイプ", glyph: "◉", w: 4.8, d: 4.2, h: 1.5, accent: "#ff9f68" },
     person: { label: "人物", glyph: "♙", w: 0.46, d: 0.3, h: 1.7, accent: "#ad9cff" },
     stairs: { label: "階段", glyph: "▰", w: 1.45, d: 2.4, h: 0.78, accent: "#ffb36f" },
@@ -1953,6 +1968,7 @@ const ASSET_LINE_BUILDERS = {
     beveledStackedBuilding: linesStackedBuilding,
     balcony: linesBalcony,
     uWall: linesUWall,
+    railing: linesRailing,
     stall: linesStall,
     stool: linesStool,
     stairs: linesStairs,
@@ -2632,6 +2648,61 @@ function linesUWall(ctx) {
     out.push(polyA(o, profile.map(([px, pz]) => [px, hd, pz]), c));
     // 断面の角8か所を通る、奥行き方向の稜線。
     profile.forEach(([px, pz]) => out.push(lineA(o, [[px, -hd, pz], [px, hd, pz]], c)));
+}
+
+// --- 手すり ---
+// 柱・上の横桟・下の横桟・縦の棒を、すべて「細い直方体の線画」で組む。
+// 寸法の決定は railingGeometry()（engine-tools.js）に任せ、ここでは描くだけ。
+// 形（コの字・L字・直線）と本数の配分も railingGeometry() が計算済みなので、
+// 画面のハンドル・数値パネル・線画が同じ値を見ることになる。
+function linesRailing(ctx) {
+    const { o, c, out } = ctx,
+        g = railingGeometry(o),
+        { h, t, post, bottom, barT, runs, posts } = g,
+        zTop0 = Math.max(0, h - t), // 上の横桟の下端（＝縦の棒の上端）
+        zBot1 = Math.min(h - t, bottom + t), // 下の横桟の上端（＝縦の棒の下端）
+        footH = Math.min(0.03, Math.max(0.012, bottom * 0.35)),
+        // 足元の板は柱より少し広い。広げすぎると外接箱（w×d）からはみ出して
+        // 選択枠とずれるので、柱の1.5倍までにする。
+        footW = post * 1.5;
+    // 1) 柱（床から手すりの上端まで）と、足元の少し広い板。
+    posts.forEach(({ x, y }) => {
+        out.push(...wireBoxA(o, x, y, post, post, 0, h, c));
+        out.push(
+            polyA(
+                o,
+                [
+                    [x - footW / 2, y - footW / 2, footH],
+                    [x + footW / 2, y - footW / 2, footH],
+                    [x + footW / 2, y + footW / 2, footH],
+                    [x - footW / 2, y + footW / 2, footH],
+                ],
+                c,
+            ),
+        );
+        [
+            [-1, -1],
+            [1, -1],
+            [1, 1],
+            [-1, 1],
+        ].forEach(([sx, sy]) => {
+            const px = x + (sx * footW) / 2,
+                py = y + (sy * footW) / 2;
+            out.push(lineA(o, [[px, py, 0], [px, py, footH]], c));
+        });
+    });
+    // 2) 区間ごとに、上の横桟・下の横桟・縦の棒。
+    runs.forEach((r) => {
+        const cx = (r.a[0] + r.b[0]) / 2,
+            cy = (r.a[1] + r.b[1]) / 2,
+            bw = r.alongX ? r.len : t,
+            bd = r.alongX ? t : r.len;
+        out.push(...wireBoxA(o, cx, cy, bw, bd, zTop0, h, c));
+        out.push(...wireBoxA(o, cx, cy, bw, bd, bottom, zBot1, c));
+        // 縦の棒は上下の横桟の間だけ（横桟を突き抜けない）。
+        if (zTop0 - zBot1 > 0.001)
+            r.bars.forEach(([bx, by]) => out.push(...wireBoxA(o, bx, by, barT, barT, zBot1, zTop0, c)));
+    });
 }
 
 // --- 階段 ---
@@ -3710,6 +3781,19 @@ function normalizedAsset(o) {
     // コの字壁の厚さを正規化する（高さhは壁の高さそのもの）。
     if (q && q.asset === "uWall") {
         q = { ...q, uWallThickness: clamp(Number(q.uWallThickness) || 0.12, 0.035, 10) };
+    }
+    // 手すり：形・本数・角材の太さ・柱の太さ・下の横桟の高さを安全な範囲へ整える。
+    // railingGeometry() と同じ範囲で丸めるので、数値パネルの表示と線画が食い違わない。
+    if (q && q.asset === "railing") {
+        const g = railingGeometry(q);
+        q = {
+            ...q,
+            railingShape: g.shape,
+            railingCount: g.count,
+            railingThickness: g.t,
+            railingPostSize: g.post,
+            railingBottomGap: g.bottom,
+        };
     }
     // 球は3方向の半径をそろえ、必ず真球として扱う。
     if (q && q.asset === "sphere") {

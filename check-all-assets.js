@@ -106,6 +106,38 @@ const { chromium } = require("playwright");
         );
     }
 
+    // 手すり専用の点検：形3種・本数・角材の太さ・下の横桟の高さで線画が変わること。
+    const railing = await p.evaluate(() => {
+        const o = [...new Map(S.filter((s) => s.ob).map((s) => [s.ob.id, s.ob])).values()].find(
+            (q) => q && q.asset === "railing",
+        );
+        if (!o) return { ok: false, why: "手すりが追加されていない" };
+        const n = (q) => genShape(q).length,
+            // 太さ・下の横桟は「線の本数」ではなく「点の位置」が変わるので、
+            // 点列の署名で比べる（本数だけで比べると変化を見逃す）。
+            sig = (q) =>
+                genShape(q)
+                    .map((l) => (l.p || []).map((v) => v.map((x) => x.toFixed(3)).join(",")).join(";"))
+                    .join("|"),
+            base = n(o),
+            baseSig = sig(o),
+            geo = railingGeometry(o);
+        return {
+            ok: true,
+            base,
+            shapes: ["u", "l", "line"].map((sh) => [sh, n({ ...o, railingShape: sh })]),
+            counts: [2, 5, 9, 16].map((c) => [c, n({ ...o, railingCount: c })]),
+            thick: sig({ ...o, railingThickness: 0.12 }) !== baseSig,
+            bottom: sig({ ...o, railingBottomGap: 0.4 }) !== baseSig,
+            bars: geo.count,
+            handles: Object.keys((specialGizmo(o) || {}).handles || {}),
+            // 面（塗り）が包絡箱1枚になっていないか。箱は12三角形、実形状は部材の数だけ増える。
+            tris: surfaceTriangles(o).length,
+            // 3Dでも上下の面（高さ）を掴めること＝ビューごとの差を作らない。
+            faces: ((gizmo(o) || {}).faces || []).map((f) => f.id),
+        };
+    });
+
     const added = rows.filter((r) => !r.skip);
     const skipped = rows.filter((r) => r.skip).map((r) => r.k);
     const bad = added.filter((r) => r.err || r.missing || !r.lines || r.lines < 1 || !r.rot || !r.rotX || !r.rotZ);
@@ -123,9 +155,41 @@ const { chromium } = require("playwright");
         JSON.stringify(added.filter((r) => Array.isArray(r.handles) && r.handles.length).map((r) => [r.k, r.handles.length])),
     );
     console.log("屋台の線:", stall ? stall.lines + "本" + (stallNg ? "（28本ではない）" : "（OK）") : "屋台なし");
+    // 手すり：形・本数・太さ・下の横桟で線画が変わるか（増減が単調か）を確認する。
+    const railNg = (() => {
+        if (!railing.ok) return 1;
+        const uniq = (arr) => new Set(arr.map((v) => v[1])).size === arr.length,
+            mono = railing.counts.every((v, i, a) => i === 0 || v[1] > a[i - 1][1]);
+        return uniq(railing.shapes) &&
+            mono &&
+            railing.thick &&
+            railing.bottom &&
+            railing.tris > 12 && // 包絡箱（12三角形）ではない＝実際の形を塗っている
+            railing.faces.includes("top") &&
+            railing.faces.includes("base")
+            ? 0
+            : 1;
+    })();
+    if (railing.ok)
+        console.log(
+            "手すり:",
+            JSON.stringify(railing.shapes),
+            "本数→線",
+            JSON.stringify(railing.counts),
+            "線",
+            railing.base,
+            "／面",
+            railing.tris + "三角形",
+            "／ハンドル",
+            JSON.stringify(railing.handles),
+            "／面ハンドル",
+            JSON.stringify(railing.faces),
+            railNg ? "（NG）" : "（OK）",
+        );
+    else console.log("手すり:", railing.why);
     console.log("ページエラー:", errs.length, JSON.stringify(errs));
 
-    const fail = bad.length + (stallNg ? 1 : 0) + errs.length;
+    const fail = bad.length + (stallNg ? 1 : 0) + railNg + errs.length;
     console.log(fail ? "=> NG " + fail + "件" : "=> すべてOK");
     await b.close();
     process.exit(fail ? 1 : 0);
