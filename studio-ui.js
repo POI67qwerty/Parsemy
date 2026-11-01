@@ -6025,6 +6025,65 @@
         } catch (e) {}
     }
     if (innerWidth <= 900 && !sidePref) setSide(true);
+    // ===== 数値欄の「−／＋」（全パネル共通）=====
+    // input.nv（数値欄）の左右へ「−」「＋」を差し込む。押すと step ぶんだけ動かし、
+    // 数値欄を直接打ったときと同じ経路（input → change）へ流す。こうしておくと
+    // 画面ハンドル・数値欄・元に戻す（Undo）の扱いが欄ごとに食い違わない。
+    // 既に −／＋ が付いている欄（手すりの本数など）は previousElementSibling が
+    // ボタンなので飛ばす。
+    function nudgeNv(n, dir) {
+        const step = Math.abs(Number(n.step) || 0.05) || 0.05,
+            cur = Number(n.value),
+            min = n.min === "" ? NaN : Number(n.min),
+            max = n.max === "" ? NaN : Number(n.max);
+        let v = (Number.isFinite(cur) ? cur : 0) + dir * step;
+        if (Number.isFinite(min) && v < min) v = min;
+        if (Number.isFinite(max) && v > max) v = max;
+        // 刻みに合わせた桁数で表示する（0.05 刻みなら小数2桁）。
+        const dec = (String(step).split(".")[1] || "").length;
+        n.value = dec ? v.toFixed(dec) : String(Math.round(v));
+        n.dispatchEvent(new Event("input", { bubbles: true }));
+        n.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    function installNvSteppers(root) {
+        const scope = root && root.querySelectorAll ? root : document;
+        scope.querySelectorAll("input.nv").forEach((n) => {
+            if (n.dataset.nvStep) return;
+            const prev = n.previousElementSibling;
+            n.dataset.nvStep = "1";
+            if (prev && prev.tagName === "BUTTON") return; // 専用の −／＋ が既にある
+            const mk = (text, dir, label) => {
+                const b = document.createElement("button");
+                b.type = "button";
+                b.className = "nvstep";
+                b.textContent = text;
+                b.title = label;
+                b.setAttribute("aria-label", label);
+                b.addEventListener("click", (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    nudgeNv(n, dir);
+                });
+                return b;
+            };
+            n.parentNode.insertBefore(mk("−", -1, "少し減らす"), n);
+            n.parentNode.insertBefore(mk("＋", 1, "少し増やす"), n.nextSibling);
+        });
+    }
+    installNvSteppers(document);
+    // アセットごとのパネルは後から組み立てられるので、増えたら付け足す。
+    // 差し込んだボタン自身も childList を揺らすが、dataset で除外するので止まる。
+    const nvHost = el("side");
+    if (nvHost && typeof MutationObserver === "function") {
+        let nvPending = 0;
+        new MutationObserver(() => {
+            if (nvPending) return;
+            nvPending = requestAnimationFrame(() => {
+                nvPending = 0;
+                installNvSteppers(nvHost);
+            });
+        }).observe(nvHost, { childList: true, subtree: true });
+    }
     window.cityGridStudioBridge = {
         el,
         stage,

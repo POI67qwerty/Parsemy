@@ -294,17 +294,20 @@ function beveledWireBoxA(o, cx, cy, w, d, z0, z1, offset = 0.06, segments = 3, c
     );
     // ベベルの弧の途中は縦辺を描かない（面だけで見せる）。
     footprint.forEach(([x, y], index) => {
-        if (bevelSeamPoint(index, offset, segments)) return;
-        out.push(
-            lineA(
+        const mark = beveledEdgeMark(index, offset, segments),
+            line = lineA(
                 o,
                 [
                     [x + cx, y + cy, z0],
                     [x + cx, y + cy, z1],
                 ],
                 color,
-            ),
-        );
+            );
+        if (mark) {
+            line.seam = mark.key;
+            line.seamApex = mark.apex;
+        }
+        out.push(line);
     });
     return out;
 }
@@ -420,17 +423,31 @@ function beveledBoxFootprint(width, depth, offset, segmentCount) {
     });
     return out;
 }
-// ベベル（角の丸め）の弧の「途中」にある輪郭点かどうか。
-// ベベルは面として見せ、弧の途中の縦の稜線は描かない（凹窓階層建物の扱いと揃える）。
-// 弧の両端は平らな側面と接する所なので、形の輪郭として残す。
-// 今後ベベルのあるアセットを足すときも、縦辺を描く前にこの関数で判定すること。
-function bevelSeamPoint(index, offset, segments) {
-    const b = Math.abs(Number(offset) || 0);
-    if (b <= 0.000001) return false;
-    const n = beveledBoxSegments(segments) + 1;
-    if (n <= 2) return false;
-    const i = ((index % n) + n) % n;
-    return i !== 0 && i !== n - 1;
+// ベベルの縦の稜線をどう扱うか。
+//
+// ベベルは角を弧で丸めた形なので、弧の上に縦線を並べると角が黒く潰れる。
+// そこで弧の上の点は「縦線の候補」として持たせ、描くかどうかは描画側で決める。
+//   line.seam      = 角の番号（0〜3）。ベベルの無いアセットでは付けない
+//   line.seamApex  = その角のいちばん外側（弧の真ん中）か
+// 描画側の扱い：
+//   ・面ON  … 輪郭になっている縦線だけを描く（engine-render.js の seamOnSilhouette）。
+//             手前を向いた角の縦線は面の中に落ちるので描かれない。
+//   ・線だけ … 角ごとに1本（seamApex）だけ描く。全部描くと角が黒く潰れる。
+// 凹窓階層建物（recessedStackedBuildingLines）が弧の上の縦線を描かないのと同じ考えで、
+// ベベルの面そのものは線にしない。今後ベベルのあるアセットを足すときも同じ扱いにする。
+function beveledEdgeMark(index, offset, segments, group = 0) {
+    const b = Math.abs(Number(offset) || 0),
+        seg = beveledBoxSegments(segments),
+        n = seg + 1,
+        i = ((index % n) + n) % n;
+    if (b <= 0.000001 || seg <= 1) return null; // ベベル無し・平らな面取り1枚＝角の稜線
+    return {
+        // どの角か（0〜3）。group は「同じ形の中の何個目の箱か」。
+        // 階層建物のように1つのオブジェクトに箱が複数あるとき、階ごとに
+        // 別々の縦線を選べるようにするため、両方を合わせて印にする。
+        key: group + ":" + Math.round((index - i) / n),
+        apex: i === Math.round((n - 1) / 2),
+    };
 }
 // ===== 3.1 壁付け看板（単体）=====
 // 看板は板を立てた形状で、ローカル座標は x=板の幅、y=板厚、z=高さ。
@@ -2165,17 +2182,20 @@ function linesBeveledBox(ctx) {
         // ベベルの弧の途中は縦辺を描かない。以前は1つの角につき
         // (分割数+1) 本の縦線が並び、角が黒く潰れていた。
         footprint.forEach(([x, y], index) => {
-            if (bevelSeamPoint(index, q.bevelOffset, q.bevelSegments)) return;
-            out.push(
-                lineA(
+            const mark = beveledEdgeMark(index, q.bevelOffset, q.bevelSegments),
+                line = lineA(
                     o,
                     [
                         [x, y, z0],
                         [x, y, z1],
                     ],
                     c,
-                ),
-            );
+                );
+            if (mark) {
+                line.seam = mark.key;
+                line.seamApex = mark.apex;
+            }
+            out.push(line);
         });
     }
 }
@@ -2258,6 +2278,8 @@ function linesStackedBuilding(ctx) {
             ),
         );
     };
+    // 同じ建物の中で何個目の箱かを数える（階ごとに縦線を別々に選ぶため）。
+    let beveledBoxSeq = 0;
     const addBeveledBox = (
         f,
         w,
@@ -2278,18 +2300,23 @@ function linesStackedBuilding(ctx) {
         if (caps.bottom) out.push(customLineA(o, [...bottom, bottom[0]], color));
         if (caps.top) out.push(customLineA(o, [...top, top[0]], color));
         // ベベルの弧の途中は縦辺を描かない（面だけで見せる）。
+        // 角の1本（kind===1）は線だけ表示のときだけ描く。
+        const boxGroup = beveledBoxSeq++;
         footprint.forEach(([x, y], index) => {
-            if (bevelSeamPoint(index, bevelOffset, bevelSegments)) return;
-            out.push(
-                customLineA(
+            const mark = beveledEdgeMark(index, bevelOffset, bevelSegments, boxGroup),
+                line = customLineA(
                     o,
                     [
                         [x + ox, y + oy, z + oz],
                         [x + ox, y + oy, z + h + oz],
                     ],
                     color,
-                ),
-            );
+                );
+            if (mark) {
+                line.seam = mark.key;
+                line.seamApex = mark.apex;
+            }
+            out.push(line);
         });
     };
     // 開口ON/OFFの判定はここで一度だけ行う。OFFなら通常の閉じた建物になる。

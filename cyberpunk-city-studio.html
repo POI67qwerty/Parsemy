@@ -167,6 +167,31 @@ output {
     flex: none;
     text-align: right;
 }
+/* 数値欄の「−／＋」（studio-ui.js の installNvSteppers が input.nv の左右へ差し込む）。
+   すべての数値欄を同じ操作で微調整できるようにするための共通スタイル。 */
+.nvstep {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    line-height: 1;
+    border: 1px solid #cfd6dd;
+    border-radius: 6px;
+    background: #fff;
+    color: #33414d;
+    font-size: 13px;
+    cursor: pointer;
+}
+.nvstep:hover {
+    background: #eef4f8;
+}
+.nvstep:active {
+    background: #dde9f1;
+}
+.nvstep:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
 .un {
     width: 24px;
     flex: none;
@@ -2722,6 +2747,8 @@ function effectiveLineWidth(s) {
     return Math.max(0.1, ((Number.isFinite(base) ? base : MASTER_W) * (Number(P.pw) || MASTER_W)) / MASTER_W);
 }
 function strokeW(c, s) {
+    // ベベルの縦線は線だけ表示では「角ごとに1本」だけ描く（全部描くと角が黒く潰れる）。
+    if (s.seam !== undefined && s.seam !== null && !s.seamApex) return;
     c.strokeStyle = s.c;
     c.lineWidth = effectiveLineWidth(s);
     c.lineCap = c.lineJoin = "round";
@@ -10163,8 +10190,20 @@ function buildExportDepth(cw, ch, tf) {
         // 1) 前フレームで動いていた1台が塗った行を消し、
         // 2) 静止分をそこへ貼り直し、3) 動いた1台を塗り直す。
         // 全面 fill（100万要素）を避け、必要な行だけを触る。
-        const clr0 = Math.max(0, Math.min(depthMovingUsedY0, depthStatic.y0)),
-            clr1 = Math.min(ch - 1, Math.max(depthMovingUsedY1, depthStatic.y1));
+        // 消す行は「前フレームで動いていた1台が塗った行」と「静止分が塗った行」の和。
+        // どちらかが空（1台しか無いとき静止分は空）でも、もう片方だけで正しく消えるように
+        // 有限な値だけで min/max を取る。以前はここが Infinity になり、1台だけの場面で
+        // 前フレームの奥行きが残って、線が隠れすぎる不具合になっていた。
+        const c0 = Math.min(
+                Number.isFinite(depthMovingUsedY0) ? depthMovingUsedY0 : Infinity,
+                Number.isFinite(depthStatic.y0) ? depthStatic.y0 : Infinity,
+            ),
+            c1 = Math.max(
+                Number.isFinite(depthMovingUsedY1) ? depthMovingUsedY1 : -Infinity,
+                Number.isFinite(depthStatic.y1) ? depthStatic.y1 : -Infinity,
+            ),
+            clr0 = Math.max(0, c0),
+            clr1 = Math.min(ch - 1, c1);
         if (clr1 >= clr0 && Number.isFinite(clr0)) {
             depth.fill(Infinity, clr0 * cw, (clr1 + 1) * cw);
             depthOwner.fill(0, clr0 * cw, (clr1 + 1) * cw);
@@ -10211,6 +10250,20 @@ function buildExportDepth(cw, ch, tf) {
 // 「自分の面に乗っている稜線」とみなす奥行きの差（m）。
 // 深度バッファは画素ごとの補間なので、面の上の線は数mmずれる。
 const SELF_EDGE_EPS = 0.02;
+// その画素が「形の輪郭の上」かどうか。左右3画素の奥行きを比べ、
+// 片側だけ何も無い（または線よりずっと奥）なら輪郭とみなす。
+// 面と面の取り合い（両側とも面）は輪郭ではないので false。
+function silhouetteAt(depth, cw, ch, x, y, d) {
+    const side = (dx) => {
+        const sx = x + dx;
+        if (sx < 0 || sx >= cw) return Infinity;
+        const z = depth[y * cw + sx];
+        return Number.isFinite(z) ? z : Infinity;
+    },
+        a = side(-3) - d,
+        b = side(3) - d;
+    return (a > 0.5 && b < 0.05) || (b > 0.5 && a < 0.05);
+}
 // 面と面が接していると見なす距離（m）。これより奥の線は近くの画素を見ずに隠す。
 const CONTACT_REACH = 0.05;
 // 面と面が接している線（壁の下端と台の上面など）は、面をほぼ真横から見ているため
@@ -10239,7 +10292,62 @@ function nearVisible(depth, cw, ch, x, y, d) {
     const tol = Math.min(0.25, Math.max(eps, (zmax - zmin) * 0.75));
     return d <= zmin + tol;
 }
+// ベベルの縦線（s.seam）を「輪郭の1本」だけ描くための判定。
+// 丸めた角の縦線は、弧の上に何本も並ぶ。全部描くと角が黒く潰れ、
+// かといって全部消すと形の端（左右の輪郭）が抜ける。
+// そこで1つの角につき「いちばん輪郭に近い1本」だけを選ぶ。
+// 輪郭かどうかは、線の左右5pxの奥行きを深度バッファ（隠線と同じもの）で比べ、
+// 片側だけ何も無い（またはずっと奥）なら輪郭、両側とも面なら面の中、と判断する。
+const SEAM_OFF = 5,
+    SEAM_BG = 2; // 背景（面が無い）を表すための倍率
+function seamEdgeScore(a, b, depth, cw, ch) {
+    const mx = (a.x + b.x) / 2,
+        my = (a.y + b.y) / 2,
+        mz = (a.depth + b.depth) / 2,
+        cap = Math.abs(mz) * SEAM_BG + 1,
+        dx = b.x - a.x,
+        dy = b.y - a.y,
+        len = Math.hypot(dx, dy) || 1,
+        // 線に直角の向き（画面座標）。縦線ならほぼ水平。
+        px = -dy / len,
+        py = dx / len,
+        at = (k) => {
+            const x = Math.round(mx + px * k),
+                y = Math.round(my + py * k);
+            if (x < 0 || y < 0 || x >= cw || y >= ch) return cap;
+            const z = depth[y * cw + x];
+            return Number.isFinite(z) ? Math.min(z, cap) : cap;
+        };
+    return Math.abs(at(SEAM_OFF) - at(-SEAM_OFF));
+}
+let seamPicks = null;
+function updateSeamPicks(depth, cw, ch, tf) {
+    const best = new Map();
+    seamPicks = null;
+    for (let i = 0; i < S.length; i++) {
+        const s = S[i];
+        if (s.seam === undefined || s.seam === null || !s.p) continue;
+        if (!s.ob || !objectVisible(s.ob)) continue;
+        const a = exportPoint(s.p[0], tf),
+            b = exportPoint(s.p[s.p.length - 1], tf);
+        if (!a || !b) continue;
+        // 背景は cap で頭打ちにしているので、輪郭では mz(以上) の差が出る。
+        const score = seamEdgeScore(a, b, depth, cw, ch),
+            key = (s.ob.id || "") + ":" + s.seam,
+            cur = best.get(key);
+        if (!cur || score > cur.score) best.set(key, { score, s, mz: (a.depth + b.depth) / 2 });
+    }
+    const picks = new Set();
+    best.forEach((v) => {
+        // 差が小さい＝両側とも面＝面の中なので描かない。
+        if (v.score > Math.abs(v.mz) * 0.12) picks.add(v.s);
+    });
+    seamPicks = picks;
+}
 function strokeWVisible(c, s, depth, cw, ch, tf) {
+    // ベベルの縦線は、選ばれた「輪郭の1本」だけを描く。
+    const seamLine = s.seam !== undefined && s.seam !== null;
+    if (seamLine && !(seamPicks && seamPicks.has(s))) return;
     if (!s.ob || !s.d3) {
         strokeW(c, s);
         return;
@@ -10264,6 +10372,11 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         // その線は自分の面の稜線（面と面の取り合い）なので描く。
         const own = depthOwner && depthOwner[i1];
         if (own && own === myOwner && e.depth <= z + SELF_EDGE_EPS) return true;
+        // 面のすぐ外側を通る「形の輪郭」も描く（自分の面が少し手前でも輪郭なら見える）。
+        // 左右数画素の奥行きを見て、片側だけ背景（何も無い／ずっと奥）なら輪郭と判断する。
+        if (own && own === myOwner && silhouetteAt(depth, cw, ch, x, y, e.depth)) return true;
+        // ベベルの縦線は形の輪郭線なので、面のすぐ外側（隣の面がほんの少し手前）でも描く。
+        if (seamLine && e.depth <= z + Math.max(0.12, Math.abs(z) * 0.02)) return true;
         // 面と面が接している線は、面をほぼ真横から見ているため1画素でも奥行きが
         // 大きく変わる。近くの画素に「線より奥」の面があれば描く。
         return nearVisible(depth, cw, ch, x, y, e.depth);
@@ -10382,6 +10495,8 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     if (tf) x.setTransform(...tf);
     else if (view) x.setTransform(Z, 0, 0, Z, ox, oy); // 画面表示用はズーム・移動つき
     const hiddenDepth = hidden ? buildExportDepth(cw, ch, tf || [1, 0, 0, 1, 0, 0]) : null;
+    // ベベルの縦線は「角ごとに輪郭の1本」だけ描く（面ONのとき）。
+    if (hiddenDepth) updateSeamPicks(hiddenDepth, cw, ch, tf || [1, 0, 0, 1, 0, 0]);
     S.forEach((s) => {
         if (s.ob && !objectVisible(s.ob)) return;
         hidden ? strokeWVisible(x, s, hiddenDepth, cw, ch, tf || [1, 0, 0, 1, 0, 0]) : strokeW(x, s);
@@ -12820,17 +12935,20 @@ function beveledWireBoxA(o, cx, cy, w, d, z0, z1, offset = 0.06, segments = 3, c
     );
     // ベベルの弧の途中は縦辺を描かない（面だけで見せる）。
     footprint.forEach(([x, y], index) => {
-        if (bevelSeamPoint(index, offset, segments)) return;
-        out.push(
-            lineA(
+        const mark = beveledEdgeMark(index, offset, segments),
+            line = lineA(
                 o,
                 [
                     [x + cx, y + cy, z0],
                     [x + cx, y + cy, z1],
                 ],
                 color,
-            ),
-        );
+            );
+        if (mark) {
+            line.seam = mark.key;
+            line.seamApex = mark.apex;
+        }
+        out.push(line);
     });
     return out;
 }
@@ -12946,17 +13064,31 @@ function beveledBoxFootprint(width, depth, offset, segmentCount) {
     });
     return out;
 }
-// ベベル（角の丸め）の弧の「途中」にある輪郭点かどうか。
-// ベベルは面として見せ、弧の途中の縦の稜線は描かない（凹窓階層建物の扱いと揃える）。
-// 弧の両端は平らな側面と接する所なので、形の輪郭として残す。
-// 今後ベベルのあるアセットを足すときも、縦辺を描く前にこの関数で判定すること。
-function bevelSeamPoint(index, offset, segments) {
-    const b = Math.abs(Number(offset) || 0);
-    if (b <= 0.000001) return false;
-    const n = beveledBoxSegments(segments) + 1;
-    if (n <= 2) return false;
-    const i = ((index % n) + n) % n;
-    return i !== 0 && i !== n - 1;
+// ベベルの縦の稜線をどう扱うか。
+//
+// ベベルは角を弧で丸めた形なので、弧の上に縦線を並べると角が黒く潰れる。
+// そこで弧の上の点は「縦線の候補」として持たせ、描くかどうかは描画側で決める。
+//   line.seam      = 角の番号（0〜3）。ベベルの無いアセットでは付けない
+//   line.seamApex  = その角のいちばん外側（弧の真ん中）か
+// 描画側の扱い：
+//   ・面ON  … 輪郭になっている縦線だけを描く（engine-render.js の seamOnSilhouette）。
+//             手前を向いた角の縦線は面の中に落ちるので描かれない。
+//   ・線だけ … 角ごとに1本（seamApex）だけ描く。全部描くと角が黒く潰れる。
+// 凹窓階層建物（recessedStackedBuildingLines）が弧の上の縦線を描かないのと同じ考えで、
+// ベベルの面そのものは線にしない。今後ベベルのあるアセットを足すときも同じ扱いにする。
+function beveledEdgeMark(index, offset, segments, group = 0) {
+    const b = Math.abs(Number(offset) || 0),
+        seg = beveledBoxSegments(segments),
+        n = seg + 1,
+        i = ((index % n) + n) % n;
+    if (b <= 0.000001 || seg <= 1) return null; // ベベル無し・平らな面取り1枚＝角の稜線
+    return {
+        // どの角か（0〜3）。group は「同じ形の中の何個目の箱か」。
+        // 階層建物のように1つのオブジェクトに箱が複数あるとき、階ごとに
+        // 別々の縦線を選べるようにするため、両方を合わせて印にする。
+        key: group + ":" + Math.round((index - i) / n),
+        apex: i === Math.round((n - 1) / 2),
+    };
 }
 // ===== 3.1 壁付け看板（単体）=====
 // 看板は板を立てた形状で、ローカル座標は x=板の幅、y=板厚、z=高さ。
@@ -14691,17 +14823,20 @@ function linesBeveledBox(ctx) {
         // ベベルの弧の途中は縦辺を描かない。以前は1つの角につき
         // (分割数+1) 本の縦線が並び、角が黒く潰れていた。
         footprint.forEach(([x, y], index) => {
-            if (bevelSeamPoint(index, q.bevelOffset, q.bevelSegments)) return;
-            out.push(
-                lineA(
+            const mark = beveledEdgeMark(index, q.bevelOffset, q.bevelSegments),
+                line = lineA(
                     o,
                     [
                         [x, y, z0],
                         [x, y, z1],
                     ],
                     c,
-                ),
-            );
+                );
+            if (mark) {
+                line.seam = mark.key;
+                line.seamApex = mark.apex;
+            }
+            out.push(line);
         });
     }
 }
@@ -14784,6 +14919,8 @@ function linesStackedBuilding(ctx) {
             ),
         );
     };
+    // 同じ建物の中で何個目の箱かを数える（階ごとに縦線を別々に選ぶため）。
+    let beveledBoxSeq = 0;
     const addBeveledBox = (
         f,
         w,
@@ -14804,18 +14941,23 @@ function linesStackedBuilding(ctx) {
         if (caps.bottom) out.push(customLineA(o, [...bottom, bottom[0]], color));
         if (caps.top) out.push(customLineA(o, [...top, top[0]], color));
         // ベベルの弧の途中は縦辺を描かない（面だけで見せる）。
+        // 角の1本（kind===1）は線だけ表示のときだけ描く。
+        const boxGroup = beveledBoxSeq++;
         footprint.forEach(([x, y], index) => {
-            if (bevelSeamPoint(index, bevelOffset, bevelSegments)) return;
-            out.push(
-                customLineA(
+            const mark = beveledEdgeMark(index, bevelOffset, bevelSegments, boxGroup),
+                line = customLineA(
                     o,
                     [
                         [x + ox, y + oy, z + oz],
                         [x + ox, y + oy, z + h + oz],
                     ],
                     color,
-                ),
-            );
+                );
+            if (mark) {
+                line.seam = mark.key;
+                line.seamApex = mark.apex;
+            }
+            out.push(line);
         });
     };
     // 開口ON/OFFの判定はここで一度だけ行う。OFFなら通常の閉じた建物になる。
@@ -23887,6 +24029,65 @@ window.cityGridInstallAssetUI = function (bridge) {
         } catch (e) {}
     }
     if (innerWidth <= 900 && !sidePref) setSide(true);
+    // ===== 数値欄の「−／＋」（全パネル共通）=====
+    // input.nv（数値欄）の左右へ「−」「＋」を差し込む。押すと step ぶんだけ動かし、
+    // 数値欄を直接打ったときと同じ経路（input → change）へ流す。こうしておくと
+    // 画面ハンドル・数値欄・元に戻す（Undo）の扱いが欄ごとに食い違わない。
+    // 既に −／＋ が付いている欄（手すりの本数など）は previousElementSibling が
+    // ボタンなので飛ばす。
+    function nudgeNv(n, dir) {
+        const step = Math.abs(Number(n.step) || 0.05) || 0.05,
+            cur = Number(n.value),
+            min = n.min === "" ? NaN : Number(n.min),
+            max = n.max === "" ? NaN : Number(n.max);
+        let v = (Number.isFinite(cur) ? cur : 0) + dir * step;
+        if (Number.isFinite(min) && v < min) v = min;
+        if (Number.isFinite(max) && v > max) v = max;
+        // 刻みに合わせた桁数で表示する（0.05 刻みなら小数2桁）。
+        const dec = (String(step).split(".")[1] || "").length;
+        n.value = dec ? v.toFixed(dec) : String(Math.round(v));
+        n.dispatchEvent(new Event("input", { bubbles: true }));
+        n.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    function installNvSteppers(root) {
+        const scope = root && root.querySelectorAll ? root : document;
+        scope.querySelectorAll("input.nv").forEach((n) => {
+            if (n.dataset.nvStep) return;
+            const prev = n.previousElementSibling;
+            n.dataset.nvStep = "1";
+            if (prev && prev.tagName === "BUTTON") return; // 専用の −／＋ が既にある
+            const mk = (text, dir, label) => {
+                const b = document.createElement("button");
+                b.type = "button";
+                b.className = "nvstep";
+                b.textContent = text;
+                b.title = label;
+                b.setAttribute("aria-label", label);
+                b.addEventListener("click", (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    nudgeNv(n, dir);
+                });
+                return b;
+            };
+            n.parentNode.insertBefore(mk("−", -1, "少し減らす"), n);
+            n.parentNode.insertBefore(mk("＋", 1, "少し増やす"), n.nextSibling);
+        });
+    }
+    installNvSteppers(document);
+    // アセットごとのパネルは後から組み立てられるので、増えたら付け足す。
+    // 差し込んだボタン自身も childList を揺らすが、dataset で除外するので止まる。
+    const nvHost = el("side");
+    if (nvHost && typeof MutationObserver === "function") {
+        let nvPending = 0;
+        new MutationObserver(() => {
+            if (nvPending) return;
+            nvPending = requestAnimationFrame(() => {
+                nvPending = 0;
+                installNvSteppers(nvHost);
+            });
+        }).observe(nvHost, { childList: true, subtree: true });
+    }
     window.cityGridStudioBridge = {
         el,
         stage,
@@ -23904,7 +24105,6 @@ window.cityGridInstallAssetUI = function (bridge) {
 })();
 
 </script>
-    <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a53d536f4fd27e85',t:'MTc5MzU2MTU1MQ=='};var l=window.parent.location,o;try{o=new URL(l.origin).origin}catch(e){try{o=new URL(new URL(l.href).origin).origin}catch(e){o=''}}var u='/cdn-cgi/challenge-platform/scripts/jsd/main.js?ray=a53d536f4fd27e85',a=document.createElement('script');a.src=o?new URL(u,o).href:u;document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+    </body>
 </html>
 

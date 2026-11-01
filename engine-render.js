@@ -1292,8 +1292,20 @@ function buildExportDepth(cw, ch, tf) {
         // 1) 前フレームで動いていた1台が塗った行を消し、
         // 2) 静止分をそこへ貼り直し、3) 動いた1台を塗り直す。
         // 全面 fill（100万要素）を避け、必要な行だけを触る。
-        const clr0 = Math.max(0, Math.min(depthMovingUsedY0, depthStatic.y0)),
-            clr1 = Math.min(ch - 1, Math.max(depthMovingUsedY1, depthStatic.y1));
+        // 消す行は「前フレームで動いていた1台が塗った行」と「静止分が塗った行」の和。
+        // どちらかが空（1台しか無いとき静止分は空）でも、もう片方だけで正しく消えるように
+        // 有限な値だけで min/max を取る。以前はここが Infinity になり、1台だけの場面で
+        // 前フレームの奥行きが残って、線が隠れすぎる不具合になっていた。
+        const c0 = Math.min(
+                Number.isFinite(depthMovingUsedY0) ? depthMovingUsedY0 : Infinity,
+                Number.isFinite(depthStatic.y0) ? depthStatic.y0 : Infinity,
+            ),
+            c1 = Math.max(
+                Number.isFinite(depthMovingUsedY1) ? depthMovingUsedY1 : -Infinity,
+                Number.isFinite(depthStatic.y1) ? depthStatic.y1 : -Infinity,
+            ),
+            clr0 = Math.max(0, c0),
+            clr1 = Math.min(ch - 1, c1);
         if (clr1 >= clr0 && Number.isFinite(clr0)) {
             depth.fill(Infinity, clr0 * cw, (clr1 + 1) * cw);
             depthOwner.fill(0, clr0 * cw, (clr1 + 1) * cw);
@@ -1340,6 +1352,20 @@ function buildExportDepth(cw, ch, tf) {
 // 「自分の面に乗っている稜線」とみなす奥行きの差（m）。
 // 深度バッファは画素ごとの補間なので、面の上の線は数mmずれる。
 const SELF_EDGE_EPS = 0.02;
+// その画素が「形の輪郭の上」かどうか。左右3画素の奥行きを比べ、
+// 片側だけ何も無い（または線よりずっと奥）なら輪郭とみなす。
+// 面と面の取り合い（両側とも面）は輪郭ではないので false。
+function silhouetteAt(depth, cw, ch, x, y, d) {
+    const side = (dx) => {
+        const sx = x + dx;
+        if (sx < 0 || sx >= cw) return Infinity;
+        const z = depth[y * cw + sx];
+        return Number.isFinite(z) ? z : Infinity;
+    },
+        a = side(-3) - d,
+        b = side(3) - d;
+    return (a > 0.5 && b < 0.05) || (b > 0.5 && a < 0.05);
+}
 // 面と面が接していると見なす距離（m）。これより奥の線は近くの画素を見ずに隠す。
 const CONTACT_REACH = 0.05;
 // 面と面が接している線（壁の下端と台の上面など）は、面をほぼ真横から見ているため
@@ -1368,7 +1394,62 @@ function nearVisible(depth, cw, ch, x, y, d) {
     const tol = Math.min(0.25, Math.max(eps, (zmax - zmin) * 0.75));
     return d <= zmin + tol;
 }
+// ベベルの縦線（s.seam）を「輪郭の1本」だけ描くための判定。
+// 丸めた角の縦線は、弧の上に何本も並ぶ。全部描くと角が黒く潰れ、
+// かといって全部消すと形の端（左右の輪郭）が抜ける。
+// そこで1つの角につき「いちばん輪郭に近い1本」だけを選ぶ。
+// 輪郭かどうかは、線の左右5pxの奥行きを深度バッファ（隠線と同じもの）で比べ、
+// 片側だけ何も無い（またはずっと奥）なら輪郭、両側とも面なら面の中、と判断する。
+const SEAM_OFF = 5,
+    SEAM_BG = 2; // 背景（面が無い）を表すための倍率
+function seamEdgeScore(a, b, depth, cw, ch) {
+    const mx = (a.x + b.x) / 2,
+        my = (a.y + b.y) / 2,
+        mz = (a.depth + b.depth) / 2,
+        cap = Math.abs(mz) * SEAM_BG + 1,
+        dx = b.x - a.x,
+        dy = b.y - a.y,
+        len = Math.hypot(dx, dy) || 1,
+        // 線に直角の向き（画面座標）。縦線ならほぼ水平。
+        px = -dy / len,
+        py = dx / len,
+        at = (k) => {
+            const x = Math.round(mx + px * k),
+                y = Math.round(my + py * k);
+            if (x < 0 || y < 0 || x >= cw || y >= ch) return cap;
+            const z = depth[y * cw + x];
+            return Number.isFinite(z) ? Math.min(z, cap) : cap;
+        };
+    return Math.abs(at(SEAM_OFF) - at(-SEAM_OFF));
+}
+let seamPicks = null;
+function updateSeamPicks(depth, cw, ch, tf) {
+    const best = new Map();
+    seamPicks = null;
+    for (let i = 0; i < S.length; i++) {
+        const s = S[i];
+        if (s.seam === undefined || s.seam === null || !s.p) continue;
+        if (!s.ob || !objectVisible(s.ob)) continue;
+        const a = exportPoint(s.p[0], tf),
+            b = exportPoint(s.p[s.p.length - 1], tf);
+        if (!a || !b) continue;
+        // 背景は cap で頭打ちにしているので、輪郭では mz(以上) の差が出る。
+        const score = seamEdgeScore(a, b, depth, cw, ch),
+            key = (s.ob.id || "") + ":" + s.seam,
+            cur = best.get(key);
+        if (!cur || score > cur.score) best.set(key, { score, s, mz: (a.depth + b.depth) / 2 });
+    }
+    const picks = new Set();
+    best.forEach((v) => {
+        // 差が小さい＝両側とも面＝面の中なので描かない。
+        if (v.score > Math.abs(v.mz) * 0.12) picks.add(v.s);
+    });
+    seamPicks = picks;
+}
 function strokeWVisible(c, s, depth, cw, ch, tf) {
+    // ベベルの縦線は、選ばれた「輪郭の1本」だけを描く。
+    const seamLine = s.seam !== undefined && s.seam !== null;
+    if (seamLine && !(seamPicks && seamPicks.has(s))) return;
     if (!s.ob || !s.d3) {
         strokeW(c, s);
         return;
@@ -1393,6 +1474,11 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         // その線は自分の面の稜線（面と面の取り合い）なので描く。
         const own = depthOwner && depthOwner[i1];
         if (own && own === myOwner && e.depth <= z + SELF_EDGE_EPS) return true;
+        // 面のすぐ外側を通る「形の輪郭」も描く（自分の面が少し手前でも輪郭なら見える）。
+        // 左右数画素の奥行きを見て、片側だけ背景（何も無い／ずっと奥）なら輪郭と判断する。
+        if (own && own === myOwner && silhouetteAt(depth, cw, ch, x, y, e.depth)) return true;
+        // ベベルの縦線は形の輪郭線なので、面のすぐ外側（隣の面がほんの少し手前）でも描く。
+        if (seamLine && e.depth <= z + Math.max(0.12, Math.abs(z) * 0.02)) return true;
         // 面と面が接している線は、面をほぼ真横から見ているため1画素でも奥行きが
         // 大きく変わる。近くの画素に「線より奥」の面があれば描く。
         return nearVisible(depth, cw, ch, x, y, e.depth);
@@ -1511,6 +1597,8 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     if (tf) x.setTransform(...tf);
     else if (view) x.setTransform(Z, 0, 0, Z, ox, oy); // 画面表示用はズーム・移動つき
     const hiddenDepth = hidden ? buildExportDepth(cw, ch, tf || [1, 0, 0, 1, 0, 0]) : null;
+    // ベベルの縦線は「角ごとに輪郭の1本」だけ描く（面ONのとき）。
+    if (hiddenDepth) updateSeamPicks(hiddenDepth, cw, ch, tf || [1, 0, 0, 1, 0, 0]);
     S.forEach((s) => {
         if (s.ob && !objectVisible(s.ob)) return;
         hidden ? strokeWVisible(x, s, hiddenDepth, cw, ch, tf || [1, 0, 0, 1, 0, 0]) : strokeW(x, s);

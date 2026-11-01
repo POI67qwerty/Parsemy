@@ -833,6 +833,8 @@ function effectiveLineWidth(s) {
     return Math.max(0.1, ((Number.isFinite(base) ? base : MASTER_W) * (Number(P.pw) || MASTER_W)) / MASTER_W);
 }
 function strokeW(c, s) {
+    // ベベルの縦線は線だけ表示では「角ごとに1本」だけ描く（全部描くと角が黒く潰れる）。
+    if (s.seam !== undefined && s.seam !== null && !s.seamApex) return;
     c.strokeStyle = s.c;
     c.lineWidth = effectiveLineWidth(s);
     c.lineCap = c.lineJoin = "round";
