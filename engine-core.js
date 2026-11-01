@@ -839,16 +839,91 @@ const sp = (s, v) => scr3(s.d3 ? V.add(v, CO()) : v); // 線の点の画面位�
 const PL = { 0: [2, 1], 1: [0, 2], 2: [0, 1] }; // 面の法線k → 面内の2軸 (0=X,1=Y,2=Z)
 // 複数の定義を「結合」した複合オブジェクト用の座標変換。
 // 子パーツは元の定義を保持し、複合オブジェクトのtx/ty/tzだけを動かす。
+// ===== 9b. パーツごとの「ワールド上下軸まわりの回転（ヨー）」 =====
+// 図形の定義は「面(k)＋面内の回転(rot)＋押し出し(h)」でできているため、
+// 縦の面（k=0/2）は rot でヨーを表せない（rot は面の中の回転になってしまう）。
+// そこで、どの面でも使える“外側の回転”を spin として持たせる。
+//   spin      … ワールドY軸まわりの角度（度）
+//   spinPivot … その回転中心（ワールド座標 [x,y,z]）
+// 結合体を回すとき、全パーツが同じ spinPivot を共有すれば剛体として回る。
+const wrapSpin = (a) => ((((a + 180) % 360) + 360) % 360) - 180;
+function partSpinDeg(o) {
+    const a = Number(o?.spin);
+    return Number.isFinite(a) && a % 360 !== 0 ? a : 0;
+}
+// 1点 v にスピン（ヨー）を掛ける。
+function applyPartSpin(o, v) {
+    const d = partSpinDeg(o),
+        p = o?.spinPivot;
+    if (!d || !p || !Number.isFinite(p[0]) || !Number.isFinite(p[2])) return v;
+    const a = d * DG,
+        cs = Math.cos(a),
+        sn = Math.sin(a),
+        dx = v[0] - p[0],
+        dz = v[2] - p[2];
+    return [p[0] + dx * cs + dz * sn, v[1], p[2] - dx * sn + dz * cs];
+}
+// ヨーの合成。いまスピン(s度・中心Ps)で回っているパーツへ、
+// さらに deg度・中心P の回転を掛けると、結果は「(s+deg)度・中心P2」の
+// 1回転で表せる。P2 は
+//     P2 − R·P2 = P + Rdeg(Ps − P) − R·Ps      （R = s+deg の回転行列）
+// を解いて求める（2x2。合計角が0/360のときは半径0の回転なので P を使う）。
+function spinComposePivot(Ps, spinS, P, deg) {
+    const u = (spinS + deg) * DG,
+        cu = Math.cos(u),
+        su = Math.sin(u),
+        det = (1 - cu) * (1 - cu) + su * su;
+    if (Math.abs(det) < 1e-9) return [P[0], Ps[1], P[2]];
+    const dd = deg * DG,
+        cd = Math.cos(dd),
+        sd = Math.sin(dd),
+        px = Ps[0] - P[0],
+        pz = Ps[2] - P[2],
+        // P + Rdeg(Ps − P) − R·Ps
+        bx = P[0] + (px * cd + pz * sd) - (Ps[0] * cu + Ps[2] * su),
+        bz = P[2] - (px * sd - pz * cd) - (-Ps[0] * su + Ps[2] * cu);
+    return [((1 - cu) * bx + su * bz) / det, Ps[1], (-su * bx + (1 - cu) * bz) / det];
+}
+// 水平面(k=1)のスピンを定義そのものへ焼き込む（rot・中心へ移す）。
+// k=1 は面内の2軸がワールドのX・Zなので、ヨーは面内回転として表せる。
+function bakePartSpin(o) {
+    const s = partSpinDeg(o);
+    if (!s || Number(o?.k) !== 1 || o?.wallSideBasis) return o;
+    const P = o.spinPivot || [0, 0, 0],
+        q = { ...o, off: [...(o.off || [0, 0, 0])] },
+        a = s * DG,
+        c = Math.cos(a),
+        n = Math.sin(a),
+        cx = (Number(q.ca) || 0) + q.off[0],
+        cz = (Number(q.cb) || 0) + q.off[2],
+        dx = cx - P[0],
+        dz = cz - P[2];
+    q.ca = P[0] + dx * c + dz * n - q.off[0];
+    q.cb = P[2] - dx * n + dz * c - q.off[2];
+    // rot は中心移動と逆向きの回転の決まりなので、焼き込むときも“引く”。
+    q.rot = wrapSpin((Number(q.rot) || 0) - s);
+    q.spin = 0;
+    delete q.spinPivot;
+    return q;
+}
 function translateDefinition(o, vec) {
     if (!o) return o;
-    if (o.type === "compound")
+    if (o.type === "compound") {
+        const sp = o.spinPivot;
         return {
             ...o,
             tx: (Number(o.tx) || 0) + vec[0],
             ty: (Number(o.ty) || 0) + vec[1],
             tz: (Number(o.tz) || 0) + vec[2],
+            ...(sp && Number.isFinite(sp[0])
+                ? { spinPivot: [sp[0] + vec[0], sp[1] + vec[1], sp[2] + vec[2]] }
+                : {}),
         };
+    }
     const q = { ...o, off: [...(o.off || [0, 0, 0])] };
+    // 回転中心も同じ量だけ動かす（形と中心が一緒に動くので、回しても軸がずれない）。
+    const sp = o.spinPivot;
+    if (sp && Number.isFinite(sp[0])) q.spinPivot = [sp[0] + vec[0], sp[1] + vec[1], sp[2] + vec[2]];
     if (!PL[q.k]) return q;
     const [iu, iv] = PL[q.k];
     q.ca = Number(q.ca) || 0;
@@ -859,9 +934,19 @@ function translateDefinition(o, vec) {
     q.lift -= vec[q.k] / (Number(q.d) || 1);
     return q;
 }
+// 結合体の子パーツは、外の親へ接着させない。
+// 接着情報が残っていると、結合体を回しても看板などが元の壁へ吸い戻されて
+// 「回すと位置がずれる」原因になる。位置は結合した時点で ca/cb/lift に入って
+// いるので、ここで外しても見た目は変わらない（分離したときは元のデータが残る）。
+function detachPart(part) {
+    if (!part || !part.attachment) return part;
+    const q = { ...part };
+    delete q.attachment;
+    return q;
+}
 function compoundPartsAt(o) {
     const d = [Number(o?.tx) || 0, Number(o?.ty) || 0, Number(o?.tz) || 0];
-    return (o?.parts || []).map((part) => translateDefinition(part, d));
+    return (o?.parts || []).map((part) => detachPart(translateDefinition(part, d)));
 }
 function genCompoundShape(ob) {
     const out = [];
@@ -901,7 +986,10 @@ function genShape(ob) {
         // オブジェクトの傾き（rotX / rotZ）をこの1か所で掛ける。掛けないと
         // 傾けたときに面（塗り）だけが傾いて、線画が元の向きに取り残される。
         // 傾きが0のときは applyObjectTilt がそのまま返すので費用はほぼ掛からない。
-        return typeof applyObjectTilt === "function" ? applyObjectTilt(ob, out3) : out3;
+        // パーツごとのヨー（spin）を先に掛け、そのあとオブジェクトの傾きを掛ける。
+        // L2W と同じ順番（spin → tilt）にそろえてあるので、線画と当たり判定がずれない。
+        const spun = partSpinDeg(ob) ? applyPartSpin(ob, out3) : out3;
+        return typeof applyObjectTilt === "function" ? applyObjectTilt(ob, spun) : spun;
     }; // 面内(a,b)を中心まわりに回転＋法線方向の3D点（＋オブジェクトの傾き）
     const e = -d * ob.h,
         L = []; // eは押し出し量（カメラ側へ）
@@ -1512,7 +1600,9 @@ function l2wRaw(o, x, y, z) {
     v[iu] = o.ca + x * cs - y * sn;
     const f = o.off || [0, 0, 0];
     v[iv] = o.cb + x * sn + y * cs;
-    return [v[0] + f[0], v[1] + f[1], v[2] + f[2]];
+    // パーツごとのヨー（spin）。傾き(tilt)の内側で掛けるので、
+    // genShape 側の点も同じ順番（spin → tilt）で掛ける。
+    return applyPartSpin(o, [v[0] + f[0], v[1] + f[1], v[2] + f[2]]);
 }
 function L2W(o, x, y, z) {
     if (o?.attachment) o = syncAttachedPart(o);
@@ -1523,8 +1613,12 @@ function L2W(o, x, y, z) {
     if (wb?.origin && wb?.u && wb?.v && wb?.n) {
         const add = (base, axis, scale) => base.map((value, i) => value + axis[i] * scale),
             p = add(wb.origin, wb.u, Number(x) || 0),
-            q = add(p, wb.v, Number(y) || 0);
-        return applyObjectTilt(o, add(q, wb.n, Number(z) || 0), wb.origin);
+            q = add(p, wb.v, Number(y) || 0),
+            w = add(q, wb.n, Number(z) || 0),
+            // 壁沿いの基底で作った点にも、パーツのヨー(spin)を最後に掛ける。
+            // 掛けないと、結合した横壁看板だけが回転に付いてこない。
+            spun = partSpinDeg(o) ? applyPartSpin(o, w) : w;
+        return applyObjectTilt(o, spun, wb.origin);
     }
     return applyObjectTilt(o, l2wRaw(o, x, y, z));
 }

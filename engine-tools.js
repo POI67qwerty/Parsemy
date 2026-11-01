@@ -179,24 +179,80 @@ function moveBy(o, vec, keepAttachedOffset = false) {
 }
 // 間取りの回転ハンドルで、地面上の複合オブジェクトを一体回転する。
 // 子パーツの定義を壊さず、現在位置をいったんワールド座標へ展開してから戻す。
+// 複合オブジェクトを回すときの軸（ワールド座標）。
+// 一度決めた軸は o.spinPivot に保存し、以後はその点で回す。
+// 毎回「いまの外接箱の中心」を出すと、回すたびに箱が膨らんで軸が動き、
+// 「回すたびに位置がずれる」原因になるため、保存した軸を優先する。
+// 保存が無いとき（＝まだ一度も回していない）は今の外接箱の中心にする。
+function compoundSpinPivot(o) {
+    const sp = o?.spinPivot;
+    if (sp && Number.isFinite(sp[0]) && Number.isFinite(sp[2])) return [sp[0], sp[1], sp[2]];
+    const b0 = obBounds(o);
+    if (b0 && Number.isFinite(b0.lo[0]) && Number.isFinite(b0.hi[0]))
+        return [(b0.lo[0] + b0.hi[0]) / 2, (b0.lo[1] + b0.hi[1]) / 2, (b0.lo[2] + b0.hi[2]) / 2];
+    const parts = compoundPartsAt(o);
+    if (!parts.length) {
+        const b = obBounds(o);
+        return [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2];
+    }
+    let x = 0,
+        y = 0,
+        z = 0;
+    parts.forEach((q) => {
+        const p = L2W(q, 0, 0, 0);
+        x += p[0];
+        y += p[1];
+        z += p[2];
+    });
+    return [x / parts.length, y / parts.length, z / parts.length];
+}
+// 結合したオブジェクトを、その場で（軸を動かさずに）ヨー回転する。
+// 子パーツは2通りで回す。
+//   ・水平面(k=1)のパーツ … 定義そのもの（rot・中心・off）を回す。数値パネルの
+//     回転や、分離したあとの見た目もそのまま保てる。
+//   ・それ以外（縦の面 k=0/2 など）… 定義ではヨーを表せないので、パーツごとの
+//     外側の回転 spin（＋中心 spinPivot）として持たせる。前から回してある場合は
+//     2つの回転を1つに合成する（spinComposePivot）。
+// どちらも「同じ軸まわりの同じ角度」なので、結合体は形を変えずに回る。
 function rotateCompoundBy(o, deg) {
     if (o?.type !== "compound") return { rot: wrap180((Number(o?.rot) || 0) + deg) };
-    const pivot = objectAnchorWorld(o),
-        a = Number(deg || 0) * DG,
+    const dDeg = Number(deg) || 0,
+        pivot = compoundSpinPivot(o),
+        a = dDeg * DG,
         cs = Math.cos(a),
         sn = Math.sin(a),
         parts = compoundPartsAt(o).map((part) => {
-            const q = { ...part, off: [...(part.off || [0, 0, 0])] };
-            if (q.k === 1) {
+            const q = bakePartSpin({ ...part, off: [...(part.off || [0, 0, 0])] });
+            // 横壁看板のように「壁沿いの基底(wallSideBasis)」で形を作るパーツは、
+            // 位置が ca/cb ではなく基底の原点で決まるので、定義を書き換えても回らない。
+            // こういうパーツは縦の面と同じく spin で回す。
+            if (Number(q.k) === 1 && !q.wallSideBasis) {
+                // 位置（中心）を軸まわりに回し、off も同じ角度だけ回す。
+                // off はワールド方向の平行移動なので、回さないと本体だけ取り残される。
                 const base = L2W(q, 0, 0, 0),
                     dx = base[0] - pivot[0],
                     dz = base[2] - pivot[2],
                     rx = pivot[0] + dx * cs + dz * sn,
-                    rz = pivot[2] - dx * sn + dz * cs;
-                q.ca = rx - q.off[0];
-                q.cb = rz - q.off[2];
-                q.rot = wrap180((Number(q.rot) || 0) + Number(deg || 0));
+                    rz = pivot[2] - dx * sn + dz * cs,
+                    ox = q.off[0] * cs + q.off[2] * sn,
+                    oz = -q.off[0] * sn + q.off[2] * cs;
+                q.off = [ox, q.off[1], oz];
+                q.ca = rx - ox;
+                q.cb = rz - oz;
+                // 形の回転角 rot は「面の中で +で反時計（x右・z手前）だが、上の
+                // 中心移動は −で同じ向き」という逆向きの決まりになっている。
+                // そのため rot は“引く”。足すと、中心だけ回って形が逆に回り、
+                // パーツが滑って「位置がずれた」ように見える（実データで30°ずれ）。
+                q.rot = wrap180((Number(q.rot) || 0) - dDeg);
+                q.spin = 0;
+                q.spinPivot = [pivot[0], pivot[1], pivot[2]];
+                return q;
             }
+            const s0 = partSpinDeg(q),
+                Ps = q.spinPivot && Number.isFinite(q.spinPivot[0]) ? q.spinPivot : pivot,
+                P2 = spinComposePivot(Ps, s0, pivot, dDeg);
+            q.spin = wrap180(s0 + dDeg);
+            q.spinPivot = [P2[0], Ps[1], P2[2]];
             return q;
         });
     return {
@@ -205,9 +261,11 @@ function rotateCompoundBy(o, deg) {
         ty: 0,
         tz: 0,
         rot: 0,
-        compoundRot: (Number(o.compoundRot) || 0) + Number(deg || 0),
+        compoundRot: (Number(o.compoundRot) || 0) + dDeg,
         ca: pivot[0],
         cb: pivot[2],
+        // 次に回すときも同じ軸を使う（＝回すたびに軸が動かない）。
+        spinPivot: [pivot[0], pivot[1], pivot[2]],
     };
 }
 // 面を動かしたときの変更内容（反対側の面は動かさない）
@@ -2653,7 +2711,10 @@ function drawSpecialGizmo(c, o) {
 function scaleCompoundPart(part, pivot, scale) {
     const q = { ...part, off: [...(part.off || [0, 0, 0])] };
     if (!PL[q.k]) return q;
-    const base = L2W(q, 0, 0, 0),
+    // ヨー(spin)を持っているパーツは、回す前の座標で拡縮してから元のヨーを戻す。
+    // 回したあとの座標のまま ca/cb を書き換えると、ヨーが二重に掛かってしまう。
+    const spinS = partSpinDeg(q),
+        base = L2W(spinS ? { ...q, spin: 0 } : q, 0, 0, 0),
         nb = base.map((v, j) => pivot[j] + (v - pivot[j]) * (Number(scale[j]) || 1)),
         [iu, iv] = PL[q.k],
         d = Number(q.d) || 1;
@@ -2669,12 +2730,17 @@ function scaleCompoundPart(part, pivot, scale) {
     q.rb = Math.max(0.002, Math.abs(Number(q.rb) || 0.002) * Math.max(0.002, sv));
     if (su > 0.0001) q.rot = wrap180(Math.atan2(scale[iv] * sn, scale[iu] * cs) / DG);
     if (Number(q.h) > 0) q.h = Math.max(0.002, Number(q.h) * Math.abs(Number(scale[q.k]) || 1));
+    // 回転中心も同じ倍率で動かす（拡縮しても回転軸がずれない）。
+    const Ps = q.spinPivot;
+    if (spinS && Ps && Number.isFinite(Ps[0]))
+        q.spinPivot = [0, 1, 2].map((j) => pivot[j] + (Ps[j] - pivot[j]) * (Number(scale[j]) || 1));
     return q;
 }
 function scaleCompoundDefinition(o, pivot, scale) {
     const parts = compoundPartsAt(o).map((part) => scaleCompoundPart(part, pivot, scale)),
         b = groupBounds(parts),
         center = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2];
+    const sp = o.spinPivot;
     return {
         parts,
         tx: 0,
@@ -2685,6 +2751,10 @@ function scaleCompoundDefinition(o, pivot, scale) {
         ra: Math.max(0.005, (b.hi[0] - b.lo[0]) / 2),
         rb: Math.max(0.005, (b.hi[2] - b.lo[2]) / 2),
         h: Math.max(0, b.hi[1] - b.lo[1]),
+        // 回転軸も同じ倍率で動かす（拡縮したあとに回しても、その場で回る）。
+        ...(sp && Number.isFinite(sp[0])
+            ? { spinPivot: [0, 1, 2].map((j) => pivot[j] + (sp[j] - pivot[j]) * (Number(scale[j]) || 1)) }
+            : {}),
     };
 }
 function compoundFacePatch(o, fid, dl) {
@@ -2708,7 +2778,9 @@ function compoundFacePatch(o, fid, dl) {
 }
 function compoundGizmo(o) {
     const b = obBounds(o),
-        C3 = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2],
+        // 回転の軸（compoundSpinPivot）をそのまま輪の中心にする。
+        // 箱の中心を使うと、回している間に輪だけが動いて「軸が違う」ように見える。
+        C3 = compoundSpinPivot(o),
         sC = scrW(C3);
     if (!sC.ok) return null;
     const g = { o, C3, sC, axes: [], faces: [], ring: [], compound: true, bounds: b },
@@ -5490,8 +5562,24 @@ function projPoint(v, tf) {
 let depthBuffer = null,
     depthBufferLen = 0,
     depthUsedY0 = Infinity,
-    depthUsedY1 = -Infinity;
+    depthUsedY1 = -Infinity,
+    depthKey = null;
+// 深度バッファは「大きさ・変換・カメラ・オブジェクトの中身」が同じなら作り直さない。
+// 面を選び直しただけ・ハンドルに触れただけの描き直しでは、この計算（実測20ms前後）が丸ごと省ける。
+// キー作りは JSON.stringify 30個で 0.04ms 程度なので、毎回作っても十分安い。
+function exportDepthKey(cw, ch, tf, seen) {
+    let key = cw + "," + ch + "," + (tf ? tf.join(",") : "") + "," + sigNow() + "," + JSON.stringify(P) + "|";
+    S.forEach((s) => {
+        const o = s && s.ob;
+        if (!o || !objectVisible(o) || seen.has(o.id)) return;
+        seen.add(o.id);
+        key += JSON.stringify(o) + ";";
+    });
+    return key;
+}
 function buildExportDepth(cw, ch, tf) {
+    const key = exportDepthKey(cw, ch, tf, new Set());
+    if (!window.__noDepthCache && depthKey === key && depthBuffer && depthBufferLen === cw * ch) return depthBuffer;
     const need = cw * ch;
     if (!depthBuffer || depthBufferLen !== need) {
         depthBuffer = new Float32Array(need);
@@ -5577,8 +5665,8 @@ function buildExportDepth(cw, ch, tf) {
                 w2 = ((p0.x - p2.x) * (py - p2.y) - (p0.y - p2.y) * (px0 - p2.x)) / area,
                 idx = y * cw + xa;
             for (let x = xa; x <= xb; x++, idx++, w0 += d0, w1 += d1, w2 += d2) {
-                // 重心座標の和は常に1なので「全負」側の許容を足しても判定は変わらない（旧式と同じ結果になる）
-                if ((w0 >= -1e-5 && w1 >= -1e-5 && w2 >= -1e-5) || (w0 <= 1e-5 && w1 <= 1e-5 && w2 <= 1e-5)) {
+                // 重心座標は和が必ず1なので「全部が -1e-5 未満」になることはない（＝内側の判定はこれだけで足りる）
+                if (w0 >= -1e-5 && w1 >= -1e-5 && w2 >= -1e-5) {
                     const z = p0.depth * w1 + p1.depth * w2 + p2.depth * w0;
                     if (z < depth[idx]) depth[idx] = z;
                 }
@@ -5586,6 +5674,7 @@ function buildExportDepth(cw, ch, tf) {
         }
     };
     tris.forEach(putTri);
+    depthKey = key;
     return depth;
 }
 function strokeWVisible(c, s, depth, cw, ch, tf) {
@@ -6111,6 +6200,58 @@ function renderFresh() {
     // イベント処理が終わったあとのタスクでもう一度描くと確実に出る。
     setTimeout(() => render(), 0);
 }
+// ===== 背景（用紙色・参考写真・床の色・床グリッド）のキャッシュ =====
+// これらは「カメラ」か「設定」が変わったときだけ描き直せばよい。
+// ハンドルをドラッグしている間カメラは止まっているので、毎フレーム描き直すのは無駄
+// （床グリッドだけで実測 7ms/フレーム）。同じ状態なら前回の絵をそのまま貼る。
+let BG = null,
+    BGKey = "",
+    imgSeq = 0;
+// 参考写真は差し替わるたびに別の Image になるので、オブジェクトに通し番号を付けて見分ける。
+const imgTag = () => (IMG ? IMG.__tag || (IMG.__tag = ++imgSeq) : -1);
+function backgroundLayer() {
+    const key = [
+        W,
+        H,
+        Z,
+        ox,
+        oy,
+        T,
+        imgTag(),
+        P.pa,
+        $("bgw").checked,
+        $("gg").checked,
+        $("floorTint")?.checked ? 1 : 0,
+        window.cityFloorTint ? 1 : 0,
+        JSON.stringify(P),
+    ].join("|");
+    if (!window.__noBgCache && BG && BGKey === key && BG.width === W && BG.height === H) return BG;
+    if (!BG || BG.width !== W || BG.height !== H) {
+        BG = document.createElement("canvas");
+        BG.width = W;
+        BG.height = H;
+    }
+    const g = BG.getContext("2d");
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = $("bgw").checked ? "#fff" : "#23251f";
+    g.fillRect(0, 0, W, H);
+    g.save();
+    g.setTransform(Z, 0, 0, Z, ox, oy);
+    if (IMG) {
+        const s = Math.min(W / IMG.width, H / IMG.height),
+            w = IMG.width * s,
+            h = IMG.height * s;
+        g.globalAlpha = P.pa;
+        g.drawImage(IMG, (W - w) / 2, (H - h) / 2, w, h);
+        g.globalAlpha = 1;
+    }
+    if (window.cityFloorTint && $("floorTint")?.checked) window.cityFloorTint(g);
+    if ($("gg").checked) floorGrid(g);
+    g.restore();
+    BGKey = key;
+    return BG;
+}
 function render() {
     dirty = true;
     // カメラロック中は、どの入口から視点が動いても描く前に元へ戻す（最後の砦）。
@@ -6122,21 +6263,12 @@ function render() {
     syncSel();
     T === "f" ? calcF() : calc();
     const c = ctx;
+    c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, W, H);
-    c.fillStyle = $("bgw").checked ? "#fff" : "#23251f";
-    c.fillRect(0, 0, W, H);
+    // 背景はキャッシュを貼るだけ（中身は backgroundLayer()）
+    c.drawImage(backgroundLayer(), 0, 0);
     c.save();
     c.setTransform(Z, 0, 0, Z, ox, oy); // 以降はズーム/移動つき
-    if (IMG) {
-        const s = Math.min(W / IMG.width, H / IMG.height),
-            w = IMG.width * s,
-            h = IMG.height * s;
-        c.globalAlpha = P.pa;
-        c.drawImage(IMG, (W - w) / 2, (H - h) / 2, w, h);
-        c.globalAlpha = 1;
-    }
-    if (window.cityFloorTint && $("floorTint")?.checked) window.cityFloorTint(c);
-    if ($("gg").checked) floorGrid(c);
     drawObjectSurfaces(c);
     if ($("gon").checked) {
         if (orthView) orthGuides(c);
