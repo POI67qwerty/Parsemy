@@ -1059,6 +1059,13 @@ let depthBuffer = null,
     // これが無いと、同一平面上の稜線が面の奥行きと僅かに食い違って
     // 点線状に欠ける（＝重なった面の隠線が透ける）ことがある。
     depthOwner = null,
+    // 画素ごとの「面ID」。同じ平面（同じ法線＋同じ位置）の三角形は同じ番号になる。
+    // 線の左右で面IDが同じなら、その線は平面の内側（＝継ぎ目）なので描かない。
+    // FreePencil2 の「面ID＋法線バッファ」方式のうち、線の除去に必要な部分だけを持つ。
+    depthFace = null,
+    // 平面 → 面ID。作り直しても番号を変えないよう、消さずに使い回す
+    // （静止分キャッシュに残った古い番号と衝突させないため）。
+    facePlaneIds = new Map(),
     depthOwnerMap = new Map(),
     depthBufferLen = 0,
     depthUsedY0 = Infinity,
@@ -1080,13 +1087,42 @@ function exportDepthKey(cw, ch, tf, seen) {
 // 面の奥行きをバッファへ塗る本体。buildExportDepth から呼ぶ。
 // buf / own へ書き込み、実際に塗った行の範囲を used（{y0,y1}）へ返す。
 // 次のフレームで消す行をその範囲だけに絞るために使う。
-function rasterizeDepthInto(buf, own, ownerMap, list, cw, ch, tf, used) {
+function rasterizeDepthInto(buf, own, ownerMap, list, cw, ch, tf, used, face) {
     // 三角形を深度バッファへ書く。走査線（スキャンライン）方式で塗る。
     // 以前は外接矩形の全画素で重心座標を3つずつ計算していたため、
     // 面の多いシーン（30個・2,580三角形）で1フレーム400ms近くかかっていた。
     //   ・行ごとに三角形の左右の端（xL / xR）を辺との交点から出す
     //   ・重心座標は行の中で x の1次式なので、開始値＋増分の足し算で済ませる
     //   ・画面外の三角形は外接矩形の段階で捨てる
+    // 三角形の平面（法線＋位置）から面IDを出す。同じ平面の三角形は同じIDになる。
+    const faceIdOf = (tr) => {
+        const ax = tr[1][0] - tr[0][0],
+            ay = tr[1][1] - tr[0][1],
+            az = tr[1][2] - tr[0][2],
+            bx = tr[2][0] - tr[0][0],
+            by = tr[2][1] - tr[0][1],
+            bz = tr[2][2] - tr[0][2];
+        let nx = ay * bz - az * by,
+            ny = az * bx - ax * bz,
+            nz = ax * by - ay * bx;
+        const len = Math.hypot(nx, ny, nz);
+        if (!(len > 1e-9)) return 0;
+        nx /= len;
+        ny /= len;
+        nz /= len;
+        // 表裏で同じ平面とみなすため、法線の向きをそろえる（大きい成分を正にする）。
+        if (Math.abs(nx) >= Math.abs(ny) && Math.abs(nx) >= Math.abs(nz) ? nx < 0 : Math.abs(ny) >= Math.abs(nz) ? ny < 0 : nz < 0) {
+            nx = -nx;
+            ny = -ny;
+            nz = -nz;
+        }
+        const d = nx * tr[0][0] + ny * tr[0][1] + nz * tr[0][2];
+        // 量子化して、隣り合う三角形の計算誤差を同じ平面にまとめる。
+        const key = nx.toFixed(3) + "," + ny.toFixed(3) + "," + nz.toFixed(3) + "," + d.toFixed(2);
+        let id = facePlaneIds.get(key);
+        if (id === undefined) facePlaneIds.set(key, (id = facePlaneIds.size + 1));
+        return id;
+    };
     const putTri = (tr, owner) => {
         const p0 = exportPoint(tr[0], tf),
             p1 = exportPoint(tr[1], tf),
@@ -1177,17 +1213,23 @@ function rasterizeDepthInto(buf, own, ownerMap, list, cw, ch, tf, used) {
                     if (z < buf[idx]) {
                         buf[idx] = z;
                         if (own) own[idx] = owner;
+                        if (face) face[idx] = fid;
                     }
                 }
             }
         }
     };
+    let fid = 0; // いま塗っている三角形の面ID
     for (let i = 0; i < list.length; i++) {
         const o = list[i],
             tris = surfaceTriangles(o);
         if (!tris.length) continue;
         const owner = ownerMap.get(o.id) || 0;
-        for (let i2 = 0; i2 < tris.length; i2++) putTri(tris[i2], owner);
+        for (let i2 = 0; i2 < tris.length; i2++) {
+            const tr = tris[i2];
+            fid = faceIdOf(tr);
+            putTri(tr, owner);
+        }
     }
 }
 // 直前のフレームの「オブジェクトごとの内容」と、静止分キャッシュ。
@@ -1222,6 +1264,7 @@ function buildExportDepth(cw, ch, tf) {
     if (needAlloc) {
         depthBuffer = new Float32Array(need);
         depthOwner = new Int32Array(need);
+        if (!depthFace || depthFace.length !== need) depthFace = new Int32Array(need);
         depthBufferLen = need;
         // Float32Array の初期値は 0（＝いちばん手前）なので、そのままだと
         // 作った直後の1フレームだけ「面の外の線がすべて隠れる」。必ず無限遠で埋める。
@@ -1272,11 +1315,13 @@ function buildExportDepth(cw, ch, tf) {
                 len: need,
                 buf: reuse ? depthStatic.buf : new Float32Array(need),
                 owner: reuse ? depthStatic.owner : new Int32Array(need),
+                face: reuse ? depthStatic.face : new Int32Array(need),
                 y0: Infinity,
                 y1: -Infinity,
             };
             st.buf.fill(Infinity);
             st.owner.fill(0);
+            st.face.fill(0);
             rasterizeDepthInto(
                 st.buf,
                 st.owner,
@@ -1286,6 +1331,7 @@ function buildExportDepth(cw, ch, tf) {
                 ch,
                 tf,
                 st,
+                st.face,
             );
             depthStatic = st;
         }
@@ -1309,15 +1355,17 @@ function buildExportDepth(cw, ch, tf) {
         if (clr1 >= clr0 && Number.isFinite(clr0)) {
             depth.fill(Infinity, clr0 * cw, (clr1 + 1) * cw);
             depthOwner.fill(0, clr0 * cw, (clr1 + 1) * cw);
+            if (depthFace) depthFace.fill(0, clr0 * cw, (clr1 + 1) * cw);
         }
         if (depthStatic.y1 >= depthStatic.y0) {
             const sy0 = Math.max(0, Math.floor(depthStatic.y0)),
                 sy1 = Math.min(ch - 1, Math.ceil(depthStatic.y1));
             depth.set(depthStatic.buf.subarray(sy0 * cw, (sy1 + 1) * cw), sy0 * cw);
             depthOwner.set(depthStatic.owner.subarray(sy0 * cw, (sy1 + 1) * cw), sy0 * cw);
+            if (depthFace) depthFace.set(depthStatic.face.subarray(sy0 * cw, (sy1 + 1) * cw), sy0 * cw);
         }
         const used = { y0: Infinity, y1: -Infinity };
-        rasterizeDepthInto(depth, depthOwner, ownerMap, [moving], cw, ch, tf, used);
+        rasterizeDepthInto(depth, depthOwner, ownerMap, [moving], cw, ch, tf, used, window.__noFaceBuf ? null : depthFace);
         depthMovingUsedY0 = used.y0;
         depthMovingUsedY1 = used.y1;
         depthUsedY0 = Math.min(depthStatic.y0, Number.isFinite(used.y0) ? used.y0 : Infinity);
@@ -1334,13 +1382,14 @@ function buildExportDepth(cw, ch, tf) {
             ry1 = Math.min(ch, depthUsedY1 + 1) * cw;
         depth.fill(Infinity, ry0, ry1);
         if (depthOwner) depthOwner.fill(0, ry0, ry1);
+        if (depthFace) depthFace.fill(0, ry0, ry1);
     }
     depthUsedY0 = Infinity;
     depthUsedY1 = -Infinity;
     depthMovingUsedY0 = Infinity;
     depthMovingUsedY1 = -Infinity;
     const used = { y0: Infinity, y1: -Infinity };
-    rasterizeDepthInto(depth, depthOwner, ownerMap, objs, cw, ch, tf, used);
+    rasterizeDepthInto(depth, depthOwner, ownerMap, objs, cw, ch, tf, used, window.__noFaceBuf ? null : depthFace);
     depthUsedY0 = used.y0;
     depthUsedY1 = used.y1;
     depthOwnerMap = ownerMap;
@@ -1365,6 +1414,12 @@ function silhouetteAt(depth, cw, ch, x, y, d) {
         a = side(-3) - d,
         b = side(3) - d;
     return (a > 0.5 && b < 0.05) || (b > 0.5 && a < 0.05);
+}
+// その画素の面ID（0 は「面が無い」）。
+function faceIdAt(cw, ch, x, y) {
+    if (!depthFace) return 0;
+    if (x < 0 || x >= cw || y < 0 || y >= ch) return 0;
+    return depthFace[y * cw + x];
 }
 // 面と面が接していると見なす距離（m）。これより奥の線は近くの画素を見ずに隠す。
 const CONTACT_REACH = 0.05;
@@ -1446,6 +1501,9 @@ function updateSeamPicks(depth, cw, ch, tf) {
     });
     seamPicks = picks;
 }
+// ===== 線を「色×太さ」ごとにまとめて引く =====
+// 線を1本ずつ描く（まとめて stroke する方式は実測で高速化にならず、
+// 交差部の濃さが変わるため採用しなかった。ドキュメント §5Z-5）。
 function strokeWVisible(c, s, depth, cw, ch, tf) {
     // ベベルの縦線は、選ばれた「輪郭の1本」だけを描く。
     const seamLine = s.seam !== undefined && s.seam !== null;
@@ -1469,7 +1527,27 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         if (x < 0 || x >= cw || y < 0 || y >= ch) return false;
         const i1 = y * cw + x,
             z = depth[i1];
-        if (!(e.depth > z + CG.depthEps(e.depth))) return true;
+        if (!(e.depth > z + CG.depthEps(e.depth))) {
+            // 面ID照合による「平面の内側の線」の除去（既定オン・__noFaceCull で無効）。
+            if (!window.__noFaceCull) {
+                const ow = depthOwner && depthOwner[i1];
+                if (ow && ow === myOwner) {
+                    // 上下左右とも同じ面IDのときだけ「面の内側」と判断する。
+                    // 左右だけだと、板の厚みが1画素未満の細い部材（手すり・スラブ）で
+                    // 縁の線まで消えて破線状になる（実測で確認済み）。
+                    const f0 = depthFace ? depthFace[i1] : 0;
+                    if (
+                        f0 &&
+                        faceIdAt(cw, ch, x - 3, y) === f0 &&
+                        faceIdAt(cw, ch, x + 3, y) === f0 &&
+                        faceIdAt(cw, ch, x, y - 3) === f0 &&
+                        faceIdAt(cw, ch, x, y + 3) === f0
+                    )
+                        return false;
+                }
+            }
+            return true;
+        }
         // その画素の面が「この線の持ち主」で、奥行きがほぼ同じなら、
         // その線は自分の面の稜線（面と面の取り合い）なので描く。
         const own = depthOwner && depthOwner[i1];
@@ -1584,8 +1662,29 @@ function strokeBox(cw, ch, tf) {
     if (bx1 <= bx || by1 <= by) return null;
     return { x: bx, y: by, w: bx1 - bx, h: by1 - by };
 }
+// 前回と同じ絵なら線の層を作り直さない（層の描き直しは実測30ms）。
+// カメラ・用紙・設定・オブジェクト・選択のどれかが変われば必ず作り直す。
+// 編集中の線（withCur）が乗るときは、内容が毎フレーム変わるので使わない。
+let lineLayerKey = null;
+function lineLayerSignature(view, cw, ch, tf, hidden) {
+    let k = (view ? 1 : 0) + "," + cw + "," + ch + "," + (tf ? tf.join(",") : "-") + "," + hidden + "," + Z + "," + ox + "," + oy + "," + (sel ?? "") + "|" + JSON.stringify(P) + "|";
+    const seen = new Set();
+    S.forEach((s) => {
+        const o = s && s.ob;
+        if (!o || !objectVisible(o) || seen.has(o.id)) return;
+        seen.add(o.id);
+        k += JSON.stringify(o) + ";";
+    });
+    return k;
+}
 function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     // tf=書き出し用の変換 [拡大,0,0,拡大,ずれx,ずれy]
+    const cacheable = !window.__noLineCache && !withCur;
+    if (cacheable && LC && LC.width === cw && LC.height === ch && lineLayerKey) {
+        const k = lineLayerSignature(view, cw, ch, tf, hidden) + "|" + $("bin").checked;
+        if (k === lineLayerKey) return LC;
+        lineLayerKey = null;
+    }
     if (!LC || LC.width !== cw || LC.height !== ch) {
         LC = document.createElement("canvas");
         LC.width = cw;
@@ -1605,6 +1704,8 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     });
     if (withCur) drawCur(x);
     if (withCur && prev) prev.forEach((s) => strokeW(x, s));
+    // 次回の比較用（二値化の有無も含める）。
+    if (cacheable) lineLayerKey = lineLayerSignature(view, cw, ch, tf, hidden) + "|" + $("bin").checked;
     if ($("bin").checked) {
         // 二値化：しきい値以上の画素だけ完全に不透明にする。
         // 以前は毎フレーム canvas 全体（例 1600×900＝144万画素）を読み書きしていた。
@@ -1873,15 +1974,39 @@ const SURF_IDENT = [1, 0, 0, 1, 0, 0],
     SURF_STROKE_AREA = 4,
     // 画面外の三角形を捨てる余白（px）。
     SURF_CULL_PAD = 8;
+// 面の層（オフスクリーン）をそのまま貼る。
+function blitSurfaceLayer(c, box) {
+    c.save();
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.globalAlpha = box.alpha;
+    c.drawImage(surfaceLayerCanvas, 0, 0, box.dw, box.dh, box.dx0, box.dy0, box.dw, box.dh);
+    c.restore();
+}
+// 前回の層と条件が同じなら作り直さない（層の再ラスタライズは実測13ms）。
+// 動かしていないのに描き直す場面（ホバー・パネル操作・ギズモの当たり判定など）で効く。
+let surfaceLayerCache = null;
 function drawObjectSurfaces(c) {
     if (!P.surfaceMode) return;
-    const proj = surfaceProjector(),
-        tris = [],
+    const objs = [],
         seen = new Set();
     S.forEach((s) => {
         const o = s && s.ob;
         if (!o || !objectVisible(o) || seen.has(o.id)) return;
         seen.add(o.id);
+        objs.push(o);
+    });
+    if (!objs.length) return;
+    const key =
+        "surf|" + W + "," + H + "," + Z + "," + ox + "," + oy + "|" +
+        JSON.stringify(P) + "|" + objs.map((o) => JSON.stringify(o)).join(";");
+    if (!window.__noSurfCache && surfaceLayerCache && surfaceLayerCache.key === key) {
+        blitSurfaceLayer(c, surfaceLayerCache);
+        return;
+    }
+    surfaceLayerCache = null;
+    const proj = surfaceProjector(),
+        tris = [];
+    objs.forEach((o) => {
         const list = surfaceTriangles(o);
         if (!list.length) return;
         // 色と不透明度はオブジェクトごとに1回だけ求める。
@@ -1929,7 +2054,8 @@ function drawObjectSurfaces(c) {
     // 遠い面から描く簡易ペインター法。半透明の面でもオブジェクト同士の重なりが自然になる。
     tris.sort((a, b) => b.depth - a.depth);
     // 不透明度が同じ面をまとめる（通常は全部 0.22 なので1グループ）。
-    const groups = new Map();
+    const groups = new Map(),
+        boxes = [];
     tris.forEach((t) => {
         if (!groups.has(t.alpha)) groups.set(t.alpha, []);
         groups.get(t.alpha).push(t);
@@ -2018,12 +2144,12 @@ function drawObjectSurfaces(c) {
                 if (hasEdge) lc.stroke(edge);
             }
         });
-        c.save();
-        c.setTransform(1, 0, 0, 1, 0, 0);
-        c.globalAlpha = alpha;
-        c.drawImage(layer, 0, 0, dw, dh, dx0, dy0, dw, dh);
-        c.restore();
+        const box = { alpha, dx0, dy0, dw, dh };
+        blitSurfaceLayer(c, box);
+        boxes.push(box);
     });
+    // 層が1枚だけ（通常のケース）なら、そのまま次回使い回せる。
+    if (boxes.length === 1) surfaceLayerCache = { key, ...boxes[0] };
 }
 // アセットを置いた直後の1回目の描画は、キャンバスの再ラスタライズが間に合わず
 // 輪郭線が欠けて見えることがある（クリックして描き直すと出る）。

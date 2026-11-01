@@ -5,12 +5,12 @@ set -e
 cd "$(dirname "$0")"
 
 echo "== 構文チェック =="
-for f in engine-lib.js engine-core.js engine-gizmo.js engine-render.js engine-input.js engine-io.js asset.js asset-controller.js studio-ui.js check-all-assets.js; do
+for f in engine-lib.js engine-core.js engine-gizmo.js engine-render.js engine-input.js engine-io.js asset.js asset-controller.js studio-lib.js studio-floorplan.js studio-ui.js check-all-assets.js; do
     node --check "$f" && echo "  ok  $f"
 done
 
 echo "== 単体HTML生成 =="
-python3 build-city-grid.py
+python3 build-city-grid.py "$@"
 
 echo "== ドキュメントHTML生成 =="
 python3 build-guide.py CITY_GRID_STUDIO.md

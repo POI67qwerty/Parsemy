@@ -10,7 +10,9 @@
 - engine-io.js         : 画像書き出し・参考写真・保存/読み込み・起動
 - asset.js             : アセット形状・正規化
 - asset-controller.js  : アセット配置・JSON・棚UI
-- studio-ui.js         : パネル・間取り・プリセット
+- studio-lib.js        : studio-ui.js と studio-floorplan.js が共有する小さな道具箱
+- studio-floorplan.js : 間取りモード（選択・移動・回転・寸法編集）
+- studio-ui.js         : パネル・プリセット・初期化（間取りは studio-floorplan.js）
 
 cyberpunk-city-studio.html は生成物なので、直接編集せず、
 このスクリプトでソースから再生成する。
@@ -19,6 +21,7 @@ cyberpunk-city-studio.html は生成物なので、直接編集せず、
 どこからも読み込まれておらず、ソース＋単体HTMLと内容が重複するだけだったため廃止した。
 配布物は単体HTML 1本、開発用は index.html＋ソース5本に統一している。
 """
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -32,6 +35,45 @@ def read(name: str) -> str:
 def write(name: str, text: str) -> None:
     """UTF-8で生成物を書き出す。"""
     (ROOT / name).write_text(text, encoding="utf-8")
+
+
+def strip_comments(src: str) -> str:
+    """コメントと空行を落とす（--min のときだけ使う）。
+
+    文字列・テンプレート・正規表現の中身は壊さないよう、1文字ずつ状態を見て
+    「文字列の外にある // と /* */」だけを落とす簡易スキャナ。
+    行中のコードはそのまま残すので、動作は変わらない。
+    """
+    out = []
+    i = 0
+    n = len(src)
+    quote = None
+    while i < n:
+        ch = src[i]
+        if quote is None:
+            if ch == "/" and i + 1 < n and src[i + 1] == "/":
+                j = src.find("\n", i)
+                i = n if j < 0 else j
+                continue
+            if ch == "/" and i + 1 < n and src[i + 1] == "*":
+                j = src.find("*/", i + 2)
+                i = n if j < 0 else j + 2
+                continue
+            if ch in "'\"`":
+                quote = ch
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "\\":
+            out.append(src[i : i + 2])
+            i += 2
+            continue
+        if ch == quote:
+            quote = None
+        out.append(ch)
+        i += 1
+    text = "\n".join(line.rstrip() for line in "".join(out).split("\n"))
+    return "\n".join(line for line in text.split("\n") if line.strip())
 
 
 def inject_script(html: str, marker: str, content: str) -> str:
@@ -49,7 +91,12 @@ def inject_style(html: str, marker: str, content: str) -> str:
 
 
 def main() -> None:
-    """ソース順を固定して、配布用の単体HTMLを更新する。"""
+    """ソース順を固定して、配布用の単体HTMLを更新する。
+
+    `--min` を付けると、コメントと空行を落とした軽量版
+    （cyberpunk-city-studio.min.html）も書き出す。中身の動作は同じ。
+    """
+    want_min = "--min" in sys.argv[1:]
     lib = read("engine-lib.js")
     core = read("engine-core.js")
     tools = "\n".join(
@@ -58,7 +105,8 @@ def main() -> None:
     )
     asset = read("asset.js")
     controller = read("asset-controller.js")
-    ui = read("studio-ui.js")
+    # 読み込み順は index.html と同じ（lib → ui → floorplan）。
+    ui = read("studio-lib.js") + "\n" + read("studio-ui.js") + "\n" + read("studio-floorplan.js")
 
     # 単体HTMLの「engine」ブロック＝コア＋入力／描画ツール。
     engine = lib + "\n" + core + "\n" + tools
@@ -72,6 +120,11 @@ def main() -> None:
     html = inject_script(html, '<script id="engine">', engine)
     html = inject_script(html, '<script id="studio-ui">', asset + "\n" + controller + "\n" + ui)
     write("cyberpunk-city-studio.html", html)
+    if want_min:
+        # コメントを落とした軽量版。ソース側は説明を残したまま、配布用だけ小さくする。
+        small = strip_comments(html)
+        write("cyberpunk-city-studio.min.html", small)
+        print(f"軽量版: cyberpunk-city-studio.min.html  {len(small):,} 文字")
 
 
 if __name__ == "__main__":
