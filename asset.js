@@ -58,14 +58,14 @@ const ASSETS = {
     wallSign: { label: "壁付け看板（単体）", glyph: "▤", w: 1.6, d: 0.26, h: 1.8, accent: "#76d9ff" },
     // 棚には表示しないが、建物横壁へ接着する専用看板の描画・JSON互換用定義。
     wallSideSign: { label: "横壁看板", glyph: "▥", w: 1.5, d: 0.16, h: 1.8, accent: "#76d9ff" },
-    awning: { label: "店舗テント", glyph: "▱", w: 3.8, d: 1.35, h: 0.35, accent: "#d98b68" },
+    awning: { label: "店舗テント", glyph: "▱", w: 3, d: 1, h: 0.35, accent: "#d98b68" },
     balcony: { label: "壁付けベランダ", glyph: "▱", w: 3.2, d: 1.8, h: 1.25, accent: "#e6a36f" },
     pathPipe: { label: "パスパイプ", glyph: "◉", w: 4.8, d: 4.2, h: 1.5, accent: "#ff9f68" },
     person: { label: "人物", glyph: "♙", w: 0.46, d: 0.3, h: 1.7, accent: "#ad9cff" },
     stairs: { label: "階段", glyph: "▰", w: 1.45, d: 2.4, h: 0.78, accent: "#ffb36f" },
-    building: { label: "開口のある建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#8ce6c2" },
-    buildingAwning: { label: "テント付き建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#d98b68" },
-    buildingSign: { label: "看板付き開口建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#76d9ff" },
+    building: { label: "開口のある建物", glyph: "▣", w: 4, d: 3, h: 5, accent: "#8ce6c2" },
+    buildingAwning: { label: "テント付き建物", glyph: "▣", w: 4, d: 3, h: 5, accent: "#d98b68" },
+    buildingSign: { label: "看板付き開口建物", glyph: "▣", w: 4, d: 3, h: 5, accent: "#76d9ff" },
     stackedBuilding: { label: "縁付き階層建物", glyph: "▥", w: 4, d: 3, h: 8.98, accent: "#8ce6c2" },
     recessedStackedBuilding: {
         label: "凹窓階層建物",

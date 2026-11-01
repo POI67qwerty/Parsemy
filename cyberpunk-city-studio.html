@@ -1023,20 +1023,84 @@ body.cameraLocked #cv {
     display: none;
     pointer-events: none;
 }
+/* 棚は「上段＝操作部＋グループのタブ（固定）」「下段＝選択中グループのカード（横スクロール）」。
+   スクロールは .assetTrayScroll だけが持つので、カードを端まで送っても操作部とタブは動かない。 */
 .assetTrayInner {
     pointer-events: auto;
     display: flex;
+    flex-direction: column;
     align-items: stretch;
-    gap: 8px;
+    gap: 7px;
     max-width: 100%;
-    overflow: auto;
+    overflow: hidden;
     padding: 9px;
     background: rgba(13, 22, 28, 0.91);
     border: 1px solid #3a5960;
     border-radius: 14px;
     box-shadow: var(--shadow);
     backdrop-filter: blur(16px);
+}
+.assetTrayTop {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.assetTrayControls {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: 8px;
+}
+/* グループのタブ（プリミティブ／建物／屋根／街・パーツ／人間）。数が増えても崩れないよう横スクロール可 */
+.assetTrayTabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+}
+.assetTrayTabs::-webkit-scrollbar {
+    display: none;
+}
+.assetTrayTab {
+    flex: 0 0 auto;
+    padding: 5px 11px;
+    border: 1px solid #344951;
+    border-radius: 999px;
+    background: #16232a;
+    color: #a9c0bf;
+    font-size: 10.5px;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.assetTrayTab:hover {
+    border-color: #5c8d88;
+    color: #e6f3f0;
+}
+.assetTrayTab.is-active {
+    border-color: #6ad7c5;
+    background: linear-gradient(135deg, #2b625f, #394e86);
+    color: #eafff9;
+    font-weight: 700;
+}
+.assetTrayScroll {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    padding-bottom: 2px;
     scrollbar-width: thin;
+    scrollbar-color: #4c6f75 transparent;
 }
 #assetTray.floorAssetTray {
     bottom: 18px;
@@ -1049,20 +1113,11 @@ body.cameraLocked #cv {
     font-size: 10px;
     line-height: 1.35;
 }
-.assetTrayTitle {
-    display: flex;
-    align-items: center;
-    padding: 0 7px 0 3px;
-    color: #b5cbc9;
-    font-size: 11px;
-    white-space: nowrap;
-}
 .assetTrayTools {
     display: flex;
     align-items: center;
     flex: 0 0 auto;
-    padding: 0 8px;
-    border-left: 1px solid rgba(116, 180, 174, 0.25);
+    padding: 0 8px 0 0;
     border-right: 1px solid rgba(116, 180, 174, 0.25);
     color: #a9c0bf;
     font-size: 10px;
@@ -1095,6 +1150,9 @@ body.cameraLocked #cv {
 .assetClipboardTools button:disabled {
     opacity: 0.42;
     cursor: default;
+}
+.assetCard[hidden] {
+    display: none !important;
 }
 .assetCard {
     flex: 0 0 auto;
@@ -1254,9 +1312,39 @@ body.cameraLocked #cv {
     }
     .assetTrayInner {
         padding: 7px;
+        gap: 6px;
     }
-    .assetTrayTitle {
-        display: none;
+    .assetTrayControls {
+        gap: 6px;
+    }
+    .assetTrayTools select {
+        min-width: 96px;
+    }
+    .assetClipboardTools {
+        padding: 0 6px 0 0;
+        gap: 4px;
+    }
+    .assetClipboardTools button {
+        min-width: 44px;
+        padding: 6px 6px !important;
+    }
+    /* 画面が狭いときは 操作部 → タブ → カード の3段へ。
+       横並びのままだとカードの幅が数十pxしか残らず、アセットを選べなくなるため。 */
+    @media (max-width: 560px) {
+        .assetTrayTop {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 6px;
+        }
+        .assetTrayControls {
+            justify-content: flex-start;
+        }
+        .assetTrayTabs {
+            width: 100%;
+        }
+        .assetTrayScroll {
+            width: 100%;
+        }
     }
     #hint {
         margin-inline: 8px !important;
@@ -1641,7 +1729,8 @@ body.cameraLocked #cv {
                     </button>
                 </div>
                 <div class="barGroup" id="standardViews">
-                    <button id="viewFloorFront" title="7：間取り（正面）">7 前</button
+                    <button id="floorViewCenter" title="前／横／上の表示位置だけを、選択中のオブジェクトの中央へ寄せます（カメラ＝3D視点は動かしません）">表示中央へ</button
+                    ><button id="viewFloorFront" title="7：間取り（正面）">7 前</button
                     ><button id="viewFloorSide" title="8：間取り（真横）">8 横</button
                     ><button id="viewFloorTop" title="9：間取り（真上）">9 上</button
                     ><button id="viewHome" title="0：元の視点">0 3D</button>
@@ -4051,16 +4140,17 @@ function awningGeometry(o) {
         // 手前の上辺は「建物の手前面（-d/2）」と「屋根の高さ h」まで届かせる。
         // 以前は 0.025／0.02 の余白を残していたため、ハンドルを最大まで動かしても
         // 上辺が水平にならず、前面もわずかに傾いたまま（直方体にならない）だった。
+        // 手前の上辺は「建物の手前面（-d/2）」から「奥の上辺（d/2）」まで動かせる。
+        // 一番奥まで寄せると手前の上辺が奥の上辺に重なり、断面が三角形＝三角柱になる。
         edgeY = clamp(
             Number.isFinite(Number(o.awningEdgeY)) ? Number(o.awningEdgeY) : -half,
             -half,
-            Math.max(-half, half - 0.025),
+            half,
         ),
-        edgeZ = clamp(
-            Number.isFinite(Number(o.awningEdgeZ)) ? Number(o.awningEdgeZ) : h,
-            0.05,
-            Math.max(0.05, h),
-        ),
+        // 高さは 0（＝手前の下端）まで下げられる。0 にすると手前の上辺が下端に重なり、
+        // こちらも断面が三角形＝三角柱になる。以前は 0.05 の余白を残していたため、
+        // 一番下まで下げても薄い板が残り、三角柱にならなかった。
+        edgeZ = clamp(Number.isFinite(Number(o.awningEdgeZ)) ? Number(o.awningEdgeZ) : h, 0, Math.max(0, h)),
         thickness = clamp(Number(o.awningThickness) || Math.max(0.05, h * 0.14), 0.03, Math.max(0.03, h * 0.45)),
         frontBottom = clamp(
             Number.isFinite(Number(o.awningFrontBottom)) ? Number(o.awningFrontBottom) : 0,
@@ -4072,7 +4162,25 @@ function awningGeometry(o) {
             0,
             Math.max(0, h - 0.03),
         );
-    return { w, d, h, half, baseFrontY: -half, edgeY, edgeZ, thickness, frontBottom, backBottom };
+    // 手前の上辺が奥の上辺の真下へ来たら、上辺を奥の高さへ揃えて
+    // 「奥が垂直な三角柱」として閉じる（斜めの上辺が残って形が濁るのを防ぐ）。
+    const triangleBack = edgeY >= half - 0.02,
+        frontTop = triangleBack ? h : edgeZ;
+    return {
+        w,
+        d,
+        h,
+        half,
+        baseFrontY: -half,
+        edgeY,
+        edgeZ: frontTop,
+        thickness,
+        frontBottom,
+        backBottom,
+        triangleBack,
+        // 一番下まで下げた状態（手前の上辺＝下端）も三角柱。
+        triangleFront: frontTop <= 0.001 && edgeY <= -half + 0.02,
+    };
 }
 function awningGizmo(o) {
     if (!o || o.type !== "asset" || o.asset !== "awning") return null;
@@ -4080,6 +4188,8 @@ function awningGizmo(o) {
         edgeY = g.edgeY,
         pr = (x, y, z) => scrW(L2W(o, x, y, z)),
         s = pr(0, edgeY, g.edgeZ),
+        // 前縁Yの2軸目（手前奥）の向きを出すためのサンプル点。「前後」ハンドルは廃止したが、
+        // 前縁Yを斜めに引くと上下と手前奥が同時に動くので、この点は残す。
         qz = pr(0, edgeY, g.edgeZ + 0.1),
         qy = pr(0, edgeY + 0.1, g.edgeZ),
         zdx = qz.x - s.x,
@@ -4095,21 +4205,35 @@ function awningGizmo(o) {
             dir: { x: zdx / zpx, y: zdy / zpx },
             scale: zpx / 0.1 || 1,
             start: g.edgeZ,
-            min: 0.05,
+            // 一番下（0）まで下げると手前の上辺が下端に重なり、断面が三角形＝三角柱になる。
+            // 間取りの正面・横ビューと同じ値にして、ビューごとに三角柱にできたり
+            // できなかったりする差を作らない。
+            min: 0,
             max: g.h,
             frontBottom: g.frontBottom,
         },
     };
-    if (!o.attachment?.verticalOnly)
-        handles.edgeY = {
-            kind: "edgeY",
-            s: qy,
-            dir: { x: ydx / ypx, y: ydy / ypx },
-            scale: ypx / 0.1 || 1,
-            start: g.edgeY,
-            min: -g.d / 2,
-            max: g.d / 2 - 0.025,
-        };
+    // 前縁（手前の上辺）は上下だけでなく手前奥へも動かせる。
+    // 2本目の軸を同じハンドルへ持たせ、斜めに引いても両方いっぺんに変わる。
+    // ただし2軸目は1軸目と直交させておく。斜め投影では手前奥の向きが
+    // 画面上で斜めになるため、そのままだと「真下へ引いたのに手前奥も動く」状態になり、
+    // 高さを下げ切ったつもりでも三角柱にならない（＝3Dだけ三角柱にできない）原因だった。
+    const dot12 = (ydx * zdx + ydy * zdy) / (zpx * zpx),
+        ox2 = ydx - zdx * dot12,
+        oy2 = ydy - zdy * dot12,
+        opx2 = Math.hypot(ox2, oy2);
+    if (opx2 > 0.01) {
+        handles.edgeZ.dir2 = { x: ox2 / opx2, y: oy2 / opx2 };
+        handles.edgeZ.scale2 = opx2 / 0.1 || 1;
+    } else {
+        handles.edgeZ.dir2 = { x: ydx / ypx, y: ydy / ypx };
+        handles.edgeZ.scale2 = ypx / 0.1 || 1;
+    }
+    handles.edgeZ.start2 = g.edgeY;
+    handles.edgeZ.min2 = -g.d / 2;
+    handles.edgeZ.max2 = g.d / 2; // 一番奥まで寄せられる（三角柱）
+    // 「前後」ハンドルは廃止した。手前奥は前縁Y（edgeZ）の2軸目で動かせるため、
+    // 同じ場所に2つ並べると掴み間違えるだけだった。
     return {
         o,
         C3: L2W(o, 0, 0, (g.edgeZ + g.h) * 0.5),
@@ -5518,8 +5642,7 @@ function drawSpecialGizmo(c, o) {
         }
         c.setLineDash([]);
     } else if (sg.o.asset === "awning") {
-        const hz = sg.handles.edgeZ,
-            hy = sg.handles.edgeY;
+        const hz = sg.handles.edgeZ;
         c.setLineDash([5 / Z, 4 / Z]);
         c.strokeStyle = "rgba(255,179,111,.9)";
         c.lineWidth = 1.5 / Z;
@@ -5529,17 +5652,12 @@ function drawSpecialGizmo(c, o) {
             c.closePath();
             c.stroke();
         }
-        c.beginPath();
-        c.moveTo(hz.s.x, hz.s.y);
-        if (hy) c.lineTo(hy.s.x, hy.s.y);
-        c.stroke();
         c.setLineDash([]);
+        // テントのハンドルは菱形1つ（前縁Y）。上下と手前奥の両方へ動く。
         sq(hz.s, "#ffb36f", true);
-        if (hy) sq(hy.s, "#ffb36f");
         c.fillStyle = "#ffd0a8";
         c.font = `bold ${12 / Z}px system-ui`;
         c.fillText("前縁Y", hz.s.x + 9 / Z, hz.s.y - 8 / Z);
-        if (hy) c.fillText("前後", hy.s.x + 9 / Z, hy.s.y - 8 / Z);
     } else if (sg.o.asset === "sign") {
         const h = sg.handles;
         c.setLineDash([5 / Z, 4 / Z]);
@@ -7018,20 +7136,23 @@ function dragEdit(p, freeRotation = false) {
             deltaY = p.y - ed.p0.y,
             amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1);
         // 直方体（上辺が水平・前面が垂直）へ近づいたら、ぴったり吸着させる。
+        // 上辺が水平（＝直方体）と、一番下（＝三角柱）の両方へ吸着させる。
         patch = {
-            awningEdgeZ: snapAwningEdge(clamp(h.start + amount, h.min, h.max), h.max),
+            awningEdgeZ: snapAwningEdge(
+                snapAwningEdge(clamp(h.start + amount, h.min, h.max), h.max),
+                h.min,
+            ),
             awningFrontBottom: h.frontBottom,
             awningEdgeEdited: true,
         };
-    } else if (ed.t === "awning-edgeY") {
-        const h = ed.sign,
-            deltaX = p.x - ed.p0.x,
-            deltaY = p.y - ed.p0.y,
-            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1);
-        patch = {
-            awningEdgeY: snapAwningEdge(clamp(h.start + amount, h.min, h.max), h.min),
-            awningEdgeEdited: true,
-        };
+        // 2軸目（手前奥）も一緒に動かす。前縁の点を画面の好きな方向へ引ける。
+        if (h.dir2) {
+            const amount2 = (deltaX * h.dir2.x + deltaY * h.dir2.y) / (h.scale2 || 1);
+            patch.awningEdgeY = snapAwningEdge(
+                snapAwningEdge(clamp(h.start2 + amount2, h.min2, h.max2 ?? 20), h.min2),
+                h.max2,
+            );
+        }
     } else if (ed.t === "sign-faceW" || ed.t === "sign-faceH") {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -8480,6 +8601,23 @@ function surfaceAlpha(o) {
     const v = Number(o.surfaceAlpha);
     return Number.isFinite(v) ? clamp(v, 0.04, 0.9) : 0.22;
 }
+// 面表示を「1回だけ半透明で重ねる」ためのオフスクリーン。
+// 三角形を1枚ずつ半透明で塗ると、同じオブジェクトの面が重なる場所だけ
+// 透明度が積み上がって乗算したように濃くなる（開口の奥の壁・柱の裏など）。
+// そこで不透明度ごとに1枚の層へ不透明で描き、最後にまとめて1回だけ合成する。
+let surfaceLayerCanvas = null;
+function surfaceLayerCanvasFor(w, h) {
+    // 毎フレーム大きさが変わると再確保が続くので、64px 単位に丸めて使い回す。
+    const step = 64,
+        cw = Math.max(step, Math.ceil(w / step) * step),
+        ch = Math.max(step, Math.ceil(h / step) * step);
+    if (!surfaceLayerCanvas) surfaceLayerCanvas = document.createElement("canvas");
+    if (surfaceLayerCanvas.width !== cw || surfaceLayerCanvas.height !== ch) {
+        surfaceLayerCanvas.width = cw;
+        surfaceLayerCanvas.height = ch;
+    }
+    return surfaceLayerCanvas;
+}
 function drawObjectSurfaces(c) {
     if (!P.surfaceMode) return;
     const tris = [],
@@ -8499,19 +8637,98 @@ function drawObjectSurfaces(c) {
     });
     // 遠い面から描く簡易ペインター法。半透明の面でもオブジェクト同士の重なりが自然になる。
     tris.sort((a, b) => b.depth - a.depth);
-    c.save();
-    c.lineJoin = "round";
-    tris.forEach(({ o, p }) => {
-        c.globalAlpha = surfaceAlpha(o);
-        c.fillStyle = surfaceColor(o);
-        c.beginPath();
-        c.moveTo(p[0].x, p[0].y);
-        c.lineTo(p[1].x, p[1].y);
-        c.lineTo(p[2].x, p[2].y);
-        c.closePath();
-        c.fill();
+    // 不透明度が同じ面をまとめる（通常は全部 0.22 なので1グループ）。
+    const groups = new Map();
+    tris.forEach((t) => {
+        const key = surfaceAlpha(t.o).toFixed(3);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(t);
     });
-    c.restore();
+    groups.forEach((list, key) => {
+        // 面が写っている範囲だけを層にする。画面全体を毎回消して重ねると重いため。
+        let minX = Infinity,
+            minY = Infinity,
+            maxX = -Infinity,
+            maxY = -Infinity;
+        list.forEach(({ p }) =>
+            p.forEach((q) => {
+                if (q.x < minX) minX = q.x;
+                if (q.y < minY) minY = q.y;
+                if (q.x > maxX) maxX = q.x;
+                if (q.y > maxY) maxY = q.y;
+            }),
+        );
+        if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
+        const dx0 = Math.max(0, Math.floor(minX * Z + ox) - 2),
+            dy0 = Math.max(0, Math.floor(minY * Z + oy) - 2),
+            dx1 = Math.min(W, Math.ceil(maxX * Z + ox) + 2),
+            dy1 = Math.min(H, Math.ceil(maxY * Z + oy) + 2),
+            dw = dx1 - dx0,
+            dh = dy1 - dy0;
+        if (dw <= 0 || dh <= 0) return;
+        const layer = surfaceLayerCanvasFor(dw, dh),
+            lc = layer.getContext("2d");
+        lc.setTransform(1, 0, 0, 1, 0, 0);
+        lc.clearRect(0, 0, dw, dh);
+        // 本番のキャンバスと同じズーム／移動を掛け、切り出した範囲の左上が原点に来るようにする。
+        lc.setTransform(Z, 0, 0, Z, ox - dx0, oy - dy0);
+        lc.lineJoin = "round";
+        // 色ごとに1本のパスへまとめてから塗る。三角形ごとに fill すると
+        // パス生成の回数が面の数だけ増えて重いので、同じ色はまとめる。
+        // 塗ったあと同色で縁をなぞるのは、隣り合う三角形の継ぎ目が
+        // 透けて細い筋に見えるのを防ぐため（塗りと同色なので線には見えない）。
+        const byColor = new Map();
+        list.forEach(({ o, p }) => {
+            const col = surfaceColor(o);
+            if (!byColor.has(col)) byColor.set(col, []);
+            byColor.get(col).push(p);
+        });
+        lc.globalAlpha = 1; // 層の中は不透明。重なっても濃くならない。
+        byColor.forEach((trisOfColor, col) => {
+            // 1本のパスへまとめすぎると、三角形が数千枚あるアセット（球・ベベル階層など）で
+            // パス構築が重くなる。400枚ずつに区切って塗る。
+            const chunk = 400;
+            lc.fillStyle = col;
+            lc.strokeStyle = col;
+            // 継ぎ目の隙間を埋める縁取りは「画面上で1px」になる太さにする。
+            // 変換に Z が掛かっているので、1/Z で1pxになる。
+            lc.lineWidth = 1 / Math.max(0.25, Z);
+            for (let i = 0; i < trisOfColor.length; i += chunk) {
+                const path = new Path2D(),
+                    end = Math.min(i + chunk, trisOfColor.length);
+                for (let k = i; k < end; k++) {
+                    const p = trisOfColor[k],
+                        // 同じパスへ複数の三角形を入れると、巻き方向が逆の三角形どうしが
+                        // 打ち消し合って塗りが抜ける（裏表の面が重なる立体で顕著）。
+                        // 全三角形の巻き方向をそろえてから1本のパスにする。
+                        area = (p[1].x - p[0].x) * (p[2].y - p[0].y) - (p[1].y - p[0].y) * (p[2].x - p[0].x),
+                        q1 = area < 0 ? p[2] : p[1],
+                        q2 = area < 0 ? p[1] : p[2];
+                    path.moveTo(p[0].x, p[0].y);
+                    path.lineTo(q1.x, q1.y);
+                    path.lineTo(q2.x, q2.y);
+                    path.closePath();
+                }
+                lc.fill(path, "nonzero");
+                lc.stroke(path);
+            }
+        });
+        c.save();
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        c.globalAlpha = Number(key);
+        c.drawImage(layer, 0, 0, dw, dh, dx0, dy0, dw, dh);
+        c.restore();
+    });
+}
+// アセットを置いた直後の1回目の描画は、キャンバスの再ラスタライズが間に合わず
+// 輪郭線が欠けて見えることがある（クリックして描き直すと出る）。
+// 追加系の操作ではこちらを使い、次のフレームでもう一度描いて確実に線を出す。
+function renderFresh() {
+    render();
+    // 追加直後の1回目の描画は、同じイベント処理の中で続けて描いても
+    // 輪郭線が欠けたまま残ることがある（ラスタライズが間に合わない）。
+    // イベント処理が終わったあとのタスクでもう一度描くと確実に出る。
+    setTimeout(() => render(), 0);
 }
 function render() {
     dirty = true;
@@ -10209,14 +10426,14 @@ const ASSETS = {
     wallSign: { label: "壁付け看板（単体）", glyph: "▤", w: 1.6, d: 0.26, h: 1.8, accent: "#76d9ff" },
     // 棚には表示しないが、建物横壁へ接着する専用看板の描画・JSON互換用定義。
     wallSideSign: { label: "横壁看板", glyph: "▥", w: 1.5, d: 0.16, h: 1.8, accent: "#76d9ff" },
-    awning: { label: "店舗テント", glyph: "▱", w: 3.8, d: 1.35, h: 0.35, accent: "#d98b68" },
+    awning: { label: "店舗テント", glyph: "▱", w: 3, d: 1, h: 0.35, accent: "#d98b68" },
     balcony: { label: "壁付けベランダ", glyph: "▱", w: 3.2, d: 1.8, h: 1.25, accent: "#e6a36f" },
     pathPipe: { label: "パスパイプ", glyph: "◉", w: 4.8, d: 4.2, h: 1.5, accent: "#ff9f68" },
     person: { label: "人物", glyph: "♙", w: 0.46, d: 0.3, h: 1.7, accent: "#ad9cff" },
     stairs: { label: "階段", glyph: "▰", w: 1.45, d: 2.4, h: 0.78, accent: "#ffb36f" },
-    building: { label: "開口のある建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#8ce6c2" },
-    buildingAwning: { label: "テント付き建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#d98b68" },
-    buildingSign: { label: "看板付き開口建物", glyph: "▣", w: 4.2, d: 3.2, h: 3.6, accent: "#76d9ff" },
+    building: { label: "開口のある建物", glyph: "▣", w: 4, d: 3, h: 5, accent: "#8ce6c2" },
+    buildingAwning: { label: "テント付き建物", glyph: "▣", w: 4, d: 3, h: 5, accent: "#d98b68" },
+    buildingSign: { label: "看板付き開口建物", glyph: "▣", w: 4, d: 3, h: 5, accent: "#76d9ff" },
     stackedBuilding: { label: "縁付き階層建物", glyph: "▥", w: 4, d: 3, h: 8.98, accent: "#8ce6c2" },
     recessedStackedBuilding: {
         label: "凹窓階層建物",
@@ -14218,25 +14435,32 @@ window.cityGridInstallAssetUI = function (bridge) {
         child.linkedRole = "child";
         // 開口側（建物のローカルYマイナス面）へ接着する。
         // 反対側へ回り込まないよう、親の回転に追従するローカル面として保持する。
+        // 付属パーツの初期寸法（建物の寸法に比例させず、決め打ちにする）。
+        //   幅 3m（左右とも中央そろえ）／高さ 1m
+        //   奥行きはテント 1m・看板 0.5m
+        //   取り付け高さ（下端）は地面から 3.6m。建物5mの上部に付く。
+        const PART_W = 3,
+            PART_H = 1,
+            PART_BASE_Z = 3.6;
         child.attachment = {
             parentId: parent.id,
             side: -1,
             x: 0,
-            baseZ: kind === "buildingAwning" ? parent.h * 0.52 : parent.h * 0.56,
+            baseZ: PART_BASE_Z,
             offsetZ: 0,
             rotOffset: 0,
             verticalOnly: true,
         };
         if (kind === "buildingSign") {
-            child.ra = parent.ra * 0.72;
-            child.rb = Math.max(0.12, parent.rb * 0.16);
-            child.h = Math.max(0.35, parent.h * 0.23);
+            child.ra = PART_W / 2;
+            child.rb = 0.5 / 2;
+            child.h = PART_H;
             child.extrude = true;
             child.accent = "#66e3c8";
         } else {
-            child.ra = parent.ra * 0.46;
-            child.rb = Math.max(0.18, parent.rb * 0.3);
-            child.h = Math.max(0.28, parent.h * 0.2);
+            child.ra = PART_W / 2;
+            child.rb = 1 / 2;
+            child.h = PART_H;
             child.awningEdgeZ = child.h;
             child.awningEdgeY = -child.rb;
             child.awningThickness = Math.max(0.04, child.h * 0.14);
@@ -14268,7 +14492,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 setMode("draw");
             } else if (kind === "buildingSign") setStudioWorkspace("perspective");
             syncSel();
-            render();
+            renderFresh();
         } catch (err) {
             S = before;
             prev = null;
@@ -14348,7 +14572,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 setMode("draw");
             }
             syncSel();
-            render();
+            renderFresh();
         } catch (err) {
             S = before;
             prev = null;
@@ -14384,7 +14608,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 setMode("draw");
             } else if (kind === "person") setStudioWorkspace("character");
             syncSel();
-            render();
+            renderFresh();
         } catch (err) {
             S = before;
             prev = null;
@@ -14453,7 +14677,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 fitFloorPlan();
                 setMode("draw");
             }
-            render();
+            renderFresh();
             return true;
         } catch (err) {
             S = before;
@@ -14552,7 +14776,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         setMode("draw");
         if (window.cityFloorPlanActive) fitFloorPlan();
         syncSel();
-        render();
+        renderFresh();
     }
 
     // 既存建物の左右の横壁へ、小型看板を任意で接着する。
@@ -14753,7 +14977,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             setSelection(parent.id, false);
             tool = "edit";
             setMode("draw");
-            render();
+            renderFresh();
             return true;
         } catch (err) {
             S = before;
@@ -14766,24 +14990,120 @@ window.cityGridInstallAssetUI = function (bridge) {
 
     // ===== 6. アセット棚と配置方向 =====
     // 棚のボタンはplaceAsset()へ集約し、UIイベント内に形状生成ロジックを重複させない。
+    //
+    // 棚の構成（上から）:
+    //   1段目 = 生成面セレクト／コピー／貼り付け／JSON読込 ＋ グループのタブ（どちらも固定）
+    //   2段目 = 選択中グループのアセットカードだけを横スクロール
+    // カードが26枚あると1列では探しにくいので、5つのグループへ分けてタブで切り替える。
+    // タブと操作部はスクロール領域の外に置くため、カードを端まで送っても消えない。
+    const ASSET_GROUPS = [
+        {
+            key: "primitive",
+            label: "プリミティブ",
+            kinds: ["rect", "box", "beveledBox", "cornerCutBox", "circle", "cone", "sphere", "triPrism", "triPyramid"],
+        },
+        {
+            key: "building",
+            label: "建物",
+            // 建物そのもの（本体と、本体に付く屋根・窓・棟の構成）だけを残す。
+            // 単体で置くパーツ（店舗テント・壁付けベランダ・壁付け看板・窓グリッド）は
+            // 「街・パーツ」へ移した（建物の付属品ではなく、街に置く部品のため）。
+            kinds: [
+                "building",
+                "buildingAwning",
+                "buildingSign",
+                "stackedBuilding",
+                "recessedStackedBuilding",
+                "beveledStackedBuilding",
+            ],
+        },
+        { key: "roof", label: "屋根", kinds: ["gableRoof", "shedRoof"] },
+        // 街並みの小物。新しいアセットを足して下の一覧へ書き忘れた場合も、
+        // ここへ自動で入れて「棚から消える」事故を防ぐ（unassignedKinds）。
+        {
+            key: "street",
+            label: "街・パーツ",
+            kinds: ["stairs", "crosswalk", "ramp", "pathPipe", "awning", "balcony", "wallSign", "windowGrid"],
+        },
+        { key: "person", label: "人間", kinds: ["person"] },
+    ];
+    // 看板は「壁付け看板（単体）」へ統合した。asset=sign と asset=wallSideSign
+    // （建物へ接着する専用形状）は既存JSONの読み込み・表示用に定義だけ残し、棚からは外す。
+    const trayKinds = Object.keys(ASSETS).filter((k) => k !== "sign" && k !== "wallSideSign");
+    ASSET_GROUPS.forEach((g) => {
+        g.kinds = g.kinds.filter((k) => trayKinds.includes(k));
+    });
+    const assignedKinds = new Set(ASSET_GROUPS.flatMap((g) => g.kinds));
+    const unassignedKinds = trayKinds.filter((k) => !assignedKinds.has(k));
+    if (unassignedKinds.length) {
+        const street = ASSET_GROUPS.find((g) => g.key === "street") || ASSET_GROUPS[ASSET_GROUPS.length - 1];
+        street.kinds = [...street.kinds, ...unassignedKinds];
+    }
+    // カードは全グループぶんを最初に1回だけ作り、切り替えは hidden の付け替えだけで行う。
+    // こうすると DOM を作り直さないので、[data-asset="..."] での参照やクリック委譲が
+    // グループを切り替えても壊れない（既存のテスト・ヘルプ・貼り付けからも触れる）。
+    const assetCardHtml = (k, groupKey) =>
+        `<button class="assetCard" data-asset="${k}" data-group="${groupKey}" title="${ASSETS[k].label}を追加${k === "balcony" ? "（建物選択中は壁へ接着）" : ""}"><span class="assetGlyph">${ASSETS[k].glyph}</span><span>${ASSETS[k].label}</span></button>`;
+
     const tray = document.createElement("div");
     tray.id = "assetTray";
     tray.innerHTML =
-        '<div class="assetTrayInner"><div class="assetTrayTitle">シーンに追加</div><div class="assetTrayTools"><label>生成面<select id="assetAxisTray"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select></label></div><div class="assetClipboardTools"><button type="button" id="objectCopy">コピー</button><button type="button" id="objectPaste" disabled>貼り付け</button><button type="button" id="objectImportButton">JSON読込</button><input id="objectImportFile" type="file" accept="application/json,.json" hidden></div>' +
-        // 通常の「看板」アセットは、建物へ接着する横壁看板へ統合したため棚から外す。
-        // 既存JSONのasset=signはASSETS定義を残して読み込み・表示できるようにする。
-        Object.entries(ASSETS)
-            // 看板は「壁付け看板（単体）」へ統合した。
-            // asset=sign と asset=wallSideSign（建物へ接着する専用形状）は
-            // 既存JSONの読み込み・表示用に定義だけ残し、棚からは外す。
-            .filter(([k]) => k !== "sign" && k !== "wallSideSign")
-            .map(
-                ([k, v]) =>
-                    `<button class="assetCard" data-asset="${k}" title="${v.label}を追加${k === "balcony" ? "（建物選択中は壁へ接着）" : ""}"><span class="assetGlyph">${v.glyph}</span><span>${v.label}</span></button>`,
-            )
-            .join("") +
-        '</div><div class="assetTrayNote">建物を選択して「壁付けベランダ」を押すと、正面壁の2階相当へ自動接着。未選択なら地面へ配置。パスパイプは選択後に画面上の制御点と半径ハンドルを編集できます。</div>';
+        '<div class="assetTrayInner">' +
+        '<div class="assetTrayTop">' +
+        '<div class="assetTrayControls">' +
+        '<div class="assetTrayTools"><label>生成面<select id="assetAxisTray"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select></label></div>' +
+        '<div class="assetClipboardTools"><button type="button" id="objectCopy">コピー</button><button type="button" id="objectPaste" disabled>貼り付け</button><button type="button" id="objectImportButton">JSON読込</button><input id="objectImportFile" type="file" accept="application/json,.json" hidden></div>' +
+        "</div>" +
+        '<div class="assetTrayTabs" role="tablist" aria-label="アセットの種類">' +
+        ASSET_GROUPS.map(
+            (g) =>
+                `<button type="button" class="assetTrayTab" role="tab" data-asset-group="${g.key}" aria-selected="false" title="${g.label}のアセットを表示">${g.label}</button>`,
+        ).join("") +
+        "</div>" +
+        "</div>" +
+        '<div class="assetTrayScroll" role="tabpanel">' +
+        ASSET_GROUPS.map((g) => g.kinds.map((k) => assetCardHtml(k, g.key)).join("")).join("") +
+        "</div>" +
+        "</div>" +
+        '<div class="assetTrayNote">建物を選択して「壁付けベランダ」を押すと、正面壁の2階相当へ自動接着。未選択なら地面へ配置。パスパイプは選択後に画面上の制御点と半径ハンドルを編集できます。</div>';
     stage.appendChild(tray);
+
+    // グループのタブ切り替え。最後に開いていたグループを記憶して、次回も同じ所から始める。
+    const trayScroll = tray.querySelector(".assetTrayScroll"),
+        trayCards = [...trayScroll.querySelectorAll(".assetCard")],
+        trayTabs = [...tray.querySelectorAll("[data-asset-group]")];
+    const groupStoreKey = "cityGridAssetGroup";
+    const savedGroup = (() => {
+        try {
+            return localStorage.getItem(groupStoreKey);
+        } catch (e) {
+            return null;
+        }
+    })();
+    let activeGroups = ASSET_GROUPS.some((g) => g.key === savedGroup) ? savedGroup : ASSET_GROUPS[0].key;
+    const showAssetGroup = (key) => {
+        const group = ASSET_GROUPS.find((g) => g.key === key) || ASSET_GROUPS[0];
+        activeGroups = group.key;
+        trayScroll.dataset.group = group.key;
+        trayCards.forEach((card) => {
+            card.hidden = card.dataset.group !== group.key;
+        });
+        trayScroll.scrollLeft = 0;
+        trayTabs.forEach((b) => {
+            const on = b.dataset.assetGroup === group.key;
+            b.classList.toggle("is-active", on);
+            b.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        try {
+            localStorage.setItem(groupStoreKey, group.key);
+        } catch (e) {
+            /* 保存できない環境でも動作は変えない */
+        }
+    };
+    showAssetGroup(activeGroups);
+    window.cityGridAssetGroup = (key) => showAssetGroup(key);
+    window.cityGridAssetGroups = () => ASSET_GROUPS.map((g) => ({ key: g.key, label: g.label, kinds: [...g.kinds] }));
+
     const assetAxisTrayInput = el("assetAxisTray");
     window.cityGridAssetAxisTray = assetAxisTrayInput;
     const setAssetAxis = (value) => {
@@ -14794,6 +15114,11 @@ window.cityGridInstallAssetUI = function (bridge) {
     assetAxisTrayInput.onchange = () => setAssetAxis(assetAxisTrayInput.value);
     if (bridge.syncAssetAxis) bridge.syncAssetAxis();
     tray.addEventListener("click", (e) => {
+        const tab = e.target.closest("[data-asset-group]");
+        if (tab) {
+            if (tab.dataset.assetGroup !== activeGroups) showAssetGroup(tab.dataset.assetGroup);
+            return;
+        }
         const b = e.target.closest("[data-asset]");
         if (b) placeAsset(b.dataset.asset);
     });
@@ -15047,7 +15372,7 @@ window.cityGridInstallAssetUI = function (bridge) {
       <div class="quickRow"><button id="openFloorPlan" class="primary">開く</button><button id="closeFloorPlan">3Dへ戻る</button></div>
       <div id="floorPlanSelectionStatus" class="sceneNote">未選択</div>
       <div class="quickRow floorPlanRotateRow"><button id="floorRotateLeft" disabled>↺</button><button id="floorRotateRight" disabled>↻</button><button id="floorRotate90" disabled>90°</button><button id="floorDelete" disabled>削除</button></div>
-      <div class="sceneNote">間取りでは全ての生成面のオブジェクトをドラッグ移動できます。正面・上・横の移動ギズモ、選択中の前側の丸をドラッグした回転、カメラ本体のドラッグ移動、先端の丸のドラッグで向きの変更ができます。回転は15°刻みで30°・45°・90°も選べ、Shiftを押しながらドラッグすると自由な角度です。矢印キーで移動、Q/Eで15°ずつ回転します。幅・奥行き・高さの編集も生成面に関係なく利用できます。接続テントは接着を保つため上下方向に制限され、横壁看板は上下＋壁沿いの前後方向へ移動できます。</div>
+      <div class="sceneNote">間取りでは全ての生成面のオブジェクトをドラッグ移動できます。正面・上・横の移動ギズモ、選択中の前側の丸をドラッグした回転、カメラ本体のドラッグ移動、先端の丸のドラッグで向きの変更ができます。回転は15°刻みで30°・45°・90°も選べ、Shiftを押しながらドラッグすると自由な角度です。矢印キーで移動、Q/Eで15°ずつ回転します。幅・奥行き・高さの編集も生成面に関係なく利用できます。テントの前縁Yを一番下まで下げる／前後を一番奥まで寄せると、断面が三角形の三角柱になります。接続テントは接着を保つため本体の移動は上下方向に制限されますが、テントの形（前縁Y＝上下＋手前奥、前後）は店舗テントと同じように編集できます。横壁看板は上下＋壁沿いの前後方向へ移動できます。</div>
     </section>
 
     <section class="workspaceScreen" data-workspace-screen="perspective">
@@ -15689,6 +16014,49 @@ window.cityGridInstallAssetUI = function (bridge) {
         render();
     }
     el("centerOnScreenSel").onclick = centerSelectionOnScreen;
+
+    // ===== 表示中央へ（前／横／上の「表示位置」だけを動かす） =====
+    // 「画面中央へ」はオブジェクトの方を画面中央へ移動するが、こちらは
+    //   ・オブジェクト（o の座標）は動かさない
+    //   ・カメラ（P.cx / P.cz / P.ch / yaw / pitch / lens …）も動かさない
+    //   ・間取りキャンバスの表示中心（window.cityFloorPlanCenter）だけを寄せる
+    // という操作。前／横／上は正投影なので、表示中心と倍率だけで見え方が決まる。
+    // 画面中央に来るワールド座標は「表示中心 − カメラ由来の基準点」なので、
+    // 選択中のオブジェクトの中心がその値になるよう表示中心を置き直す。
+    function centerFloorViewOnSelection() {
+        if (!window.cityFloorPlanActive || !orthView) {
+            flashHint("「表示中央へ」は前（7）・横（8）・上（9）のビューで使えます");
+            return;
+        }
+        const objects = selectedObjects();
+        if (!objects.length) {
+            flashHint("表示を寄せたいオブジェクトを選択してください");
+            return;
+        }
+        // 付属パーツ（テント・看板）まで含めると建物本体がずれるので、
+        // 「画面中央へ」と同じく建物本体（接着していない側）を基準にする。
+        const body = objects.filter((o) => !o.attachment?.parentId),
+            b = groupBounds(body.length ? body : objects);
+        if (!b || !b.lo || !b.hi) return;
+        const c = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2],
+            basis = orthBasis(),
+            // orthSetup() が使う「カメラ由来の基準点」と同じ値。読むだけで書き換えない。
+            sx = orthView === "side" ? Number(P.cz) || 0 : Number(P.cx) || 0,
+            sy = orthView === "top" ? Number(P.cz) || 0 : (Number(P.ch) || 1) - 1,
+            next = [dot3(c, basis.right) + sx, dot3(c, basis.up) + sy],
+            prev = Array.isArray(window.cityFloorPlanCenter) ? window.cityFloorPlanCenter : null;
+        if (prev && Math.hypot(prev[0] - next[0], prev[1] - next[1]) < 1e-3) {
+            flashHint("選択中のオブジェクトはすでに表示の中央にあります");
+            return;
+        }
+        // オブジェクトもカメラも触らないので、元に戻す履歴は積まない。
+        window.cityFloorPlanCenter = next;
+        render();
+        flashHint(
+            `${orthView === "top" ? "真上" : orthView === "side" ? "真横" : "正面"}の表示位置を選択中のオブジェクトへ移動しました（カメラ＝3D視点は動かしていません）`,
+        );
+    }
+    if (el("floorViewCenter")) el("floorViewCenter").onclick = centerFloorViewOnSelection;
     // ===== テント・看板を建物の中央へ =====
     // テント付き建物・看板付き建物の子パーツは「親のローカルX方向の位置（attachment.x）」を
     // 持っていて、0 が建物の左右の中央。整列（2個以上必要）を使わずに、
@@ -18107,15 +18475,21 @@ window.cityGridInstallAssetUI = function (bridge) {
     }
     function floorAwningEdgeHandle(o) {
         const g = awningGeometry(o),
-            point = L2W(o, 0, g.edgeY, g.edgeZ),
+            // 手前上辺の中央は「上端／下端」の白い四角と同じ位置になり、
+            // 掴むたびに別のハンドルが当たっていた。前縁の点は手前上辺の左端へ寄せ、
+            // 上端・下端と重ならないようにする（辺の上なので意味は変わらない）。
+            hx = -g.w / 2,
+            point = L2W(o, hx, g.edgeY, g.edgeZ),
             s = scrW(point);
         if (!s.ok) return [];
         const out = [],
-            // 手前上辺は「屋根の高さ」と「建物の手前面」まで届かせる（直方体にできる）。
-            zMin = 0.05,
-            zMax = Math.max(0.05, g.h),
+            // 手前上辺は「屋根の高さ」「建物の手前面」まで届かせる（直方体にできる）。
+            // さらに一番下（0）まで下げると手前の上辺が下端に重なり、
+            // 一番奥（d/2）まで寄せると奥の上辺に重なって、どちらも三角柱になる。
+            zMin = 0,
+            zMax = Math.max(0, g.h),
             yMin = -g.d / 2,
-            yMax = g.d / 2 - 0.025;
+            yMax = g.d / 2;
         if (orthView === "top") {
             const gap = orthHandleGap(Math.max(g.w, g.d, 0.6));
             out.push({
@@ -18132,7 +18506,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 screen: true,
             });
         } else {
-            const qz = scrW(L2W(o, 0, g.edgeY, g.edgeZ + 0.1));
+            const qz = scrW(L2W(o, hx, g.edgeY, g.edgeZ + 0.1));
             if (qz.ok) {
                 const dx = qz.x - s.x,
                     dy = qz.y - s.y,
@@ -18152,42 +18526,51 @@ window.cityGridInstallAssetUI = function (bridge) {
                     });
             }
         }
-        if (!o.attachment?.verticalOnly) {
-            if (orthView === "front") {
-                const gap = orthHandleGap(Math.max(g.w, g.d, 0.6));
-                out.push({
-                    kind: "awningEdgeY",
-                    label: "前後",
-                    s: { x: s.x + gap, y: s.y, ok: true },
-                    dir: { x: 1, y: 0 },
-                    scale: orthScale(),
-                    start: g.edgeY,
-                    min: yMin,
-                    max: yMax,
-                    inner: true,
-                    screen: true,
-                });
-            } else {
-                const qy = scrW(L2W(o, 0, g.edgeY + 0.1, g.edgeZ));
-                if (qy.ok) {
-                    const dx = qy.x - s.x,
-                        dy = qy.y - s.y,
-                        px = Math.hypot(dx, dy);
-                    if (px > 0.01)
-                        out.push({
-                            kind: "awningEdgeY",
-                            label: "前後",
-                            s: qy,
-                            dir: { x: dx / px, y: dy / px },
-                            scale: px / 0.1,
-                            start: g.edgeY,
-                            min: yMin,
-                            max: yMax,
-                            inner: true,
-                        });
+        // 前縁（手前の上辺）は上下だけでなく手前奥へも動かせる。
+        // 2本目の軸を同じハンドルへ持たせ、斜めに引いても両方いっぺんに変わる。
+        // 上から見た図では上下（高さ）が見えないので、2軸目は出さない。
+        if (orthView === "front") {
+            // 正面図では手前奥が画面に出ない（真横から見ているため）。
+            // 「前後」ハンドルと同じ約束で、画面の横方向を手前奥へ割り当てる。
+            const edgeZHandle = out.find((q) => q.kind === "awningEdgeZ");
+            if (edgeZHandle) {
+                edgeZHandle.dir2 = { x: 1, y: 0 };
+                edgeZHandle.scale2 = orthScale();
+                edgeZHandle.start2 = g.edgeY;
+                edgeZHandle.min2 = yMin;
+                edgeZHandle.max2 = yMax;
+            }
+        } else if (orthView !== "top") {
+            const qy2 = scrW(L2W(o, hx, g.edgeY + 0.1, g.edgeZ)),
+                edgeZHandle = out.find((q) => q.kind === "awningEdgeZ");
+            if (qy2.ok && edgeZHandle) {
+                const dx2 = qy2.x - s.x,
+                    dy2 = qy2.y - s.y,
+                    px2 = Math.hypot(dx2, dy2);
+                if (px2 > 0.01) {
+                    // 2軸目（手前奥）は1軸目（上下）と直交させる。
+                    // 直交させないと、上下に引いただけで手前奥も動いてしまい、
+                    // 前縁を下げ切っても三角柱にならない。
+                    const ux = edgeZHandle.dir.x,
+                        uy = edgeZHandle.dir.y,
+                        dot12 = dx2 / px2 * ux + dy2 / px2 * uy,
+                        ox = dx2 / px2 - ux * dot12,
+                        oy = dy2 / px2 - uy * dot12,
+                        opx = Math.hypot(ox, oy);
+                    if (opx > 0.05) {
+                        edgeZHandle.dir2 = { x: ox / opx, y: oy / opx };
+                        edgeZHandle.scale2 = (opx * px2) / 0.1;
+                    } else {
+                        edgeZHandle.dir2 = { x: dx2 / px2, y: dy2 / px2 };
+                        edgeZHandle.scale2 = px2 / 0.1;
+                    }
+                    edgeZHandle.start2 = g.edgeY;
+                    edgeZHandle.min2 = yMin;
+                    edgeZHandle.max2 = yMax;
                 }
             }
         }
+        // 「前後」ハンドルは廃止した。手前奥は上の2軸目（前縁Yを斜めに引く）で動かせる。
         return out;
     }
     function floorBuildingBackPanel(o) {
@@ -18649,10 +19032,14 @@ window.cityGridInstallAssetUI = function (bridge) {
         const g = floorPlanEditHandles();
         if (!g?.handles?.length) return null;
         const lim = 20 / Z,
+            // 重なったハンドルは「押した位置に近い方」を掴む。
+            // 同じくらいの距離なら、テントの前縁など専用ハンドル（inner）を優先する。
+            // 以前は配列の順で先に来たもの（多くは白い四角）が必ず勝っていたため、
+            // 意図したハンドルと違うものを掴んでいた。
             hit = g.handles
                 .map((h) => ({ h, d: Math.hypot(h.s.x - p.x, h.s.y - p.y) }))
                 .filter((q) => q.d < lim)
-                .sort((a, b) => a.d - b.d)[0];
+                .sort((a, b) => a.d - (a.h.inner ? 1.2 : 0) - (b.d - (b.h.inner ? 1.2 : 0)))[0];
         return hit ? { g, h: hit.h } : null;
     }
     function floorMoveGizmo(o) {
@@ -19860,6 +20247,21 @@ window.cityGridInstallAssetUI = function (bridge) {
                         ((p.x - floorPlanDrag.p0.x) * h.dir.x + (p.y - floorPlanDrag.p0.y) * h.dir.y) / (h.scale || 1),
                     value = clamp(h.start + (h.factor || 1) * amount, h.min, h.max ?? 20);
                 snapHit = null;
+                // 2軸ハンドル（テントの前縁など）は、斜めへ引くと上下と手前奥が同時に変わる。
+                const second = h.dir2
+                        ? clamp(
+                              h.start2 +
+                                  ((p.x - floorPlanDrag.p0.x) * h.dir2.x +
+                                      (p.y - floorPlanDrag.p0.y) * h.dir2.y) /
+                                      (h.scale2 || 1),
+                              h.min2,
+                              h.max2 ?? 20,
+                          )
+                        : null,
+                    secondSnap =
+                        second == null
+                            ? null
+                            : snapAwningEdge(snapAwningEdge(second, h.min2), h.max2);
                 // 凹窓階層建物のハンドルは、3Dドラッグと同じ変換を共有する。
                 const recessedPatch = typeof recessedHandlePatch === "function"
                         ? recessedHandlePatch(o, h.kind, value)
@@ -19885,28 +20287,40 @@ window.cityGridInstallAssetUI = function (bridge) {
                                       ? { openingBack: value }
                                       : h.kind === "awningEdgeZ"
                                         ? {
-                                              // 上辺が水平（＝屋根の高さ）に近づいたら吸着
-                                              awningEdgeZ: snapAwningEdge(value, h.max),
+                                              // 上辺が水平（＝直方体）と、一番下（＝三角柱）へ吸着
+                                              awningEdgeZ: snapAwningEdge(
+                                                  snapAwningEdge(value, h.max),
+                                                  h.min,
+                                              ),
                                               awningFrontBottom: h.frontBottom,
                                               awningEdgeEdited: true,
                                           }
                                         : h.kind === "awningEdgeY"
                                           ? {
-                                                // 前面が垂直（＝建物の手前面）に近づいたら吸着
-                                                awningEdgeY: snapAwningEdge(value, h.min),
+                                                // 前面が垂直（＝直方体）と、一番奥（＝三角柱）へ吸着
+                                                awningEdgeY: snapAwningEdge(
+                                                    snapAwningEdge(value, h.min),
+                                                    h.max,
+                                                ),
                                                 awningEdgeEdited: true,
                                             }
                                           : { openingW: value }
                                 : h.param
                                   ? floorWallDimensionPatch(o, h.param, value, h.side || 1)
                                   : floorResizeSnap(o, floorDimensionPatch(o, h.kind, value, h.side || 1), h, value);
-                if (patch) {
+                // 前縁ハンドルで手前奥も動かす（テントの前縁は2軸で動く）。
+                // patch は const なので、そのまま渡す直前に1つにまとめる。
+                const applied =
+                    patch && secondSnap != null && h.kind === "awningEdgeZ"
+                        ? { ...patch, awningEdgeY: secondSnap }
+                        : patch;
+                if (applied) {
                     if (!floorPlanDrag.started) {
                         HU.push(S);
                         RD = [];
                         floorPlanDrag.started = true;
                     }
-                    setOb(o.id, patch);
+                    setOb(o.id, applied);
                 }
                 render();
                 return;
@@ -20542,7 +20956,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     const help = document.createElement("div");
     help.id = "helpPanel";
     help.innerHTML =
-        '<div class="helpTitle">操作のコツ</div><div><span class="helpKey">Pencil</span>線を引く　<span class="helpKey">指</span>視点・ピンチ</div><div><span class="helpKey">⌘ Z</span>元に戻す　<span class="helpKey">E</span>消しゴム</div><div><span class="helpKey">図形</span>ドラッグで床・壁に配置</div><div><span class="helpKey">編集</span>線を選択 → 矢印移動（X左右／Y手前奥／Z上下）／白い四角で拡縮／輪で回転</div><div><span class="helpKey">画面中央へ</span>選択中の建物（接着した看板・テントも一緒）を、いまの画面の中央へ移動</div><div><span class="helpKey">⌘ L</span>選択をロック／解除　<span class="helpKey">L</span>カメラ（視点）を固定</div><div style="margin-top:7px;color:#7f999c">アセットを追加したあと、編集モードでBlender風ギズモを使えます。人物は基準身長から作られます。<br>ロックしたオブジェクトは、ギズモ・数値パネル・整列・削除のどれでも変わりません（シーン一覧の鍵で解除）。カメラ固定中もオブジェクトの編集はできます。</div>';
+        '<div class="helpTitle">操作のコツ</div><div><span class="helpKey">Pencil</span>線を引く　<span class="helpKey">指</span>視点・ピンチ</div><div><span class="helpKey">⌘ Z</span>元に戻す　<span class="helpKey">E</span>消しゴム</div><div><span class="helpKey">図形</span>ドラッグで床・壁に配置</div><div><span class="helpKey">編集</span>線を選択 → 矢印移動（X左右／Y手前奥／Z上下）／白い四角で拡縮／輪で回転</div><div><span class="helpKey">画面中央へ</span>選択中の建物（接着した看板・テントも一緒）を、いまの画面の中央へ移動</div><div><span class="helpKey">⌘ L</span>選択をロック／解除　<span class="helpKey">L</span>カメラ（視点）を固定</div><div><span class="helpKey">表示中央へ</span>前（7）・横（8）・上（9）の表示位置だけを選択中のオブジェクトへ寄せる（カメラは動かさない）</div><div style="margin-top:7px;color:#7f999c">アセットを追加したあと、編集モードでBlender風ギズモを使えます。人物は基準身長から作られます。<br>ロックしたオブジェクトは、ギズモ・数値パネル・整列・削除のどれでも変わりません（シーン一覧の鍵で解除）。カメラ固定中もオブジェクトの編集はできます。</div>';
     el("main").appendChild(help);
     el("helpToggle").onclick = () => {
         help.style.display = help.style.display === "block" ? "none" : "block";
@@ -20622,6 +21036,5 @@ window.cityGridInstallAssetUI = function (bridge) {
 })();
 
 </script>
-    <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a53a6e10390e19f2',t:'MTc5MzUzMTE4NA=='};var l=window.parent.location,o;try{o=new URL(l.origin).origin}catch(e){try{o=new URL(new URL(l.href).origin).origin}catch(e){o=''}}var u='/cdn-cgi/challenge-platform/scripts/jsd/main.js?ray=a53a6e10390e19f2',a=document.createElement('script');a.src=o?new URL(u,o).href:u;document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+    <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a53b2a2bef04fc9d',t:'MTc5MzUzODg4OQ=='};var l=window.parent.location,o;try{o=new URL(l.origin).origin}catch(e){try{o=new URL(new URL(l.href).origin).origin}catch(e){o=''}}var u='/cdn-cgi/challenge-platform/scripts/jsd/main.js?ray=a53b2a2bef04fc9d',a=document.createElement('script');a.src=o?new URL(u,o).href:u;document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

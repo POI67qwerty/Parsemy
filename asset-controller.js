@@ -397,25 +397,32 @@ window.cityGridInstallAssetUI = function (bridge) {
         child.linkedRole = "child";
         // 開口側（建物のローカルYマイナス面）へ接着する。
         // 反対側へ回り込まないよう、親の回転に追従するローカル面として保持する。
+        // 付属パーツの初期寸法（建物の寸法に比例させず、決め打ちにする）。
+        //   幅 3m（左右とも中央そろえ）／高さ 1m
+        //   奥行きはテント 1m・看板 0.5m
+        //   取り付け高さ（下端）は地面から 3.6m。建物5mの上部に付く。
+        const PART_W = 3,
+            PART_H = 1,
+            PART_BASE_Z = 3.6;
         child.attachment = {
             parentId: parent.id,
             side: -1,
             x: 0,
-            baseZ: kind === "buildingAwning" ? parent.h * 0.52 : parent.h * 0.56,
+            baseZ: PART_BASE_Z,
             offsetZ: 0,
             rotOffset: 0,
             verticalOnly: true,
         };
         if (kind === "buildingSign") {
-            child.ra = parent.ra * 0.72;
-            child.rb = Math.max(0.12, parent.rb * 0.16);
-            child.h = Math.max(0.35, parent.h * 0.23);
+            child.ra = PART_W / 2;
+            child.rb = 0.5 / 2;
+            child.h = PART_H;
             child.extrude = true;
             child.accent = "#66e3c8";
         } else {
-            child.ra = parent.ra * 0.46;
-            child.rb = Math.max(0.18, parent.rb * 0.3);
-            child.h = Math.max(0.28, parent.h * 0.2);
+            child.ra = PART_W / 2;
+            child.rb = 1 / 2;
+            child.h = PART_H;
             child.awningEdgeZ = child.h;
             child.awningEdgeY = -child.rb;
             child.awningThickness = Math.max(0.04, child.h * 0.14);
@@ -447,7 +454,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 setMode("draw");
             } else if (kind === "buildingSign") setStudioWorkspace("perspective");
             syncSel();
-            render();
+            renderFresh();
         } catch (err) {
             S = before;
             prev = null;
@@ -527,7 +534,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 setMode("draw");
             }
             syncSel();
-            render();
+            renderFresh();
         } catch (err) {
             S = before;
             prev = null;
@@ -563,7 +570,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 setMode("draw");
             } else if (kind === "person") setStudioWorkspace("character");
             syncSel();
-            render();
+            renderFresh();
         } catch (err) {
             S = before;
             prev = null;
@@ -632,7 +639,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 fitFloorPlan();
                 setMode("draw");
             }
-            render();
+            renderFresh();
             return true;
         } catch (err) {
             S = before;
@@ -731,7 +738,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         setMode("draw");
         if (window.cityFloorPlanActive) fitFloorPlan();
         syncSel();
-        render();
+        renderFresh();
     }
 
     // 既存建物の左右の横壁へ、小型看板を任意で接着する。
@@ -932,7 +939,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             setSelection(parent.id, false);
             tool = "edit";
             setMode("draw");
-            render();
+            renderFresh();
             return true;
         } catch (err) {
             S = before;
@@ -945,24 +952,120 @@ window.cityGridInstallAssetUI = function (bridge) {
 
     // ===== 6. アセット棚と配置方向 =====
     // 棚のボタンはplaceAsset()へ集約し、UIイベント内に形状生成ロジックを重複させない。
+    //
+    // 棚の構成（上から）:
+    //   1段目 = 生成面セレクト／コピー／貼り付け／JSON読込 ＋ グループのタブ（どちらも固定）
+    //   2段目 = 選択中グループのアセットカードだけを横スクロール
+    // カードが26枚あると1列では探しにくいので、5つのグループへ分けてタブで切り替える。
+    // タブと操作部はスクロール領域の外に置くため、カードを端まで送っても消えない。
+    const ASSET_GROUPS = [
+        {
+            key: "primitive",
+            label: "プリミティブ",
+            kinds: ["rect", "box", "beveledBox", "cornerCutBox", "circle", "cone", "sphere", "triPrism", "triPyramid"],
+        },
+        {
+            key: "building",
+            label: "建物",
+            // 建物そのもの（本体と、本体に付く屋根・窓・棟の構成）だけを残す。
+            // 単体で置くパーツ（店舗テント・壁付けベランダ・壁付け看板・窓グリッド）は
+            // 「街・パーツ」へ移した（建物の付属品ではなく、街に置く部品のため）。
+            kinds: [
+                "building",
+                "buildingAwning",
+                "buildingSign",
+                "stackedBuilding",
+                "recessedStackedBuilding",
+                "beveledStackedBuilding",
+            ],
+        },
+        { key: "roof", label: "屋根", kinds: ["gableRoof", "shedRoof"] },
+        // 街並みの小物。新しいアセットを足して下の一覧へ書き忘れた場合も、
+        // ここへ自動で入れて「棚から消える」事故を防ぐ（unassignedKinds）。
+        {
+            key: "street",
+            label: "街・パーツ",
+            kinds: ["stairs", "crosswalk", "ramp", "pathPipe", "awning", "balcony", "wallSign", "windowGrid"],
+        },
+        { key: "person", label: "人間", kinds: ["person"] },
+    ];
+    // 看板は「壁付け看板（単体）」へ統合した。asset=sign と asset=wallSideSign
+    // （建物へ接着する専用形状）は既存JSONの読み込み・表示用に定義だけ残し、棚からは外す。
+    const trayKinds = Object.keys(ASSETS).filter((k) => k !== "sign" && k !== "wallSideSign");
+    ASSET_GROUPS.forEach((g) => {
+        g.kinds = g.kinds.filter((k) => trayKinds.includes(k));
+    });
+    const assignedKinds = new Set(ASSET_GROUPS.flatMap((g) => g.kinds));
+    const unassignedKinds = trayKinds.filter((k) => !assignedKinds.has(k));
+    if (unassignedKinds.length) {
+        const street = ASSET_GROUPS.find((g) => g.key === "street") || ASSET_GROUPS[ASSET_GROUPS.length - 1];
+        street.kinds = [...street.kinds, ...unassignedKinds];
+    }
+    // カードは全グループぶんを最初に1回だけ作り、切り替えは hidden の付け替えだけで行う。
+    // こうすると DOM を作り直さないので、[data-asset="..."] での参照やクリック委譲が
+    // グループを切り替えても壊れない（既存のテスト・ヘルプ・貼り付けからも触れる）。
+    const assetCardHtml = (k, groupKey) =>
+        `<button class="assetCard" data-asset="${k}" data-group="${groupKey}" title="${ASSETS[k].label}を追加${k === "balcony" ? "（建物選択中は壁へ接着）" : ""}"><span class="assetGlyph">${ASSETS[k].glyph}</span><span>${ASSETS[k].label}</span></button>`;
+
     const tray = document.createElement("div");
     tray.id = "assetTray";
     tray.innerHTML =
-        '<div class="assetTrayInner"><div class="assetTrayTitle">シーンに追加</div><div class="assetTrayTools"><label>生成面<select id="assetAxisTray"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select></label></div><div class="assetClipboardTools"><button type="button" id="objectCopy">コピー</button><button type="button" id="objectPaste" disabled>貼り付け</button><button type="button" id="objectImportButton">JSON読込</button><input id="objectImportFile" type="file" accept="application/json,.json" hidden></div>' +
-        // 通常の「看板」アセットは、建物へ接着する横壁看板へ統合したため棚から外す。
-        // 既存JSONのasset=signはASSETS定義を残して読み込み・表示できるようにする。
-        Object.entries(ASSETS)
-            // 看板は「壁付け看板（単体）」へ統合した。
-            // asset=sign と asset=wallSideSign（建物へ接着する専用形状）は
-            // 既存JSONの読み込み・表示用に定義だけ残し、棚からは外す。
-            .filter(([k]) => k !== "sign" && k !== "wallSideSign")
-            .map(
-                ([k, v]) =>
-                    `<button class="assetCard" data-asset="${k}" title="${v.label}を追加${k === "balcony" ? "（建物選択中は壁へ接着）" : ""}"><span class="assetGlyph">${v.glyph}</span><span>${v.label}</span></button>`,
-            )
-            .join("") +
-        '</div><div class="assetTrayNote">建物を選択して「壁付けベランダ」を押すと、正面壁の2階相当へ自動接着。未選択なら地面へ配置。パスパイプは選択後に画面上の制御点と半径ハンドルを編集できます。</div>';
+        '<div class="assetTrayInner">' +
+        '<div class="assetTrayTop">' +
+        '<div class="assetTrayControls">' +
+        '<div class="assetTrayTools"><label>生成面<select id="assetAxisTray"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select></label></div>' +
+        '<div class="assetClipboardTools"><button type="button" id="objectCopy">コピー</button><button type="button" id="objectPaste" disabled>貼り付け</button><button type="button" id="objectImportButton">JSON読込</button><input id="objectImportFile" type="file" accept="application/json,.json" hidden></div>' +
+        "</div>" +
+        '<div class="assetTrayTabs" role="tablist" aria-label="アセットの種類">' +
+        ASSET_GROUPS.map(
+            (g) =>
+                `<button type="button" class="assetTrayTab" role="tab" data-asset-group="${g.key}" aria-selected="false" title="${g.label}のアセットを表示">${g.label}</button>`,
+        ).join("") +
+        "</div>" +
+        "</div>" +
+        '<div class="assetTrayScroll" role="tabpanel">' +
+        ASSET_GROUPS.map((g) => g.kinds.map((k) => assetCardHtml(k, g.key)).join("")).join("") +
+        "</div>" +
+        "</div>" +
+        '<div class="assetTrayNote">建物を選択して「壁付けベランダ」を押すと、正面壁の2階相当へ自動接着。未選択なら地面へ配置。パスパイプは選択後に画面上の制御点と半径ハンドルを編集できます。</div>';
     stage.appendChild(tray);
+
+    // グループのタブ切り替え。最後に開いていたグループを記憶して、次回も同じ所から始める。
+    const trayScroll = tray.querySelector(".assetTrayScroll"),
+        trayCards = [...trayScroll.querySelectorAll(".assetCard")],
+        trayTabs = [...tray.querySelectorAll("[data-asset-group]")];
+    const groupStoreKey = "cityGridAssetGroup";
+    const savedGroup = (() => {
+        try {
+            return localStorage.getItem(groupStoreKey);
+        } catch (e) {
+            return null;
+        }
+    })();
+    let activeGroups = ASSET_GROUPS.some((g) => g.key === savedGroup) ? savedGroup : ASSET_GROUPS[0].key;
+    const showAssetGroup = (key) => {
+        const group = ASSET_GROUPS.find((g) => g.key === key) || ASSET_GROUPS[0];
+        activeGroups = group.key;
+        trayScroll.dataset.group = group.key;
+        trayCards.forEach((card) => {
+            card.hidden = card.dataset.group !== group.key;
+        });
+        trayScroll.scrollLeft = 0;
+        trayTabs.forEach((b) => {
+            const on = b.dataset.assetGroup === group.key;
+            b.classList.toggle("is-active", on);
+            b.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        try {
+            localStorage.setItem(groupStoreKey, group.key);
+        } catch (e) {
+            /* 保存できない環境でも動作は変えない */
+        }
+    };
+    showAssetGroup(activeGroups);
+    window.cityGridAssetGroup = (key) => showAssetGroup(key);
+    window.cityGridAssetGroups = () => ASSET_GROUPS.map((g) => ({ key: g.key, label: g.label, kinds: [...g.kinds] }));
+
     const assetAxisTrayInput = el("assetAxisTray");
     window.cityGridAssetAxisTray = assetAxisTrayInput;
     const setAssetAxis = (value) => {
@@ -973,6 +1076,11 @@ window.cityGridInstallAssetUI = function (bridge) {
     assetAxisTrayInput.onchange = () => setAssetAxis(assetAxisTrayInput.value);
     if (bridge.syncAssetAxis) bridge.syncAssetAxis();
     tray.addEventListener("click", (e) => {
+        const tab = e.target.closest("[data-asset-group]");
+        if (tab) {
+            if (tab.dataset.assetGroup !== activeGroups) showAssetGroup(tab.dataset.assetGroup);
+            return;
+        }
         const b = e.target.closest("[data-asset]");
         if (b) placeAsset(b.dataset.asset);
     });

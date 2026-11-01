@@ -830,20 +830,84 @@ body.cameraLocked #cv {
     display: none;
     pointer-events: none;
 }
+/* 棚は「上段＝操作部＋グループのタブ（固定）」「下段＝選択中グループのカード（横スクロール）」。
+   スクロールは .assetTrayScroll だけが持つので、カードを端まで送っても操作部とタブは動かない。 */
 .assetTrayInner {
     pointer-events: auto;
     display: flex;
+    flex-direction: column;
     align-items: stretch;
-    gap: 8px;
+    gap: 7px;
     max-width: 100%;
-    overflow: auto;
+    overflow: hidden;
     padding: 9px;
     background: rgba(13, 22, 28, 0.91);
     border: 1px solid #3a5960;
     border-radius: 14px;
     box-shadow: var(--shadow);
     backdrop-filter: blur(16px);
+}
+.assetTrayTop {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.assetTrayControls {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: 8px;
+}
+/* グループのタブ（プリミティブ／建物／屋根／街・パーツ／人間）。数が増えても崩れないよう横スクロール可 */
+.assetTrayTabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+}
+.assetTrayTabs::-webkit-scrollbar {
+    display: none;
+}
+.assetTrayTab {
+    flex: 0 0 auto;
+    padding: 5px 11px;
+    border: 1px solid #344951;
+    border-radius: 999px;
+    background: #16232a;
+    color: #a9c0bf;
+    font-size: 10.5px;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.assetTrayTab:hover {
+    border-color: #5c8d88;
+    color: #e6f3f0;
+}
+.assetTrayTab.is-active {
+    border-color: #6ad7c5;
+    background: linear-gradient(135deg, #2b625f, #394e86);
+    color: #eafff9;
+    font-weight: 700;
+}
+.assetTrayScroll {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    padding-bottom: 2px;
     scrollbar-width: thin;
+    scrollbar-color: #4c6f75 transparent;
 }
 #assetTray.floorAssetTray {
     bottom: 18px;
@@ -856,20 +920,11 @@ body.cameraLocked #cv {
     font-size: 10px;
     line-height: 1.35;
 }
-.assetTrayTitle {
-    display: flex;
-    align-items: center;
-    padding: 0 7px 0 3px;
-    color: #b5cbc9;
-    font-size: 11px;
-    white-space: nowrap;
-}
 .assetTrayTools {
     display: flex;
     align-items: center;
     flex: 0 0 auto;
-    padding: 0 8px;
-    border-left: 1px solid rgba(116, 180, 174, 0.25);
+    padding: 0 8px 0 0;
     border-right: 1px solid rgba(116, 180, 174, 0.25);
     color: #a9c0bf;
     font-size: 10px;
@@ -902,6 +957,9 @@ body.cameraLocked #cv {
 .assetClipboardTools button:disabled {
     opacity: 0.42;
     cursor: default;
+}
+.assetCard[hidden] {
+    display: none !important;
 }
 .assetCard {
     flex: 0 0 auto;
@@ -1061,9 +1119,39 @@ body.cameraLocked #cv {
     }
     .assetTrayInner {
         padding: 7px;
+        gap: 6px;
     }
-    .assetTrayTitle {
-        display: none;
+    .assetTrayControls {
+        gap: 6px;
+    }
+    .assetTrayTools select {
+        min-width: 96px;
+    }
+    .assetClipboardTools {
+        padding: 0 6px 0 0;
+        gap: 4px;
+    }
+    .assetClipboardTools button {
+        min-width: 44px;
+        padding: 6px 6px !important;
+    }
+    /* 画面が狭いときは 操作部 → タブ → カード の3段へ。
+       横並びのままだとカードの幅が数十pxしか残らず、アセットを選べなくなるため。 */
+    @media (max-width: 560px) {
+        .assetTrayTop {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 6px;
+        }
+        .assetTrayControls {
+            justify-content: flex-start;
+        }
+        .assetTrayTabs {
+            width: 100%;
+        }
+        .assetTrayScroll {
+            width: 100%;
+        }
     }
     #hint {
         margin-inline: 8px !important;
