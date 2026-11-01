@@ -132,8 +132,9 @@
     <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　7 前　8 横　9 上　0 3D　／　詳細操作は「？」</div>
     <div class="sceneTitle">シーン内オブジェクト</div>
     <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneLockSel" title="選択中のオブジェクトをロック／解除（⌘/Ctrl+L）">選択をロック</button><button id="sceneUnlockAll" title="ロック中のオブジェクトをすべて解除">全ロック解除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button><button id="sceneCombineSel">結合</button><button id="sceneSeparateSel">結合解除</button></div>
-    <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Y軸（高さ）</option><option value=2>Z軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
-    <div class="sceneNote">行のチェックで複数選択。整列は2個以上を選んでください。グループ化は後から解除できます。結合は複数の定義を一つの複合オブジェクトにまとめ、結合解除まで一体として扱います。</div>
+    <div class="alignTools"><button id="centerOnScreenSel" title="選択中のオブジェクト（接着した子パーツ・グループを含む）を、いま見ている画面の中央へ移動">画面中央へ</button><button id="centerChildSel" title="テント付き建物・看板付き建物のテント／看板を、建物の左右（X方向）の中央へすぐ戻す。1個を選ぶだけで使えます">テント・看板を中央へ</button></div>
+    <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Z軸（高さ）</option><option value=2>Y軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
+    <div class="sceneNote">行のチェックで複数選択。「画面中央へ」は1個でも動きます（看板付き建物・テント付き建物は建物本体の中心を画面中央へ合わせます）。整列は2個以上を選んでください。グループ化は後から解除できます。結合は複数の定義を一つの複合オブジェクトにまとめ、結合解除まで一体として扱います。</div>
     <div id="objectList"><div class="emptyList">まだオブジェクトがありません</div></div>`;
     side.insertBefore(quick, side.firstChild);
     const humanInput = el("humanHeight");
@@ -644,6 +645,130 @@
         });
         render();
     }
+    // ===== 画面中央へ =====
+    // 看板付き建物・テント付き建物のような複合アセットは、建物本体と付属パーツで
+    // 外接範囲が大きく、数値入力で中央へ寄せるのが難しい。押した1回で
+    // 「見えている画面の中央」へ移動できるようにする。
+    // 移動量は表示中のビューに合わせて決める。
+    //   3D／真上 … 画面中央の床面（X/Z）。高さは変えない
+    //   正面     … 画面中央の X と高さ
+    //   真横     … 画面中央の奥行きと高さ
+    // 接着中の子パーツ（テント・看板）は親と同じ量だけ動かし、位置関係を崩さない。
+    function screenCenterTarget(worldCenter) {
+        const mid = { x: W / 2, y: H / 2 };
+        if (orthView === "front") {
+            const w = floorPlanFrontWorldAt(mid);
+            return w ? [w.x, w.y, worldCenter[2]] : null;
+        }
+        if (orthView === "side") {
+            const w = floorPlanSideWorldAt(mid);
+            return w ? [worldCenter[0], w.y, w.z] : null;
+        }
+        if (orthView === "top") {
+            const w = floorPlanWorldAt(mid);
+            return w ? [w.x, worldCenter[1], w.z] : null;
+        }
+        // 3D（透視・魚眼）：画面中央の視線が床と交わる点を中央とみなす。
+        // 視線が水平以上で床に当たらないときは、視線方向へ8m先。
+        // 視線の向きはカメラ座標の+Z（cam()の逆回転）から求める。
+        const th = (Number(P.yaw) || 0) * DG,
+            ph = (Number(P.pitch) || 0) * DG,
+            eyeY = (Number(P.ch) || 1.6) - 1,
+            fx = -Math.cos(ph) * Math.sin(th),
+            fy = Math.sin(ph),
+            fz = Math.cos(ph) * Math.cos(th),
+            // 画面中央の視線が、オブジェクトの高さ（worldCenter[1]）を通る位置を求める。
+            // これで「オブジェクトの中心」が画面中央に来る。
+            // 視線がほぼ水平で交点が無いときは、視線方向へ8m先にする。
+            ty = Number(worldCenter[1]) || 0,
+            drop = ty - eyeY,
+            // 視線がほぼ水平（＝地平線が画面中央）のときは、床の上の点を画面中央へ
+            // 置けない。その場合は「画面の下寄り（8割）に収まる距離」まで離して、
+            // 画面外へ飛ばないようにする。
+            fit = (Math.abs(drop) * ((W * (Number(P.lens) || 50)) / 36)) / Math.max(40, 0.85 * (H / 2)),
+            tRaw = Math.abs(fy) > 1e-3 ? drop / fy : Math.max(8, fit),
+            t = clamp(tRaw > 0.5 ? tRaw : Math.max(8, fit), 1.5, 80);
+        return [
+            (Number(P.cx) || 0) + fx * t,
+            worldCenter[1],
+            (Number(P.cz) || 0) + fz * t,
+        ];
+    }
+    function centerSelectionOnScreen() {
+        const objects = selectedObjects();
+        if (!objects.length) {
+            flashHint("中央へ移動するオブジェクトを選択してください");
+            return;
+        }
+        // 接着している子パーツ・グループも同時に動かす（見た目が崩れないように）。
+        const unitKeys = new Set(objects.map((o) => o.groupId || o.id)),
+            unit = sceneObjects().filter((o) => unitKeys.has(o.groupId || o.id)),
+            movable = unit.filter((o) => o && !obLocked(o));
+        if (!movable.length) {
+            flashHint("ロック中のオブジェクトは移動できません");
+            return;
+        }
+        // 「建物の中央」を画面中央へ合わせる。テントや看板は建物の前面に
+        // 付くため、付属パーツまで含めた中心を使うと建物本体が画面中央から
+        // ずれる。親（建物本体）を基準に中心を決め、移動は付属パーツも一緒に行う。
+        const bodyObjects = movable.filter((o) => !o.attachment?.parentId),
+            b = groupBounds(bodyObjects.length ? bodyObjects : movable),
+            center = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2],
+            target = screenCenterTarget(center);
+        if (!target) {
+            flashHint("このビューでは画面中央を計算できません");
+            return;
+        }
+        const delta = [target[0] - center[0], target[1] - center[1], target[2] - center[2]];
+        if (Math.hypot(delta[0], delta[1], delta[2]) < 1e-4) return;
+        HU.push(S);
+        RD = [];
+        const ids = new Set(movable.map((o) => o.id));
+        movable.forEach((o) => setOb(o.id, moveBy(o, delta, !!(o.attachment?.parentId && ids.has(o.attachment.parentId)))));
+        render();
+    }
+    el("centerOnScreenSel").onclick = centerSelectionOnScreen;
+    // ===== テント・看板を建物の中央へ =====
+    // テント付き建物・看板付き建物の子パーツは「親のローカルX方向の位置（attachment.x）」を
+    // 持っていて、0 が建物の左右の中央。整列（2個以上必要）を使わずに、
+    // 選択1個から子パーツだけを中央へ戻せるようにする。
+    function centerAttachedChildOnParent() {
+        const objects = selectedObjects();
+        if (!objects.length) {
+            flashHint("テント付き建物・看板付き建物を選択してください");
+            return;
+        }
+        const ids = new Set(objects.map((o) => o.id)),
+            groupIds = new Set(objects.map((o) => o.groupId).filter(Boolean)),
+            // 選択が親でも子でも、同じグループの接着パーツを対象にする。
+            children = sceneObjects().filter(
+                (o) =>
+                    o &&
+                    o.attachment?.parentId &&
+                    (ids.has(o.attachment.parentId) || (o.groupId && groupIds.has(o.groupId))),
+            );
+        if (!children.length) {
+            flashHint("接着しているテント・看板がありません（建物付きアセットを選んでください）");
+            return;
+        }
+        const targets = children.filter((o) => !obLocked(o));
+        if (!targets.length) {
+            flashHint("ロック中のパーツは動かせません（一覧の鍵で解除）");
+            return;
+        }
+        // すでに中央にあるなら何もしない（無駄なUndoを積まない）。
+        const needs = targets.filter((o) => Math.abs(Number(o.attachment?.x) || 0) > 1e-4);
+        if (!needs.length) {
+            flashHint("テント・看板はすでに建物の中央にあります");
+            return;
+        }
+        HU.push(S);
+        RD = [];
+        needs.forEach((o) => setOb(o.id, { attachment: { ...o.attachment, x: 0 } }));
+        render();
+        flashHint("テント・看板を建物の左右の中央へ戻しました");
+    }
+    el("centerChildSel").onclick = centerAttachedChildOnParent;
     list.addEventListener("click", (e) => {
         const b = e.target.closest("[data-object]");
         if (!b) return;
@@ -3025,9 +3150,10 @@
             s = scrW(point);
         if (!s.ok) return [];
         const out = [],
+            // 手前上辺は「屋根の高さ」と「建物の手前面」まで届かせる（直方体にできる）。
             zMin = 0.05,
-            zMax = g.h - 0.02,
-            yMin = -g.d / 2 + 0.025,
+            zMax = Math.max(0.05, g.h),
+            yMin = -g.d / 2,
             yMax = g.d / 2 - 0.025;
         if (orthView === "top") {
             const gap = orthHandleGap(Math.max(g.w, g.d, 0.6));
@@ -3445,14 +3571,23 @@
             add("w", "幅−", L2W(o, -o.ra, 0, 0), L2W(o, -o.ra - 0.1, 0, 0), Math.abs(o.ra) * 2, 0.01, -1);
             add("d", "奥行＋", L2W(o, 0, o.rb, 0), L2W(o, 0, o.rb + 0.1, 0), Math.abs(o.rb) * 2, 0.01, 1);
             add("d", "奥行−", L2W(o, 0, -o.rb, 0), L2W(o, 0, -o.rb - 0.1, 0), Math.abs(o.rb) * 2, 0.01, -1);
-            // 真上ではY方向が投影されないため、画面上へ高さハンドルを逃がして表示する。
-            const gap = orthHandleGap(Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)), 0.65);
+            // 真上では高さ方向が投影されないため、画面上へ逃がして表示する。
+            // 以前は真下（center の 48px 下）へ置いていたため「奥行−」の白い四角と
+            // ほぼ同じ位置になり、押しても高さが変わらなかった。
+            // 右下の角の外側へ斜めに逃がし、他のハンドルと重ならない位置にする。
+            const corner = scrW(
+                    L2W(o, Math.abs(Number(o.ra) || 0.3), -Math.abs(Number(o.rb) || 0.3), 0),
+                ),
+                out = 24 / Z,
+                gap = orthHandleGap(Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.rb) || 0.5)), 0.65);
             handles.push({
                 kind: "h",
                 label: "高さ",
-                s: { x: center.x, y: center.y + gap, ok: true },
-                dir: { x: 0, y: 1 },
-                scale: orthScale(),
+                s: corner.ok
+                    ? { x: corner.x + out, y: corner.y + out, ok: true }
+                    : { x: center.x + gap, y: center.y + gap, ok: true },
+                dir: { x: Math.SQRT1_2, y: Math.SQRT1_2 },
+                scale: orthScale() * Math.SQRT1_2,
                 start: Math.max(0, Number(o.h) || 0),
                 min: 0,
                 screen: true,
@@ -3504,13 +3639,20 @@
                 add("h", "上端", L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + 0.1), Math.max(0, Number(o.h) || 0), 0, 1);
                 add("h", "下端", L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - 0.1), Math.max(0, Number(o.h) || 0), 0, -1);
             }
-            const gap = orthHandleGap(Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.h) || 0.6)), 0.65);
+            // 奥行き（画面に投影されない軸）は、右上の角の外側へ斜めに逃がす。
+            // 以前は中心の真横（+60px）へ置いていたため「幅＋」の白い四角と重なり、
+            // 押しても幅の変更として処理されていた。
+            const corner = scrW(L2W(o, Math.abs(Number(o.ra) || 0.3), 0, z1)),
+                out = 26 / Z,
+                gap = orthHandleGap(Math.max(Math.abs(Number(o.ra) || 0.5), Math.abs(Number(o.h) || 0.6)), 0.65);
             handles.push({
                 kind: "d",
                 label: "奥行き",
-                s: { x: center.x + gap, y: center.y, ok: true },
-                dir: { x: 1, y: 0 },
-                scale: orthScale(),
+                s: corner.ok
+                    ? { x: corner.x + out, y: corner.y - out, ok: true }
+                    : { x: center.x + gap, y: center.y - gap, ok: true },
+                dir: { x: Math.SQRT1_2, y: Math.SQRT1_2 },
+                scale: orthScale() * Math.SQRT1_2,
                 start: Math.abs(o.rb) * 2,
                 min: 0.01,
                 side: 1,
@@ -3557,26 +3699,39 @@
         const b = obBounds(o),
             centerWorld = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2],
             center = scrW(centerWorld),
-            screenLen = 64 / Z,
-            worldLen = Math.max(0.45, Math.min(2.4, screenLen / Math.max(1, Number(orthScale()) || 1)));
-        const defs =
-            orthView === "top"
-                ? [
-                      { vec: [1, 0, 0], name: "X", col: "#e8743d" },
-                      { vec: [0, 0, 1], name: "Z", col: "#2fb5a5" },
-                      { vec: [0, 1, 0], name: "Y", col: "#4a7be8", screenDir: { x: 0, y: -1 } },
-                  ]
-                : orthView === "side"
-                  ? [
-                        { vec: [0, 0, 1], name: "Z", col: "#2fb5a5" },
-                        { vec: [0, 1, 0], name: "Y", col: "#4a7be8" },
-                        { vec: [1, 0, 0], name: "X", col: "#e8743d", screenDir: { x: 1, y: 0 } },
-                    ]
-                  : [
-                        { vec: [1, 0, 0], name: "X", col: "#e8743d" },
-                        { vec: [0, 1, 0], name: "Y", col: "#4a7be8" },
-                        { vec: [0, 0, 1], name: "Z", col: "#2fb5a5", screenDir: { x: 1, y: 0 } },
-                    ];
+            sc = Math.max(1, Number(orthScale()) || 1),
+            // 矢印の長さは、寸法ハンドル（幅＋−／奥行＋−／高さ）へ届かない長さにする。
+            // 以前は 64px 固定で、外側の白い四角や回転リングの丸と重なり、
+            // 矢印を掴んでも寸法変更や回転として処理されていた。
+            halfPx = Math.max(
+                6,
+                Math.min(Math.abs(b.hi[0] - b.lo[0]), Math.abs(b.hi[2] - b.lo[2])) * sc * 0.5,
+            ),
+            screenLen = Math.max(20, Math.min(46, halfPx * 0.85)) / Z,
+            worldLen = Math.max(0.45, Math.min(2.4, screenLen / sc));
+        // 軸の表示名と色は3Dギズモと同じ約束へ揃える。
+        // 左右＝X（橙）／手前奥＝Y（緑）／上下＝Z（青）。
+        // 正投影で画面へ投影されない軸は、真横へ潰すと他の軸と重なるため、
+        // 斜め右下へ逃がして必ず掴めるようにする。
+        const diag = { x: Math.SQRT1_2, y: Math.SQRT1_2 },
+            defs =
+                orthView === "top"
+                    ? [
+                          { vec: [1, 0, 0], name: "X", col: "#e8743d" },
+                          { vec: [0, 0, 1], name: "Y", col: "#3aa76a" },
+                          { vec: [0, 1, 0], name: "Z", col: "#4a7be8", screenDir: diag },
+                      ]
+                    : orthView === "side"
+                      ? [
+                            { vec: [0, 0, 1], name: "Y", col: "#3aa76a" },
+                            { vec: [0, 1, 0], name: "Z", col: "#4a7be8" },
+                            { vec: [1, 0, 0], name: "X", col: "#e8743d", screenDir: diag },
+                        ]
+                      : [
+                            { vec: [1, 0, 0], name: "X", col: "#e8743d" },
+                            { vec: [0, 1, 0], name: "Z", col: "#4a7be8" },
+                            { vec: [0, 0, 1], name: "Y", col: "#3aa76a", screenDir: diag },
+                        ];
         const axes = defs
             .map((d) => {
                 const q = scrW(V.add(centerWorld, d.vec, 1, worldLen)),
@@ -3592,7 +3747,7 @@
                             ok: true,
                         },
                         screen: true,
-                        scale: Math.max(1, Number(orthScale()) || 1),
+                        scale: sc,
                     };
                 if (!q.ok || px < 4) return null;
                 return { ...d, sT: q, screen: false, scale: px / worldLen || 1 };
@@ -3600,13 +3755,24 @@
             .filter(Boolean);
         return { centerWorld, center, axes };
     }
+    // 移動の矢印は「根元〜先端」ではなく外側だけを掴めるようにする。
+    // 中心から先端までの線分全体を当たり判定にすると、図形の内側を通る線が
+    // 面・寸法ハンドルを奪ってしまう（3D側の AXIS_GRAB_FROM と同じ考え方）。
     function floorMoveHandleAt(p) {
         const o = floorPlanObject(),
             g = floorMoveGizmo(o);
         if (!g) return null;
-        const lim = 18 / Z;
-        for (const a of g.axes) if (segd(p, g.center, a.sT) < lim) return { g, a };
-        return null;
+        const lim = 14 / Z;
+        let best = null;
+        for (const a of g.axes) {
+            const from = {
+                x: g.center.x + (a.sT.x - g.center.x) * 0.45,
+                y: g.center.y + (a.sT.y - g.center.y) * 0.45,
+            };
+            const d = segd(p, from, a.sT);
+            if (d < lim && (!best || d < best.d)) best = { g, a, d };
+        }
+        return best;
     }
     function drawFloorMoveGizmo(c, o) {
         const g = floorMoveGizmo(o);
@@ -4366,10 +4532,17 @@
                     // 受け持つ」として除外していたが、3Dで描かれているリングを
                     // 前／横／上で押すと何も起きず、「3Dでしか回せない」状態だった。
                     // dragEdit 側は正投影でもリングを回せる（ringPlaneUV）。
+                    signScreenGizmo = !!obOf(sel)?.attachment?.wallSideSign,
+                    // 間取りビュー（前／横／上）では、3Dの汎用ギズモ（回転の輪・軸・面）は
+                    // 描画されていない。描かれていない輪の当たり判定だけが残っていると、
+                    // 見えないリングが寸法ハンドルを奪い、「幅＋−を押すと回転する」
+                    // 「押しても何も動かない」状態になる。看板だけは engine-tools 側が
+                    // 前／横／上でもギズモを描くので除外する。
                     genericGizmo =
                         (specialT === "face" && specialAsset !== "sign") ||
                         specialT === "axis" ||
-                        specialT === "mv",
+                        specialT === "mv" ||
+                        (specialT === "ring" && !signScreenGizmo),
                     customFloorGizmo = !!special && !genericGizmo;
                 const activeFloorObject = sel && obOf(sel),
                     wallPlaneSelection = !!(activeFloorObject && activeFloorObject.k !== 1),
@@ -4389,7 +4562,15 @@
                             !signBodyCenterHit &&
                             special?.sign?.s?.ok &&
                             Math.hypot(special.sign.s.x - p.x, special.sign.s.y - p.y) <= 12 / Z);
-                if (customFloorGizmo && signHandleClose) {
+                // アセット専用ハンドル（奥の扉・開口など）と、間取りの寸法ハンドル
+                // （幅＋−・奥行＋−・高さの白い四角）は、図形の縁で重なりやすい。
+                // 白い四角の中心をしっかり押したときは寸法変更を優先し、
+                // それ以外はアセット専用ハンドルへ渡す。
+                const resizeTight = (() => {
+                    const r = floorPlanEditHandleAt(p);
+                    return !!r && Math.hypot(r.h.s.x - p.x, r.h.s.y - p.y) <= 7 / Z;
+                })();
+                if (customFloorGizmo && signHandleClose && !resizeTight) {
                     e.preventDefault();
                     e.stopImmediatePropagation();
                     ptr = e.pointerId;
@@ -4404,10 +4585,23 @@
             // 正面／横ビューにも、上面と同じ回転ハンドルを用意する。
             // これまではこの2ビューだけ先に高さ／移動判定へ落ち、回転丸を
             // 押しても通常の面編集として扱われていた。
+            // ただし寸法ハンドル（白い四角）や移動矢印の方が押した点に近いときは
+            // そちらを優先する。以前は必ず回転が勝つ順序だったため、
+            // 幅＋−を押すと回転してしまい、寸法が変えられなかった。
             if (sel && (orthView === "front" || orthView === "side")) {
                 const turn = floorPlanHandles(),
-                    turnLimit = 24 / Z;
-                if (turn.object?.s?.ok && Math.hypot(turn.object.s.x - p.x, turn.object.s.y - p.y) < turnLimit) {
+                    turnLimit = 24 / Z,
+                    turnDist = turn.object?.s?.ok
+                        ? Math.hypot(turn.object.s.x - p.x, turn.object.s.y - p.y)
+                        : Infinity,
+                    resizePre = floorPlanEditHandleAt(p),
+                    resizeDist = resizePre ? Math.hypot(resizePre.h.s.x - p.x, resizePre.h.s.y - p.y) : Infinity,
+                    movePre = floorMoveHandleAt(p),
+                    moveDist = movePre ? movePre.d : Infinity;
+                // 同距離のときは寸法ハンドルを優先する（白い四角の方が狙いが狭いため）。
+                // 判定は 2px の余裕を持たせる。押した座標は数px ずれるので、
+                // 完全一致で比べると「矢印と四角が一直線に並ぶ」場面で結果が安定しない。
+                if (turnDist < turnLimit && turnDist + 2 / Z < resizeDist && turnDist <= moveDist) {
                     e.preventDefault();
                     e.stopImmediatePropagation();
                     floorPlanDrag = {
@@ -4424,10 +4618,19 @@
                     return;
                 }
             }
-            const resize = floorPlanEditHandleAt(p);
+            const resize = floorPlanEditHandleAt(p),
+                moveNear = floorMoveHandleAt(p),
+                // 幅／奥行／高さの白い四角と移動矢印が重なるときは、近い方を採用する。
+                // 以前は必ず寸法が勝っていたため、矢印の先端を押しても移動できなかった。
+                // 移動矢印と白い四角が一直線に並ぶ（例：テントの前後ハンドルと Y 矢印）ときは
+                // 必ず寸法ハンドルを優先する。押した座標は数px ずれるため、
+                // 完全一致ではなく 2px の余裕を持たせて比べる。
+                resizeWins =
+                    !!resize &&
+                    (!moveNear || Math.hypot(resize.h.s.x - p.x, resize.h.s.y - p.y) <= moveNear.d + 2 / Z);
             // 7 前も9 上・8 横と同じ面編集ハンドルを先に受け取る。
             // ここから漏れると、ハンドルを押してもオブジェクト移動として処理される。
-            if (resize && (orthView === "top" || orthView === "side" || orthView === "front")) {
+            if (resizeWins && (orthView === "top" || orthView === "side" || orthView === "front")) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 floorPlanDrag = {
@@ -4721,12 +4924,17 @@
                                       ? { openingBack: value }
                                       : h.kind === "awningEdgeZ"
                                         ? {
-                                              awningEdgeZ: value,
+                                              // 上辺が水平（＝屋根の高さ）に近づいたら吸着
+                                              awningEdgeZ: snapAwningEdge(value, h.max),
                                               awningFrontBottom: h.frontBottom,
                                               awningEdgeEdited: true,
                                           }
                                         : h.kind === "awningEdgeY"
-                                          ? { awningEdgeY: value, awningEdgeEdited: true }
+                                          ? {
+                                                // 前面が垂直（＝建物の手前面）に近づいたら吸着
+                                                awningEdgeY: snapAwningEdge(value, h.min),
+                                                awningEdgeEdited: true,
+                                            }
                                           : { openingW: value }
                                 : h.param
                                   ? floorWallDimensionPatch(o, h.param, value, h.side || 1)
@@ -5373,7 +5581,7 @@
     const help = document.createElement("div");
     help.id = "helpPanel";
     help.innerHTML =
-        '<div class="helpTitle">操作のコツ</div><div><span class="helpKey">Pencil</span>線を引く　<span class="helpKey">指</span>視点・ピンチ</div><div><span class="helpKey">⌘ Z</span>元に戻す　<span class="helpKey">E</span>消しゴム</div><div><span class="helpKey">図形</span>ドラッグで床・壁に配置</div><div><span class="helpKey">編集</span>線を選択 → 矢印移動／白い四角で拡縮／輪で回転</div><div><span class="helpKey">⌘ L</span>選択をロック／解除　<span class="helpKey">L</span>カメラ（視点）を固定</div><div style="margin-top:7px;color:#7f999c">アセットを追加したあと、編集モードでBlender風ギズモを使えます。人物は基準身長から作られます。<br>ロックしたオブジェクトは、ギズモ・数値パネル・整列・削除のどれでも変わりません（シーン一覧の鍵で解除）。カメラ固定中もオブジェクトの編集はできます。</div>';
+        '<div class="helpTitle">操作のコツ</div><div><span class="helpKey">Pencil</span>線を引く　<span class="helpKey">指</span>視点・ピンチ</div><div><span class="helpKey">⌘ Z</span>元に戻す　<span class="helpKey">E</span>消しゴム</div><div><span class="helpKey">図形</span>ドラッグで床・壁に配置</div><div><span class="helpKey">編集</span>線を選択 → 矢印移動（X左右／Y手前奥／Z上下）／白い四角で拡縮／輪で回転</div><div><span class="helpKey">画面中央へ</span>選択中の建物（接着した看板・テントも一緒）を、いまの画面の中央へ移動</div><div><span class="helpKey">⌘ L</span>選択をロック／解除　<span class="helpKey">L</span>カメラ（視点）を固定</div><div style="margin-top:7px;color:#7f999c">アセットを追加したあと、編集モードでBlender風ギズモを使えます。人物は基準身長から作られます。<br>ロックしたオブジェクトは、ギズモ・数値パネル・整列・削除のどれでも変わりません（シーン一覧の鍵で解除）。カメラ固定中もオブジェクトの編集はできます。</div>';
     el("main").appendChild(help);
     el("helpToggle").onclick = () => {
         help.style.display = help.style.display === "block" ? "none" : "block";

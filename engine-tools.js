@@ -550,20 +550,32 @@ function buildingGizmo(o) {
         handles: { ...front.handles, ...back.handles, backFace },
     };
 }
+// テントの前縁ハンドルを、直方体になる値（上辺＝屋根の高さ h / 前面＝建物の手前面）へ
+// 近づいたら吸着させる。吸着幅は 3cm。これで「最大まで動かす」だけで
+// きれいな直方体になり、少し傾いた中途半端な状態が残らない。
+function snapAwningEdge(value, target) {
+    const v = Number(value),
+        t = Number(target);
+    if (!Number.isFinite(v) || !Number.isFinite(t)) return v;
+    return Math.abs(v - t) <= 0.03 ? t : v;
+}
 function awningGeometry(o) {
     const w = Math.max(0.1, Math.abs(Number(o.ra) || 1) * 2),
         d = Math.max(0.05, Math.abs(Number(o.rb) || 0.5) * 2),
         h = Math.max(0.1, Number(o.h) || 1),
         half = d / 2,
+        // 手前の上辺は「建物の手前面（-d/2）」と「屋根の高さ h」まで届かせる。
+        // 以前は 0.025／0.02 の余白を残していたため、ハンドルを最大まで動かしても
+        // 上辺が水平にならず、前面もわずかに傾いたまま（直方体にならない）だった。
         edgeY = clamp(
             Number.isFinite(Number(o.awningEdgeY)) ? Number(o.awningEdgeY) : -half,
-            -half + 0.025,
-            half - 0.025,
+            -half,
+            Math.max(-half, half - 0.025),
         ),
         edgeZ = clamp(
             Number.isFinite(Number(o.awningEdgeZ)) ? Number(o.awningEdgeZ) : h,
             0.05,
-            Math.max(0.05, h - 0.02),
+            Math.max(0.05, h),
         ),
         thickness = clamp(Number(o.awningThickness) || Math.max(0.05, h * 0.14), 0.03, Math.max(0.03, h * 0.45)),
         frontBottom = clamp(
@@ -600,7 +612,7 @@ function awningGizmo(o) {
             scale: zpx / 0.1 || 1,
             start: g.edgeZ,
             min: 0.05,
-            max: g.h - 0.02,
+            max: g.h,
             frontBottom: g.frontBottom,
         },
     };
@@ -611,7 +623,7 @@ function awningGizmo(o) {
             dir: { x: ydx / ypx, y: ydy / ypx },
             scale: ypx / 0.1 || 1,
             start: g.edgeY,
-            min: -g.d / 2 + 0.025,
+            min: -g.d / 2,
             max: g.d / 2 - 0.025,
         };
     return {
@@ -3521,8 +3533,9 @@ function dragEdit(p, freeRotation = false) {
             deltaX = p.x - ed.p0.x,
             deltaY = p.y - ed.p0.y,
             amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1);
+        // 直方体（上辺が水平・前面が垂直）へ近づいたら、ぴったり吸着させる。
         patch = {
-            awningEdgeZ: clamp(h.start + amount, h.min, h.max),
+            awningEdgeZ: snapAwningEdge(clamp(h.start + amount, h.min, h.max), h.max),
             awningFrontBottom: h.frontBottom,
             awningEdgeEdited: true,
         };
@@ -3531,7 +3544,10 @@ function dragEdit(p, freeRotation = false) {
             deltaX = p.x - ed.p0.x,
             deltaY = p.y - ed.p0.y,
             amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1);
-        patch = { awningEdgeY: clamp(h.start + amount, h.min, h.max), awningEdgeEdited: true };
+        patch = {
+            awningEdgeY: snapAwningEdge(clamp(h.start + amount, h.min, h.max), h.min),
+            awningEdgeEdited: true,
+        };
     } else if (ed.t === "sign-faceW" || ed.t === "sign-faceH") {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
