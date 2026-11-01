@@ -5496,6 +5496,9 @@ function buildExportDepth(cw, ch, tf) {
     if (!depthBuffer || depthBufferLen !== need) {
         depthBuffer = new Float32Array(need);
         depthBufferLen = need;
+        // Float32Array の初期値は 0（＝いちばん手前）なので、そのままだと
+        // 作った直後の1フレームだけ「面の外の線がすべて隠れる」。必ず無限遠で埋める。
+        depthBuffer.fill(Infinity);
         depthUsedY0 = Infinity;
         depthUsedY1 = -Infinity;
     }
@@ -5512,32 +5515,75 @@ function buildExportDepth(cw, ch, tf) {
             tris.push(...surfaceTriangles(s.ob));
         }
     });
+    // 三角形を深度バッファへ書く。走査線（スキャンライン）方式で塗る。
+    // 以前は外接矩形の全画素で重心座標を3つずつ計算していたため、
+    // 面の多いシーン（30個・2,580三角形）で1フレーム400ms近くかかっていた。
+    //   ・行ごとに三角形の左右の端（xL / xR）を辺との交点から出す
+    //   ・重心座標は行の中で x の1次式なので、開始値＋増分の足し算で済ませる
+    //   ・画面外の三角形は外接矩形の段階で捨てる
     const putTri = (tr) => {
-        const p = tr.map((v) => exportPoint(v, tf));
-        if (p.some((q) => !q || !Number.isFinite(q.depth) || q.depth < -0.001)) return;
-        const area = (p[1].x - p[0].x) * (p[2].y - p[0].y) - (p[1].y - p[0].y) * (p[2].x - p[0].x);
+        const p0 = exportPoint(tr[0], tf),
+            p1 = exportPoint(tr[1], tf),
+            p2 = exportPoint(tr[2], tf);
+        if (
+            !p0 || !p1 || !p2 ||
+            !Number.isFinite(p0.depth) || !Number.isFinite(p1.depth) || !Number.isFinite(p2.depth) ||
+            p0.depth < -0.001 || p1.depth < -0.001 || p2.depth < -0.001
+        )
+            return;
+        const area = (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x);
         if (Math.abs(area) < 0.001) return;
-        const x0 = Math.max(0, Math.floor(Math.min(p[0].x, p[1].x, p[2].x))),
-            x1 = Math.min(cw - 1, Math.ceil(Math.max(p[0].x, p[1].x, p[2].x))),
-            y0 = Math.max(0, Math.floor(Math.min(p[0].y, p[1].y, p[2].y))),
-            y1 = Math.min(ch - 1, Math.ceil(Math.max(p[0].y, p[1].y, p[2].y)));
-        if (y1 >= y0) {
-            if (y0 < depthUsedY0) depthUsedY0 = y0;
-            if (y1 > depthUsedY1) depthUsedY1 = y1;
-        }
-        for (let y = y0; y <= y1; y++)
-            for (let x = x0; x <= x1; x++) {
-                const px = x + 0.5,
-                    py = y + 0.5,
-                    w0 = ((p[1].x - p[0].x) * (py - p[0].y) - (p[1].y - p[0].y) * (px - p[0].x)) / area,
-                    w1 = ((p[2].x - p[1].x) * (py - p[1].y) - (p[2].y - p[1].y) * (px - p[1].x)) / area,
-                    w2 = ((p[0].x - p[2].x) * (py - p[2].y) - (p[0].y - p[2].y) * (px - p[2].x)) / area;
+        const minY = Math.min(p0.y, p1.y, p2.y),
+            maxY = Math.max(p0.y, p1.y, p2.y);
+        // 画面の外は捨てる（上下どちらか外れていれば描く画素が無い）
+        if (maxY < 0 || minY > ch || Math.min(p0.x, p1.x, p2.x) > cw || Math.max(p0.x, p1.x, p2.x) < 0) return;
+        const y0 = Math.max(0, Math.floor(minY)),
+            y1 = Math.min(ch - 1, Math.ceil(maxY));
+        if (y1 < y0) return;
+        if (y0 < depthUsedY0) depthUsedY0 = y0;
+        if (y1 > depthUsedY1) depthUsedY1 = y1;
+        const d0 = -(p1.y - p0.y) / area, // 重心座標の x 方向の増分
+            d1 = -(p2.y - p1.y) / area,
+            d2 = -(p0.y - p2.y) / area;
+        for (let y = y0; y <= y1; y++) {
+            const py = y + 0.5;
+            // この行と三角形の辺が交わる x の最小・最大を求める
+            let xL = Infinity,
+                xR = -Infinity;
+            for (let e = 0; e < 3; e++) {
+                const a = e === 0 ? p0 : e === 1 ? p1 : p2,
+                    b = e === 0 ? p1 : e === 1 ? p2 : p0;
+                if ((a.y <= py && b.y >= py) || (b.y <= py && a.y >= py)) {
+                    const px =
+                        Math.abs(b.y - a.y) < 1e-9
+                            ? Math.min(a.x, b.x)
+                            : a.x + ((b.x - a.x) * (py - a.y)) / (b.y - a.y);
+                    if (px < xL) xL = px;
+                    if (b.y === a.y) {
+                        // 水平な辺は行全体を覆うので、両端を候補にする
+                        const px2 = Math.max(a.x, b.x);
+                        if (px2 > xR) xR = px2;
+                    }
+                    if (px > xR) xR = px;
+                }
+            }
+            if (!(xR >= xL)) continue;
+            const xa = Math.max(0, Math.ceil(xL - 0.5)),
+                xb = Math.min(cw - 1, Math.floor(xR - 0.5));
+            if (xb < xa) continue;
+            const px0 = xa + 0.5;
+            let w0 = ((p1.x - p0.x) * (py - p0.y) - (p1.y - p0.y) * (px0 - p0.x)) / area,
+                w1 = ((p2.x - p1.x) * (py - p1.y) - (p2.y - p1.y) * (px0 - p1.x)) / area,
+                w2 = ((p0.x - p2.x) * (py - p2.y) - (p0.y - p2.y) * (px0 - p2.x)) / area,
+                idx = y * cw + xa;
+            for (let x = xa; x <= xb; x++, idx++, w0 += d0, w1 += d1, w2 += d2) {
+                // 重心座標の和は常に1なので「全負」側の許容を足しても判定は変わらない（旧式と同じ結果になる）
                 if ((w0 >= -1e-5 && w1 >= -1e-5 && w2 >= -1e-5) || (w0 <= 1e-5 && w1 <= 1e-5 && w2 <= 1e-5)) {
-                    const z = p[0].depth * w1 + p[1].depth * w2 + p[2].depth * w0,
-                        idx = y * cw + x;
+                    const z = p0.depth * w1 + p1.depth * w2 + p2.depth * w0;
                     if (z < depth[idx]) depth[idx] = z;
                 }
             }
+        }
     };
     tris.forEach(putTri);
     return depth;

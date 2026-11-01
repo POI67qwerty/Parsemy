@@ -2425,6 +2425,10 @@ function linesStall(ctx) {
         [hw - t, hd],
         [-hw + t, hd],
     ].forEach(([x, y]) => out.push(lineA(o, [[x, y, 0], [x, y, roofBottom]], c)));
+    // 3b) コの字の外側の底（壁が地面に接する線）。左右の壁の下面を描かないと、
+    //     カウンターの後ろで線が途切れて「壁が浮いている」ように見える。
+    //     奥の壁の底は 2) の四角の辺で描かれているので、左右の2本だけ足す。
+    [-hw, hw].forEach((x) => out.push(lineA(o, [[x, -hd, 0], [x, hd, 0]], c)));
     // 4) カウンター：上面と底面の四角、手前の縦2本。
     //    奥の縦2本は 3) の外側の稜線と同じ位置なので描かない。
     out.push(polyA(o, [[-hw, counterFrontY, ch], [hw, counterFrontY, ch], [hw, -hd, ch], [-hw, -hd, ch]], c));
@@ -2433,18 +2437,26 @@ function linesStall(ctx) {
     out.push(lineA(o, [[hw, counterFrontY, 0], [hw, counterFrontY, ch]], c));
     // 4b) 壁の内側の見えている範囲（壁側＋左右）の床。カウンターと左右の壁で
     //     囲まれた所に線を入れると、床と壁の境が読める。
+    //     奥は「奥の壁の内面」まで（hd-t）。hd まで伸ばすと壁の下に潜り、内側の
+    //     接地線が奥の壁の外側の線と重なって、内側だけ線が無いように見える。
     out.push(
         polyA(
             o,
             [
                 [-hw + t, -hd, 0],
                 [hw - t, -hd, 0],
-                [hw - t, hd, 0],
-                [-hw + t, hd, 0],
+                [hw - t, hd - t, 0],
+                [-hw + t, hd - t, 0],
             ],
             c,
         ),
     );
+    // 4c) 内側の稜線。壁の内面どうしが交わる奥の縦2本と、内面の上端（屋根の下面との
+    //     取り合い）3本。これが無いと、内側から見たときに壁と屋根・壁と壁の境が
+    //     消えて、面が1枚の板のように見える。
+    [-hw + t, hw - t].forEach((x) => out.push(lineA(o, [[x, hd - t, 0], [x, hd - t, roofBottom]], c)));
+    out.push(lineA(o, [[-hw + t, hd - t, roofBottom], [hw - t, hd - t, roofBottom]], c));
+    [-hw + t, hw - t].forEach((x) => out.push(lineA(o, [[x, -hd, roofBottom], [x, hd - t, roofBottom]], c)));
     // 5) 屋根：上面と底面の四角、前後の縦4本（後ろの2本はコの字の奥の稜線の続き）。
     out.push(polyA(o, [[-hw, roofFrontY, h], [hw, roofFrontY, h], [hw, hd, h], [-hw, hd, h]], c));
     out.push(

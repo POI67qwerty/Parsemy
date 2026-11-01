@@ -808,13 +808,17 @@ function strokeW(c, s) {
     // 正投影ビューでは投影が線形なので、点の間を球面上で補間する必要がない。
     // （以前は全ビューで角度分割していたため、1本の線が最大200点に増えていた）
     const subdivide = !orthView;
+    // 直前の点の正規化ベクトルを次の区間で使い回す（以前は区間ごとに2点とも正規化し直していた）。
+    let pna = null;
     s.p.forEach((v, i) => {
-        if (i && subdivide) {
+        const pnv = subdivide ? V.nrm(rl(v)) : null;
+        if (i && subdivide && pna) {
             const a = s.p[i - 1],
-                n = Math.ceil(Math.acos(Math.max(-1, Math.min(1, V.dot(V.nrm(rl(a)), V.nrm(rl(v)))))) / 0.03);
+                n = Math.ceil(Math.acos(Math.max(-1, Math.min(1, V.dot(pna, pnv)))) / 0.03);
             for (let j = 1; j < n; j++) put(co ? V.add(a, v, 1 - j / n, j / n) : V.nrm(V.add(a, v, 1 - j / n, j / n)));
         }
         put(v);
+        pna = pnv;
     });
     c.stroke();
 }
