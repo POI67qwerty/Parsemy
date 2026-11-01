@@ -1028,6 +1028,43 @@ function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
         ];
     return out;
 }
+// 上下の面の稜線を描かない箱（縦の棒専用）。
+// 横桟と横桟に挟まれた棒は、上端と下端が必ず横桟の中に隠れる。面ONのときは
+// 隠線処理で消えるが、面OFFの線画では「見えない線」が残って線が混む。
+// そこで最初から面を描かず、縦の4本だけを出す（線画の本数を減らす）。
+function wireBoxVA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
+    const x = w / 2,
+        y = d / 2;
+    return [
+        lineA(o, [[cx - x, cy - y, z0], [cx - x, cy - y, z1]], color),
+        lineA(o, [[cx + x, cy - y, z0], [cx + x, cy - y, z1]], color),
+        lineA(o, [[cx + x, cy + y, z0], [cx + x, cy + y, z1]], color),
+        lineA(o, [[cx - x, cy + y, z0], [cx - x, cy + y, z1]], color),
+    ];
+}
+// 上面の稜線を描かない箱（柱専用）。
+// 柱は上の横桟と同じ高さで終わるため、上端の四角は横桟の上面と重なって
+// 二重の線になる。面ONでも面OFFでも見え方は変わらないので描かない。
+function wireBoxNoTopA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
+    const x = w / 2,
+        y = d / 2;
+    return [
+        polyA(
+            o,
+            [
+                [cx - x, cy - y, z0],
+                [cx + x, cy - y, z0],
+                [cx + x, cy + y, z0],
+                [cx - x, cy + y, z0],
+            ],
+            color,
+        ),
+        lineA(o, [[cx - x, cy - y, z0], [cx - x, cy - y, z1]], color),
+        lineA(o, [[cx + x, cy - y, z0], [cx + x, cy - y, z1]], color),
+        lineA(o, [[cx + x, cy + y, z0], [cx + x, cy + y, z1]], color),
+        lineA(o, [[cx - x, cy + y, z0], [cx - x, cy + y, z1]], color),
+    ];
+}
 // ===== 5. パスパイプ用のベクトル計算 =====
 // パスパイプは制御点を丸めて中心線を作り、その周囲に円形断面を並べる。
 // 以下の小さな関数群は、その中心線・接線・法線を計算するためのもの。
@@ -2713,7 +2750,8 @@ function linesRailing(ctx) {
         footW = post * 1.5;
     // 1) 柱（床から手すりの上端まで）と、足元の少し広い板。
     posts.forEach(({ x, y }) => {
-        out.push(...wireBoxA(o, x, y, post, post, 0, h, c));
+        // 柱の上端は横桟の上面と同じ高さなので、上の四角は描かない（重なった線を減らす）。
+        out.push(...wireBoxNoTopA(o, x, y, post, post, 0, h, c));
         out.push(
             polyA(
                 o,
@@ -2746,8 +2784,9 @@ function linesRailing(ctx) {
         out.push(...wireBoxA(o, cx, cy, bw, bd, zTop0, h, c));
         out.push(...wireBoxA(o, cx, cy, bw, bd, bottom, zBot1, c));
         // 縦の棒は上下の横桟の間だけ（横桟を突き抜けない）。
+        // 縦の棒は上下の横桟に挟まれているので、上下の面は描かない（線画の本数を減らす）。
         if (zTop0 - zBot1 > 0.001)
-            r.bars.forEach(([bx, by]) => out.push(...wireBoxA(o, bx, by, barT, barT, zBot1, zTop0, c)));
+            r.bars.forEach(([bx, by]) => out.push(...wireBoxVA(o, bx, by, barT, barT, zBot1, zTop0, c)));
     });
 }
 

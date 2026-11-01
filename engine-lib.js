@@ -7,6 +7,8 @@
      1. CG.depthEps()      … 隠線判定の許容量（奥行きに応じて変える）
      2. CG.lineDedup*      … 同じ線分を2回描かないための「この1回で描いた線分」の記録
 
+     3. CG.clamp()          … 値を範囲内に収める（全モジュールで使う）
+
    使い方
      - 隠線の判定：`if (depth > z + CG.depthEps(depth)) 隠れている`
      - 線の重複よけ：`CG.lineDedup.begin()` → 描く → `CG.lineDedup.end()`
@@ -111,5 +113,16 @@
         },
     };
 
-    global.CG = Object.assign(global.CG || {}, { depthEps, lineDedup });
+    // ===== 3. 値を範囲内に収める ==============================================
+    // 画面の座標・寸法・カメラの角度など、あらゆる場所で使う。
+    // 以前は engine-input.js の途中で `const clamp = ...` と宣言していたが、
+    // 「どのモジュールからも使う小さな計算」はここに置く方針に合わせて移した。
+    function clamp(v, a, b) {
+        return Math.max(a, Math.min(b, v));
+    }
+
+    global.CG = Object.assign(global.CG || {}, { depthEps, lineDedup, clamp });
+    // 既存の呼び出し（clamp(...) が300か所以上）を書き換えずに済むよう、
+    // これまでどおり名前だけの関数としても見せる。
+    if (!global.clamp) global.clamp = clamp;
 })(typeof window !== "undefined" ? window : globalThis);

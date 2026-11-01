@@ -26,7 +26,7 @@ $("zr").onclick = () => {
     Z = 1;
     ox = oy = 0;
     updZ();
-    render();
+    renderSoon();
 };
 cv.addEventListener(
     "wheel",
@@ -204,7 +204,7 @@ function stepErase(a, b) {
         n = Math.max(1, Math.ceil(d / (P.ew / 2)));
     for (let i = 1; i <= n; i++) eraseAt({ x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n });
 }
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// clamp() は engine-lib.js の共通ライブラリにある（CG.clamp と同じもの）。
 // 間取りのドラッグ状態はstudio-ui.jsのIIFE内で管理する。
 // 分割読み込みでは別スコープになるため、window経由の小さな橋を使う。
 const getCityFloorPlanDrag = () => window.cityFloorPlanGetDrag?.() || null;
@@ -235,7 +235,7 @@ function armBoxPending(start, pointerId, source = "canvas", meta = {}) {
         if (source === "floor") setCityFloorPlanDrag(null);
         boxSelect = { pointerId, start: { ...pending.start }, end: { ...pending.start }, source };
         clearSelection();
-        render();
+        renderSoon();
     }, 360);
 }
 // 戻り値: pending / cancel / floorPan。floorPanのときだけ従来の表示パンへ引き継ぐ。
@@ -314,7 +314,7 @@ function finishBoxSelection(end) {
     tool = "edit";
     setMode("draw");
     syncSel();
-    render();
+    renderSoon();
 }
 function drawBoxSelection(c) {
     if (!boxSelect) return;
@@ -397,7 +397,7 @@ function endBoxPointer(e, commit) {
     try {
         if (cv.hasPointerCapture?.(pointerId)) cv.releasePointerCapture(pointerId);
     } catch (err) {}
-    if (!commit) render();
+    if (!commit) renderSoon();
     return true;
 }
 function abortAllBoxPointers() {
@@ -599,19 +599,19 @@ cv.onpointerdown = (e) => {
             } else armBoxPending(p, e.pointerId, "canvas");
         }
         syncSel();
-        render();
+        renderSoon();
         return;
     }
     if (act === "draw" && tool === "border") {
         bd = true;
         CR = { x0: clamp(p.x, 0, W), y0: clamp(p.y, 0, H), x1: clamp(p.x, 0, W), y1: clamp(p.y, 0, H) };
-        render();
+        renderSoon();
         return;
     }
     if (act === "draw" && tool === "erase") {
         er = { base: S, last: p };
         stepErase(p, p);
-        render();
+        renderSoon();
         return;
     } // 消しゴム
     const sn = $("snap").value;
@@ -649,7 +649,7 @@ cv.onpointermove = (e) => {
         // 途中でロックした場合も、視点は記録した位置へ戻す。
         drag = null;
         enforceCameraLock();
-        render();
+        renderSoon();
         return;
     }
     if (drag) {
@@ -719,7 +719,7 @@ cv.onpointermove = (e) => {
             cur.p = [a, { x: a.x + u.x * t, y: a.y + u.y * t }];
         } // 定規の線上に投影
     }
-    render();
+    renderSoon();
 };
 cv.onpointerup = cv.onpointercancel = (e) => {
     if (e.pointerType === "touch") {
@@ -788,7 +788,7 @@ cv.onpointerup = cv.onpointercancel = (e) => {
         RD = [];
     }
     cur = null;
-    render();
+    renderSoon();
 }; // 向きに変換して保存
 
 // iPad Safariでキャンバス外へ指／ペンを離した場合の一般操作用保険。
@@ -846,14 +846,14 @@ const undo = () => {
         if (HU.length) {
             RD.push(S);
             S = HU.pop();
-            render();
+            renderSoon();
         }
     },
     redo = () => {
         if (RD.length) {
             HU.push(S);
             S = RD.pop();
-            render();
+            renderSoon();
         }
     };
 $("undo").onclick = undo;
@@ -865,7 +865,7 @@ $("clr").onclick = () => {
         // ロック中の線は残す（解除しない限り消えない、という約束を守る）。
         S = lockedLines;
         RD = [];
-        render();
+        renderSoon();
     }
 };
 addEventListener("keydown", (e) => {
@@ -963,7 +963,7 @@ addEventListener("keydown", (e) => {
     else if (e.key === "ArrowDown") setP("pitch", clamp(P.pitch - d, -89, 89));
     else return;
     sync();
-    render();
+    renderSoon();
 });
 
 // 書き出しメニューは上部バーの横スクロール領域に隠れないよう、body直下へ移動して表示する。
@@ -989,7 +989,7 @@ if (exportLineWidthInput)
         if (mainWidth && document.activeElement !== mainWidth) mainWidth.value = value.toFixed(1);
         const slider = $("pw");
         if (slider) slider.value = value;
-        render();
+        renderSoon();
     };
 syncExportLineWidth();
 exportToggle.onclick = (e) => {

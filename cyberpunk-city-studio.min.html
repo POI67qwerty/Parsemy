@@ -1845,7 +1845,11 @@ body.cameraLocked #cv {
             return false;
         },
     };
-    global.CG = Object.assign(global.CG || {}, { depthEps, lineDedup });
+    function clamp(v, a, b) {
+        return Math.max(a, Math.min(b, v));
+    }
+    global.CG = Object.assign(global.CG || {}, { depthEps, lineDedup, clamp });
+    if (!global.clamp) global.clamp = clamp;
 })(typeof window !== "undefined" ? window : globalThis);
 const $ = (id) => document.getElementById(id);
 function isStackedBuildingAsset(o) {
@@ -9137,6 +9141,10 @@ function rasterizeDepthInto(buf, own, ownerMap, list, cw, ch, tf, used, face) {
         if (y1 < y0) return;
         if (y0 < used.y0) used.y0 = y0;
         if (y1 > used.y1) used.y1 = y1;
+        const ux0 = Math.max(0, Math.floor(minX)),
+            ux1 = Math.min(cw - 1, Math.ceil(maxX));
+        if (ux0 < used.x0) used.x0 = ux0;
+        if (ux1 > used.x1) used.x1 = ux1;
         const d0 = -(p1.y - p0.y) / area,
             d1 = -(p2.y - p1.y) / area,
             d2 = -(p0.y - p2.y) / area;
@@ -9194,7 +9202,8 @@ function rasterizeDepthInto(buf, own, ownerMap, list, cw, ch, tf, used, face) {
         }
     }
 }
-let depthLast = null,
+let depthMovingRect = null,
+    depthLast = null,
     depthStatic = null,
     depthMovingUsedY0 = Infinity,
     depthMovingUsedY1 = -Infinity;
@@ -9284,32 +9293,50 @@ function buildExportDepth(cw, ch, tf) {
             );
             depthStatic = st;
         }
-        const c0 = Math.min(
-                Number.isFinite(depthMovingUsedY0) ? depthMovingUsedY0 : Infinity,
-                Number.isFinite(depthStatic.y0) ? depthStatic.y0 : Infinity,
-            ),
-            c1 = Math.max(
-                Number.isFinite(depthMovingUsedY1) ? depthMovingUsedY1 : -Infinity,
-                Number.isFinite(depthStatic.y1) ? depthStatic.y1 : -Infinity,
-            ),
-            clr0 = Math.max(0, c0),
-            clr1 = Math.min(ch - 1, c1);
-        if (clr1 >= clr0 && Number.isFinite(clr0)) {
-            depth.fill(Infinity, clr0 * cw, (clr1 + 1) * cw);
-            depthOwner.fill(0, clr0 * cw, (clr1 + 1) * cw);
-            if (depthFace) depthFace.fill(0, clr0 * cw, (clr1 + 1) * cw);
+        const nowRect = movingRectOf(moving, cw, ch, tf),
+            prevRect = depthMovingRect;
+        let rx0, ry0, rx1, ry1;
+        if (prevRect) {
+            rx0 = Math.max(0, Math.min(prevRect.x0, nowRect.x0));
+            rx1 = Math.min(cw - 1, Math.max(prevRect.x1, nowRect.x1));
+            ry0 = Math.max(0, Math.min(prevRect.y0, nowRect.y0));
+            ry1 = Math.min(ch - 1, Math.max(prevRect.y1, nowRect.y1));
+        } else {
+            rx0 = 0;
+            rx1 = cw - 1;
+            ry0 = Number.isFinite(depthUsedY0) ? Math.max(0, depthUsedY0) : 0;
+            ry1 = Number.isFinite(depthUsedY1) ? Math.min(ch - 1, depthUsedY1) : ch - 1;
         }
-        if (depthStatic.y1 >= depthStatic.y0) {
-            const sy0 = Math.max(0, Math.floor(depthStatic.y0)),
-                sy1 = Math.min(ch - 1, Math.ceil(depthStatic.y1));
-            depth.set(depthStatic.buf.subarray(sy0 * cw, (sy1 + 1) * cw), sy0 * cw);
-            depthOwner.set(depthStatic.owner.subarray(sy0 * cw, (sy1 + 1) * cw), sy0 * cw);
-            if (depthFace) depthFace.set(depthStatic.face.subarray(sy0 * cw, (sy1 + 1) * cw), sy0 * cw);
+        if (ry1 >= ry0 && rx1 >= rx0) {
+            const hasStatic = depthStatic.y1 >= depthStatic.y0;
+            if (!hasStatic) {
+                for (let y = ry0; y <= ry1; y++) {
+                    const s0 = y * cw + rx0,
+                        s1 = y * cw + rx1 + 1;
+                    depth.fill(Infinity, s0, s1);
+                    if (depthOwner) depthOwner.fill(0, s0, s1);
+                    if (depthFace) depthFace.fill(0, s0, s1);
+                }
+            }
+            if (hasStatic) {
+                const sy0 = Math.max(Math.max(0, Math.floor(depthStatic.y0)), ry0),
+                    sy1 = Math.min(Math.min(ch - 1, Math.ceil(depthStatic.y1)), ry1);
+                for (let y = sy0; y <= sy1; y++) {
+                    const s0 = y * cw + rx0,
+                        s1 = y * cw + rx1 + 1;
+                    depth.set(depthStatic.buf.subarray(s0, s1), s0);
+                    if (depthOwner) depthOwner.set(depthStatic.owner.subarray(s0, s1), s0);
+                    if (depthFace) depthFace.set(depthStatic.face.subarray(s0, s1), s0);
+                }
+            }
         }
-        const used = { y0: Infinity, y1: -Infinity };
+        const used = { y0: Infinity, y1: -Infinity, x0: Infinity, x1: -Infinity };
         rasterizeDepthInto(depth, depthOwner, ownerMap, [moving], cw, ch, tf, used, window.__noFaceBuf ? null : depthFace);
         depthMovingUsedY0 = used.y0;
         depthMovingUsedY1 = used.y1;
+        depthMovingRect = Number.isFinite(used.x0)
+            ? { x0: used.x0, y0: Math.max(0, used.y0), x1: used.x1, y1: Math.min(ch - 1, used.y1) }
+            : nowRect;
         depthUsedY0 = Math.min(depthStatic.y0, Number.isFinite(used.y0) ? used.y0 : Infinity);
         depthUsedY1 = Math.max(depthStatic.y1, Number.isFinite(used.y1) ? used.y1 : -Infinity);
         depthOwnerMap = ownerMap;
@@ -9329,7 +9356,8 @@ function buildExportDepth(cw, ch, tf) {
     depthUsedY1 = -Infinity;
     depthMovingUsedY0 = Infinity;
     depthMovingUsedY1 = -Infinity;
-    const used = { y0: Infinity, y1: -Infinity };
+    depthMovingRect = null;
+    const used = { y0: Infinity, y1: -Infinity, x0: Infinity, x1: -Infinity };
     rasterizeDepthInto(depth, depthOwner, ownerMap, objs, cw, ch, tf, used, window.__noFaceBuf ? null : depthFace);
     depthUsedY0 = used.y0;
     depthUsedY1 = used.y1;
@@ -9350,6 +9378,31 @@ function silhouetteAt(depth, cw, ch, x, y, d) {
         a = side(-3) - d,
         b = side(3) - d;
     return (a > 0.5 && b < 0.05) || (b > 0.5 && a < 0.05);
+}
+function movingRectOf(o, cw, ch, tf) {
+    const tris = surfaceTriangles(o);
+    let x0 = Infinity,
+        y0 = Infinity,
+        x1 = -Infinity,
+        y1 = -Infinity;
+    for (let i = 0; i < tris.length; i++) {
+        const tr = tris[i];
+        for (let j = 0; j < 3; j++) {
+            const p = exportPoint(tr[j], tf || [1, 0, 0, 1, 0, 0]);
+            if (!p) continue;
+            if (p.x < x0) x0 = p.x;
+            if (p.x > x1) x1 = p.x;
+            if (p.y < y0) y0 = p.y;
+            if (p.y > y1) y1 = p.y;
+        }
+    }
+    if (!Number.isFinite(x0)) return { x0: 0, y0: 0, x1: cw - 1, y1: ch - 1 };
+    return {
+        x0: Math.max(0, Math.floor(x0) - 2),
+        y0: Math.max(0, Math.floor(y0) - 2),
+        x1: Math.min(cw - 1, Math.ceil(x1) + 2),
+        y1: Math.min(ch - 1, Math.ceil(y1) + 2),
+    };
 }
 function faceIdAt(cw, ch, x, y) {
     if (!depthFace) return 0;
@@ -9474,8 +9527,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     };
     const put = (v) => emit(projPoint(v, tf));
     const lerpFlag = !orthView && T !== "f";
-    const pj = new Array(s.p.length);
-    for (let i = 0; i < s.p.length; i++) pj[i] = projPoint(s.p[i], tf);
+    const pj = projPtsFor(s, tf);
     s.p.forEach((v, i) => {
         if (i) {
             const a = s.p[i - 1];
@@ -9536,9 +9588,14 @@ function strokeBox(cw, ch, tf) {
     };
     S.forEach((s) => {
         if (s.ob && !objectVisible(s.ob)) return;
-        for (let i = 0; i < s.p.length; i++) add(projPoint(s.p[i], tf));
+        const pj = projPtsFor(s, tf);
+        for (let i = 0; i < pj.length; i++) add(pj[i]);
     });
-    if (prev) prev.forEach((s) => { for (let i = 0; i < s.p.length; i++) add(projPoint(s.p[i], tf)); });
+    if (prev)
+        prev.forEach((s) => {
+            const pj = projPtsFor(s, tf);
+            for (let i = 0; i < pj.length; i++) add(pj[i]);
+        });
     if (!(x1 >= x0 && y1 >= y0)) return null;
     const pad = 3,
         bx = Math.max(0, Math.floor(x0) - pad),
@@ -9549,23 +9606,56 @@ function strokeBox(cw, ch, tf) {
     return { x: bx, y: by, w: bx1 - bx, h: by1 - by };
 }
 let lineLayerKey = null;
-function lineLayerSignature(view, cw, ch, tf, hidden) {
-    let k = (view ? 1 : 0) + "," + cw + "," + ch + "," + (tf ? tf.join(",") : "-") + "," + hidden + "," + Z + "," + ox + "," + oy + "," + (sel ?? "") + "|" + JSON.stringify(P) + "|";
-    const seen = new Set();
-    S.forEach((s) => {
-        const o = s && s.ob;
-        if (!o || !objectVisible(o) || seen.has(o.id)) return;
-        seen.add(o.id);
-        k += JSON.stringify(o) + ";";
-    });
-    return k;
+const projPtsCache = new WeakMap();
+let projKeyValue = null;
+function projCameraKey(tf) {
+    return (
+        (tf ? tf.join(",") : Z + "," + ox + "," + oy) +
+        "|" + T + "|" + (orthView ? 1 : 0) + "|" + W + "," + H + "|" + JSON.stringify(P)
+    );
+}
+function projPtsFor(s, tf) {
+    const hit = projPtsCache.get(s);
+    if (!window.__noProjCache && hit && hit.key === projKeyValue) return hit.pj;
+    const pj = new Array(s.p.length);
+    for (let i = 0; i < s.p.length; i++) pj[i] = projPoint(s.p[i], tf);
+    projPtsCache.set(s, { key: projKeyValue, pj });
+    return pj;
+}
+function freeLineSig() {
+    let h = 0,
+        n = 0;
+    for (let i = 0; i < S.length; i++) {
+        const s = S[i];
+        if (!s || s.ob) continue;
+        n++;
+        const p = s.p || [];
+        for (let k = 0; k < p.length; k++) {
+            const q = p[k];
+            h = (Math.imul(h, 31) + ((q[0] * 1000) | 0) + ((q[1] * 1000) | 0) * 7919 + ((q[2] * 1000) | 0) * 104729) | 0;
+        }
+        const c = s.c || "";
+        for (let k = 0; k < c.length; k++) h = (Math.imul(h, 131) + c.charCodeAt(k)) | 0;
+        h = (Math.imul(h, 131) + Math.round((Number(s.w) || 0) * 97)) | 0;
+    }
+    return n + ":" + h;
 }
 function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
-    const cacheable = !window.__noLineCache && !withCur;
-    if (cacheable && LC && LC.width === cw && LC.height === ch && lineLayerKey) {
-        const k = lineLayerSignature(view, cw, ch, tf, hidden) + "|" + $("bin").checked;
-        if (k === lineLayerKey) return LC;
-        lineLayerKey = null;
+    projKeyValue = projCameraKey(tf);
+    const binOn = $("bin").checked;
+    const sigs = new Map();
+    S.forEach((s) => {
+        const o = s && s.ob;
+        if (!o || !objectVisible(o) || sigs.has(o.id)) return;
+        sigs.set(o.id, JSON.stringify(o));
+    });
+    const curEff = !!withCur && !!(cur || prev);
+    const camKey = projKeyValue + "|" + (hidden ? 1 : 0) + "|" + cw + "," + ch + "|" + (view ? 1 : 0) + "|" + (sel ?? "");
+    const key =
+        camKey + "|" + (curEff ? 1 : 0) + "|" + (binOn ? 1 : 0) + "|" + freeLineSig() + "|" +
+        [...sigs].map(([id, sg]) => id + ":" + sg).join(";");
+    if (!window.__noLineCache && LC && LC.width === cw && LC.height === ch && lineLayerKey && key === lineLayerKey) {
+        return LC;
     }
     if (!LC || LC.width !== cw || LC.height !== ch) {
         LC = document.createElement("canvas");
@@ -9585,7 +9675,7 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     });
     if (withCur) drawCur(x);
     if (withCur && prev) prev.forEach((s) => strokeW(x, s));
-    if (cacheable) lineLayerKey = lineLayerSignature(view, cw, ch, tf, hidden) + "|" + $("bin").checked;
+    lineLayerKey = curEff ? null : key;
     if ($("bin").checked) {
         x.setTransform(1, 0, 0, 1, 0, 0);
         const box = strokeBox(cw, ch, tf || [Z, 0, 0, Z, ox, oy]);
@@ -9593,7 +9683,11 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
             const im = x.getImageData(box.x, box.y, box.w, box.h),
                 d = im.data,
                 t = P.bt;
-            for (let i = 3; i < d.length; i += 4) d[i] = d[i] < t ? 0 : 255;
+            const u32 = new Uint32Array(d.buffer, d.byteOffset, d.length >> 2);
+            for (let i = 0; i < u32.length; i++) {
+                const v = u32[i];
+                u32[i] = (v >>> 24) < t ? 0 : v | 0xff000000;
+            }
             x.putImageData(im, box.x, box.y);
         }
     }
@@ -9761,17 +9855,6 @@ function surfaceAlpha(o) {
     return Number.isFinite(v) ? clamp(v, 0.04, 0.9) : 0.22;
 }
 let surfaceLayerCanvas = null;
-function surfaceLayerCanvasFor(w, h) {
-    const step = 64,
-        cw = Math.max(step, Math.ceil(w / step) * step),
-        ch = Math.max(step, Math.ceil(h / step) * step);
-    if (!surfaceLayerCanvas) surfaceLayerCanvas = document.createElement("canvas");
-    if (surfaceLayerCanvas.width !== cw || surfaceLayerCanvas.height !== ch) {
-        surfaceLayerCanvas.width = cw;
-        surfaceLayerCanvas.height = ch;
-    }
-    return surfaceLayerCanvas;
-}
 function surfaceProjector() {
     const cx = -P.cx,
         cy = 1 - P.ch,
@@ -9832,6 +9915,73 @@ function blitSurfaceLayer(c, box) {
     c.restore();
 }
 let surfaceLayerCache = null;
+let surfState = null;
+function surfaceLayerNew(w, h) {
+    const cvNew = document.createElement("canvas");
+    cvNew.width = Math.max(1, Math.ceil(w));
+    cvNew.height = Math.max(1, Math.ceil(h));
+    return cvNew;
+}
+function surfTriBox(t) {
+    const x0 = Math.min(t.x0, t.x1, t.x2),
+        x1 = Math.max(t.x0, t.x1, t.x2),
+        y0 = Math.min(t.y0, t.y1, t.y2),
+        y1 = Math.max(t.y0, t.y1, t.y2);
+    t.bx0 = x0;
+    t.by0 = y0;
+    t.bx1 = x1;
+    t.by1 = y1;
+}
+function paintSurfaceTris(lc, list, clip) {
+    if (!list.length) return;
+    if (clip) {
+        lc.save();
+        lc.beginPath();
+        lc.rect(clip.x0, clip.y0, clip.x1 - clip.x0, clip.y1 - clip.y0);
+        lc.clip();
+    }
+    lc.lineJoin = "round";
+    lc.globalAlpha = 1;
+    lc.lineWidth = 1 / Math.max(0.25, Z);
+    const byColor = new Map();
+    list.forEach((t) => {
+        let arr = byColor.get(t.color);
+        if (!arr) byColor.set(t.color, (arr = []));
+        arr.push(t);
+    });
+    byColor.forEach((arr, col) => {
+        const chunk = 400;
+        lc.fillStyle = col;
+        lc.strokeStyle = col;
+        for (let i = 0; i < arr.length; i += chunk) {
+            const path = new Path2D(),
+                edge = new Path2D(),
+                end = Math.min(i + chunk, arr.length);
+            let hasEdge = false;
+            for (let k = i; k < end; k++) {
+                const t = arr[k],
+                    flip = t.area < 0,
+                    q1x = flip ? t.x2 : t.x1,
+                    q1y = flip ? t.y2 : t.y1,
+                    q2x = flip ? t.x1 : t.x2,
+                    q2y = flip ? t.y1 : t.y2;
+                path.moveTo(t.x0, t.y0);
+                path.lineTo(q1x, q1y);
+                path.lineTo(q2x, q2y);
+                if (Math.abs(t.area) >= SURF_STROKE_AREA) {
+                    edge.moveTo(t.x0, t.y0);
+                    edge.lineTo(q1x, q1y);
+                    edge.lineTo(q2x, q2y);
+                    edge.lineTo(t.x0, t.y0);
+                    hasEdge = true;
+                }
+            }
+            lc.fill(path, "nonzero");
+            if (hasEdge) lc.stroke(edge);
+        }
+    });
+    if (clip) lc.restore();
+}
 function drawObjectSurfaces(c) {
     if (!P.surfaceMode) return;
     const objs = [],
@@ -9843,137 +9993,219 @@ function drawObjectSurfaces(c) {
         objs.push(o);
     });
     if (!objs.length) return;
-    const key =
-        "surf|" + W + "," + H + "," + Z + "," + ox + "," + oy + "|" +
-        JSON.stringify(P) + "|" + objs.map((o) => JSON.stringify(o)).join(";");
+    const cam = W + "," + H + "," + Z + "," + ox + "," + oy + "|" + JSON.stringify(P);
+    const sigs = objs.map((o) => o.id + ":" + JSON.stringify(o));
+    const ids = objs.map((o) => o.id).join(",");
+    const key = "surf|" + cam + "|" + sigs.join(";");
     if (!window.__noSurfCache && surfaceLayerCache && surfaceLayerCache.key === key) {
         blitSurfaceLayer(c, surfaceLayerCache);
         return;
     }
-    surfaceLayerCache = null;
+    let alphaOne = null;
+    for (let i = 0; i < objs.length; i++) {
+        const a = Number(surfaceAlpha(objs[i]).toFixed(3));
+        if (alphaOne === null) alphaOne = a;
+        else if (a !== alphaOne) {
+            alphaOne = null;
+            break;
+        }
+    }
+    const prev = surfState;
+    const partial =
+        !window.__noSurfFull &&
+        alphaOne !== null &&
+        !!prev &&
+        prev.cam === cam &&
+        prev.ids === ids &&
+        prev.alphaOne === alphaOne &&
+        !!surfaceLayerCanvas;
     const proj = surfaceProjector(),
-        tris = [];
-    objs.forEach((o) => {
+        next = { cam, ids, alphaOne, entries: new Map(), box: prev && partial ? { ...prev.box } : null },
+        changed = [];
+    objs.forEach((o, i) => {
+        const old = partial ? prev.entries.get(o.id) : null;
+        if (old && old.sig === sigs[i]) {
+            next.entries.set(o.id, old);
+            return;
+        }
         const list = surfaceTriangles(o);
-        if (!list.length) return;
-        const color = surfaceColor(o),
-            alpha = Number(surfaceAlpha(o).toFixed(3));
-        for (let i = 0; i < list.length; i++) {
-            const tr = list[i];
-            let a, b, e;
-            if (proj) {
-                if (!proj(tr[0], SURF_P0) || !proj(tr[1], SURF_P1) || !proj(tr[2], SURF_P2)) continue;
-                a = SURF_P0;
-                b = SURF_P1;
-                e = SURF_P2;
-            } else {
-                a = exportPoint(tr[0], SURF_IDENT);
-                b = exportPoint(tr[1], SURF_IDENT);
-                e = exportPoint(tr[2], SURF_IDENT);
-                if (!a || !b || !e) continue;
+        const ent = { sig: sigs[i], tris: null, box: null };
+        if (list && list.length) {
+            const color = surfaceColor(o),
+                alpha = Number(surfaceAlpha(o).toFixed(3)),
+                out = [];
+            let bx0 = Infinity,
+                by0 = Infinity,
+                bx1 = -Infinity,
+                by1 = -Infinity;
+            for (let k = 0; k < list.length; k++) {
+                const tr = list[k];
+                let a, b, e;
+                if (proj) {
+                    if (!proj(tr[0], SURF_P0) || !proj(tr[1], SURF_P1) || !proj(tr[2], SURF_P2)) continue;
+                    a = SURF_P0;
+                    b = SURF_P1;
+                    e = SURF_P2;
+                } else {
+                    a = exportPoint(tr[0], SURF_IDENT);
+                    b = exportPoint(tr[1], SURF_IDENT);
+                    e = exportPoint(tr[2], SURF_IDENT);
+                    if (!a || !b || !e) continue;
+                }
+                if (
+                    (a.x < -SURF_CULL_PAD && b.x < -SURF_CULL_PAD && e.x < -SURF_CULL_PAD) ||
+                    (a.x > W + SURF_CULL_PAD && b.x > W + SURF_CULL_PAD && e.x > W + SURF_CULL_PAD) ||
+                    (a.y < -SURF_CULL_PAD && b.y < -SURF_CULL_PAD && e.y < -SURF_CULL_PAD) ||
+                    (a.y > H + SURF_CULL_PAD && b.y > H + SURF_CULL_PAD && e.y > H + SURF_CULL_PAD)
+                )
+                    continue;
+                const area = (b.x - a.x) * (e.y - a.y) - (b.y - a.y) * (e.x - a.x);
+                if (Math.abs(area) < SURF_MIN_AREA) continue;
+                const t = {
+                    color,
+                    alpha,
+                    depth: (a.depth + b.depth + e.depth) / 3,
+                    area,
+                    x0: a.x,
+                    y0: a.y,
+                    x1: b.x,
+                    y1: b.y,
+                    x2: e.x,
+                    y2: e.y,
+                };
+                surfTriBox(t);
+                if (t.bx0 < bx0) bx0 = t.bx0;
+                if (t.by0 < by0) by0 = t.by0;
+                if (t.bx1 > bx1) bx1 = t.bx1;
+                if (t.by1 > by1) by1 = t.by1;
+                out.push(t);
             }
-            if (
-                (a.x < -SURF_CULL_PAD && b.x < -SURF_CULL_PAD && e.x < -SURF_CULL_PAD) ||
-                (a.x > W + SURF_CULL_PAD && b.x > W + SURF_CULL_PAD && e.x > W + SURF_CULL_PAD) ||
-                (a.y < -SURF_CULL_PAD && b.y < -SURF_CULL_PAD && e.y < -SURF_CULL_PAD) ||
-                (a.y > H + SURF_CULL_PAD && b.y > H + SURF_CULL_PAD && e.y > H + SURF_CULL_PAD)
-            )
-                continue;
-            const area = (b.x - a.x) * (e.y - a.y) - (b.y - a.y) * (e.x - a.x);
-            if (Math.abs(area) < SURF_MIN_AREA) continue;
-            tris.push({
-                color,
-                alpha,
-                depth: (a.depth + b.depth + e.depth) / 3,
-                area,
-                x0: a.x,
-                y0: a.y,
-                x1: b.x,
-                y1: b.y,
-                x2: e.x,
-                y2: e.y,
+            if (out.length) {
+                ent.tris = out;
+                ent.box = { x0: bx0, y0: by0, x1: bx1, y1: by1 };
+            }
+        }
+        next.entries.set(o.id, ent);
+        changed.push([ent.box, old ? old.box : null]);
+    });
+    const sortTris = (list) => list.sort((a, b) => b.depth - a.depth);
+    const toScreen = (u0, v0, u1, v1, pad) => {
+        const dx0 = Math.max(0, Math.floor(u0 * Z + ox) - pad),
+            dy0 = Math.max(0, Math.floor(v0 * Z + oy) - pad),
+            dx1 = Math.min(W, Math.ceil(u1 * Z + ox) + pad),
+            dy1 = Math.min(H, Math.ceil(v1 * Z + oy) + pad);
+        return { dx0, dy0, dx1, dy1, dw: dx1 - dx0, dh: dy1 - dy0 };
+    };
+    const fullPaint = (unionBox) => {
+        const all = [];
+        next.entries.forEach((e) => {
+            if (e.tris) for (let i = 0; i < e.tris.length; i++) all.push(e.tris[i]);
+        });
+        sortTris(all);
+        const b = unionBox || { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+        if (!unionBox) {
+            all.forEach((t) => {
+                if (t.bx0 < b.x0) b.x0 = t.bx0;
+                if (t.by0 < b.y0) b.y0 = t.by0;
+                if (t.bx1 > b.x1) b.x1 = t.bx1;
+                if (t.by1 > b.y1) b.y1 = t.by1;
             });
         }
-    });
-    tris.sort((a, b) => b.depth - a.depth);
-    const groups = new Map(),
-        boxes = [];
-    tris.forEach((t) => {
-        if (!groups.has(t.alpha)) groups.set(t.alpha, []);
-        groups.get(t.alpha).push(t);
-    });
-    groups.forEach((list, alpha) => {
-        let minX = Infinity,
-            minY = Infinity,
-            maxX = -Infinity,
-            maxY = -Infinity;
-        list.forEach((t) => {
-            const ax = Math.min(t.x0, t.x1, t.x2),
-                bx = Math.max(t.x0, t.x1, t.x2),
-                ay = Math.min(t.y0, t.y1, t.y2),
-                by = Math.max(t.y0, t.y1, t.y2);
-            if (ax < minX) minX = ax;
-            if (ay < minY) minY = ay;
-            if (bx > maxX) maxX = bx;
-            if (by > maxY) maxY = by;
+        if (!Number.isFinite(b.x0) || !Number.isFinite(b.y0)) return null;
+        const r = toScreen(b.x0, b.y0, b.x1, b.y1, 2);
+        if (r.dw <= 0 || r.dh <= 0) return null;
+        surfaceLayerCanvas = surfaceLayerNew(r.dw, r.dh);
+        const lc = surfaceLayerCanvas.getContext("2d");
+        lc.setTransform(Z, 0, 0, Z, ox - r.dx0, oy - r.dy0);
+        paintSurfaceTris(lc, all, null);
+        const box = { alpha: alphaOne, dx0: r.dx0, dy0: r.dy0, dw: r.dw, dh: r.dh };
+        next.box = { x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, ...box };
+        return box;
+    };
+    if (!partial) {
+        const box = fullPaint(null);
+        if (box) {
+            blitSurfaceLayer(c, box);
+            surfState = next;
+            if (alphaOne !== null) surfaceLayerCache = { key, ...box };
+            else surfaceLayerCache = null;
+        }
+        return;
+    }
+    let ux0 = Infinity,
+        uy0 = Infinity,
+        ux1 = -Infinity,
+        uy1 = -Infinity;
+    changed.forEach(([nb, ob]) => {
+        [nb, ob].forEach((b) => {
+            if (!b) return;
+            if (b.x0 < ux0) ux0 = b.x0;
+            if (b.y0 < uy0) uy0 = b.y0;
+            if (b.x1 > ux1) ux1 = b.x1;
+            if (b.y1 > uy1) uy1 = b.y1;
         });
-        if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
-        const dx0 = Math.max(0, Math.floor(minX * Z + ox) - 2),
-            dy0 = Math.max(0, Math.floor(minY * Z + oy) - 2),
-            dx1 = Math.min(W, Math.ceil(maxX * Z + ox) + 2),
-            dy1 = Math.min(H, Math.ceil(maxY * Z + oy) + 2),
-            dw = dx1 - dx0,
-            dh = dy1 - dy0;
-        if (dw <= 0 || dh <= 0) return;
-        const layer = surfaceLayerCanvasFor(dw, dh),
-            lc = layer.getContext("2d");
-        lc.setTransform(1, 0, 0, 1, 0, 0);
-        lc.clearRect(0, 0, dw, dh);
-        lc.setTransform(Z, 0, 0, Z, ox - dx0, oy - dy0);
-        lc.lineJoin = "round";
-        lc.globalAlpha = 1;
-        const byColor = new Map();
-        list.forEach((t) => {
-            if (!byColor.has(t.color)) byColor.set(t.color, []);
-            byColor.get(t.color).push(t);
-        });
-        byColor.forEach((trisOfColor, col) => {
-            const chunk = 400;
-            lc.fillStyle = col;
-            lc.strokeStyle = col;
-            lc.lineWidth = 1 / Math.max(0.25, Z);
-            for (let i = 0; i < trisOfColor.length; i += chunk) {
-                const path = new Path2D(),
-                    edge = new Path2D(),
-                    end = Math.min(i + chunk, trisOfColor.length);
-                let hasEdge = false;
-                for (let k = i; k < end; k++) {
-                    const t = trisOfColor[k],
-                        flip = t.area < 0,
-                        q1x = flip ? t.x2 : t.x1,
-                        q1y = flip ? t.y2 : t.y1,
-                        q2x = flip ? t.x1 : t.x2,
-                        q2y = flip ? t.y1 : t.y2;
-                    path.moveTo(t.x0, t.y0);
-                    path.lineTo(q1x, q1y);
-                    path.lineTo(q2x, q2y);
-                    if (Math.abs(t.area) >= SURF_STROKE_AREA) {
-                        edge.moveTo(t.x0, t.y0);
-                        edge.lineTo(q1x, q1y);
-                        edge.lineTo(q2x, q2y);
-                        edge.lineTo(t.x0, t.y0);
-                        hasEdge = true;
-                    }
-                }
-                lc.fill(path, "nonzero");
-                if (hasEdge) lc.stroke(edge);
-            }
-        });
-        const box = { alpha, dx0, dy0, dw, dh };
-        blitSurfaceLayer(c, box);
-        boxes.push(box);
     });
-    if (boxes.length === 1) surfaceLayerCache = { key, ...boxes[0] };
+    const cur = next.box;
+    if (!Number.isFinite(ux0) || !cur) {
+        const box = fullPaint(null);
+        if (box) {
+            blitSurfaceLayer(c, box);
+            surfState = next;
+            surfaceLayerCache = { key, ...box };
+        }
+        return;
+    }
+    const dr = toScreen(ux0, uy0, ux1, uy1, 2);
+    if (dr.dw <= 0 || dr.dh <= 0) {
+        blitSurfaceLayer(c, cur);
+        surfState = next;
+        surfaceLayerCache = { key, ...cur };
+        return;
+    }
+    const need = { x0: Math.min(cur.x0, dr.dx0), y0: Math.min(cur.y0, dr.dy0) },
+        needX1 = Math.max(cur.dx0 + cur.dw, dr.dx1),
+        needY1 = Math.max(cur.dy0 + cur.dh, dr.dy1);
+    if (need.x0 !== cur.dx0 || need.y0 !== cur.dy0 || needX1 !== cur.dx0 + cur.dw || needY1 !== cur.dy0 + cur.dh) {
+        const pad = 96,
+            nx0 = Math.max(0, need.x0 - pad),
+            ny0 = Math.max(0, need.y0 - pad),
+            nx1 = Math.min(W, needX1 + pad),
+            ny1 = Math.min(H, needY1 + pad),
+            grown = surfaceLayerNew(nx1 - nx0, ny1 - ny0);
+        grown.getContext("2d").drawImage(surfaceLayerCanvas, cur.dx0 - nx0, cur.dy0 - ny0);
+        surfaceLayerCanvas = grown;
+        cur.dx0 = nx0;
+        cur.dy0 = ny0;
+        cur.dw = nx1 - nx0;
+        cur.dh = ny1 - ny0;
+        cur.x0 = nx0 / Z - ox / Z;
+        cur.y0 = ny0 / Z - oy / Z;
+        cur.x1 = nx1 / Z - ox / Z;
+        cur.y1 = ny1 / Z - oy / Z;
+    }
+    const lc = surfaceLayerCanvas.getContext("2d");
+    lc.save();
+    lc.setTransform(1, 0, 0, 1, 0, 0);
+    lc.clearRect(dr.dx0 - cur.dx0, dr.dy0 - cur.dy0, dr.dw, dr.dh);
+    lc.restore();
+    const clipU = { x0: ux0 - 1 / Z, y0: uy0 - 1 / Z, x1: ux1 + 1 / Z, y1: uy1 + 1 / Z },
+        near = [];
+    next.entries.forEach((e) => {
+        if (!e.tris) return;
+        for (let i = 0; i < e.tris.length; i++) {
+            const t = e.tris[i];
+            if (t.bx0 > clipU.x1 || t.bx1 < clipU.x0 || t.by0 > clipU.y1 || t.by1 < clipU.y0) continue;
+            near.push(t);
+        }
+    });
+    sortTris(near);
+    lc.setTransform(Z, 0, 0, Z, ox - cur.dx0, oy - cur.dy0);
+    paintSurfaceTris(lc, near, clipU);
+    const box = { alpha: cur.alpha, dx0: cur.dx0, dy0: cur.dy0, dw: cur.dw, dh: cur.dh };
+    blitSurfaceLayer(c, box);
+    next.box = cur;
+    surfState = next;
+    surfaceLayerCache = { key, ...box };
 }
 function renderFresh() {
     render();
@@ -10162,7 +10394,7 @@ $("zr").onclick = () => {
     Z = 1;
     ox = oy = 0;
     updZ();
-    render();
+    renderSoon();
 };
 cv.addEventListener(
     "wheel",
@@ -10333,7 +10565,6 @@ function stepErase(a, b) {
         n = Math.max(1, Math.ceil(d / (P.ew / 2)));
     for (let i = 1; i <= n; i++) eraseAt({ x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n });
 }
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const getCityFloorPlanDrag = () => window.cityFloorPlanGetDrag?.() || null;
 const setCityFloorPlanDrag = (value) => window.cityFloorPlanSetDrag?.(value);
 const fitCityFloorPlan = () => window.cityFloorPlanFit?.();
@@ -10360,7 +10591,7 @@ function armBoxPending(start, pointerId, source = "canvas", meta = {}) {
         if (source === "floor") setCityFloorPlanDrag(null);
         boxSelect = { pointerId, start: { ...pending.start }, end: { ...pending.start }, source };
         clearSelection();
-        render();
+        renderSoon();
     }, 360);
 }
 function updateBoxPending(p, pointerId) {
@@ -10436,7 +10667,7 @@ function finishBoxSelection(end) {
     tool = "edit";
     setMode("draw");
     syncSel();
-    render();
+    renderSoon();
 }
 function drawBoxSelection(c) {
     if (!boxSelect) return;
@@ -10514,7 +10745,7 @@ function endBoxPointer(e, commit) {
     try {
         if (cv.hasPointerCapture?.(pointerId)) cv.releasePointerCapture(pointerId);
     } catch (err) {}
-    if (!commit) render();
+    if (!commit) renderSoon();
     return true;
 }
 function abortAllBoxPointers() {
@@ -10698,19 +10929,19 @@ cv.onpointerdown = (e) => {
             } else armBoxPending(p, e.pointerId, "canvas");
         }
         syncSel();
-        render();
+        renderSoon();
         return;
     }
     if (act === "draw" && tool === "border") {
         bd = true;
         CR = { x0: clamp(p.x, 0, W), y0: clamp(p.y, 0, H), x1: clamp(p.x, 0, W), y1: clamp(p.y, 0, H) };
-        render();
+        renderSoon();
         return;
     }
     if (act === "draw" && tool === "erase") {
         er = { base: S, last: p };
         stepErase(p, p);
-        render();
+        renderSoon();
         return;
     }
     const sn = $("snap").value;
@@ -10747,7 +10978,7 @@ cv.onpointermove = (e) => {
     if (drag && cameraLock) {
         drag = null;
         enforceCameraLock();
-        render();
+        renderSoon();
         return;
     }
     if (drag) {
@@ -10816,7 +11047,7 @@ cv.onpointermove = (e) => {
             cur.p = [a, { x: a.x + u.x * t, y: a.y + u.y * t }];
         }
     }
-    render();
+    renderSoon();
 };
 cv.onpointerup = cv.onpointercancel = (e) => {
     if (e.pointerType === "touch") {
@@ -10884,7 +11115,7 @@ cv.onpointerup = cv.onpointercancel = (e) => {
         RD = [];
     }
     cur = null;
-    render();
+    renderSoon();
 };
 function releaseInputState(e) {
     if (e?.pointerType === "touch") {
@@ -10937,14 +11168,14 @@ const undo = () => {
         if (HU.length) {
             RD.push(S);
             S = HU.pop();
-            render();
+            renderSoon();
         }
     },
     redo = () => {
         if (RD.length) {
             HU.push(S);
             S = RD.pop();
-            render();
+            renderSoon();
         }
     };
 $("undo").onclick = undo;
@@ -10955,7 +11186,7 @@ $("clr").onclick = () => {
         HU.push(S);
         S = lockedLines;
         RD = [];
-        render();
+        renderSoon();
     }
 };
 addEventListener("keydown", (e) => {
@@ -11047,7 +11278,7 @@ addEventListener("keydown", (e) => {
     else if (e.key === "ArrowDown") setP("pitch", clamp(P.pitch - d, -89, 89));
     else return;
     sync();
-    render();
+    renderSoon();
 });
 const exportToggle = $("exportToggle"),
     exportMenu = $("exportMenu");
@@ -11070,7 +11301,7 @@ if (exportLineWidthInput)
         if (mainWidth && document.activeElement !== mainWidth) mainWidth.value = value.toFixed(1);
         const slider = $("pw");
         if (slider) slider.value = value;
-        render();
+        renderSoon();
     };
 syncExportLineWidth();
 exportToggle.onclick = (e) => {
@@ -12462,6 +12693,36 @@ function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
             lineA(o, [v[3], v[7]], color),
         ];
     return out;
+}
+function wireBoxVA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
+    const x = w / 2,
+        y = d / 2;
+    return [
+        lineA(o, [[cx - x, cy - y, z0], [cx - x, cy - y, z1]], color),
+        lineA(o, [[cx + x, cy - y, z0], [cx + x, cy - y, z1]], color),
+        lineA(o, [[cx + x, cy + y, z0], [cx + x, cy + y, z1]], color),
+        lineA(o, [[cx - x, cy + y, z0], [cx - x, cy + y, z1]], color),
+    ];
+}
+function wireBoxNoTopA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
+    const x = w / 2,
+        y = d / 2;
+    return [
+        polyA(
+            o,
+            [
+                [cx - x, cy - y, z0],
+                [cx + x, cy - y, z0],
+                [cx + x, cy + y, z0],
+                [cx - x, cy + y, z0],
+            ],
+            color,
+        ),
+        lineA(o, [[cx - x, cy - y, z0], [cx - x, cy - y, z1]], color),
+        lineA(o, [[cx + x, cy - y, z0], [cx + x, cy - y, z1]], color),
+        lineA(o, [[cx + x, cy + y, z0], [cx + x, cy + y, z1]], color),
+        lineA(o, [[cx - x, cy + y, z0], [cx - x, cy + y, z1]], color),
+    ];
 }
 function pathVecSub(a, b) {
     return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -13897,7 +14158,7 @@ function linesRailing(ctx) {
         footH = Math.min(0.03, Math.max(0.012, bottom * 0.35)),
         footW = post * 1.5;
     posts.forEach(({ x, y }) => {
-        out.push(...wireBoxA(o, x, y, post, post, 0, h, c));
+        out.push(...wireBoxNoTopA(o, x, y, post, post, 0, h, c));
         out.push(
             polyA(
                 o,
@@ -13929,7 +14190,7 @@ function linesRailing(ctx) {
         out.push(...wireBoxA(o, cx, cy, bw, bd, zTop0, h, c));
         out.push(...wireBoxA(o, cx, cy, bw, bd, bottom, zBot1, c));
         if (zTop0 - zBot1 > 0.001)
-            r.bars.forEach(([bx, by]) => out.push(...wireBoxA(o, bx, by, barT, barT, zBot1, zTop0, c)));
+            r.bars.forEach(([bx, by]) => out.push(...wireBoxVA(o, bx, by, barT, barT, zBot1, zTop0, c)));
     });
 }
 function linesStairs(ctx) {

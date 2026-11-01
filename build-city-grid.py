@@ -2,7 +2,7 @@
 """City Grid Studio のソースを結合する小さなビルドスクリプト。
 
 ソースの役割:
-- engine-lib.js        : 共通の小さな道具箱（隠線の許容量・線の重複よけ）
+- engine-lib.js        : 共通の小さな道具箱（隠線の許容量・線の重複よけ・clamp）
 - engine-core.js       : 共有状態・投影・基本図形
 - engine-gizmo.js      : ギズモ・当たり判定・ドラッグ・アセットの寸法
 - engine-render.js     : 書き出し範囲・隠れ線・線画レイヤー・グリッド・描画
@@ -93,10 +93,11 @@ def inject_style(html: str, marker: str, content: str) -> str:
 def main() -> None:
     """ソース順を固定して、配布用の単体HTMLを更新する。
 
-    `--min` を付けると、コメントと空行を落とした軽量版
-    （cyberpunk-city-studio.min.html）も書き出す。中身の動作は同じ。
+    既定で、コメントと空行を落とした軽量版（cyberpunk-city-studio.min.html）も
+    書き出す（配布用の軽い版が古いまま残るのを防ぐため）。
+    `--no-min` を付けると軽量版を作らない。中身の動作は同じ。
     """
-    want_min = "--min" in sys.argv[1:]
+    want_min = "--no-min" not in sys.argv[1:]
     lib = read("engine-lib.js")
     core = read("engine-core.js")
     tools = "\n".join(

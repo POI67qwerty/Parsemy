@@ -1,0 +1,3578 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>City Grid Studio（サイバーパンク画面）ドキュメント</title>
+<style>
+:root{
+  --ink:#20272f; --sub:#5b6672; --line:#dbe2ea; --bg:#ffffff; --tint:#f5f8fc;
+  --navy:#12304f; --blue:#1565c0; --red:#d32f2f; --green:#2e7d32; --amber:#ffd54f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:#eef2f7; color:var(--ink);
+  font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",
+              "Meiryo",system-ui,-apple-system,sans-serif;
+  line-height:1.95; font-size:16px; letter-spacing:.01em;
+}
+.page{max-width:940px; margin:0 auto; background:var(--bg);
+  padding:54px 62px 90px; box-shadow:0 2px 24px rgba(20,40,70,.10);}
+@media (max-width:700px){ .page{padding:28px 20px 60px} body{font-size:15px} }
+
+/* ---- 見出し ---- */
+h1{
+  font-size:2.0em; line-height:1.5; margin:0 0 .2em; letter-spacing:.02em; color:var(--navy);
+  border-bottom:4px solid var(--navy); padding-bottom:.35em;
+}
+h1::before{
+  content:var(--kicker, "REFERENCE"); display:block; font-size:.34em; letter-spacing:.28em;
+  color:var(--blue); font-weight:700; margin-bottom:.9em;
+}
+h2{
+  font-size:1.42em; margin:2.6em 0 .9em; padding:.42em .0em .42em .6em; color:#fff;
+  background:linear-gradient(90deg,var(--navy),#2f6f9e 70%,#4b93c0);
+  border-radius:6px; letter-spacing:.02em;
+}
+h3{
+  font-size:1.14em; margin:2.0em 0 .7em; padding:.1em 0 .3em .55em;
+  color:var(--navy); border-left:7px solid var(--blue); border-bottom:1px dotted var(--line);
+}
+h4{ font-size:1.02em; margin:1.5em 0 .5em; color:var(--blue); }
+h2+*, h3+*, h4+*{ margin-top:.2em }
+
+p{ margin:.75em 0; text-align:justify; }
+strong{ color:var(--navy); }
+a{ color:var(--blue); text-decoration:none; border-bottom:1px solid #b8d4f0; }
+
+/* ---- マーカー・色文字 ---- */
+.mk{ background:linear-gradient(transparent 58%, var(--amber) 58%, #ffe680 96%, transparent 96%);
+     font-weight:700; padding:0 .06em; }
+.rd{ color:var(--red); font-weight:700; }
+.bl{ color:var(--blue); font-weight:700; }
+.gr{ color:var(--green); font-weight:700; }
+
+/* ---- コード ---- */
+code{
+  background:#fdf0f3; color:#b3135a; border:1px solid #f6d3dd; border-radius:4px;
+  padding:.06em .38em; font-size:.9em; font-weight:600; white-space:nowrap;
+  font-family:"SFMono-Regular",Consolas,"Courier New",monospace;
+}
+pre{
+  background:#10192b; color:#e6edf6; border-radius:8px; padding:16px 20px;
+  overflow-x:auto; line-height:1.65; border-left:6px solid var(--blue);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.06); margin:1em 0;
+}
+pre code{ background:none; border:0; color:inherit; padding:0; font-weight:400; white-space:pre;
+  font-size:.86em; }
+
+/* ---- 表 ---- */
+table{ width:100%; border-collapse:separate; border-spacing:0; margin:1.1em 0;
+  font-size:.9em; background:#fff; border:1px solid var(--line); border-radius:8px;
+  overflow:hidden; }
+thead th{ background:var(--navy); color:#fff; text-align:left; padding:10px 12px;
+  font-weight:700; font-size:.95em; letter-spacing:.02em; border-right:1px solid rgba(255,255,255,.15); }
+thead th:last-child{ border-right:0 }
+tbody td{ padding:9px 12px; border-top:1px solid var(--line); vertical-align:top; }
+tbody tr:nth-child(even){ background:#f7fafd; }
+tbody tr:hover{ background:#eef6ff; }
+td code{ white-space:normal; word-break:break-word }
+
+/* ---- 引用＝呼び出しボックス ---- */
+blockquote{
+  margin:1.1em 0; padding:14px 18px 14px 46px; position:relative;
+  background:var(--tint); border-left:6px solid var(--blue); border-radius:6px;
+  color:#33404e;
+}
+blockquote::before{
+  content:"▶"; position:absolute; left:16px; top:13px; color:var(--blue); font-size:.9em;
+}
+blockquote p{ margin:.3em 0 }
+blockquote.warn{ background:#fff5f5; border-left-color:var(--red) }
+blockquote.warn::before{ content:"!"; font-weight:900; color:var(--red); left:20px;
+  border:2px solid var(--red); border-radius:50%; width:15px; height:15px; line-height:14px;
+  text-align:center; font-size:.7em; top:17px; }
+blockquote.point{ background:#fffdf0; border-left-color:#e0a800 }
+blockquote.point::before{ content:"★"; color:#e0a800 }
+blockquote.term{ background:#f2f6ff; border-left-color:#5c6bc0 }
+blockquote.term::before{ content:"?"; font-weight:900; color:#3949ab }
+blockquote.calc{ background:#f4fbf6; border-left-color:var(--green) }
+blockquote.calc::before{ content:"f(x)"; font-weight:700; color:var(--green); font-size:.72em }
+
+/* ---- リスト ---- */
+ul,ol{ margin:.7em 0 .9em; padding-left:1.6em }
+li{ margin:.32em 0 }
+li::marker{ color:var(--blue); font-weight:700 }
+ul ul,ol ol,ul ol,ol ul{ margin:.25em 0 }
+
+hr{ border:0; border-top:2px dashed #cfd9e4; margin:2.4em 0 }
+
+/* ---- 目次 ---- */
+.toc{ background:var(--tint); border:1px solid var(--line); border-radius:10px;
+  padding:18px 26px 22px; margin:1.6em 0 2.4em; }
+.toc h2{ background:none; color:var(--navy); font-size:1.05em; padding:0;
+  border-bottom:2px solid var(--blue); border-radius:0; margin:.1em 0 .8em; }
+.toc ul{ margin:.2em 0 .4em; padding-left:1.35em; line-height:1.7 }
+.toc li{ margin:.12em 0 }
+.toc > ul > li{ margin:.3em 0 }
+.toc ul ul{ margin:.1em 0 .3em }
+.toc a{ border-bottom:none }
+.toc a:hover{ text-decoration:underline }
+
+/* ---- ページ先頭の小物 ---- */
+.lead{ color:var(--sub); font-size:.95em }
+.badge{ display:inline-block; background:var(--navy); color:#fff; font-size:.72em;
+  padding:.1em .6em; border-radius:99px; margin-right:.5em; letter-spacing:.08em }
+
+@media print{
+  body{ background:#fff } .page{ box-shadow:none; max-width:none; padding:0 }
+  pre{ box-shadow:none } h2{ -webkit-print-color-adjust:exact; print-color-adjust:exact }
+}
+</style>
+</head>
+<body>
+<div class="page" style="--kicker:'STUDIO DOCUMENT';">
+<h1 id="city-grid-studioサイバーパンク画面ドキュメント">City Grid Studio（サイバーパンク画面）ドキュメント</h1>
+<p>
+最終更新: 2026-11-01 / 対象: <code>cyberpunk-city-studio.html</code> とそのソース5本（＋CSS2本）
+</p>
+<hr>
+<blockquote><p><strong>関連ドキュメント</strong>：<code>asset.js</code> の全関数・計算内容は <strong><code>ASSET_JS_GUIDE.md</code></strong> にまとめています。 色付きで読みやすい HTML 版（<code>ASSET_JS_GUIDE.html</code> / <code>CITY_GRID_STUDIO.html</code>）は <code>python3 build-guide.py *.md</code> でいつでも作り直せます。</p></blockquote>
+<h2 id="1-起動に必要なファイル">1. 起動に必要なファイル</h2>
+<h3 id="1-1-配布・実行用1ファイルで動く">1-1. 配布・実行用（1ファイルで動く）</h3>
+<table><thead><tr><th>ファイル</th><th>中身</th></tr></thead><tbody>
+<tr><td><strong><code>cyberpunk-city-studio.html</code></strong></td><td>これ1つで起動する。外部CSS・JS・画像・通信はいっさい無し（CSSもビルドで埋め込む）</td></tr>
+</tbody></table>
+<table><thead><tr><th>HTML内の位置</th><th>中身</th><th>実体のソース</th></tr></thead><tbody>
+<tr><td>1–202行 <code>&lt;style&gt;</code></td><td>基本レイアウト・配色</td><td>HTMLに直接記述</td></tr>
+<tr><td>203–1609行 <code>&lt;style id="studio-ui"&gt;</code></td><td>スタジオUIの見た目</td><td>HTMLに直接記述</td></tr>
+<tr><td><code>&lt;script id="engine"&gt;</code></td><td>エンジン本体</td><td><code>engine-lib.js</code> + <code>engine-core.js</code> + <code>engine-gizmo.js</code> + <code>engine-render.js</code> + <code>engine-input.js</code> + <code>engine-io.js</code></td></tr>
+<tr><td><code>&lt;script id="studio-ui"&gt;</code></td><td>アセットとUI</td><td><code>asset.js</code> + <code>asset-controller.js</code> + <code>studio-lib.js</code> + <code>studio-ui.js</code> + <code>studio-floorplan.js</code></td></tr>
+</tbody></table>
+<h3 id="1-2-ソースから動かす場合indexhtml-経由">1-2. ソースから動かす場合（<code>index.html</code> 経由）</h3>
+<p>
+<strong>読み込み順が重要</strong>（前のファイルが定義した <code>P</code> / <code>S</code> / <code>genShape</code> / <code>ASSETS</code> を後が使う）。
+</p>
+<table><thead><tr><th>順</th><th>ファイル</th><th>行数</th><th>役割</th></tr></thead><tbody>
+<tr><td>0</td><td><code>index.html</code></td><td>92</td><td>画面の骨組みと読み込み順の定義</td></tr>
+<tr><td>0</td><td><code>style.css</code> / <code>studio.css</code></td><td>182 / 1,312</td><td>基本スタイル／スタジオUIのスタイル</td></tr>
+<tr><td>1</td><td><code>engine-core.js</code></td><td>1,566</td><td>共有状態（<code>P</code>/<code>S</code>）、投影・魚眼、<code>genShape</code>、選択・編集の土台</td></tr>
+<tr><td>2</td><td><code>engine-lib.js</code></td><td>110</td><td>隠線の許容量・線の重複よけ（他のファイルに依存しない）</td></tr>
+<tr><td>2</td><td><code>engine-core.js</code></td><td>2,000</td><td>投影・カメラ・図形生成・線の描画</td></tr>
+<tr><td>2</td><td><code>engine-gizmo.js</code></td><td>4,802</td><td>ギズモ、ドラッグ、アセット寸法</td></tr>
+<tr><td>2</td><td><code>engine-render.js</code></td><td>1,930</td><td>描画ループ、面の塗り、隠線、床グリッド</td></tr>
+<tr><td>2</td><td><code>engine-input.js</code></td><td>996</td><td>ポインター・ピンチ・消しゴム・モード切替</td></tr>
+<tr><td>2</td><td><code>engine-io.js</code></td><td>526</td><td>書き出し・参考写真・保存/読み込み</td></tr>
+<tr><td>3</td><td><code>asset.js</code></td><td>2,725</td><td>アセット定義（<code>ASSETS</code>）、形状（<code>ASSET_LINE_BUILDERS</code>）、<span class="bl">正規化</span></td></tr>
+<tr><td>4</td><td><code>asset-controller.js</code></td><td>1,103</td><td>配置・親子接続・コピー・JSON入出力・棚</td></tr>
+<tr><td>5</td><td><code>studio-ui.js</code></td><td>3,381</td><td>左パネル、プリセット、ショートカット、初期化</td></tr>
+<tr><td>6</td><td><code>studio-floorplan.js</code></td><td>2,761</td><td>間取りモード（正面・横・上の選択、移動・回転・寸法編集）</td></tr>
+<tr><td>—</td><td><code>studio-lib.js</code></td><td>29</td><td><code>studio-ui.js</code> と <code>studio-floorplan.js</code> が共有する道具（最初に読む）</td></tr>
+</tbody></table>
+<h3 id="1-3-生成物とビルド">1-3. 生成物とビルド</h3>
+<pre><code>engine-lib.js ┐
+engine-core.js │
+engine-gizmo.js │ ───────→ cyberpunk-city-studio.html の「engine」ブロック
+engine-render.js │
+engine-input.js │
+engine-io.js ┘
+asset.js ────────────┐
+asset-controller.js  │ ──→ 同ファイルの「studio-ui」ブロック
+studio-lib.js        │      （読み込み順：lib → ui → floorplan）
+studio-ui.js         │
+studio-floorplan.js ─┘</code></pre>
+<ul>
+<li><code>python3 build-city-grid.py</code> で <strong>単体HTML（<code>cyberpunk-city-studio.html</code>）だけ</strong>を再生成する（<code>bash</code> では動かない）
+</li>
+<li>このスクリプトは <strong>HTMLの2つのscriptブロックだけを差し替え</strong>、レイアウトとCSSは保持する
+</li>
+<li>ソースを直したら再ビルド必須。HTMLを直接編集しても次回ビルドで上書きされる
+</li>
+<li>開発用は <code>index.html</code> ＋ ソース11本、配布用は単体HTML 1本の二本立て（結合版 <code>engine.js</code> / <code>script.js</code> は 2026-11-01 に廃止）
+</li>
+<li><code>./build.sh</code> は通常版に加えて、コメントと空行を落とした軽量版 <code>cyberpunk-city-studio.min.html</code> も作る（1.09MB → 0.88MB。描画結果は同一。不要なら <code>--no-min</code>）
+</li>
+</ul>
+<hr>
+<h2 id="2-アセット壁付け看板単体wallsign">2. アセット：壁付け看板（単体）<code>wallSign</code></h2>
+<p>
+アセット棚の「壁付け看板（単体）」から地面へ配置する単体アセット（建物を選んでいても接着しない）。
+</p>
+<table><thead><tr><th>機能</th><th>場所</th><th>内容</th></tr></thead><tbody>
+<tr><td>取付金具の有無</td><td>左パネル「取付金具を付ける」</td><td>OFFで0本</td></tr>
+<tr><td>取付金具の本数</td><td>左パネル（1〜3本）</td><td>板の高さ方向へ等間隔</td></tr>
+<tr><td>取付金具の長さ</td><td>左パネル＋ハンドル「金具の長さ」</td><td>0.05〜5m</td></tr>
+<tr><td>板の形状</td><td>左パネル（直方体／ベベル）</td><td>既定はベベル</td></tr>
+<tr><td>ベベル幅</td><td>左パネル＋ハンドル「ベベル幅」</td><td>0〜短辺の45%</td></tr>
+<tr><td>ベベル分割数</td><td>左パネル（1〜4）</td><td>角の丸みの分割</td></tr>
+<tr><td>板の幅・板厚・高さ</td><td>標準ハンドル／数値欄</td><td>既存の編集系をそのまま使用</td></tr>
+</tbody></table>
+<h3 id="2-1-座標と形の決め方">2-1. 座標と形の決め方</h3>
+<ul>
+<li><span class="bl">ローカル座標</span>は <strong>x=板の幅、y=板の厚さ、z=高さ</strong>。板は <code>y ∈ [-thickness/2, +thickness/2]</code>、<code>z ∈ [-height/2, +height/2]</code>
+</li>
+<li>板の輪郭は <code>wallSignFacePoints(params)</code>（幅×高さの4隅を丸めた多角形）。表裏・側面・線画・メッシュ・<span class="bl">外接範囲</span>で共有
+</li>
+<li><strong>ベベルは表裏の輪郭の4隅</strong>（幅×高さ）へ付く。<code>bevelMax = min(width, height) * 0.45 - 0.001</code>
+</li>
+<li><strong>取付金具は板の左側面（-x）から横へ</strong>まっすぐ伸びる単純な直方体（z軸回りに反時計回り90度回した面が取付面）
+<ul>
+<li><code>x0 = -width/2 - bracketLength</code>、<code>x1 = -width/2</code>
+</li>
+<li>太さは <code>y ∈ [-thickness/2, +thickness/2]</code> に収め、板の表裏からはみ出させない
+</li>
+<li>高さ位置 <code>z = height*(i+1)/(count+1) - height/2</code>（中央から上下へ等間隔）
+</li>
+</ul>
+</li>
+<li>既定値：<code>rot: 0</code>、<code>wallSignShape: "beveled"</code>、<code>wallSignBevelOffset: 0.18</code>、<code>wallSignBevelSegments: 4</code>、金具3本・長さ0.36
+</li>
+</ul>
+<h3 id="2-2-画面上のハンドル">2-2. 画面上のハンドル</h3>
+<table><thead><tr><th>ハンドル</th><th>位置</th><th>動き</th></tr></thead><tbody>
+<tr><td>金具の長さ（黄）</td><td><strong>金具の先端（外側）</strong></td><td>板の側面から外へ伸ばす</td></tr>
+<tr><td>ベベル幅（赤）</td><td>表裏の輪郭の右上角</td><td>角の丸みを増減</td></tr>
+</tbody></table>
+<p>
+3D・正面・横・上の4ビューすべてでドラッグ編集できる。線画・面メッシュ（背面除去／面表示／PNG・クリップボード書き出し）・当たり判定・コピー＆貼り付け・元に戻す に対応。
+</p>
+<hr>
+<h2 id="3-これまでの修正履歴">3. これまでの修正履歴</h2>
+<h3 id="3-1-壁付け看板の形">3-1. 壁付け看板の形</h3>
+<table><thead><tr><th>症状</th><th>原因</th><th>対応</th></tr></thead><tbody>
+<tr><td>金具が看板を突き抜ける／金具の奥に余計な物体</td><td>固定タブと壁側フランジという余計な箱を足していた</td><td>金具は<strong>単純な直方体のみ</strong>に戻した</td></tr>
+<tr><td>ベベルが見えない</td><td>既定のベベル幅0.08mが短辺に対して小さすぎた</td><td>既定を<strong>ベベル形状</strong>にし、幅を短辺の1割（0.18m）へ</td></tr>
+<tr><td>線画が金具で崩れる</td><td>突起物が板と交差していた</td><td>金具は板の面から外へ出るだけにし、板と交差しない配置に</td></tr>
+<tr><td>「ベベルを付ける辺が違う」</td><td>縦の稜線（幅×板厚）へ付けていた</td><td><strong>表裏の輪郭の4隅（幅×高さ）</strong>へ戻した</td></tr>
+<tr><td>金具の向き</td><td>板の裏（+y）から出ていた</td><td><strong>板の左側面（-x）から横へ</strong>（z軸回り反時計90度の面）</td></tr>
+<tr><td>金具が板からはみ出す</td><td>高さ位置が <code>0〜height</code> 基準だった</td><td><code>height/2</code> を引いて中央基準に修正</td></tr>
+<tr><td>金具長さのハンドルが内側</td><td>取付点に置いていた</td><td><strong>先端（外側）</strong>へ移動</td></tr>
+<tr><td>3Dで金具が見えない</td><td>既定の回転が30度</td><td>初期値を <strong><code>rot: 0</code></strong> に（向きは画面から変えられる）</td></tr>
+</tbody></table>
+<h3 id="3-2-凹窓階層建物recessedstackedbuilding">3-2. 凹窓階層建物（<code>recessedStackedBuilding</code>）</h3>
+<ul>
+<li>正面→4分割ベベル→右側面へ続く<strong>連続した凹み窓帯</strong>（正面と横面が別々の窓に見えない）
+</li>
+<li>階接合部の高さ＝窓の高さが常に一致（窓高は個別編集させない）
+</li>
+<li>窓は接合部のみ、窓枚数は既定5（1〜12）、端の壁幅を画面から調整
+</li>
+<li>ベベル0で角が直角になる／最上階も隠線除去が効く
+</li>
+<li>編集は<strong>前・横・上の各直交ビュー＋3D</strong>の全部で可能
+</li>
+</ul>
+<hr>
+<h2 id="4-追加したアセットと実用ヘルパー2026-10-29">4. 追加したアセットと実用ヘルパー（2026-10-29）</h2>
+<p>
+<code>asset_re.js</code> として届いた追加分を本体へ取り込みました。<strong>追加のみで、既存アセットの形は変わっていません</strong>
+<br>
+（棚の24アセットすべて、線画・面の枚数が取り込み前と一致）。
+</p>
+<h3 id="4-1-追加されたアセット4種">4-1. 追加されたアセット（4種）</h3>
+<table><thead><tr><th>アセット</th><th>形</th><th>主な設定値</th><th>パネル</th></tr></thead><tbody>
+<tr><td>切妻屋根 <code>gableRoof</code></td><td>棟を中心に左右へ下る山形の板</td><td>軒の出・板の厚さ・棟の向き（幅／奥行）</td><td>あり</td></tr>
+<tr><td>片流れ屋根 <code>shedRoof</code></td><td>低い側から高い側へ一枚で上がる板</td><td>軒の出・板の厚さ・低い側の高さ</td><td>あり</td></tr>
+<tr><td>スロープ <code>ramp</code></td><td>手前が床、奥が立ち上がる楔</td><td>手すりの有無・手すりの高さ</td><td>あり</td></tr>
+<tr><td>窓グリッド <code>windowGrid</code></td><td>厚みのある板に窓枠を並べる</td><td>行・列・<strong>窓1枚の幅・高さ</strong>・余白・窓台・上下左右の間隔・裏表と側面の窓</td><td>あり（＋画面上ハンドル2本）</td></tr>
+</tbody></table>
+<p>
+<strong>2026-10-29 追加の修正（3点）</strong>
+</p>
+<table><thead><tr><th>修正</th><th>内容</th></tr></thead><tbody>
+<tr><td>屋根の板厚が均一でなかった</td><td>鉛直方向へ厚みを足していたため、勾配が強いほど板が薄く見えていた。<strong>斜面に直角な<span class="bl">法線方向</span></strong>へ厚みを取る方式へ変更（<code>offsetPolyline2D</code>／<code>roofSlab</code>）。板厚0.06／0.2／0.35で<span class="gr">検算</span>し、内側の各点から斜面までの垂距離がすべて指定値と一致（誤差0.002未満）</td></tr>
+<tr><td>窓の大きさを変えられなかった</td><td>行・列しか変えられず、窓1枚の寸法は割り付け任せだった。<strong>窓の幅・窓の高さ</strong>を数値欄と画面上ハンドル（左上の窓の右辺・上辺）の両方から変更可能に。<code>0</code> は「セルいっぱい（自動）」</td></tr>
+<tr><td>面と線で屋根の形がずれていた</td><td>線画と面メッシュが別々に断面を組んでいた。共通の <code>roofSlab()</code> を両方が使う形へ統一</td></tr>
+</tbody></table>
+<ul>
+<li>数値は左パネルから編集でき、<strong>配置直後に元に戻す（Undo）も効きます</strong>
+</li>
+<li>屋根パネルの「<strong>下の建物に合わせる</strong>」で、近くの建物の寸法へ屋根の大きさ・高さ・位置を自動で合わせます
+<br>
+（建物の上面ぴったり・中心合わせを実測で確認済み）
+</li>
+</ul>
+<h3 id="4-2-追加された実用ヘルパーassetjs-6">4-2. 追加された実用ヘルパー（<code>asset.js</code> §6）</h3>
+<table><thead><tr><th>分類</th><th>関数</th><th>用途</th></tr></thead><tbody>
+<tr><td>数値</td><td><code>finiteNumber(value, fallback)</code></td><td>数値でない入力を既定値へ（29か所で使用）</td></tr>
+<tr><td>寸法</td><td><code>assetDimensions</code> / <code>assetFootprintArea</code> / <code>assetVolume</code></td><td>幅・奥行き・高さ、面積、体積</td></tr>
+<tr><td>変形</td><td><code>translateLocalPoints</code> / <code>mirrorLocalPoints</code> / <code>scaledAssetProps</code></td><td>ローカル点の移動・鏡映・寸法のスケール</td></tr>
+<tr><td>並べる</td><td><code>evenSpaced(count, span)</code> / <code>linearRepeatOffsets(count, spacing, axis)</code></td><td>等間隔の座標、格子状のオフセット</td></tr>
+<tr><td>衝突</td><td><code>aabbOverlaps(a, b, pad)</code> / <code>assetsOverlap(a, b, pad)</code></td><td>外接箱の重なり判定</td></tr>
+<tr><td>窓</td><td><code>windowGridOptions</code> / <code>facadeWindowGridRects</code> / <code>appendFacadeWindows</code> / <code>normalizedWindowFields</code></td><td>壁面の窓グリッド計算と描画</td></tr>
+<tr><td>屋根</td><td><code>roofParams</code> / <code>roofFitFromHost</code> / <code>rampParams</code></td><td>屋根とスロープの寸法解決、建物への合わせ込み</td></tr>
+<tr><td>屋根板</td><td><code>roofSlab(o, kind)</code>（新規）</td><td>断面の外形・内形・押し出し方向をまとめて返す。線画と面メッシュが共有</td></tr>
+<tr><td>形状</td><td><code>offsetPolyline2D(points, distance)</code>（新規）</td><td>折れ線を<span class="bl">法線方向</span>へ一定距離ずらす（<span class="bl">マイター</span>交点方式）。板厚を斜面に直角で一定にする</td></tr>
+<tr><td>補間</td><td><code>lerp</code> / <code>inverseLerp</code>（新規）</td><td>2点間の補間とその逆算</td></tr>
+<tr><td>丸め</td><td><code>snapValue</code> / <code>roundTo</code>（新規）</td><td>グリッドへの丸め、小数桁の丸め</td></tr>
+<tr><td>範囲</td><td><code>boundsOfPoints(points)</code>（新規）</td><td>点列の<span class="bl">外接範囲</span>（AABB）。空配列でも安全</td></tr>
+<tr><td>窓の寸法</td><td><code>windowGridOptions</code> の <code>ww</code> / <code>wh</code>（新規）</td><td>窓1枚の幅・高さ。<code>0</code>＝自動（セルいっぱい）</td></tr>
+</tbody></table>
+<ul>
+<li><code>windowRows</code> / <code>windowCols</code> を設定すると、<strong>直方体と建物にも窓を並べられます</strong>（既定は0＝従来どおり）
+</li>
+<li>建物の開口と重なる位置の窓は <code>windowRectHitsOpening</code> で自動的に省かれます
+</li>
+</ul>
+<h3 id="4-3-取り込み時に直した点">4-3. 取り込み時に直した点</h3>
+<table><thead><tr><th>項目</th><th>内容</th></tr></thead><tbody>
+<tr><td>面メッシュが箱近似だった</td><td><code>exportSurfaceTriangles</code> に分岐が無く、屋根もスロープも<strong><span class="rd">包絡箱</span></strong>で面が作られていた（面表示・背面処理で勾配が消える）。断面を押し出して閉じた立体を作る分岐を追加</td></tr>
+<tr><td>数値を編集できなかった</td><td>3アセットにパネルが無く、JSON編集しか手段がなかった。<code>roofP</code> / <code>rampP</code> / <code>windowGridP</code> を追加し <code>setOb</code> 経由で反映</td></tr>
+<tr><td>初期値が引き継がれなかった</td><td><code>newAsset</code> が定義表の固有値をコピーしていなかったので、屋根の軒の出・窓の行×列などを初期値として持たせる分岐を追加</td></tr>
+<tr><td><code>windowGrid</code> が裏面固定だった</td><td><code>windowBack: true</code> 固定をやめ、パネルの指定を尊重（既定は裏表とも）</td></tr>
+<tr><td>節番号が物理順でなかった</td><td><code>3.5 実用ヘルパー</code> が <code>4</code> と <code>5</code> の間にあったので、1〜10へ振り直し</td></tr>
+<tr><td>コメントが前の関数へ残っていた</td><td><span class="mk">1形状=1関数</span>へ分割した際、各形の見出しコメントが<strong>前の関数の末尾</strong>に入っていた（16か所）。正しい形の直前へ戻した</td></tr>
+<tr><td>関数間の空行</td><td>複雑な形の関数の前にだけ空行が2つあったので1つに統一</td></tr>
+<tr><td>屋根の断面の計算</td><td>軒の出を含む外形と板厚から6角形（切妻）／4角形（片流れ）の断面を作り、棟方向へ押し出す方式に統一</td></tr>
+</tbody></table>
+<h3 id="4-4-そのまま残したもの・今後の候補">4-4. そのまま残したもの・今後の候補</h3>
+<ul>
+<li>未使用のヘルパー：<code>assetVolume</code> / <code>assetFootprintArea</code> / <code>scaledAssetProps</code> / <code>mirrorLocalPoints</code> / <code>translateLocalPoints</code> / <code>evenSpaced</code> / <code>linearRepeatOffsets</code> / <code>aabbOverlaps</code> / <code>assetsOverlap</code> は<strong>現時点で呼び出し元がありません</strong>（将来用）。使わないなら削除して構いません
+</li>
+<li>逆に、今回追加した <code>offsetPolyline2D</code> / <code>roofSlab</code> / <code>lerp</code> / <code>inverseLerp</code> / <code>snapValue</code> / <code>roundTo</code> / <code>boundsOfPoints</code> は <strong>実際に使用中</strong>です
+</li>
+<li>屋根の専用ハンドル（軒の出・棟の高さ）は未実装。今は数値欄と共通の面ハンドルで編集します
+</li>
+<li>建物と屋根を<strong>親子接続</strong>（建物を動かすと屋根も追従）は未実装。「下の建物に合わせる」は配置時の1回合わせです
+</li>
+</ul>
+<h3 id="4-5-屋根の板厚2026-10-29">4-5. 屋根の板厚（2026-10-29）</h3>
+<pre><code>外側の断面  outerPath = [ (-halfSpan, lowZ), (0, h), (+halfSpan, lowZ) ]   ← 切妻
+内向き法線  n = 接線を −90°回したもの
+内側の断面  innerPath = offsetPolyline2D(outerPath, thickness)             ← マイター交点方式
+断面        cross = outerPath + reverse(innerPath)  → 棟方向へ ±half 押し出す</code></pre>
+<ul>
+<li>どの面でも内側は外側から<strong>法線距離 <code>thickness</code></strong> だけ離れるので、勾配・軒の出・棟の高さを
+<br>
+変えても板厚は一定
+</li>
+<li>折れ点は隣り合う2直線の交点（<span class="bl">マイター</span>）で取るため、棟の角も途切れない
+</li>
+<li><strong>両端（軒先）は鉛直に切る</strong>（垂木の小口と同じ）。下げ量は <code>t / cosθ</code>。
+<br>
+<span class="bl">法線方向</span>へずらすだけだと軒先が棟方向へ伸びて屋根の中心がずれるため、端だけ垂直に切り落としている。
+<br>
+鉛直に切っても斜面上の垂距離は <code>t</code> のまま（<span class="gr">検算</span>済み）
+</li>
+<li>「下の建物に合わせる」はこの下げ量 <code>t / cosθ</code> を見て持ち上げるので、<strong>軒が建物へ<span class="rd">めり込</span>まない</strong>
+</li>
+<li>線画（<code>roofSlabLines</code>）と面メッシュ（<code>exportSurfaceTriangles</code>）が <strong>同じ <code>roofSlab()</code></strong> を使うので、
+<br>
+面表示と線が食い違わない
+</li>
+</ul>
+<p>
+<span class="gr">検算</span>（内側の各点から斜面までの垂距離、単位 m）:
+</p>
+<table><thead><tr><th>板厚</th><th>切妻屋根（左斜面／棟／右斜面）</th><th>片流れ屋根（低い側／高い側）</th></tr></thead><tbody>
+<tr><td>0.06</td><td>0.06 / 0.06 / 0.06</td><td>0.06 / 0.06</td></tr>
+<tr><td>0.20</td><td>0.20 / 0.20 / 0.20</td><td>0.20 / 0.20</td></tr>
+<tr><td>0.35</td><td>0.35 / 0.35 / 0.35</td><td>0.35 / 0.35</td></tr>
+</tbody></table>
+<h3 id="4-6-窓の分割数と大きさ2026-10-29">4-6. 窓の分割数と大きさ（2026-10-29）</h3>
+<p>
+窓グリッドを選ぶと左パネルに <strong>行・列・窓の幅・窓の高さ</strong> が出ます。
+<br>
+画面上では <strong>左上の窓の右辺（幅）と上辺（高さ）</strong> に水色の菱形ハンドルが出るので、直接ドラッグもできます。
+</p>
+<pre><code>cellW = (wallW − 余白×2 − 横間隔×(列−1)) / 列
+winW  = min(cellW, 窓の幅)          ← 指定が無い(0)ときは cellW いっぱい
+padX  = (cellW − winW) / 2          ← 余りは左右へ均等（＝窓のまわりの壁が増える）</code></pre>
+<ul>
+<li>窓を小さくすると、四方の壁が均等に増える（中央寄せ）ので見た目が崩れない
+</li>
+<li>指定値がセルより大きいときは <strong>セル寸法で自動的に頭打ち</strong>（窓どうしが重ならない）
+</li>
+<li>行・列は <code>0</code>〜<code>20</code>、窓の幅・高さは <code>0</code>（自動）以上
+</li>
+</ul>
+<h3 id="4-6b-屋根の断面キャップ2026-10-29">4-6b. 屋根の断面キャップ（2026-10-29）</h3>
+<p>
+屋根の両端（断面）の面は、以前は「重心から各頂点への扇」で三角形に割っていました。
+<br>
+屋根の断面は<strong>凹んだ形（山形＋内側の山形）</strong>なので、扇の三角形が断面の外へはみ出し、
+<br>
+「塗らなくてよい所まで塗られる」状態になっていました。
+<br>
+現在は <strong><span class="bl">耳切り法</span>（<code>polygonEarClip</code>）</strong> で、必ず断面の内側だけを三角形に分けます。
+</p>
+<pre><code>耳切り（ear clipping）
+  1. 頂点の並びの向き（時計／反時計）を面積の符号で調べる
+  2. 「となり合う3点が作る三角形」が凹みを含まず、他の頂点を巻き込まない頂点を1つ選ぶ
+  3. その三角形を確定して頂点を1つ減らす → 残り3点で終わり</code></pre>
+<p>
+<span class="gr">検算</span>（幅 4.2・奥行き 3.2・棟高 1.35・板厚 0.2 の切妻屋根）:
+<br>
+<strong>断面積 0.5362 ＝ キャップ三角形の総面積 0.5362</strong>（片側 0.2681）。
+<br>
+<code>polygonEarClip</code> が無い環境では自動的に昔の扇へ戻ります。
+</p>
+<h3 id="4-7-3dビューで全アセットの面を編集2026-10-29">4-7. 3Dビューで全アセットの面を編集（2026-10-29）</h3>
+<p>
+3Dビューで「前後・左右」の面は編集できても、**高さ方向（上・底）の面ハンドルが出ない
+<br>
+アセット**がありました。原因は <code>gizmo()</code> の <code>solid</code> 判定（上・底の面を出すかどうかの表）に
+<br>
+新しいアセットが入っていなかったことです。現在は次の全種で <code>top</code> / <code>base</code> が出ます。
+</p>
+<pre><code>sign, stairs, building, awning, balcony, pathPipe, box, beveledBox, cornerCutBox,
+triPrism, triPyramid, recessedStackedBuilding, wallSign, person, gableRoof,
+shedRoof, ramp, windowGrid, crosswalk, 積層建物（階別ギズモ側で高さ編集）</code></pre>
+<p>
+検証：全26アセットを選択し、面ハンドルが <code>u+ / u− / v+ / v− / top / base</code> の6個そろうことを確認。
+</p>
+<h3 id="4-8-ギズモの軸の名前と色2026-10-29">4-8. ギズモの軸の名前と色（2026-10-29）</h3>
+<p>
+<strong>画面の上下＝Z（青）／手前・奥＝Y（緑）／左右＝X（橙）</strong> に統一しました。
+<br>
+内部の座標は「ワールド Y が高さ」のままなので、<strong>数値・保存データは変わりません</strong>。
+<br>
+変えたのは表示名と色だけです。
+</p>
+<table><thead><tr><th>表示</th><th>色</th><th>動かす方向</th></tr></thead><tbody>
+<tr><td><code>X</code></td><td>橙 <code>#e8743d</code></td><td>左右</td></tr>
+<tr><td><code>Z</code></td><td>青 <code>#4a7be8</code></td><td>上下（内部のワールド Y）</td></tr>
+<tr><td><code>Y</code></td><td>緑 <code>#3fa45b</code></td><td>手前・奥（内部のワールド Z）</td></tr>
+</tbody></table>
+<ul>
+<li>通常ギズモ・複合（<code>compound</code>）ギズモ・横壁看板ギズモ・パスパイプの制御点で同じ配色
+</li>
+<li>面ハンドル（白い四角）は従来どおり6面、回転リングは従来どおりオレンジの破線
+</li>
+</ul>
+<h3 id="4-9-人物の関節ポーズ2026-10-29">4-9. 人物の関節ポーズ（2026-10-29）</h3>
+<p>
+人物を選ぶと、<strong>腰・首・左右の股関節・左右の膝</strong>に丸いハンドルが出ます（3Dビュー）。
+</p>
+<table><thead><tr><th>ハンドル</th><th>色</th><th>置かれる位置</th><th>回すと動く所</th><th>範囲</th></tr></thead><tbody>
+<tr><td>腰</td><td>橙</td><td>胴の上の面の中央</td><td>胴＋首＋頭</td><td>±60°</td></tr>
+<tr><td>首</td><td>水色</td><td>頭の上</td><td>頭</td><td>±40°</td></tr>
+<tr><td>左股 / 右股</td><td>緑</td><td>膝</td><td>膝から下（太もも）</td><td>±80°</td></tr>
+<tr><td>左膝 / 右膝</td><td>紫</td><td>足</td><td>足（すね）</td><td>0〜120°</td></tr>
+</tbody></table>
+<ul>
+<li>ドラッグは <strong>ハンドルの接線方向の移動量 ÷ 1°あたりの画面ピクセル</strong> を角度へ換算（0.5°刻み）
+</li>
+<li>真横から見て回転が画面に出ない向きでは、支点の外側へ逃がした固定ハンドルになります
+</li>
+<li>関節を回すと <code>pose</code> は <code>custom</code> になり、プリセット（直立・歩行・しゃがみ・着席）は選択解除。
+<br>
+プリセットを押すと関節角度は 0 に戻ります
+</li>
+<li>同じ値は左パネルの <strong>腰の回転／首の回転／左右の股関節／左右の膝</strong>（<code>°</code>）でも編集でき、
+<br>
+「ポーズを微調整」で反映します
+</li>
+<li>角度の計算は <code>asset.js</code> の <code>personPose()</code> 1か所。<strong>線画・面メッシュ・ハンドル位置が同じ骨格</strong>を
+<br>
+使うので、回しても線と面がずれません
+</li>
+</ul>
+<h3 id="4-10-前横上ビューでも全部のハンドルを編集2026-10-29">4-10. 前／横／上ビューでも「全部のハンドル」を編集（2026-10-29）</h3>
+<p>
+<strong>症状</strong>：人物の関節ギズモと窓の大きさ（窓グリッド）が、3Dビューでは動くのに
+<br>
+前（正面）／横／上ビューでは動かなかった。
+</p>
+<p>
+<strong>原因</strong>：間取り（前・横・上）側のポインター処理が、アセット専用ハンドルの
+<br>
+アセット名を<strong>表で1つずつ列挙</strong>して振り分けていた（<code>stackedBuilding</code> <code>pathPipe</code>
+<br>
+<code>wallSideSign</code> <code>beveledBox</code> <code>wallSign</code> <code>sign</code> だけ）。表に無い新しいハンドル
+<br>
+（<code>person</code> の関節、<code>windowGrid</code> の窓の寸法など）は、間取り側の「家具の移動」として
+<br>
+処理されていた。
+</p>
+<p>
+<strong>修正</strong>：アセット名の表をやめ、<strong>3Dと同じ判定（<code>hitGizmo</code>）の結果で振り分ける</strong>
+<br>
+ようにした。面・軸・回転リングだけは間取り側の専用ハンドルが持ち、
+<br>
+それ以外（＝ <code>xxx-offset</code> <code>xxx-length</code> <code>person-joint-*</code> <code>window-grid-*</code> …）は
+<br>
+3Dビューと同じ <code>beginGizmo</code> → <code>dragEdit</code> の経路へ渡す。
+<br>
+これで<strong>新しいハンドルを追加しても、前／横／上で勝手に動く</strong>。
+</p>
+<blockquote><p><strong>訂正（2026-10-29 追記）</strong>：この時点の検証は jsdom 上で<code>pointerdown</code>/<code>pointermove</code> イベントを直接発火させる方法で行っていたため、「値が変わった」ことしか見ておらず、 <strong>実際のブラウザで 200px ドラッグしたときの変化量が 0.5 度しかない</strong>ことに気づけなかった。 間取り側の振り分け自体は 4-10 の修正で正しくなっているが、<strong>変化量・当たり判定の 取り合い・重なったハンドルは 4-12 で追加修正した</strong>。実ブラウザ（Playwright の <code>page.mouse</code>）で測り直した結果は 4-12 を参照。</p></blockquote>
+<h3 id="4-11-画面上で向きがつぶれたハンドルの補正2026-10-29">4-11. 画面上で向きがつぶれたハンドルの補正（2026-10-29）</h3>
+<p>
+<strong>症状</strong>：真上ビューで円錐の高さ・球の半径が動かなかった（3Dでは動く）。
+</p>
+<p>
+<strong>原因</strong>：真上から見ると高さ方向は画面に写らないため、ハンドルの
+<br>
+「動かす向き（<code>dir</code>）」が <code>(0,0)</code>、「1mあたりの画面ピクセル（<code>scale</code>）」が 0 になり、
+<br>
+ドラッグ量が常に 0 として計算されていた。
+</p>
+<p>
+<strong>修正</strong>：<code>specialGizmo()</code> の戻り値を <code>normalizeScreenHandles()</code> で一括点検し、
+<br>
+<code>dir</code> がほぼ 0 のハンドルは <strong>画面の上向き＋そのビューの px/単位（<code>orthScale()</code>）</strong> に
+<br>
+置き換える。アセットごとに個別対応するのではなく、ハンドルをまとめて走査するので
+<br>
+今後ハンドルを増やしても同じ不具合は起きない。
+</p>
+<p>
+あわせて、建物の開口ハンドル（ひし形）が面ハンドル（白い四角）と重なるビューで
+<br>
+面の拡大が優先されていたのを、<strong>近ければ開口を優先</strong>するようにした（真上ビューで
+<br>
+開口の高さを編集できる）。
+</p>
+<h3 id="4-12-前・横・上で関節と窓の幅が編集できないの本当の原因と修正2026-10-29">4-12. 「前・横・上で関節と窓の幅が編集できない」の本当の原因と修正（2026-10-29）</h3>
+<p>
+実ブラウザ（Playwright + Chromium、1280×800、<code>page.mouse</code> で 200px ドラッグ）で
+<br>
+測り直したところ、4-10／4-11 の修正後も次の5つが残っていた。**jsdom のプローブは
+<br>
+「値が変わったか」しか見ていないので、これらは検出できなかった。**
+</p>
+<table><thead><tr><th>#</th><th>症状（実測）</th><th>原因</th><th>修正</th></tr></thead><tbody>
+<tr><td>1</td><td>前ビューの関節が 200px で <strong>0.5 度</strong>しか動かない</td><td>画面上で回転が動かない向きの関節ハンドルの <code>scale</code> に <code>orthScale()×4</code>（前ビューで約533px/度）を入れていた</td><td><code>PERSON_JOINT_PX_PER_DEG = 6</code>（200px ≒ 33度）に固定</td></tr>
+<tr><td>2</td><td>真上ビューで腰と首、股と膝が<strong>画面上の同じ点</strong>に重なり、膝を掴むと股が動く</td><td>正投影では視線方向の関節が1点に投影される</td><td><code>spreadOverlappingHandles()</code> で重なったハンドルを26pxずつ輪状にずらす（支点から破線を引くのでどの関節か分かる）</td></tr>
+<tr><td>3</td><td>面ハンドル（白い四角）を押すと<strong>移動</strong>してしまい、大きさが変わらない</td><td>軸矢印の当たり判定が「中心→先端」の線分全体で、図形の内側を通る線が面ハンドルを奪っていた</td><td>軸は<strong>外側55%以降だけ</strong>を当たり判定にし、面と軸が競合したら<strong>近い方</strong>（同距離なら手前に描いている面）を採用</td></tr>
+<tr><td>4</td><td>窓の幅・看板の金具などが、近くの専用ハンドルに取られて動かない</td><td>専用ハンドルは距離無条件で面ハンドルより優先していた</td><td><code>handleOrFace()</code>（近い方、同距離なら専用）で全アセット共通に判定</td></tr>
+<tr><td>5</td><td>手前/奥の面（前ビュー）や高さ面（真上ビュー）が編集できない</td><td><code>faceScreenGuide()</code> が <code>hidden</code> を返し、<code>dragEdit</code> が <code>dl=0</code> にしていた</td><td>つぶれた法線は専用ハンドルと同じ規則（画面の上向き＋<code>orthScale()</code>）へ逃がす</td></tr>
+<tr><td>6</td><td>3Dで描かれている回転リングを前／横／上で押しても<strong>何も起きない</strong>（3Dでしか回せない）</td><td>間取り側のポインター処理が <code>ring</code> を「間取り専用ハンドルが受け持つ」として <code>beginGizmo</code> へ渡していなかった。さらに <code>dragEdit</code> のリングは視線と面の交点で角度を出すため、正投影（視線が面と平行）では交点が取れなかった</td><td><code>ring</code> も <code>beginGizmo</code> 経路へ渡し、角度は<strong>画面の移動量を面内2軸（<code>ringPlaneUV</code>）へ分解</strong>して求める。面が真横を向くビューは画面角度で代用</td></tr>
+</tbody></table>
+<p>
+<strong>実測（受け入れ確認、200px ドラッグ）</strong>
+</p>
+<table><thead><tr><th>ビュー</th><th>窓の幅</th><th>窓の高さ</th><th>腰</th><th>首</th><th>左股</th><th>左膝</th></tr></thead><tbody>
+<tr><td>3D</td><td>0→2.74</td><td>0→1.58</td><td>0→60°</td><td>0→40°</td><td>0→80°</td><td>0→84°</td></tr>
+<tr><td>前</td><td>0→2.74</td><td>0→1.58</td><td>0→42°</td><td>0→40°</td><td>0→42°</td><td>0→42°</td></tr>
+<tr><td>横</td><td>0→2.74</td><td>0→1.58</td><td>0→60°</td><td>0→40°</td><td>0→80°</td><td>0→84°</td></tr>
+<tr><td>上</td><td>0→2.74</td><td>0→1.58</td><td>0→60°</td><td>0→40°</td><td>0→80°</td><td>0→84°</td></tr>
+</tbody></table>
+<p>
+（窓の幅・高さの 0 は「自動」＝<code>windowW</code>/<code>windowH</code> 未設定の状態）
+</p>
+<p>
+さらに、26種の全アセット × 4ビュー × 描かれているハンドル全部を
+<br>
+「1ハンドルごとに初期状態へ戻してから実ポインターで180pxドラッグ」で総当たりし、
+<br>
+<strong>707件すべてで値が変化（NG 0件）</strong>を確認した（<code>matrix2.js</code>）。
+<br>
+残る「画面外 83件」は、ビルの高い位置のハンドルやパイプの制御点が
+<br>
+そのビューの表示範囲の外にあるという意味で、掴めない不具合ではない。
+</p>
+<h3 id="4-13-前横上でハンドルが描かれていなかった2026-10-29">4-13. 前／横／上で「ハンドルが描かれていなかった」（2026-10-29）</h3>
+<p>
+4-12 で当たり判定と変化量は直したが、**前／横／上では専用ハンドルがそもそも
+<br>
+描画されていなかった**。当たり判定だけ存在して見えないので、ユーザーから見ると
+<br>
+「3Dでは丸いアンカーや青い菱形が出るのに、前・横・上では出ない＝編集できない」状態だった。
+</p>
+<p>
+<strong>原因</strong>：<code>render</code> のギズモ描画は間取りモードでは <code>drawGizmo</code> を呼ばず、
+<br>
+間取り側の <code>cityFloorPlanOverlay</code> が専用ハンドルを描いていた。その中で
+<br>
+<code>drawSpecialGizmo</code> を呼ぶ条件が
+</p>
+<pre><code class="language-js">if (editHandles?.special) { ... }            // 積層建物・パスパイプ・壁横看板だけ
+else { drawFloorPlanEditHandles(c);
+       if (asset === "beveledBox" || asset === "wallSign") drawSpecialGizmo(c, o); }  // ← ここだけ</code></pre>
+<p>
+と<strong>アセット名の列挙</strong>になっていたため、人物（<code>person</code>）の関節の丸と
+<br>
+窓グリッド（<code>windowGrid</code>）の青い菱形が抜けていた。
+</p>
+<p>
+<strong>修正</strong>：アセット名で絞らず、<strong>選択中で編集ツールなら常に <code>drawSpecialGizmo</code> を1回だけ描く</strong>
+<br>
+（壁横看板だけは engine-gizmo.js 側の <code>drawGizmo</code> が担当するので除外）。
+<br>
+<code>drawSpecialGizmo</code> の呼び出し回数は 3D／前／横／上すべてで <strong>1回</strong>であることを実測
+<br>
+（二重描画なし）。
+</p>
+<p>
+確認は Playwright で撮った画面をその場で見て行った（前ビューの人形の関節＝丸ノブ／
+<br>
+上ビューの重なりをずらした関節／前ビューの窓の幅・高さ＝青い菱形／
+<br>
+横ビューで幅がつぶれる窓の2つの菱形）。<strong>画像ファイルは残していない</strong>（§6-1）。
+</p>
+<h3 id="4-14-人物の足元の台座立方体を削除2026-10-29">4-14. 人物の足元の台座（立方体）を削除（2026-10-29）</h3>
+<p>
+<code>asset.js</code> の <code>linesPerson()</code> の先頭にあった
+</p>
+<pre><code class="language-js">// 足元の台座
+out.push(...boxA(o, p.legR * 1.5, p.bd * 0.85, 0, 0.08 * h, c));</code></pre>
+<p>
+を削除した。人物を配置すると足元に低い箱が出て、他のアセットと重なって邪魔だったため。
+<br>
+人物は台座なしでそのまま立つ形にした（線画の本数は 37 → 25 本）。
+<br>
+~~面メッシュ（<code>exportSurfaceTriangles</code>）も線画から作っているので、台座の面も同時に消える。~~
+</p>
+<blockquote><p><strong>追記（同日）</strong>：上の「面メッシュも同時に消える」は<strong>誤り</strong>だった。 <code>engine-render.js</code> の <code>exportSurfaceTriangles()</code> の人物分岐には台座が<strong>別に</strong>書かれていて、</p></blockquote>
+<pre><code class="language-js">// 台座
+boxAt(0, 0, p.legR * 1.5, p.bd * 0.85, 0, 0.08 * h);</code></pre>
+<blockquote><p>が残っていた。線画だけ消しても、<strong>面表示（既定でオン）では足元に立方体が塗られて見える</strong>。 実際「人形を作ると足元に立方体ができる」という指摘のとおりだったので、この行も削除した。</p></blockquote>
+<h3 id="4-15-3dでは編集できるのに前横上ではできないが残っていた理由2026-10-29">4-15. 「3Dでは編集できるのに、前／横／上ではできない」が残っていた理由（2026-10-29）</h3>
+<p>
+4-13 で「常に <code>drawSpecialGizmo</code> を描く」に直したあとも、ユーザーから
+<br>
+<strong>「3Dでは丸いアンカーが出るのに、前・横・上では出ない」</strong>という指摘が続いた。
+<br>
+実ブラウザで確認した残りの原因は2つ。
+</p>
+<table><thead><tr><th>#</th><th>原因</th><th>修正</th></tr></thead><tbody>
+<tr><td>1</td><td>間取り側の描画が <code>if (tool === "edit" &amp;&amp; …) drawSpecialGizmo(...)</code> で、<strong>ツール状態に依存</strong>していた。3D側（<code>drawGizmo</code>）はツールに関係なく描くため、「3Dでは出る／前横上では出ない」という差が生まれる</td><td>条件から <code>tool === "edit"</code> を外し、<strong>選択されていれば常に描く</strong>（壁横看板だけは engine-tools 側が担当するので除外）</td></tr>
+<tr><td>2</td><td>人物の面メッシュに台座の立方体が残っていた（4-14 の追記）</td><td><code>exportSurfaceTriangles()</code> から <code>boxAt(0,0,…)</code> を削除</td></tr>
+</tbody></table>
+<p>
+ポインター処理も同じ理由で <code>tool === "edit" &amp;&amp; sel</code> を <code>sel</code> に揃えた
+<br>
+（3Dの <code>cv.onpointerdown</code> は <code>sel</code> だけで判定しているため）。
+</p>
+<p>
+<strong>確認方法（以後これを使う）</strong>：<code>drawSpecialGizmo</code> を空関数に差し替えて再描画し、
+<br>
+差し替え前後のスクリーンショットの画素差分を数える。差分があれば「そのビューで
+<br>
+実際にハンドルが描かれている」と言い切れる。
+</p>
+<table><thead><tr><th>アセット</th><th>3D</th><th>前</th><th>横</th><th>上</th></tr></thead><tbody>
+<tr><td>人物（関節6個）</td><td>1,961 px</td><td>2,515 px</td><td>2,283 px</td><td>2,015 px</td></tr>
+<tr><td>窓グリッド（菱形2個）</td><td>1,121 px</td><td>1,106 px</td><td>1,137 px</td><td>1,121 px</td></tr>
+</tbody></table>
+<p>
+（1280×820 の実ブラウザ、<code>cyberpunk-city-studio.html</code>。全ビューで描画されている）
+</p>
+<h3 id="4-16-今後のアセット追加用の下請けを20個追加2026-10-29">4-16. 今後のアセット追加用の下請けを20個追加（2026-10-29）</h3>
+<p>
+新しいアセットを作るたびに「同じような点列」「同じような窓の割り付け」「同じような
+<br>
+数値クランプ」を写経していたので、<code>asset.js</code> の<strong>§6.2</strong>（`// ===== 6.2 新しいアセットを
+<br>
+作るときの下請け =====`、1,526行目付近）へ共通部品として20個まとめた。
+<br>
+<strong>既存アセットの線画・面・当たり判定には一切使っていない</strong>（＝挙動は変わらない）。
+</p>
+<table><thead><tr><th>グループ</th><th>関数</th><th>ひとこと</th></tr></thead><tbody>
+<tr><td>値の取り出し</td><td><code>assetNum(o,key,fallback,min,max)</code> / <code>assetBool(o,key,fallback)</code></td><td>文字列・未設定・範囲外を安全に読む</td></tr>
+<tr><td>数値</td><td><code>snapValue(v,step)</code> / <code>roundTo(v,digits)</code></td><td>刻み・小数桁へ丸める</td></tr>
+<tr><td>補間</td><td><code>lerp(a,b,t)</code> / <code>inverseLerp(a,b,v)</code> / <code>smoothUnit(t)</code></td><td>線形補間・逆算・smoothstep</td></tr>
+<tr><td>点列</td><td><code>boundsOfPoints(pts)</code></td><td>点列の軸並行バウンディングボックス</td></tr>
+<tr><td>割り付け</td><td><code>spanSplit(total,count,gap,minSize)</code></td><td>左右対称に等間隔で並べた中心座標</td></tr>
+<tr><td>1本の面</td><td><code>rect2DOutlineA</code> / <code>quadFaceA</code> / <code>arcPointsA</code> / <code>discOutlineA</code></td><td>矩形・任意4点・円弧・円の輪郭</td></tr>
+<tr><td>立体</td><td><code>wireCylinderA</code> / <code>wirePrismA</code> / <code>wirePyramidA</code></td><td>ワイヤー円柱・任意断面の押し出し・錐</td></tr>
+<tr><td>建具</td><td><code>stairsRunA(opt)</code> / <code>latticePanelA(opt)</code></td><td>直階段・格子（柵・桟）</td></tr>
+<tr><td>登録・確認</td><td><code>registerAsset(kind,meta,builder)</code> / <code>describeAsset(o)</code></td><td>カタログと線画表の同時登録／1行の要約</td></tr>
+</tbody></table>
+<p>
+使い方の写経（登録までの3ステップ）は <code>ASSET_JS_GUIDE.md</code> の <strong>3.6b</strong> と <strong>5-2</strong> に、
+<br>
+関数の引数・戻り値・計算内容は <strong>6（全123関数の一覧）</strong> に書いた。
+</p>
+<hr>
+<h2 id="5-スクリプト整理・最適化2026-10-29">5. スクリプト整理・最適化（2026-10-29）</h2>
+<h3 id="5-1-結果">5-1. 結果</h3>
+<table><thead><tr><th>指標</th><th>見直し前</th><th>見直し後</th></tr></thead><tbody>
+<tr><td>未使用のトップレベル宣言</td><td>0</td><td>0</td></tr>
+<tr><td>本文が完全一致する関数</td><td>0</td><td>0</td></tr>
+<tr><td>重複コードブロック（6行窓）</td><td>194</td><td><strong>183</strong></td></tr>
+<tr><td>最大関数の行数</td><td><code>assetLines</code> <strong>1157行</strong></td><td><code>exportSurfaceTriangles</code> 720行</td></tr>
+<tr><td>1000行超の関数</td><td>1本</td><td><strong>0本</strong></td></tr>
+<tr><td>面メッシュ生成（536体・1パス）</td><td>297 ms</td><td><strong>4.9 ms</strong></td></tr>
+</tbody></table>
+<p>
+元から未使用コード・同名重複関数はゼロで、問題は<strong>巨大関数・定型句の重複・毎フレームの再計算</strong>だった。
+</p>
+<h3 id="5-2-巨大関数の分割">5-2. 巨大関数の分割</h3>
+<p>
+<code>assetLines</code>（1157行・23分岐）を <strong><span class="mk">1形状=1関数</span></strong>へ分割し、表から呼ぶ形にした。
+</p>
+<pre><code class="language-js">function assetLines(o) {
+    const kind = o.asset, w = o.ra * 2, d = o.rb * 2, h = o.h,
+        c = o.c || "#222222", ctx = { o, kind, w, d, h, c, a: c, out: [] };
+    const build = ASSET_LINE_BUILDERS[kind];
+    if (build) build(ctx);
+    return ctx.out;
+}
+const ASSET_LINE_BUILDERS = { box: linesBox, wallSign: linesWallSign, /* … */ };</code></pre>
+<p>
+<code>linesBox</code> / <code>linesWallSign</code> / <code>linesStackedBuilding</code> / <code>linesPerson</code> / <code>linesBuilding</code> など22関数。<code>beveledStackedBuilding</code> は <code>stackedBuilding</code> と同じ関数を共有。
+</p>
+<blockquote><p>分割中に「<code>openingEnabled === false</code> の建物が線画を返さない」退行を出したが、回帰probeが検出し、<code>out.push(...closedBuildingLines(...))</code> へ直して解消済み。</p></blockquote>
+<h3 id="5-3-定型句の共通化">5-3. 定型句の共通化</h3>
+<table><thead><tr><th>共通化したもの</th><th>置き換えた箇所</th><th>内容</th></tr></thead><tbody>
+<tr><td><code>capturePointer(pointerId)</code></td><td>15か所</td><td><code>try { cv.setPointerCapture() } catch {}</code></td></tr>
+<tr><td><code>orthHandleGap(span, factor)</code></td><td>8か所</td><td>正投影でハンドルを離す距離 <code>max(48/Z, min(88/Z, span*orthScale()*f))</code></td></tr>
+<tr><td><code>hiddenHandleGap()</code></td><td>6か所</td><td>裏へ回り込んだハンドルを輪郭外へ逃がす距離</td></tr>
+<tr><td><code>spokesA(...)</code></td><td>3か所</td><td>楕円リング2つを結ぶ縦線（円柱・テーパー・頭部）</td></tr>
+</tbody></table>
+<h3 id="5-4-性能面メッシュのキャッシュ">5-4. 性能：面メッシュのキャッシュ</h3>
+<p>
+描画のたびに全オブジェクトの面メッシュを作り直していたため、値が変わらない限り使い回すようにした。
+</p>
+<pre><code class="language-js">function surfaceTriangles(o) {
+    if (o.attachment) syncAttachedPart(o);   // 親に追従するパーツは基準を更新してから見る
+    const key = surfaceCacheKey(o);          // 値が1つでも変われば別キー
+    const hit = surfaceTriCache.get(o);
+    if (hit &amp;&amp; hit.key === key) return hit.tris;
+    const tris = exportSurfaceTriangles(o);
+    surfaceTriCache.set(o, { key, tris });
+    return tris;
+}</code></pre>
+<p>
+適用箇所は画面の面表示（<code>drawObjectSurfaces</code>）と書き出しの隠れ線計算（<code>buildExportDepth</code>）。編集すれば自動でキャッシュが外れる。
+</p>
+<h3 id="5-5-構成の統一">5-5. 構成の統一</h3>
+<ul>
+<li>節見出しを全ファイルで <code>// ===== n. 見出し =====</code> に統一
+<br>
+（engine-core: 1〜10 / engine-tools: 1〜17 / asset: 1〜8 / asset-controller: 1〜8 / studio-ui: 1〜6＋<code>2.1</code> などの子節）
+</li>
+<li><code>asset-controller.js</code> は見出し2つだけだったので8節に整理
+</li>
+<li>英語だけだった見出し（<code>Scene outliner</code> など）を日本語＋番号へ
+</li>
+<li>分割した関数には「何をする関数か」を1行コメントで付与
+</li>
+</ul>
+<h3 id="5-6-次にやるなら未着手">5-6. 次にやるなら（未着手）</h3>
+<ol>
+<li><code>exportSurfaceTriangles</code>（720行）の分割 … <code>assetLines</code> と同じやり方。各分岐が <code>return out</code> で終わるので表＋関数へ置き換え可能
+</li>
+<li><code>drawSpecialGizmo</code>（381行）/ <code>dragEdit</code>（343行）/ <code>hitGizmo</code>（228行）の分割 … 種別ごとの <code>switch</code> を表へ
+</li>
+<li><code>newAsset</code>（252行）の初期値を <code>ASSET_DEFAULTS</code> 表へ
+</li>
+<li>~~<code>studio-ui.js</code>（5,131行）のファイル分割~~ … <strong>2026-11-02 に実施</strong>（§5Z-7）。<code>window.CityGridStudio</code> で共有する
+</li>
+</ol>
+<h3 id="5-7-重複の削除と軽量化2026-10-29">5-7. 重複の削除と軽量化（2026-10-29）</h3>
+<p>
+<strong>重複していたものを1か所へ</strong>
+</p>
+<table><thead><tr><th>まとめたもの</th><th>内容</th><th>置き換えた箇所</th></tr></thead><tbody>
+<tr><td><code>hiddenHandleDir()</code> / <code>hiddenHandleScale()</code></td><td>つぶれたハンドルを逃がす向きと倍率</td><td>6か所＋14か所の同じ三項演算子</td></tr>
+<tr><td><code>nearestHandleOf(handles, p, R)</code></td><td>「押した位置に最も近いハンドル」を選ぶ</td><td><code>hitGizmo</code> の5アセット分（同じ <code>filter/map/sort</code> の写し）</td></tr>
+<tr><td><code>valueHandle(h, opt)</code></td><td>破線＋ひし形＋数値ラベルの描画</td><td><code>drawSpecialGizmo</code> の4アセット分（見た目の微差も解消）</td></tr>
+<tr><td><code>normalizeScreenHandles(sg)</code></td><td>ハンドルを走査して向きのつぶれを補正</td><td>新規（§4-11）</td></tr>
+</tbody></table>
+<p>
+<strong>軽くしたところ</strong>
+</p>
+<ul>
+<li>人物の関節ギズモは、1回の描画で <code>personPose()</code> を <strong>5回</strong>呼んでいた
+<br>
+（腰・首・左右の股関節・左右の膝それぞれで「角度を少し増やした姿勢」を作り直していた）。
+<br>
+支点まわりの回転だけで足りるので <strong>1回</strong>に削減（毎フレームの再計算を4回ぶん節約）
+</li>
+<li>人物の面メッシュは <code>personPose()</code> の <code>torsoBottom</code> / <code>torsoTop</code> / <code>legs</code> をそのまま使うようにして、
+<br>
+同じ回転計算を2度書かないようにした
+</li>
+</ul>
+<p>
+<strong>使っていない関数の整理</strong>
+</p>
+<ul>
+<li><code>asset.js</code> の <code>lerp</code> / <code>inverseLerp</code> / <code>snapValue</code> / <code>roundTo</code> / <code>boundsOfPoints</code>
+<br>
+… どこからも呼ばれていなかったので削除
+<br>
+→ **その後 §4-16（アセット用の下請け）で、同じ名前の関数を「今後のアセット追加用」として
+<br>
+<code>asset.js</code> の §6.2 に正式に追加した**（未使用のまま置いておくのではなく、
+<br>
+用途・引数・戻り値をコメントと <code>ASSET_JS_GUIDE.md</code> に書いた上で残す方針にした）
+</li>
+<li><code>assetVolume</code> / <code>assetFootprintArea</code> / <code>scaledAssetProps</code> / <code>mirrorLocalPoints</code> /
+<br>
+<code>translateLocalPoints</code> / <code>evenSpaced</code> / <code>linearRepeatOffsets</code> / <code>aabbOverlaps</code> / <code>assetsOverlap</code>
+<br>
+… アセット追加用の下請けとして残す（<strong>未使用であることをコメントで明記</strong>）
+</li>
+</ul>
+<h3 id="5-8-描画の最適化・第2弾2026-10-29">5-8. 描画の最適化・第2弾（2026-10-29）</h3>
+<p>
+「重い・無駄」を実測で潰した。<strong>見た目は1画素も変えていない</strong>（後述の画素比較）。
+</p>
+<table><thead><tr><th>直したところ</th><th>内容</th><th>効果</th></tr></thead><tbody>
+<tr><td><code>orthSetup()</code>（engine-core.js）</td><td>正投影の基底・倍率・画面上の原点を<strong>点ごとに3つの配列を作って計算し直していた</strong>。ビュー・倍率・中心・カメラが変わらない間は使い回す</td><td>前・横・上で効く</td></tr>
+<tr><td><code>strokeW()</code> の点間補間</td><td>魚眼投影の曲がりを出すための球面補間を、<strong>正投影でも全ビューで</strong>行っていた（1本の線が最大200点に増える）。正投影は投影が線形なので補間不要</td><td>同上</td></tr>
+<tr><td><code>projPoint()</code>（engine-tools.js）</td><td><code>strokeWVisible()</code> が同じ点を <code>scr3()</code> と <code>exportPoint()</code> で<strong>2回投影</strong>していた（どちらも <code>cam()</code> を通る）。1回にまとめた</td><td>面表示・背面処理</td></tr>
+<tr><td><code>buildExportDepth()</code></td><td>深度バッファを毎フレーム <code>new Float32Array(1600×900)</code> して全面 <code>fill(Infinity)</code> していた。<strong>使い回し＋前回書き込んだ行だけ</strong> Infinity に戻す</td><td>面表示</td></tr>
+<tr><td>二値化（<code>bin</code>）</td><td>毎フレーム canvas 全体（144万画素）を <code>getImageData</code>／<code>putImageData</code> していた。<strong>実際に線を引いた範囲（<code>strokeBox()</code>）だけ</strong>を処理</td><td>全面</td></tr>
+</tbody></table>
+<p>
+<strong>実測</strong>（1280×800、4オブジェクト・137本の線、面表示オン、25回の中央値）
+</p>
+<table><thead><tr><th>ビュー</th><th>最適化前</th><th>最適化後</th><th>変化</th></tr></thead><tbody>
+<tr><td>3D</td><td>42.8 ms</td><td>41.6 ms</td><td>−3%</td></tr>
+<tr><td>前</td><td>39.1 ms</td><td>25.9 ms</td><td><strong>−34%</strong></td></tr>
+<tr><td>横</td><td>48.4 ms</td><td>26.2 ms</td><td><strong>−46%</strong></td></tr>
+<tr><td>上</td><td>40.6 ms</td><td>35.5 ms</td><td>−13%</td></tr>
+</tbody></table>
+<p>
+3Dの伸びが小さいのは、魚眼（既定のパース）では点間補間が<strong>必要</strong>なので残しているため。
+<br>
+前・横・上は補間の省略と投影係数の使い回しがそのまま効く。
+</p>
+<p>
+<strong>見た目が変わっていないことの確認</strong>：同じシーン（箱・凹窓階層建物・人物・窓グリッド）を
+<br>
+最適化前後のコードで描画し、スクリーンショットを画素比較 → **3D／前／横／上の4枚すべて
+<br>
+最大差分 0**（完全一致）。
+</p>
+<hr>
+<h2 id="5b-オブジェクトロックカメラロック2026-10-30-追加">5B. オブジェクトロック／カメラロック（2026-10-30 追加）</h2>
+<p>
+「もう動かしたくないもの」と「もう視点を変えたくない」を、それぞれ固定できるようにした。
+<br>
+<strong>2つは別物</strong>で、片方だけ使うことも両方同時に使うこともできる。
+</p>
+<h3 id="5b-1-オブジェクトロック図形を固定">5B-1. オブジェクトロック（図形を固定）</h3>
+<table><thead><tr><th>項目</th><th>内容</th></tr></thead><tbody>
+<tr><td>入口</td><td>上部バー <code>ロック</code>／シーン一覧の各行の鍵アイコン／<code>選択をロック</code>・<code>全ロック解除</code>／<strong>⌘/Ctrl + L</strong></td></tr>
+<tr><td>保存</td><td>図形の定義に <code>locked: true</code> が入るので、<strong>JSON保存・読み込み・自動保存でそのまま残る</strong>（保存形式の変更なし）</td></tr>
+<tr><td>ロック中にできないこと</td><td>選択（クリック・箱選択・全選択）、ギズモでの移動／拡大／回転、数値パネル、整列、結合・グループ化、削除（<code>X</code>キー・<code>選択中を削除</code>・<code>全消去</code>）</td></tr>
+<tr><td>ロック中にできること</td><td>表示／非表示（一覧の目のアイコン）、<strong>ロック解除だけは一覧の鍵・バー・⌘/Ctrl+L からいつでも可能</strong></td></tr>
+<tr><td>連動</td><td>建物に接着した子（テント・看板）は親と一緒にロック。グループは全員そろってロック</td></tr>
+<tr><td>画面表示</td><td>ロック中の図形の真上に小さな鍵。一覧の行は鍵アイコンが青くなり、チェックボックスが押せなくなる</td></tr>
+</tbody></table>
+<p>
+<strong>実装の要点</strong>：判定を1か所に集めている。ロック中かを決めるのは <code>obLocked(o)</code>（<code>engine-core.js</code>）だけで、
+</p>
+<ul>
+<li><code>setOb()</code> … ロック中は <code>locked</code>／<code>visible</code> 以外の変更を<strong>捨てる</strong>（ギズモも数値パネルも整列も、すべてここを通る）
+</li>
+<li><code>pickOb()</code>／<code>setSelection()</code>／<code>normalizeSelection()</code> … ロック中は選択しない
+</li>
+<li><code>deleteSelectedObjects()</code>／<code>finishBoxSelection()</code>／<code>全消去</code> … ロック中は消さない・選ばない
+</li>
+</ul>
+<p>
+という4か所だけ。ギズモや各アセットのハンドルを個別に直す必要がないので、
+<br>
+<strong>今後アセットを増やしても自動的にロックが効く</strong>。
+</p>
+<h3 id="5b-2-カメラロック視点を固定">5B-2. カメラロック（視点を固定）</h3>
+<table><thead><tr><th>項目</th><th>内容</th></tr></thead><tbody>
+<tr><td>入口</td><td>上部バー <code>カメラ固定</code>／<strong>L</strong> キー</td></tr>
+<tr><td>固定するもの</td><td>カメラ位置（cx/cz/ch）・向き（yaw/pitch/roll）・レンズ・魚眼画角・画面上のズームと移動（Z/ox/oy）</td></tr>
+<tr><td>固定しないもの</td><td>オブジェクトの編集（移動・拡大・回転はそのまま）、表示切り替え（面ON/OFF・補助線・グリッド）、3D⇄前／横／上の切り替え</td></tr>
+<tr><td>画面表示</td><td>画面左下に「カメラ固定」ラベル、ボタンは黄色く点灯</td></tr>
+<tr><td>保存</td><td><strong>保存しない</strong>（ファイルを開いたら解除される）。開いた直後に視点が戻せない、という<span class="rd">事故</span>を避けるため</td></tr>
+</tbody></table>
+<p>
+<strong>実装の要点</strong>：視点を動かす入口は7種類以上ある（3Dドラッグ・パン・ホイール・ピンチ・矢印キー・
+<br>
+左パネルのスライダー／数値入力・標準ビュー・間取りのカメラ操作）。全部に個別のガードを書くと
+<br>
+必ず抜けるので、<strong>2段構え</strong>にした。
+</p>
+<ol>
+<li><code>setP()</code> と左パネルの入力で<strong>書き込みを拒否</strong>（その場でつまみも元へ戻す）
+</li>
+<li>それでも変わった場合に備え、<code>render()</code> の先頭で <code>enforceCameraLock()</code> が<strong>記録した値へ戻す</strong>
+<br>
+（ドラッグ中に固定した、保存データを読んだ、など想定外の経路もここで吸収される）
+</li>
+</ol>
+<h3 id="5b-3-実ブラウザでの確認2026-10-30">5B-3. 実ブラウザでの確認（2026-10-30）</h3>
+<p>
+<code>cyberpunk-city-studio.html</code> を実ブラウザ（Playwright + Chromium、1280×820）で操作して確認。
+</p>
+<table><thead><tr><th>確認したこと</th><th>結果</th></tr></thead><tbody>
+<tr><td>ロック → 選択解除・一覧に鍵・バーが「全解除 (n)」</td><td>✅</td></tr>
+<tr><td>ロック中の図形をクリック → 選べない＋理由をヒント行へ表示</td><td>✅</td></tr>
+<tr><td>ロック中は <code>X</code> キーで消えない／<code>setOb</code> も無視</td><td>✅</td></tr>
+<tr><td>一覧の鍵で解除 → クリックで選択・ギズモで編集できる</td><td>✅</td></tr>
+<tr><td>保存→読み込みでロックが残る</td><td>✅</td></tr>
+<tr><td>カメラ固定：ドラッグ・ホイール・矢印キー・左パネルのスライダーで視点が動かない</td><td>✅（4/4）</td></tr>
+<tr><td>カメラ固定：値を直接書き換えても描画時に元へ戻る</td><td>✅</td></tr>
+<tr><td>カメラ固定中でもオブジェクトは編集できる／解除後は視点が動く／<code>L</code> で入切</td><td>✅（3/3）</td></tr>
+<tr><td>ロック非使用時の既存操作（複数選択・箱選択・グループ化・削除・Undo・接着パーツ追従）</td><td>✅（10/10）</td></tr>
+<tr><td>26アセット ×（配置→ロック→解除→削除）</td><td>失敗0</td></tr>
+</tbody></table>
+<h3 id="5b-4-ついでに直したこと配布用htmlのcssが手作業だった">5B-4. ついでに直したこと：配布用HTMLのCSSが手作業だった</h3>
+<p>
+<code>build-city-grid.py</code> は JS だけを単体HTMLへ埋め込み、<strong>CSSは手で貼った状態のまま</strong>だった。
+<br>
+そのため <code>studio.css</code> に鍵アイコンのスタイルを書いても配布用HTMLには入らず、
+<br>
+「編集画面では鍵が出るが配布用では出ない」という食い違いが起きた。
+<br>
+<code>build-city-grid.py</code> に <code>inject_style()</code> を足し、<code>style.css</code> と <code>studio.css</code> も
+<br>
+ビルドのたびに埋め込むようにした（以後CSSの二重管理は不要）。
+</p>
+<hr>
+<h2 id="5c-間取りビューのハンドル整理・軸移動の修正・画面中央へ2026-11-01-追加">5C. 間取りビューのハンドル整理・軸移動の修正・「画面中央へ」（2026-11-01 追加）</h2>
+<h3 id="5c-1-症状">5C-1. 症状</h3>
+<table><thead><tr><th>ユーザーの報告</th><th>実際に起きていたこと</th></tr></thead><tbody>
+<tr><td>幅＋−のコントロールが効かない</td><td>正面ビューで <strong>見えていない3D回転リング</strong> の当たり判定だけが生きており、白い四角（幅＋−）を押すと<strong>回転</strong>していた</td></tr>
+<tr><td>「前（奥行）と高さ」のコントロールが効かない</td><td>真上ビューの <strong>高さハンドルと奥行−ハンドルがほぼ同じ位置</strong>（中心の48px下と46px下）に描かれ、近い順の判定が無いため常に奥行−が勝っていた</td></tr>
+<tr><td>X軸方向に移動できない</td><td>移動の矢印（長さ64px）の先端が <strong>幅＋の白い四角の位置</strong>と重なり、寸法変更が先に判定されていた。Z/Y の矢印も 奥行＋／高さ と重なっていた</td></tr>
+<tr><td>回転と寸法がダブる</td><td>上の2つと同じ原因（固定順の判定：回転 → 寸法 → 移動 の順で必ず先に勝つ）</td></tr>
+</tbody></table>
+<h3 id="5c-2-原因3つ">5C-2. 原因（3つ）</h3>
+<ol>
+<li><strong>描いていないギズモの当たり判定が残っていた</strong>
+<br>
+<code>render()</code> は間取り中に3Dギズモ（輪・軸・面）を描かない
+<br>
+（<code>if (sel &amp;&amp; tool === "edit" &amp;&amp; (!cityFloorPlanActive || wallSideSign)) drawGizmo(c);</code>）。
+<br>
+ところが <code>pointerdown</code> は <code>hitGizmo()</code> を毎回呼んでいたため、
+<br>
+<strong>画面に見えていないリング／軸</strong>が寸法ハンドルを奪っていた。
+</li>
+<li><strong>当たり判定が「固定順」だった</strong>
+<br>
+<code>回転 → 寸法 → 移動 → 本体</code> の順で <code>if</code> を並べていたので、
+<br>
+重なった場所では必ず前の判定が勝ち、あとのハンドルは永久に触れなかった。
+</li>
+<li><strong>ハンドルの置き場所が重なっていた</strong>
+<br>
+真上：高さ（中心+48px）と奥行−（中心+46px）、
+<br>
+正面：奥行き（中心+60px）と幅＋（中心+61px）、
+<br>
+移動矢印：64px 固定で寸法ハンドルの位置まで届いていた。
+</li>
+</ol>
+<h3 id="5c-3-修正内容">5C-3. 修正内容</h3>
+<table><thead><tr><th>直した場所</th><th>内容</th></tr></thead><tbody>
+<tr><td><code>studio-ui.js</code> <code>pointerdown</code>（間取り）</td><td>間取り中は <strong>輪（<code>t:"ring"</code>）の当たり判定を使わない</strong>。壁横看板（<code>wallSideSign</code>）だけは engine-tools 側が間取りでもギズモを描くので除外</td></tr>
+<tr><td>同上（回転／寸法／移動）</td><td><strong>押した点に近いものを1つだけ選ぶ</strong>方式へ変更（回転は +1.5px、移動は +3px の重みを付けて、同距離なら寸法優先）。<code>floorMoveHandleAt()</code> は<strong>矢印の外側45%〜先端</strong>だけを掴めるようにし、線分の根元が図形の内側のハンドルを奪わないようにした</td></tr>
+<tr><td>同上（アセット専用ハンドル）</td><td>白い四角の中心から <strong>7px 以内</strong>を押したときは寸法変更を優先（奥の扉・開口などと重なるため）</td></tr>
+<tr><td><code>floorMoveGizmo()</code></td><td>矢印の長さを <code>20〜46px</code>（図形の短い辺×0.85）に短縮。<strong>軸名と色を3Dと同じ約束へ統一</strong>（左右＝X 橙／手前奥＝Y 緑／上下＝Z 青）。画面に投影されない軸は<strong>斜め右下へ逃がす</strong>（真横に潰すと他の軸と重なっていた）</td></tr>
+<tr><td><code>floorPlanEditHandles()</code></td><td>真上の「高さ」を <strong>右下の角の外側（斜め）</strong> へ、正面の「奥行き」を <strong>右上の角の外側（斜め）</strong> へ移動。どちらも斜め方向のドラッグ量を高さ／奥行きへ換算する <code>scale = orthScale × 1/√2</code> を設定</td></tr>
+<tr><td>整列パネルの軸名</td><td>「Y軸（高さ）／Z軸（奥行き）」→ <strong>「Z軸（高さ）／Y軸（奥行き）」</strong>（ギズモの表示名と統一。内部の値 <code>value=1/2</code> は変更なし）</td></tr>
+</tbody></table>
+<h3 id="5c-4-移動矢印の向きビュー別">5C-4. 移動矢印の向き（ビュー別）</h3>
+<table><thead><tr><th>ビュー</th><th>X（橙・左右）</th><th>Y（緑・手前奥）</th><th>Z（青・上下）</th></tr></thead><tbody>
+<tr><td>上</td><td>ワールド +X を投影</td><td>ワールド +Z を投影</td><td>投影されない → <strong>斜め右下</strong></td></tr>
+<tr><td>前</td><td>ワールド +X を投影</td><td>投影されない → <strong>斜め右下</strong></td><td>ワールド +Y を投影（画面の上）</td></tr>
+<tr><td>横</td><td>投影されない → <strong>斜め右下</strong></td><td>ワールド +Z を投影</td><td>ワールド +Y を投影（画面の上）</td></tr>
+</tbody></table>
+<p>
+斜めに逃がした軸も <code>vec</code> はワールド軸のままなので、ドラッグ量は
+<br>
+<code>scale = orthScale()</code> で高さ／奥行きへ正しく戻る（見た目だけ斜め）。
+</p>
+<h3 id="5c-5-画面中央へ新機能">5C-5. 「画面中央へ」（新機能）</h3>
+<p>
+シーン一覧の下（整列の左）に <strong>「画面中央へ」</strong> ボタンを追加した。
+<br>
+看板付き建物・テント付き建物のように、建物本体と付属パーツで<span class="bl">外接範囲</span>が大きく、
+<br>
+数値入力で中央へ寄せにくいアセットのための操作。
+</p>
+<table><thead><tr><th>項目</th><th>仕様</th></tr></thead><tbody>
+<tr><td>対象</td><td>選択中のオブジェクト。接着している子パーツ（テント・看板）とグループも<strong>同じ量だけ一緒に動く</strong></td></tr>
+<tr><td>基準にする中心</td><td><strong>建物本体（親）の外接箱の中心</strong>。付属パーツを含めると本体が中央からずれるため</td></tr>
+<tr><td>ロック中</td><td>動かさない（動かせるものが1つも無ければヒントを表示）</td></tr>
+<tr><td>元に戻す</td><td><code>HU.push(S)</code> を行うので <strong>⌘/Ctrl+Z で戻る</strong></td></tr>
+<tr><td>真上</td><td>画面中央の床面（X/Z）。高さは変えない</td></tr>
+<tr><td>正面</td><td>画面中央の X と高さ</td></tr>
+<tr><td>真横</td><td>画面中央の奥行きと高さ</td></tr>
+<tr><td>3D</td><td>画面中央の視線が<strong>オブジェクトの高さ</strong>を通る位置（＝中心が画面中央に来る）。視線が水平で交点が無いときは、画面の8割に収まる距離まで離す</td></tr>
+</tbody></table>
+<h3 id="5c-6-実ブラウザでの確認2026-11-01">5C-6. 実ブラウザでの確認（2026-11-01）</h3>
+<p>
+Playwright + Chromium（1280×820）で、実ポインターのドラッグだけを使って確認。<strong>34/34 成功・実行時<span class="gr">エラー0</span></strong>。
+</p>
+<table><thead><tr><th>確認</th><th>結果</th></tr></thead><tbody>
+<tr><td>真上：幅＋／幅−／奥行＋／奥行−／高さ の5つ</td><td>✅ すべて値が変わる（<code>ra</code>, <code>rb</code>, <code>h</code> と中心が変化）</td></tr>
+<tr><td>正面：幅＋／幅−／上端／下端／奥行き</td><td>✅ 5/5</td></tr>
+<tr><td>真横：奥行＋／奥行−／上端／下端</td><td>✅ 4/4</td></tr>
+<tr><td>3ビュー × X/Y/Z の移動矢印（9通り）</td><td>✅ 9/9（それぞれ狙った成分だけが変化）</td></tr>
+<tr><td>3Dビュー X/Y/Z の軸矢印</td><td>✅ 3/3</td></tr>
+<tr><td>4ビューでの「画面中央へ」（看板付き建物）</td><td>✅ 4/4（真上・正面・真横は誤差 0.0px、3D も (800,450) に一致）</td></tr>
+<tr><td>ロック中のオブジェクト</td><td>✅ 選択されず、値も変わらない</td></tr>
+<tr><td>25アセット × 3ビュー</td><td>✅ 実行時エラー 0</td></tr>
+<tr><td>元に戻す（画面中央への後）</td><td>✅ 戻る</td></tr>
+</tbody></table>
+<p>
+補足：`beveledBox / cornerCutBox / person / awning / building・buildingSign / stackedBuilding /
+<br>
+recessedStackedBuilding / windowGrid / pathPipe` も同じ手順で全ハンドルを走査し、
+<br>
+値が変わらないもの（例：<code>awning</code> の「前縁Y」「前後」、<code>recessedStackedBuilding</code> の「凹み奥行」など）は
+<br>
+<strong>今回の変更前から同じ</strong>（3Dビューでも同じ挙動）であることを確認済み。今回は触っていない。
+</p>
+<hr>
+<h2 id="5d-テントの直方体化・付属パーツの中央配置・原理資料2026-11-01-追加">5D. テントの直方体化・付属パーツの中央配置・原理資料（2026-11-01 追加）</h2>
+<h3 id="5d-1-依頼と症状">5D-1. 依頼と症状</h3>
+<ol>
+<li>テント付き建物の<strong>テントを、建物の中央（X方向）へすぐ置くボタン</strong>がほしい
+<br>
+（「中央に整列」は2つ選択が必要なので使えない）。
+</li>
+<li>テントの<strong>オレンジ菱形／白い四角を最大まで動かしても面が水平にならず、少し斜め</strong>になる
+<br>
+（どう動かしても直方体にならない）。
+</li>
+</ol>
+<h3 id="5d-2-直方体にならなかった原因3段階あった">5D-2. 直方体にならなかった原因（3段階あった）</h3>
+<table><thead><tr><th>#</th><th>場所</th><th>内容</th></tr></thead><tbody>
+<tr><td>①</td><td><code>awningGeometry()</code>（<code>engine-tools.js</code>）</td><td>前縁の上限が <code>edgeY = +d/2 − 0.025</code>、<code>edgeZ = h − 0.02</code> で、<strong>最大まで動かしても 2〜2.5cm 手前で止まる</strong></td></tr>
+<tr><td>②</td><td><code>awningGizmo()</code> / <code>floorAwningEdgeHandle()</code></td><td>ハンドルの <code>min/max</code> とドラッグ側のクランプが、①とは<strong>別に同じ余白</strong>を持っていた</td></tr>
+<tr><td>③</td><td>間取りの当たり判定</td><td>白い四角（寸法）と Y 移動矢印が画面上で<strong>一直線に重なり</strong>、<code>resizeDist ≈ moveDist</code>（5.25e-6 対 4.04e-6）で <strong><code>moveGizmo</code> が勝っていた</strong></td></tr>
+</tbody></table>
+<p>
+①だけ、①②だけでは直らず、<strong>③の同点処理まで直して初めて</strong>「最大まで動かす＝直方体」になりました。
+</p>
+<h3 id="5d-3-修正内容">5D-3. 修正内容</h3>
+<ul>
+<li><code>engine-tools.js</code>
+<ul>
+<li><code>awningGeometry()</code>：<code>edgeY</code> の下限を <code>−d/2</code>、<code>edgeZ</code> の上限を <code>h</code> に（余白を廃止）。
+</li>
+<li><code>snapAwningEdge(value, target)</code>（新規）：目標値の <strong>±0.03 m</strong> に入ったら吸着。
+</li>
+<li><code>awningGizmo()</code> の <code>min/max</code> と、<code>awning-edgeZ</code> / <code>awning-edgeY</code> のドラッグを吸着つきに。
+</li>
+</ul>
+</li>
+<li><code>studio-ui.js</code>
+<ul>
+<li><code>floorAwningEdgeHandle()</code>：<code>zMax = max(0.05, h)</code>、<code>yMin = −d/2</code>、<code>yMax = d/2 − 0.025</code>。
+</li>
+<li><code>awningEdgeZ</code> → <code>snapAwningEdge(value, h.max)</code>、<code>awningEdgeY</code> → <code>snapAwningEdge(value, h.min)</code>。
+</li>
+<li>間取り <code>pointerdown</code> の判定に <strong>2px の余裕</strong>を追加
+<br>
+（<code>turnDist + 2/Z &lt; resizeDist</code>、<code>resizeDist &lt;= moveNear.d + 2/Z</code>）。同距離なら寸法ハンドル優先。
+</li>
+</ul>
+</li>
+<li>結果：<code>edgeZ === h &amp;&amp; edgeY === −d/2 &amp;&amp; frontBottom === backBottom === 0</code> で <strong>直方体</strong>。
+</li>
+</ul>
+<h3 id="5d-4-テント・看板を中央へボタン新規">5D-4. 「テント・看板を中央へ」ボタン（新規）</h3>
+<p>
+<code>studio-ui.js</code> の <code>alignTools</code> に <code>#centerChildSel</code>（ラベル「テント・看板を中央へ」）を追加し、
+<br>
+<code>centerAttachedChildOnParent()</code> を実装しました。
+</p>
+<pre><code class="language-js">const ids = [...(sel ? [sel] : []), ...groupIds];          // 親・子どちらを選んでも対象を拾う
+ids.forEach(id =&gt; {
+  const o = obOf(id); if (!o || obLocked(o)) return;
+  const child = o.attachment ? o : /* 子を持つ親なら子を全部 */;
+  if (Math.abs(o.attachment.x) &gt; 1e-4) { HU.push(S); setOb(id, { attachment: { ...o.attachment, x: 0 } }); }
+});</code></pre>
+<ul>
+<li><strong>1個選択で即実行</strong>（2つ選択は不要）。子を選んでも親を選んでも同じ結果。
+</li>
+<li>既に中央（<code>x ≈ 0</code>）ならヒントを出すだけで、<strong>元に戻す履歴は積まない</strong>。
+</li>
+<li><code>Ctrl+Z</code> で元の位置へ戻ります。
+</li>
+</ul>
+<h3 id="5d-5-実ブラウザでの確認2026-11-01">5D-5. 実ブラウザでの確認（2026-11-01）</h3>
+<table><thead><tr><th>確認</th><th>結果</th></tr></thead><tbody>
+<tr><td>テント：斜め状態（<code>edgeZ 0.12 / edgeY 0.2</code>）から前縁Y最大→前後最小</td><td>✅ 真上／真横／正面／3D の4ビューすべてで <code>box:true</code></td></tr>
+<tr><td>中央ボタン：<code>buildingAwning</code> 子選択→クリック</td><td>✅ <code>attachX 1.4 → 0</code>、<code>dx 0</code></td></tr>
+<tr><td>中央ボタン：親選択→クリック</td><td>✅ 同じ結果</td></tr>
+<tr><td>中央ボタン：<code>Ctrl+Z</code></td><td>✅ <code>attachX 1.1</code> へ復帰</td></tr>
+<tr><td>回帰（既存ハンドル・軸移動・画面中央へ・ロック・全アセット・Undo）</td><td>✅ <strong>34/34 成功・実行時<span class="gr">エラー0</span></strong></td></tr>
+<tr><td>配布用HTML のスモーク（アセット75回配置）</td><td>✅ <span class="gr">エラー0</span></td></tr>
+</tbody></table>
+<h3 id="5d-6-配布用htmlが古かった重要">5D-6. 配布用HTMLが古かった（重要）</h3>
+<p>
+<code>cyberpunk-city-studio.html</code> は<strong>生成物</strong>です。ソースを直しただけでは反映されず、
+<br>
+<code>python3 build-city-grid.py</code> を実行して単体HTMLを作り直す必要があります。
+<br>
+今回、修正直後の単体HTMLに <code>centerChildSel</code> と <code>snapAwningEdge</code> が<strong>入っていない</strong>ことを
+<br>
+<code>grep</code> で検出したため、再ビルドして反映しました（現在は両方入っています）。
+</p>
+<h3 id="5d-7-新しい資料object_geometry_guide">5D-7. 新しい資料：<code>OBJECT_GEOMETRY_GUIDE</code></h3>
+<p>
+「全てのオブジェクトがどういった原理（計算）で作られているか」を説明する資料を追加しました。
+</p>
+<ul>
+<li>Markdown：<code>OBJECT_GEOMETRY_GUIDE.md</code>／読みやすい版：<code>OBJECT_GEOMETRY_GUIDE.html</code>
+<br>
+（<code>python3 build-guide.py OBJECT_GEOMETRY_GUIDE.md</code> で再生成）
+</li>
+<li>構成：全体パイプライン → 座標系（<code>L2W</code> の式）→ 投影（<code>cam</code> / <code>scr</code> / 正投影 / <code>dens3</code>）
+<br>
+→ <code>genShape</code>（隠れ線判定）→ 共通部品 → <strong>アセット別の計算（全28種）</strong> →
+<br>
+面表示（三角形分割・ペインター法）→ 編集時の再生成 → 数値の早見表 → 検算手順。
+</li>
+<li>実測表つき：各アセットの初期寸法・線画本数・三角形数・外接範囲（2026-11-01 実測）。
+</li>
+<li>追記（同日）：<strong>§6.3 付属パーツの取り付け計算</strong>（<code>attachment</code> の式と 3.6m の根拠）、
+<br>
+<strong>§6.4 全アセット共通レシピ表</strong>、<strong>§12 <code>asset.js</code> の関数リファレンス（全116個）</strong>、
+<br>
+<strong>§13 <code>engine-tools.js</code> / <code>engine-core.js</code> 側の計算関数</strong>、
+<br>
+<strong>§14 建物 4×3×5 ＋ 付属テント 3×1×1 の検算例</strong>。
+<br>
+依頼6・7で変えた初期値（建物 4×3×5、単体テント 3×1×0.35、付属パーツ 3×1・下端3.6m）に
+<br>
+合わせて、表と検算例の数値をすべて実測し直しました。
+</li>
+</ul>
+<hr>
+<h2 id="5e-アセット棚の操作部を固定2026-11-01-追加">5E. アセット棚の操作部を固定（2026-11-01 追加）</h2>
+<h3 id="5e-1-症状">5E-1. 症状</h3>
+<p>
+下部のアセット棚は「生成面セレクト・コピー・貼り付け・JSON読込」とアセット一覧が
+<br>
+<strong>同じ横スクロール領域</strong>に入っていたため、一覧を横に送ると操作部まで一緒に流れて見えなくなっていた。
+</p>
+<h3 id="5e-2-変更">5E-2. 変更</h3>
+<p>
+棚の中身を <strong>「動かない固定ブロック」＋「横スクロールする一覧」</strong> の2つに分けた。
+</p>
+<pre><code>#assetTray
+└ .assetTrayInner            ← スクロールしない（overflow:hidden）
+   ├ .assetTrayControls      ← 生成面／コピー／貼り付け／JSON読込（flex:0 0 auto）
+   └ .assetTrayScroll        ← 26枚のアセットカード（overflow-x:auto）
+.assetTrayNote               ← 説明文（従来どおり棚の下）</code></pre>
+<ul>
+<li><code>asset-controller.js</code>：<code>assetTrayInner</code> の内側に <code>assetTrayControls</code> と <code>assetTrayScroll</code> を追加
+</li>
+<li><code>studio.css</code>：<code>.assetTrayInner</code> を <code>overflow:hidden</code> にし、スクロールは <code>.assetTrayScroll</code> だけが持つ
+</li>
+<li>左端の見出し <strong>「シーンに追加」は削除</strong>（HTML・CSSの <code>.assetTrayTitle</code> と、モバイル用の <code>display:none</code> 指定も撤去）
+</li>
+<li>画面幅 560px 以下では固定ブロックを上段・一覧を下段に積む（横並びのままだと一覧が数十pxしか残らず選べないため）
+</li>
+</ul>
+<h3 id="5e-3-実ブラウザでの確認2026-11-01">5E-3. 実ブラウザでの確認（2026-11-01）</h3>
+<table><thead><tr><th>確認</th><th>結果</th></tr></thead><tbody>
+<tr><td>一覧を最後までスクロールしたときの固定ブロックの位置</td><td>✅ 生成面セレクト・コピー・貼り付け・JSON読込の <code>x / y</code> が<strong>1pxも動かない</strong>（1280×820）</td></tr>
+<tr><td>スクロール後に最後のカード（窓グリッド）をクリック</td><td>✅ 配置され、選択状態になる</td></tr>
+<tr><td>生成面セレクトの変更</td><td>✅ <code>P.assetAxis</code> が切り替わる</td></tr>
+<tr><td>間取りモード（<code>floorAssetTray</code>）でも同じか</td><td>✅ 開発版・配布版とも固定（スクロール量 2262px でも位置不変）</td></tr>
+<tr><td>幅 420px（スマホ相当）</td><td>✅ 固定ブロックが上段・一覧が下段。一覧の幅 388px を確保</td></tr>
+<tr><td>説明文（<code>assetTrayNote</code>）が画面内に収まるか</td><td>✅ 下端 802px（画面高 820px）</td></tr>
+<tr><td>実行時エラー</td><td>✅ 0</td></tr>
+</tbody></table>
+<hr>
+<h2 id="5f-アセット棚のグループ分け2026-11-01-追加">5F. アセット棚のグループ分け（2026-11-01 追加）</h2>
+<h3 id="5f-1-症状">5F-1. 症状</h3>
+<p>
+カードが26枚あり、1列に並んでいたため「探すのに毎回横スクロールが必要」で、ごちゃごちゃして見えた。
+</p>
+<h3 id="5f-2-変更5グループタブ切り替え">5F-2. 変更：5グループ＋タブ切り替え</h3>
+<p>
+棚の上段（固定）にタブを並べ、押したグループのカードだけを下段に出す。
+</p>
+<table><thead><tr><th>タブ</th><th>枚数</th><th>入っているアセット</th></tr></thead><tbody>
+<tr><td>プリミティブ</td><td>9</td><td>長方形・直方体・ベベル直方体・隅切り直方体・円・円錐・球体・三角柱・三角錐</td></tr>
+<tr><td>建物</td><td>6</td><td>開口のある建物・テント付き建物・看板付き開口建物・縁付き階層建物・凹窓階層建物・ベベル直方体の縁付き階層建物（店舗テント・ベランダ・壁付け看板・窓グリッドは §5H で「街・パーツ」へ移動）</td></tr>
+<tr><td>屋根</td><td>2</td><td>切妻屋根・片流れ屋根</td></tr>
+<tr><td>街・パーツ</td><td>8</td><td>階段・横断歩道・スロープ・パスパイプ・店舗テント・壁付けベランダ・壁付け看板（単体）・窓グリッド</td></tr>
+<tr><td>人間</td><td>1</td><td>人物</td></tr>
+</tbody></table>
+<ul>
+<li><code>asset-controller.js</code>：<code>ASSET_GROUPS</code>（key / label / kinds）を定義し、タブ HTML とカード HTML をここから生成
+</li>
+<li>カードは <strong>全グループぶんを最初に1回だけ作り、切り替えは <code>hidden</code> の付け替えだけ</strong>で行う。
+<br>
+DOM を作り直さないので、<code>[data-asset="..."]</code> での参照・クリック委譲・既存テストが<span class="rd">壊れ</span>ない
+</li>
+<li>最後に開いていたタブは <code>localStorage</code>（<code>cityGridAssetGroup</code>）へ保存し、次回も同じタブから始まる
+</li>
+<li><strong>書き忘れ対策</strong>：<code>ASSETS</code> に新しいアセットを足して <code>ASSET_GROUPS</code> へ入れ忘れても、
+<br>
+未分類のものは自動で「街・パーツ」の末尾に入る（棚から消えない）
+</li>
+<li><code>studio.css</code>：<code>.assetTrayTop</code> / <code>.assetTrayTabs</code> / <code>.assetTrayTab</code>（選択中はミント色）を追加。
+<br>
+560px 以下では「操作部 → タブ → カード」の3段
+</li>
+</ul>
+<h3 id="5f-3-実ブラウザでの確認2026-11-01">5F-3. 実ブラウザでの確認（2026-11-01）</h3>
+<table><thead><tr><th>確認</th><th>結果</th></tr></thead><tbody>
+<tr><td>タブの数と並び</td><td>✅ プリミティブ／建物／屋根／街・パーツ／人間（初期はプリミティブ＝9枚）</td></tr>
+<tr><td>各タブのカード枚数</td><td>✅ 9 / 10 / 2 / 4 / 1（合計26＝棚に出る全アセット）</td></tr>
+<tr><td>各グループの先頭カードを実クリック</td><td>✅ <code>cone</code> / <code>buildingAwning</code>（親＋子で2体）/ <code>shedRoof</code> / <code>crosswalk</code> / <code>person</code> が正しく配置</td></tr>
+<tr><td>カードを端までスクロールしたときのタブ・操作部</td><td>✅ 位置が1pxも動かない（スクロール量 1437px）</td></tr>
+<tr><td>タブの記憶（リロード後）</td><td>✅ 「建物」を選んで再読み込み → 建物タブ・10枚で復帰</td></tr>
+<tr><td>幅420px</td><td>✅ 操作部（63px）→タブ（28px）→カード（40px）の3段、カード9枚が横スクロール</td></tr>
+<tr><td>回帰（ハンドル・軸移動・画面中央へ・ロック・全アセット・Undo）</td><td>✅ <strong>34/34 pass・エラー0</strong></td></tr>
+<tr><td>配布版スモーク（アセット75回）</td><td>✅ エラー0</td></tr>
+</tbody></table>
+<hr>
+<h2 id="5g-表示中央へボタンの追加2026-11-01-追加">5G. 「表示中央へ」ボタンの追加（2026-11-01 追加）</h2>
+<h3 id="5g-1-依頼">5G-1. 依頼</h3>
+<p>
+「カメラ固定の次（『7 前』の前）にボタンを置き、前・横・上の視点の位置へ選択オブジェクトを動かす。
+<br>
+<strong>カメラ（視点）は動かさない。</strong>」
+</p>
+<p>
+「オブジェクトを視点の位置へ動かす」は、そのまま解釈すると座標の書き換えになる。
+<br>
+しかし座標を動かすとアセットの配置が<span class="rd">壊れ</span>、Undo も大量に積まれる。
+<br>
+そこで <strong>「間取り（前／横／上）の表示中心 <code>window.cityFloorPlanCenter</code> だけを選択オブジェクトへ寄せる」</strong>
+<br>
+という意味に確定した。オブジェクトの <code>c</code>／<code>ca</code>／<code>cb</code> も、カメラ値 <code>P</code> も一切書き換えない。
+</p>
+<h3 id="5g-2-変更">5G-2. 変更</h3>
+<ul>
+<li><code>index.html</code>：<code>#standardViews</code> の先頭に <code>#floorViewCenter</code>（ラベル <strong>表示中央へ</strong>）を追加。
+<br>
+並びは「ロック → カメラ固定 → <strong>表示中央へ</strong> → 7 前 → 8 横 → 9 上 → 0 3D」
+</li>
+<li><code>studio-ui.js</code>：<code>centerFloorViewOnSelection()</code> を追加し <code>el("floorViewCenter").onclick</code> へ接続
+<br>
+（「画面中央へ」＝<code>centerOnScreenSel</code> の直後）。ヘルプにも1行追記
+</li>
+<li>計算：<code>orthBasis()</code> の <code>right</code>／<code>up</code> で選択中心 <code>c</code> を投影し、基準点
+<br>
+（<code>sx = orthView==="side" ? P.cz : P.cx</code>、<code>sy = orthView==="top" ? P.cz : P.ch-1</code>）を足して新しい中心を決める。
+<br>
+つまり <strong>画面の見え方（スケール・カメラ）はそのままに、投影の原点だけをずらす</strong>
+</li>
+<li>接着子（テント・看板）を選んでいるときは親建物の <code>groupBounds</code> 中心を使う（「画面中央へ」と同じ扱い）
+</li>
+<li>差が 1e-3 未満ならヒントだけ出す／<strong>Undo 履歴（<code>HU</code>）には積まない</strong>
+</li>
+</ul>
+<h3 id="5g-3-実ブラウザでの確認2026-11-01">5G-3. 実ブラウザでの確認（2026-11-01）</h3>
+<table><thead><tr><th>確認</th><th>結果</th></tr></thead><tbody>
+<tr><td>並びとラベル</td><td>✅ <code>lockCam</code> x=639 → <code>floorViewCenter</code> x=736（ラベル「表示中央へ」）→ <code>viewFloorFront</code> x=814</td></tr>
+<tr><td>上ビュー：中心が画面中央へ</td><td>✅ 選択中心 (386.6, 71.4) → <strong>(800, 450)</strong>（実キャンバス 1600×900）</td></tr>
+<tr><td>上ビュー：カメラ不変</td><td>✅ <code>cx,cz,ch,yaw,pitch,lens</code> すべて押下前と同じ／スケールも不変</td></tr>
+<tr><td>前ビュー</td><td>✅ 中心 (800, 450)、カメラ・スケール不変</td></tr>
+<tr><td>横ビュー</td><td>✅ 中心 (800, 450)、カメラ・スケール不変</td></tr>
+<tr><td>3D ビュー</td><td>✅ 何も動かず「「表示中央へ」は前（7）・横（8）・上（9）のビューで使えます」</td></tr>
+<tr><td>すでに中央のとき</td><td>✅ 「選択中のオブジェクトはすでに表示の中央にあります」</td></tr>
+<tr><td>未選択のとき</td><td>✅ 「表示を寄せたいオブジェクトを選択してください」</td></tr>
+<tr><td>配布版 <code>cyberpunk-city-studio.html</code></td><td>✅ dev 版と同一の結果（カメラ不変・中心 (800, 450)・エラー0）</td></tr>
+<tr><td>幅 1280 / 760 / 560 / 420px</td><td>✅ 4段すべてで「表示中央へ」が表示され、「7 前」と同じ行に収まる（バーは従来どおり横スクロール）</td></tr>
+<tr><td>回帰（ハンドル・軸移動・ロック・全アセット・Undo）</td><td>✅ <strong>34/34 pass・エラー0</strong>、配布版スモーク 75 回エラー0</td></tr>
+</tbody></table>
+<p>
+注意：<code>enterFloorPlan()</code> は入り直すたびに <code>fitFloorPlan()</code> で中心を作り直すため、
+<br>
+ビューを切り替え直すと「表示中央へ」の効果はリセットされる（意図どおり）。
+</p>
+<hr>
+<h2 id="5h-テント付き建物のテントを店舗テントと同じ仕様に2026-11-01-追加">5H. テント付き建物のテントを店舗テントと同じ仕様に（2026-11-01 追加）</h2>
+<h3 id="5h-1-症状">5H-1. 症状</h3>
+<ul>
+<li><strong>店舗テント（単体の <code>awning</code>）</strong> には「前縁Y」と「前後」の2つのハンドルがある。
+</li>
+<li><strong>テント付き建物のテント（<code>buildingAwning</code> の子）</strong> には「前縁Y」しか出ず、奥行きを変えられない。
+</li>
+<li>「前縁Y」は上下にしか動かず、手前奥へは動かせない。
+</li>
+</ul>
+<p>
+原因は <code>attachment.verticalOnly</code>（接着を保つため本体の移動を上下だけに制限する印）を、
+<br>
+<strong>形の編集ハンドルを出すかどうかの判定にも流用していた</strong>こと。
+<br>
+接着を保つ仕組み（移動）と、テントの形の編集は別の話なので、判定を分ける必要があった。
+</p>
+<h3 id="5h-2-変更">5H-2. 変更</h3>
+<table><thead><tr><th>場所</th><th>変更</th></tr></thead><tbody>
+<tr><td><code>engine-tools.js</code> <code>awningGizmo()</code></td><td>子テントにも「前後」ハンドルを出す（<code>verticalOnly</code> で止めない）。「前縁Y」に2本目の軸（<code>dir2</code>/<code>scale2</code>/<code>start2</code>/<code>min2</code>/<code>max2</code>）を持たせ、上下と手前奥を同時に動かせるようにした</td></tr>
+<tr><td><code>engine-tools.js</code> <code>dragEdit()</code></td><td><code>awning-edgeZ</code>（前縁Y）のドラッグで <code>awningEdgeY</code> も一緒に更新</td></tr>
+<tr><td><code>studio-ui.js</code> <code>floorAwningEdgeHandle()</code></td><td>同じ2軸化。正面図は手前奥が画面に出ないので、「前後」ハンドルと同じ約束で<strong>画面の横方向を手前奥</strong>に割り当てる。真上図は高さが見えないので2軸目を出さない</td></tr>
+<tr><td><code>studio-ui.js</code> 間取りのドラッグ（resize）</td><td>2軸ハンドルの2軸目を <code>awningEdgeY</code> として反映</td></tr>
+<tr><td><code>studio-ui.js</code> <code>floorPlanEditHandleAt()</code></td><td>重なったハンドルは<strong>押した位置に近い方</strong>を掴む（同距離なら専用ハンドル優先）。以前は配列の順で先に来た白い四角が必ず勝っていた</td></tr>
+<tr><td><code>studio-ui.js</code> <code>floorAwningEdgeHandle()</code></td><td>「前縁Y」の点を手前上辺の<strong>左端</strong>へ移動。中央は「上端／下端」の白い四角と完全に同じ座標になり、掴むたびに別のハンドルが当たっていた</td></tr>
+<tr><td><code>asset-controller.js</code> <code>ASSET_GROUPS</code></td><td>店舗テント・壁付けベランダ・壁付け看板（単体）・窓グリッドを「建物」から<strong>「街・パーツ」</strong>へ移動</td></tr>
+</tbody></table>
+<p>
+接着位置（<code>attachment</code>）は別の値で決まるため、テントの形を編集しても建物から外れない。
+<br>
+子テント<strong>本体</strong>の移動は従来どおり上下のみ（接着を保つため）。
+</p>
+<h3 id="5h-3-実ブラウザでの確認2026-11-01">5H-3. 実ブラウザでの確認（2026-11-01）</h3>
+<table><thead><tr><th>確認</th><th>結果</th></tr></thead><tbody>
+<tr><td>棚のグループ</td><td>✅ プリミティブ9／<strong>建物6</strong>／屋根2／<strong>街・パーツ8</strong>／人間1（合計26）</td></tr>
+<tr><td>街・パーツの中身</td><td>✅ 階段・横断歩道・スロープ・パスパイプ ＋ <strong>店舗テント・壁付けベランダ・壁付け看板・窓グリッド</strong></td></tr>
+<tr><td>子テントのハンドル（3D）</td><td>✅ 「前縁Y」「前後」の2つ（以前は前縁Yのみ）</td></tr>
+<tr><td>子テント 前縁Y 縦ドラッグ（3D）</td><td>✅ <code>awningEdgeZ</code> 0.72 → 0.41</td></tr>
+<tr><td>子テント 前縁Y 斜めドラッグ（3D）</td><td>✅ <code>edgeZ</code> 0.41 → 0.649、<code>edgeY</code> −0.48 → 0.087（<strong>上下と手前奥が同時に動く</strong>）</td></tr>
+<tr><td>子テント 横ビュー 斜めドラッグ</td><td>✅ <code>edgeZ</code> 0.649 → 0.72、<code>edgeY</code> 0.087 → 0.455（上辺が水平へ吸着）</td></tr>
+<tr><td>子テント 前ビュー 斜めドラッグ</td><td>✅ <code>edgeZ</code> 0.72 → 0.336、<code>edgeY</code> −0.48 → 0.033</td></tr>
+<tr><td>子テント 前ビュー「前後」</td><td>✅ <code>edgeY</code> 0.033 → 0.455</td></tr>
+<tr><td>店舗テント（単体）前ビュー</td><td>✅ 斜めドラッグで <code>edgeZ</code> 0.35 → 0.05、<code>edgeY</code> −0.675 → −0.119（従来の挙動を維持）</td></tr>
+<tr><td>ページエラー</td><td>✅ 0</td></tr>
+</tbody></table>
+<p>
+<strong>注意（既知の残り）</strong>：正面図では「前縁Y」の点が手前上辺の左端にあり、狭い画面では
+<br>
+「幅−」「奥行き」のラベルと近い。掴む位置は距離で決まるので誤操作はしないが、ラベルが重なって見える。
+</p>
+<hr>
+<h2 id="5i-テントのハンドルを菱形に統一・一番下一番奥で三角柱2026-11-01-追加">5I. テントのハンドルを菱形に統一・一番下／一番奥で三角柱（2026-11-01 追加）</h2>
+<h3 id="5i-1-依頼">5I-1. 依頼</h3>
+<ul>
+<li>テントの<strong>オレンジの四角はいらない。菱形だけ</strong>にしたい。
+</li>
+<li>オレンジの菱形を<strong>一番下・一番奥まで動かしたら三角柱</strong>になってほしい。
+</li>
+</ul>
+<h3 id="5i-2-変更">5I-2. 変更</h3>
+<table><thead><tr><th>場所</th><th>変更</th></tr></thead><tbody>
+<tr><td><code>engine-tools.js</code> <code>drawSpecialGizmo()</code></td><td>3Dの「前後」ハンドルが四角（<code>sq(hy.s, ...)</code>）で描かれていた。前縁Yと同じ<strong>菱形</strong>に統一</td></tr>
+<tr><td><code>engine-tools.js</code> <code>awningGeometry()</code></td><td>前縁の可動範囲を端まで広げた：高さ <code>0.05 → 0</code>、奥行き <code>d/2 − 0.025 → d/2</code></td></tr>
+<tr><td>同上</td><td>手前の上辺が奥の上辺の真下へ来たら（<code>edgeY ≥ d/2 − 0.02</code>）上辺を奥の高さへ揃え、<strong>奥が垂直な三角柱</strong>として閉じる（<code>triangleBack</code>）</td></tr>
+<tr><td>同上</td><td>手前の上辺が下端に重なった状態を <code>triangleFront</code> として扱う（＝三角柱）</td></tr>
+<tr><td><code>engine-tools.js</code> / <code>studio-ui.js</code> ドラッグ</td><td>吸着先を2つにした。<strong>直方体</strong>（上辺が水平・前面が垂直）＋<strong>三角柱</strong>（一番下・一番奥）</td></tr>
+<tr><td><code>studio-ui.js</code> <code>floorAwningEdgeHandle()</code></td><td>間取り（前・横）のハンドル範囲も同じく 0／d/2 まで</td></tr>
+</tbody></table>
+<p>
+以前は 0.05 と 0.025 の余白を残していたため、一番下・一番奥まで動かしても
+<br>
+<strong>薄い板や斜めの上辺が残り、三角柱にならなかった</strong>。
+</p>
+<h3 id="5i-3-実ブラウザでの確認2026-11-01">5I-3. 実ブラウザでの確認（2026-11-01）</h3>
+<table><thead><tr><th>確認</th><th>結果</th></tr></thead><tbody>
+<tr><td>横ビュー・前縁Y の範囲</td><td>✅ min 0 / max 0.35（h）</td></tr>
+<tr><td>横ビュー・前後の範囲</td><td>✅ min −0.675 / max <strong>+0.675</strong>（d/2）</td></tr>
+<tr><td>前縁Y を一番下までドラッグ</td><td>✅ <code>awningEdgeZ</code> 0.35 → <strong>0</strong>（手前の上辺＝下端。断面が三角形）</td></tr>
+<tr><td>前後 を一番奥までドラッグ</td><td>✅ <code>awningEdgeY</code> −0.675 → <strong>0.675</strong>、上辺が奥の高さへ揃う（三角柱）</td></tr>
+<tr><td>3Dのハンドル表示</td><td>✅ 前縁Y・前後とも<strong>菱形</strong>（オレンジの四角は無し）</td></tr>
+<tr><td>ページエラー</td><td>✅ 0</td></tr>
+<tr><td>配布版（26アセット×4ビュー）</td><td>✅ エラー 0</td></tr>
+</tbody></table>
+<p>
+<strong>残る注意</strong>：三角柱の状態では手前の面が線に重なるため、
+<br>
+そのままでは「面」を掴む操作はできない（ハンドルで戻せば元の直方体に戻る）。
+</p>
+<hr>
+<h2 id="5j-前後ハンドルの廃止と建物・付属パーツの初期寸法2026-11-01-追加">5J. 「前後」ハンドルの廃止と建物・付属パーツの初期寸法（2026-11-01 追加）</h2>
+<h3 id="5j-1-依頼">5J-1. 依頼</h3>
+<ul>
+<li>テントの「前後」ハンドルはいらない。
+</li>
+<li><strong>全ての建物の初期値を 幅4・奥行き3・高さ5</strong> に。
+</li>
+<li><strong>テント／看板の初期値は 幅3・高さ1</strong>、奥行きはテント1・看板0.5。
+</li>
+<li>取り付け位置は<strong>地面から3.6m</strong>（建物5mの上部）。左右（X）は建物の中央。
+</li>
+</ul>
+<h3 id="5j-2-変更">5J-2. 変更</h3>
+<table><thead><tr><th>場所</th><th>変更</th></tr></thead><tbody>
+<tr><td><code>engine-tools.js</code> <code>awningGizmo()</code> / <code>drawSpecialGizmo()</code></td><td>「前後」ハンドルを廃止（菱形1つ＝前縁Yのみ）。手前奥は前縁Yの2軸目（斜めドラッグ）で動かす</td></tr>
+<tr><td><code>studio-ui.js</code> <code>floorAwningEdgeHandle()</code></td><td>間取り側も「前後」を廃止</td></tr>
+<tr><td><code>asset.js</code> <code>ASSETS</code></td><td>building / buildingAwning / buildingSign を <strong>w:4, d:3, h:5</strong> に。単体の店舗テント（<code>awning</code>）は <strong>w:3, d:1</strong>（高さは 0.35 の日よけ板のまま）</td></tr>
+<tr><td><code>asset-controller.js</code> <code>placeLinkedAsset()</code></td><td>付属パーツを決め打ちに：<strong>幅3（ra=1.5）・高さ1</strong>、奥行きはテント <code>rb=0.5</code>（1m）／看板 <code>rb=0.25</code>（0.5m）、<code>attachment.baseZ = 3.6</code>（地面から3.6mの位置に取り付け）、<code>x = 0</code>（左右中央）</td></tr>
+</tbody></table>
+<p>
+「前後」は前縁Yと数cm しか離れておらず、どちらを掴んだか分かりにくかった。
+<br>
+前縁Y が上下＋手前奥の2軸で動くので、機能は減っていない。
+</p>
+<h3 id="5j-3-実ブラウザでの確認2026-11-01">5J-3. 実ブラウザでの確認（2026-11-01）</h3>
+<table><thead><tr><th>確認</th><th>結果</th></tr></thead><tbody>
+<tr><td>建物の初期値</td><td>✅ 幅4 × 奥行き3 × 高さ5</td></tr>
+<tr><td>テント付き建物のテント</td><td>✅ 幅3 × 奥行き1 × 高さ<strong>1</strong>、<code>baseZ</code> <strong>3.6</strong>（建物5mの上部に付く）、X中央</td></tr>
+<tr><td>看板付き建物の看板</td><td>✅ 幅3 × 奥行き0.5 × 高さ<strong>1</strong>、<code>baseZ</code> <strong>3.6</strong>、X中央</td></tr>
+<tr><td>3Dのハンドル</td><td>✅ テントは <code>edgeZ</code>（前縁Y）のみ</td></tr>
+<tr><td>前ビューのハンドル</td><td>✅ 幅＋／幅−／上端／下端／奥行き／前縁Y（前後は無し）</td></tr>
+<tr><td>単体の店舗テント</td><td>✅ 幅3 × 奥行き1 × 高さ0.35</td></tr>
+<tr><td>ページエラー</td><td>✅ 0（<code>qy is not defined</code> を1度出したので修正済み）</td></tr>
+</tbody></table>
+<p>
+<strong>確認済みの方針</strong>：階層建物（縁付き・凹窓・ベベル）は多階の塔として残す（初期値は今までどおり
+<br>
+幅4×奥行き3×高さ8.98〜12.5）。4×3×5 にするのは基本の建物3種だけ。
+</p>
+<hr>
+<h2 id="5k-アセット生成直後に線が消えて見える問題2026-11-01-追加">5K. アセット生成直後に線が消えて見える問題（2026-11-01 追加）</h2>
+<h3 id="5k-1-症状">5K-1. 症状</h3>
+<p>
+アセットを棚から追加した直後、<strong>図形の塗りは出るのに輪郭線（黒い線）が出ない</strong>。
+<br>
+画面のどこかをクリックすると線が出る。追加した瞬間のキャンバスを見ると、
+<br>
+地面のグリッドまで薄く欠けて見えた。
+</p>
+<h3 id="5k-2-調べたこと">5K-2. 調べたこと</h3>
+<ul>
+<li>線のデータ自体は正常（<code>S</code> の各線に有限の点が入っていて、色も <code>#222222</code>）。
+<br>
+追加直後と再描画後で <strong>点の配列は1ビットも変わらない</strong>。
+</li>
+<li><code>render()</code> の中で描いている内容も同じ（<code>fill</code> / <code>stroke</code> の呼び出し回数・色・
+<br>
+線幅・<code>globalAlpha</code>・合成モード・ダッシュ・キャンバスの変換行列・<code>Z</code>/<code>ox</code>/<code>oy</code>/<code>W</code>/<code>H</code>
+<br>
+をすべて記録して比較 → <strong>完全に一致</strong>）。
+</li>
+<li>ところが<strong>キャンバスの実ピクセルは違う</strong>（暗い画素が 390 → 4290）。
+</li>
+<li>追加の処理の中で <code>render()</code> を2回続けて呼んでも直らない。
+<br>
+<strong>イベント処理が終わったあと（別タスク）に <code>render()</code> を1回呼ぶと直る。</strong>
+</li>
+</ul>
+<p>
+つまり「描画命令は同じなのに、追加直後の1回目だけラスタライズが欠ける」という
+<br>
+ブラウザ側のタイミング問題で、コードの計算違いではなかった。
+</p>
+<h3 id="5k-3-修正">5K-3. 修正</h3>
+<ul>
+<li><code>engine-tools.js</code> に <code>renderFresh()</code> を追加：
+<br>
+<code>render()</code> を呼んだあと、<code>setTimeout(() =&gt; render(), 0)</code> で
+<br>
+<strong>イベント処理が終わったタスクでもう一度描く</strong>。
+</li>
+<li><code>asset-controller.js</code> の<strong>追加系の成功時</strong>の <code>render()</code> を <code>renderFresh()</code> に置き換え：
+<ul>
+<li><code>placeAsset()</code>（通常アセット）
+</li>
+<li><code>placeLinkedAssetInstance()</code>（テント付き建物・看板付き建物）
+</li>
+<li><code>placeBalcony()</code>
+</li>
+<li>貼り付け（<code>pasteObjectClipboard()</code>）／定義から復元する経路／横壁看板の追加
+</li>
+</ul>
+</li>
+<li>失敗時（<code>catch</code>）は従来どおり <code>render()</code> のまま。
+</li>
+</ul>
+<h3 id="5k-4-実ブラウザでの確認2026-11-01">5K-4. 実ブラウザでの確認（2026-11-01）</h3>
+<table><thead><tr><th>確認</th><th>結果</th></tr></thead><tbody>
+<tr><td>追加直後の暗い画素（キャンバス）</td><td>✅ <strong>390 → 4290</strong>（クリック後の値と一致）</td></tr>
+<tr><td>追加直後のスクリーンショット</td><td>✅ 輪郭線が出ている（再描画後と同一）</td></tr>
+<tr><td>26アセットを順に追加</td><td>✅ ページエラー 0</td></tr>
+<tr><td>建物・テント付き建物・看板付き建物・店舗テント・階段・直方体</td><td>✅ すべて線が出る</td></tr>
+</tbody></table>
+<hr>
+<hr>
+<h2 id="5l-テントが3d・正面では三角柱にできない問題2026-11-01-追加">5L. テントが「3D・正面では三角柱にできない」問題（2026-11-01 追加）</h2>
+<h3 id="5l-1-症状">5L-1. 症状</h3>
+<p>
+店舗テントのオレンジ菱形（前縁Y）を一番下まで下げると三角柱になるが、
+<br>
+<strong>3Dビューでは三角柱にならず、薄い板が残る</strong>。横ビューでは三角柱になる。
+</p>
+<h3 id="5l-2-原因2つ">5L-2. 原因（2つ）</h3>
+<ol>
+<li><strong>3Dのハンドルだけ可動域の下限が 0.05 だった</strong>
+<br>
+<code>awningGizmo()</code> の <code>min: 0.05</code> のため、一番下まで引いても <code>edgeZ = 0.05</code> で止まり、
+<br>
+三角柱の判定（<code>triangleFront</code> は <code>edgeZ ≦ 0.001</code>）に届かなかった。
+<br>
+間取りの正面・横ビューは <code>min: 0</code> だったので、<strong>ビューによって到達できる形が違っていた</strong>。
+</li>
+<li><strong>2軸目（手前奥）が1軸目と直交していなかった</strong>
+<br>
+斜め投影の3Dでは「手前奥」の向きが画面上で斜めになる。そのまま2軸目に使うと、
+<br>
+<strong>真下へ引いただけで手前奥も一緒に動き</strong>、高さを下げ切っても三角柱の条件を満たさなかった。
+</li>
+</ol>
+<h3 id="5l-3-修正">5L-3. 修正</h3>
+<ul>
+<li><code>awningGizmo()</code> の <code>min</code> を <strong>0</strong> に（間取り正面・横と同じ値）。
+</li>
+<li>前縁Y の2軸目を <strong>1軸目と直交化</strong>（グラム・シュミット）。
+<ul>
+<li><code>engine-tools.js</code> の <code>awningGizmo()</code>（3D）
+</li>
+<li><code>studio-ui.js</code> の <code>floorAwningEdgeHandle()</code>（間取りの横ビュー）
+</li>
+<li>直交化した成分がほぼ0になる視点では、従来の向きへフォールバック。
+</li>
+</ul>
+</li>
+<li>吸着（<code>snapAwningEdge</code>）は最小値 0 にも効くので、端まで引けばぴったり三角柱。
+</li>
+</ul>
+<h3 id="5l-4-実測実ポインター操作・2026-11-01">5L-4. 実測（実ポインター操作・2026-11-01）</h3>
+<p>
+単体テント（3×1×0.35）と付属テント（3×1×1）で、前・横・3D の3ビュー ×
+<br>
+上下左右の4方向、計 <strong>24通り</strong>を実際にドラッグして確認。
+</p>
+<table><thead><tr><th>ビュー</th><th>下へ引く</th><th>上へ引く</th><th>右（奥）へ引く</th><th>左（手前）へ引く</th></tr></thead><tbody>
+<tr><td>前</td><td>✅ 三角柱（前）</td><td>✅ 直方体</td><td>✅ 三角柱（奥）</td><td>✅ 直方体</td></tr>
+<tr><td>横</td><td>✅ 三角柱（前）</td><td>✅ 直方体</td><td>✅ 三角柱（奥）</td><td>✅ 直方体</td></tr>
+<tr><td>3D</td><td>✅ 三角柱（前）</td><td>✅ 直方体</td><td>✅ 三角柱（奥）</td><td>✅ 直方体</td></tr>
+</tbody></table>
+<ul>
+<li>3D で下げたときに手前奥が動かなくなったことを <code>awningEdgeY</code> が変わらないことで確認。
+</li>
+<li>ページエラー 0。
+</li>
+</ul>
+<hr>
+<hr>
+<h2 id="5m-面表示で重なった部分だけ濃くなる問題2026-11-01-追加">5M. 面表示で重なった部分だけ濃くなる問題（2026-11-01 追加）</h2>
+<h3 id="5m-1-症状">5M-1. 症状</h3>
+<p>
+「面 ON」のとき、<strong>面が重なっている場所だけ色が濃くなる</strong>（乗算したような見た目）。
+<br>
+開口のある建物で顕著（柱の裏・奥の壁・内側の側面が正面パネルと重なる）。
+</p>
+<h3 id="5m-2-原因">5M-2. 原因</h3>
+<p>
+<code>drawObjectSurfaces()</code> が三角形を<strong>1枚ずつ <code>globalAlpha = 0.22</code> で塗って</strong>いた。
+<br>
+線形合成なので、同じ色の面が n 枚重なると <code>1 − 0.78ⁿ</code> まで濃くなる。
+<br>
+建物は「外箱6面＋開口を作るための柱・梁・奥パネル・内側面」で面が重なるため、
+<br>
+1枚の壁でも場所によって濃さが変わっていた（資料の言葉では「同じ面なのにまだら」）。
+</p>
+<h3 id="5m-3-修正">5M-3. 修正</h3>
+<p>
+<strong>オフスクリーンに不透明で1枚描き、最後に1回だけ半透明で重ねる</strong>方式に変更。
+<br>
+層の中で何枚重なっても色は積み上がらない。
+</p>
+<ul>
+<li>不透明度ごとにグループ分け（通常は全部 0.22 なので1グループ）。
+</li>
+<li>層は<strong>面が写る範囲だけ</strong>の大きさで確保（画面全体だと 140オブジェクトで約1.5倍遅かった）。
+</li>
+<li>同じ色は1本の <code>Path2D</code> にまとめる（400枚ずつ）。
+</li>
+<li>パスへ入れる前に<strong>三角形の巻き方向をそろえる</strong>。
+<br>
+逆巻きの三角形が混ざると <code>nonzero</code> で打ち消し合い、塗りが抜ける
+<br>
+（修正の途中で実際に「斜めの筋だけ塗られる」状態になったため対処）。
+</li>
+<li>塗りと同色で <code>1/Z</code> の太さの縁をなぞり、隣り合う三角形の継ぎ目を埋める。
+</li>
+</ul>
+<h3 id="5m-4-実測2026-11-01">5M-4. 実測（2026-11-01）</h3>
+<ul>
+<li>開口のある建物 1体：面の色は <strong><code>230,250,242</code> の1色だけ</strong>（従来は
+<br>
+<code>184,241,218</code> / <code>211,246,232</code> / <code>192,234,227</code> / <code>196,243,224</code> と4段階に濃さが分かれていた）。
+</li>
+<li>建物＋テントの重なり：テントが建物の手前にある部分だけわずかに濃く、それ以外は一様。
+</li>
+<li>26アセット追加（140オブジェクト）→ <strong>ページエラー 0</strong>、線の画素数は従来と同じ（18513 対 18544）。
+</li>
+<li>描画時間（6オブジェクト）: 従来 53〜78ms → <strong>53ms</strong>（同等〜やや速い）。
+</li>
+<li>ズーム（<code>Z = 2.4</code>）・パン中でも継ぎ目や位置ズレが出ないことを目視確認。
+</li>
+</ul>
+<hr>
+<hr>
+<h2 id="5n-生成面が効かないアセット2026-11-01-追加">5N. 生成面が効かないアセット（2026-11-01 追加）</h2>
+<h3 id="5n-1-症状">5N-1. 症状</h3>
+<p>
+アセット棚の「生成面」を X／Z に変えても、大半のアセットで<strong>何も変わらない</strong>。
+</p>
+<h3 id="5n-2-原因3つ">5N-2. 原因（3つ）</h3>
+<ol>
+<li><strong>積層建物・壁付け看板が <code>k</code> を1に固定していた</strong>
+<br>
+（<code>newAsset()</code> の分岐で <code>k: 1</code> を直接書いていた）。
+</li>
+<li><strong>積層建物の線画が <code>customPt()</code>（自作の式）で描かれていた</strong>
+<br>
+<code>customPt</code> は <code>k</code> を見ずに <code>rot</code> だけを掛けていたため、<code>k</code> を渡しても向きが変わらなかった。
+</li>
+<li><strong>生成面は「新しく追加するアセット」にしか効かなかった</strong>
+<br>
+すでに置いてあるアセットには何も起きないので、変化が無いように見えていた。
+</li>
+</ol>
+<h3 id="5n-3-修正">5N-3. 修正</h3>
+<ul>
+<li>積層建物（3種）・壁付けベランダ・壁付け看板の <code>k</code> 固定を廃止し、共通設定に従う。
+</li>
+<li><code>customPt</code> を <code>L2W</code> へ委譲（<code>const customPt = (o, x, y, z) =&gt; L2W(o, x, y, z);</code>）。
+<br>
+<code>k=1, rot=0</code> では従来と完全に同じ値なので既存データの見た目は変わらない。
+</li>
+<li>テント付き建物・看板付き建物の親も生成面に従う。子テント／子看板は
+<br>
+<code>syncAttachedPart()</code> が<strong>親と同じ <code>k</code></strong> で貼り付けるようにした（親をX／Z面にすると
+<br>
+子だけ元の向きに残って壁から浮いていた不具合も同時に解消）。
+</li>
+<li><strong>生成面を切り替えたとき、選択中のオブジェクトも同じ面へ移し替える</strong>ようにした
+<br>
+（<code>replaneSelectionToAssetAxis()</code>）。位置は変えず、いまのローカル原点のワールド位置を
+<br>
+新しい面の座標へ入れ直す。接着パーツ（子）と、子を持つ親は基準が崩れるので対象外。
+<br>
+棚の生成面セレクトと左パネルの「生成方向」は同じ処理を通る。
+</li>
+</ul>
+<h3 id="5n-4-実測2026-11-01">5N-4. 実測（2026-11-01）</h3>
+<p>
+26アセットを生成面 Y／X／Z で1個ずつ作り、外形（幅×高さ×奥行き）を比較。
+</p>
+<table><thead><tr><th>アセット</th><th>Y</th><th>X</th><th>Z</th></tr></thead><tbody>
+<tr><td><code>building</code></td><td>4×5×3</td><td>5×3×4</td><td>4×3×5</td></tr>
+<tr><td><code>stackedBuilding</code></td><td>4.36×8.98×3.36</td><td>8.98×3.36×4.36</td><td>4.36×3.36×8.98</td></tr>
+<tr><td><code>recessedStackedBuilding</code></td><td>5.1×12.5×3.7</td><td>12.5×3.7×5.1</td><td>5.1×3.7×12.5</td></tr>
+<tr><td><code>balcony</code></td><td>3.2×1.25×1.8</td><td>1.25×1.8×3.2</td><td>3.2×1.8×1.25</td></tr>
+<tr><td><code>wallSign</code></td><td>1.96×1.8×0.26</td><td>1.8×0.26×1.96</td><td>1.96×0.26×1.8</td></tr>
+<tr><td><code>awning</code></td><td>3×0.35×1</td><td>0.35×1×3</td><td>3×1×0.35</td></tr>
+</tbody></table>
+<ul>
+<li><code>buildingAwning</code> / <code>buildingSign</code>：親の <code>k</code> と子の <code>k</code> が一致し、子が壁に貼り付いたまま。
+</li>
+<li><code>sphere</code> だけは外形が変わらない（球対称なので正しい）。
+</li>
+<li>140オブジェクト・4ビュー・面ON/OFF で<strong>ページエラー 0</strong>。
+</li>
+</ul>
+<hr>
+<h2 id="5o-画面の回転をどの向きにもできるように2026-11-01-追加">5O. 画面の回転を「どの向きにも」できるように（2026-11-01 追加）</h2>
+<h3 id="5o-1-症状">5O-1. 症状</h3>
+<p>
+3Dビューの回転は<strong>上下（ワールドY）まわりだけ</strong>。左右に傾ける・手前へ倒す操作ができない。
+</p>
+<h3 id="5o-2-仕組み">5O-2. 仕組み</h3>
+<ul>
+<li>オブジェクトに <code>rotX</code>（左右＝ワールドX軸）と <code>rotZ</code>（手前奥＝ワールドZ軸）を追加。
+<br>
+<code>L2W()</code> の最後で <code>Rz(rotZ)·Rx(rotX)</code> を掛けるので、**線画・面・当たり判定・
+<br>
+ハンドルがすべて同じだけ傾く<strong>。回転の中心は</strong>高さの真ん中**（底面基準だと
+<br>
+下の角が地面へ潜り込んで「倒れた」ように見えるため）。
+</li>
+<li>ギズモにリングを2本追加：<strong>Xリング（オレンジ）</strong>＝左右に倒す、
+<br>
+<strong>Yリング（緑）</strong>＝手前へ倒す。従来のオレンジの破線リング＝上下回転はそのまま。
+</li>
+<li>つかんだリング上の角度を読み、<strong>15°刻みでスナップ</strong>（Shiftで自由回転）。
+<br>
+角度は前回との差を積算するので、0°/360°をまたいでも飛ばない。
+</li>
+<li>リングの大きさは「オブジェクトの外接範囲の対角 × 0.42 + 0.2」（最小0.45・最大60）。
+<br>
+大きすぎると画面を覆って他のハンドルを隠すため。
+</li>
+<li>傾きに合わせて<strong>白い四角（面ハンドル）の法線も回す</strong>ので、傾けた後も面を掴める。
+</li>
+</ul>
+<h3 id="5o-3-実測2026-11-01">5O-3. 実測（2026-11-01）</h3>
+<ul>
+<li>建物を選ぶと X リング・Y リングが表示され、実ポインターでドラッグすると
+<br>
+<code>rotX</code> が 25° → 90°（15°刻み）に変化。
+</li>
+<li>建物を <code>rotX 35 / rotZ −20</code> に傾けたとき、付属看板が<strong>壁に付いたまま一緒に傾く</strong>。
+</li>
+<li>140オブジェクトすべてで <code>gizmo().rings</code> が1本以上（＝どのアセットでも回せる）。
+</li>
+<li>ページエラー 0。
+</li>
+</ul>
+<h2 id="5p-壁付きベランダの壁の厚さを画面上で変える2026-11-01-追加">5P. 壁付きベランダの壁の厚さを画面上で変える（2026-11-01 追加）</h2>
+<h3 id="5p-1-症状">5P-1. 症状</h3>
+<p>
+壁付きベランダの<strong>腰壁の厚さ</strong>は左パネルの数値（<code>balconyRailThickness</code>）でしか変えられず、
+<br>
+3Dビュー・間取りビューのどちらでも画面上で掴めなかった。床の厚さも同じ。
+</p>
+<h3 id="5p-2-仕組み">5P-2. 仕組み</h3>
+<ul>
+<li><code>balconyGeometry(o)</code>（<code>engine-tools.js</code>）に寸法を集約。<code>asset.js</code> の <code>linesBalcony</code> も
+<br>
+<strong>この関数を呼ぶ</strong>ので、線画・面・数値パネル・ハンドルが必ず同じ数を見る。
+<ul>
+<li><code>thickness = clamp(balconyThickness || 0.14, 0.035, min(w,d)*0.35)</code> … <strong>床と壁で共通</strong>
+</li>
+<li><code>railH = clamp(balconyRailHeight || h - thickness, 0.12, h - 0.01)</code>
+</li>
+<li><code>h = thickness + railH</code>（厚さを増やすと全体の高さも伸びる）
+</li>
+</ul>
+</li>
+<li><code>balconyGizmo(o)</code> が作るハンドルは<strong>1つ</strong>（2026-11-01：床と壁で厚さを分けない指示）。
+<ul>
+<li><strong><code>balcony-thickness</code>（壁の厚さ・<code>#ff9f68</code>）</strong>＝前面腰壁の<strong>外側面</strong>に置く四角。
+<br>
+外側へドラッグすると厚くなる。床スラブも同じ値で厚くなる。
+</li>
+</ul>
+</li>
+<li><code>specialGizmo()</code> に balcony 分岐、<code>drawSpecialGizmo</code> に「ラベル付きの四角＋破線」の描画分岐。
+</li>
+<li><code>beginGizmo</code> の kind 一覧と <code>dragEdit</code> の patch に2種を追加。<strong>床の厚さは <code>h</code> も同時に更新</strong>
+<br>
+（<code>h = 新しい floorT + railH</code>）。数値パネルの <code>applyBalconyProp</code> と同じ扱い。
+</li>
+<li>間取り（正面・横・上）でも同じハンドルを <code>floorPlanEditHandles</code> に <code>inner:true</code> で出し、
+<br>
+ドラッグの patch 分岐も同じ値を書く＝<strong>ビューによる編集能力の差を作らない</strong>。
+</li>
+</ul>
+<h3 id="5p-3-つまずいた所重要">5P-3. つまずいた所（重要）</h3>
+<p>
+専用ハンドルは <strong><code>hitGizmo()</code> の <code>special</code> 分岐に登録しないと掴めない</strong>。
+<br>
+登録が無いと、掴んでも「ゴミ箱判定」に落ちて値が変わらない（ハンドルは表示されるのに
+<br>
+ドラッグしても無反応、という症状になる）。<code>wallSign</code> / <code>windowGrid</code> と同じ型で
+<br>
+<code>nearestHandleOf(Object.values(special.handles), p, R)</code> → <code>handleOrFace</code> を通す。
+</p>
+<h3 id="5p-4-実測2026-11-01・実ポインター">5P-4. 実測（2026-11-01・実ポインター）</h3>
+<ul>
+<li>初期値 <code>railT 0.12 / floorT 0.16 / h 1.25</code>、1280×820 で壁ハンドル <code>(717,571)</code>・床 <code>(488,645)</code>。
+</li>
+<li>厚さ1本に統一した後の実測（2026-11-01）：3D <code>0.12 → 0.541</code>、正面 <code>0.12 → 0.479</code>、
+<br>
+横 <code>0.12 → 0.541</code>、上（間取り）<code>0.12 → 0.541</code>。同時に <code>h</code> も <code>1.23 → 1.651</code>。
+</li>
+<li>どのビューでも<strong>位置は不変</strong>（<code>L2W(o,0,0,0)</code> が同じ）。
+</li>
+<li>ドラッグ後に左パネルの数値（<code>#balconyRailThickness</code>）が <code>0.630</code> に追従、パネルから <code>0.2</code> を
+<br>
+入れると形状も <code>0.2</code> に追従（双方向）。
+</li>
+<li>壁をドラッグしても<strong>位置・回転は不変</strong>（<code>L2W(o,0,0,0)</code> が同じ）。ベランダでも回転リング2本は出て、
+<br>
+リングのドラッグで <code>rotZ −30°</code> が付く。
+</li>
+<li>140オブジェクト・4ビュー・面ON/OFF の回帰で<strong>ページエラー 0</strong>。
+</li>
+</ul>
+<h3 id="5p-5-ドラッグの向きについて">5P-5. ドラッグの向きについて</h3>
+<p>
+ハンドルのドラッグ量は「ハンドルの基準線が画面で向いている方向」へ投影している。
+<br>
+そのため<strong>画面で線が縦に見えるビューでは縦にドラッグ</strong>する（横に振っても値は動かない）。
+<br>
+これは壁・看板・窓グリッドなど従来のハンドルと同じ規則で、ビューごとの例外は作っていない。
+</p>
+<h2 id="5q-コの字壁新アセット・2026-11-01-追加">5Q. コの字壁（新アセット・2026-11-01 追加）</h2>
+<h3 id="5q-1-何を足したか">5Q-1. 何を足したか</h3>
+<p>
+壁付けベランダに似ているが別物のアセット <strong><code>uWall</code>（コの字壁）</strong>。
+<br>
+<strong>コの字（断面）を奥行き方向（Y軸）へ押し出した形</strong>で、<strong>上＝屋根板</strong>、左右＝側壁の3枚が
+<br>
+同じ厚さでつながる。正面・背面・下面は開いていて、床スラブは持たない。
+<br>
+初期の向きは「壁が立ったコの字」を <strong>X軸まわりに時計回りへ90°回したもの（＝屋根が上）</strong>。
+<br>
+（2026-11-01 の指示による向きの変更。<code>h</code> は今までどおり「高さ」で、
+<br>
+奥行き <code>d</code> が屋根の前後幅、幅 <code>w</code> が屋根の左右幅になる。）
+</p>
+<table><thead><tr><th>項目</th><th>値</th></tr></thead><tbody>
+<tr><td>キー</td><td><code>uWall</code>（棚のグループは「街・パーツ」）</td></tr>
+<tr><td>初期寸法</td><td>幅 3.2 × 奥行き 1.8 × 高さ 1.1</td></tr>
+<tr><td>厚さ</td><td><code>uWallThickness</code>（初期 0.12、範囲 0.035 〜 <code>min(w,d)*0.35</code>）。屋根と側壁で共通</td></tr>
+<tr><td>線画 / 面</td><td>18本 / 36三角形（<code>wireBoxA</code> と <code>boxAt</code> を3枚ぶん）</td></tr>
+</tbody></table>
+<h3 id="5q-2-編集できるところ">5Q-2. 編集できるところ</h3>
+<ul>
+<li><strong>厚さ</strong>：数値パネルの「厚さ（屋根・壁）」1つ。3D と間取り（正面・横・上）の
+<br>
+<strong>屋根の手前角にあるオレンジの四角（<code>uWall-thickness</code>）</strong> を上下にドラッグしても同じ値が変わる。
+</li>
+<li><strong>幅・奥行き・高さ</strong>：いつもの寸法ハンドル。<code>h</code> は壁の高さそのものなので、
+<br>
+厚さを変えても高さは動かない（ベランダとはここが違う）。
+<br>
+コの字壁は <code>gizmo()</code> の「中身のある立体（solid）」として扱うので、
+<br>
+<strong>3Dビューでも上面の白い四角で高さを変えられる</strong>（正面・横も同じ）。
+<br>
+間取りの正面／上ビューには、他のアセットと同じ <code>w</code> / <code>d</code> / <code>h</code> ハンドルが出る。
+</li>
+<li><strong>生成面</strong>：<code>k = 0/1/2</code> の切り替えがそのまま効く（<code>linesUWall</code> は <code>L2W</code> 経由で描くため）。
+</li>
+</ul>
+<h3 id="5q-3-実測実ポインター・2026-11-01">5Q-3. 実測（実ポインター・2026-11-01）</h3>
+<table><thead><tr><th>ビュー</th><th>厚さの変化</th><th>位置</th></tr></thead><tbody>
+<tr><td>3D</td><td>0.12 → 0.541</td><td>不変</td></tr>
+<tr><td>正面</td><td>0.12 → 0.541</td><td>不変</td></tr>
+<tr><td>横</td><td>0.12 → 0.541</td><td>不変</td></tr>
+<tr><td>上（間取り）</td><td>0.12 → 0.63</td><td>不変</td></tr>
+</tbody></table>
+<ul>
+<li>数値パネル → 形状（<code>0.3</code> を入力すると <code>uWallGeometry().thickness</code> が <code>0.3</code>）、
+<br>
+形状 → 数値パネル（<code>0.630</code> と表示）の双方向を確認。
+</li>
+<li>生成面を 0 → 1 → 2 と切り替えて線画18本のまま、ページエラー 0。
+</li>
+</ul>
+<h3 id="5q-3b-重なった箱をやめた2026-11-01-追加の修正">5Q-3b. 重なった箱をやめた（2026-11-01 追加の修正）</h3>
+<p>
+屋根板・左右の側壁を<strong>3つの箱</strong>として重ねて描いていたため、次の2つの症状が出ていた。
+</p>
+<ol>
+<li>屋根と側壁が重なる上端の角に、<strong>線が二重／余計に</strong>出る（側壁の上面の四角が屋根の表面を横切る）。
+</li>
+<li>屋根の前端などの線が<strong>途中で欠ける</strong>。線は奥行きバッファ
+<br>
+（<code>strokeWVisible</code>）で「手前の面に隠れた部分を描かない」ため、
+<br>
+重なった箱の面が同じ線を隠してしまう。
+</li>
+</ol>
+<p>
+<strong>修正</strong>：断面（コの字＝∩の8点）を1本の閉じた線として前後に描き、
+<br>
+各角から奥行き方向の稜線を8本足す<strong>1つの立体</strong>にした。線は18本 → <strong>10本</strong>。
+<br>
+面（塗り）も重ならないように、屋根は側壁の<strong>上に載せる</strong>（側壁の高さは <code>h − 厚さ</code>）。
+</p>
+<hr>
+<h3 id="5q-4-つまずいた所重要">5Q-4. つまずいた所（重要）</h3>
+<ul>
+<li><strong><code>gizmo()</code> の <code>solid</code> 一覧に入れ忘れると、3Dで高さを変えられない</strong>。
+<br>
+<code>solid</code> に入っていないアセットは「平らなもの」として扱われ、面ハンドルが
+<br>
+横4枚（X±・Y±）しか作られない＝上下の面が無いので高さのハンドルが出ない。
+<br>
+コの字壁は屋根と側壁を持つ立体なので <code>solid</code> に追加した（症状：3Dで高さだけ動かない）。
+</li>
+</ul>
+<ul>
+<li><strong>ハンドルはオブジェクトのシルエットの外へ少し出す</strong>。真横ビューでは壁が画面いっぱいに
+<br>
+重なるため、外側面の上に置いたハンドルはオブジェクトの移動に負けて掴めなかった
+<br>
+（<code>-Y</code> 方向へ <code>max(0.1, 厚さ)</code> だけ外へ出して解決）。
+</li>
+<li>パネルの HTML は <strong><code>engine-core.js</code> の中のテンプレート文字列</strong>が正で、
+<br>
+<code>cyberpunk-city-studio.html</code> を直接書き換えても <code>build-city-grid.py</code> で上書きされて消える。
+</li>
+</ul>
+<hr>
+<h2 id="5s-屋台・丸椅子新アセット・2026-11-02-追加">5S. 屋台・丸椅子（新アセット・2026-11-02 追加）</h2>
+<h3 id="5s-1-何を足したか">5S-1. 何を足したか</h3>
+<p>
+写真のような売店の <strong><code>stall</code>（屋台）</strong> と、その前に置く <strong><code>stool</code>（丸椅子）</strong>。
+</p>
+<table><thead><tr><th>項目</th><th>値</th></tr></thead><tbody>
+<tr><td>キー</td><td><code>stall</code>（棚のグループは「建物」）／<code>stool</code>（「街・パーツ」＝小物）</td></tr>
+<tr><td>屋台の初期寸法</td><td>幅 2.4 × 奥行き 1.4 × 高さ 2.4</td></tr>
+<tr><td>屋台の形</td><td>コの字の壁（奥＋左右）＋手前下のカウンター箱＋真上の屋根箱</td></tr>
+<tr><td>屋台の固有値</td><td><code>stallWallThickness</code> / <code>stallCounterHeight</code> / <code>stallCounterDepth</code> / <code>stallRoofThickness</code> / <code>stallRoofOverhang</code></td></tr>
+<tr><td>丸椅子の初期寸法</td><td>幅 0.36 × 奥行き 0.36 × 高さ 0.45（座面高さ。屋台のカウンター約1.05 mに合わせた比率）</td></tr>
+<tr><td>丸椅子の固有値</td><td><code>stoolSeatRadius</code> / <code>stoolSeatThickness</code> / <code>stoolLegRadius</code> / <code>stoolLegHeight</code>（＝<code>h</code> で保持）/ <code>stoolBaseRadius</code> / <code>stoolBaseHeight</code></td></tr>
+<tr><td>線画 / 面</td><td>屋台 21本 / 60三角形、丸椅子 12本 / 192三角形</td></tr>
+</tbody></table>
+<h3 id="5s-2-編集できるところ指示された6つの動き">5S-2. 編集できるところ（指示された6つの動き）</h3>
+<table><thead><tr><th>やりたいこと</th><th>操作</th><th>変わる値</th></tr></thead><tbody>
+<tr><td><strong>下の直方体の奥行き</strong>（奥の面はコの字に密着したまま、手前の面だけ動く）</td><td>カウンター手前の面の<strong>オレンジの四角</strong>（<code>stall-counter-front</code>）／数値欄「カウンターの奥行き」</td><td><code>stallCounterDepth</code></td></tr>
+<tr><td><strong>下の直方体の高さ</strong>（下の面＝床は動かさない）</td><td>カウンター上面の<strong>薄いオレンジの四角</strong>（<code>stall-counter-top</code>）／「カウンターの高さ」</td><td><code>stallCounterHeight</code></td></tr>
+<tr><td><strong>上の直方体の手前の面</strong>（前奥移動）</td><td>屋根の手前の面の<strong>水色の四角</strong>（<code>stall-roof-front</code>）／「屋根の張り出し」</td><td><code>stallRoofOverhang</code></td></tr>
+<tr><td><strong>上の直方体の高さ</strong>（上の面＝全体の高さは動かさず、下の面だけ動く）</td><td>屋根の下面の<strong>青灰色の四角</strong>（<code>stall-roof-bottom</code>。面と重ならないよう手前の外へ出している）／「屋根の厚さ」</td><td><code>stallRoofThickness</code></td></tr>
+<tr><td><strong>コの字の奥の壁の移動</strong></td><td>奥の壁を掴んで移動（いつもの移動ギズモ）</td><td><code>ca</code> / <code>cb</code></td></tr>
+<tr><td><strong>コの字の壁の厚さ</strong>（奥＋左右の3枚で共通）</td><td><strong>左の壁の外側の面にあるオレンジの四角</strong>（<code>stall-wall-thickness</code>）を外へドラッグ／数値欄「壁の厚さ」</td><td><code>stallWallThickness</code>（3D・正面・横・上のすべてで掴める）</td></tr>
+<tr><td><strong>全体の幅・高さ</strong></td><td>いつもの寸法ハンドル（<code>ra</code> / <code>h</code>）。3Dでも上下の面で高さを変えられる（<code>gizmo()</code> の <code>solid</code> に登録済み）</td><td><code>ra</code> / <code>h</code></td></tr>
+</tbody></table>
+<ul>
+<li>どの値も <strong><code>stallGeometry(o)</code> が唯一の寸法源</strong>なので、線画・面・数値パネル・ハンドルが同じ数を見ます。
+</li>
+<li>屋根の厚さを変えても <strong>全体の高さ（<code>h</code>）は動きません</strong>（下の面だけが降りる）。
+<br>
+カウンターの高さを変えても <strong>床は動きません</strong>（上の面だけが上がる）。
+</li>
+<li>幅を変えるとカウンター・屋根も同じ幅に追従、奥行きを変えると屋根の奥行き（<code>d + ro</code>）と
+<br>
+カウンターの奥の面（<code>−d/2</code>）が追従します。
+</li>
+</ul>
+<h3 id="5s-3-実測実ポインター・2026-11-02">5S-3. 実測（実ポインター・2026-11-02）</h3>
+<table><thead><tr><th>操作</th><th>変化</th></tr></thead><tbody>
+<tr><td>カウンター奥行きの四角をドラッグ</td><td><code>cd 0.476 → 1.739</code>（奥の面・コの字・<code>h</code> は不変）</td></tr>
+<tr><td>カウンター高さの四角をドラッグ</td><td><code>ch 1.056 → 2.064</code>（床と <code>h</code> は不変）</td></tr>
+<tr><td>屋根の張り出しの四角をドラッグ</td><td><code>ro 0.336 → 1.599</code>（<code>h</code> は不変）</td></tr>
+<tr><td>屋根の厚さの四角をドラッグ</td><td><code>rt 0.216 → 0.960</code>（<code>roofBottom 2.184 → 1.440</code>、上面 <code>h = 2.4</code> は不変）</td></tr>
+<tr><td>壁の厚さの四角をドラッグ（3D）</td><td><code>t 0.090 → 0.174</code>（他の寸法・位置は不変）</td></tr>
+<tr><td>壁の厚さの四角をドラッグ（正面／横／上）</td><td><code>0.090 → 0.180 / 0.199 / 0.199</code>（同左）</td></tr>
+<tr><td>数値欄（5つ）</td><td><code>t 0.080 / ch 1.100 / cd 0.600 / rt 0.200 / ro 0.400</code> が形状へ即反映、パネル表示も一致</td></tr>
+<tr><td>三個置き（屋台＋丸椅子）</td><td>ページエラー 0、面表示 60／192三角形</td></tr>
+</tbody></table>
+<h3 id="5s-4-つまずいた所重要">5S-4. つまずいた所（重要）</h3>
+<ul>
+<li><strong><code>hitGizmo()</code> の <code>special</code> 分岐へアセットを追加しないと、四角を掴んでも値が変わらない</strong>。
+<br>
+表示はされるので気づきにくい（症状：ドラッグしても数値が動かない）。今回は
+<br>
+<code>wallSign / windowGrid / balcony / uWall</code> の一覧へ <code>stall</code> を追加した。
+</li>
+<li><strong>ハンドルの四角を面の真上に置くと、面ハンドル（寸法変更）に負ける</strong>ことがある。
+<br>
+屋根の下面のハンドルは、屋根の手前の外へ出して破線で下面へ結んでいる
+<br>
+（コの字壁の厚さハンドルと同じ対策）。
+</li>
+<li><strong><code>newAsset()</code> では <code>width</code> / <code>depth</code> という変数は存在しない</strong>（使えるのは <code>info.w</code> / <code>info.d</code> / <code>height</code>）。
+<br>
+存在しない変数を参照すると <code>ReferenceError</code> になり、「アセットを配置できませんでした」のダイアログが出る。
+</li>
+<li>パネルの HTML は <code>engine-core.js</code> のテンプレート文字列が正（<code>cyberpunk-city-studio.html</code> を直接直すと消える）。
+</li>
+<li>**値の幅が狭いハンドル（壁の厚さなど）は、ドラッグ量の基準（<code>screenHandle</code> の <code>scale</code>）を
+<br>
+画面上の長さから決め直す**。既定のままだと数 px で上限へ飛ぶ。ここでは
+<br>
+「1 m 動かすのに画面 4 m」に相当する量（下限 300）を使っている。
+</li>
+<li>同じ理由で、<strong><code>hitGizmo()</code> の <code>special</code> 分岐へ追加したアセット</strong>は、
+<br>
+<code>specialGizmo()</code> が返す <code>handles</code>（<code>normalizeScreenHandles</code> 適用後の座標）で
+<br>
+位置を確かめること。<code>stallGizmo()</code> を直接呼ぶと、重なりをほどく前の座標が返る。
+</li>
+</ul>
+<hr>
+<h2 id="5t-円・円柱・球・丸椅子の線画と半径ハンドル2026-11-02-追加">5T. 円・円柱・球・丸椅子の線画と半径ハンドル（2026-11-02 追加）</h2>
+<h3 id="5t-1-何が起きていたか原因">5T-1. 何が起きていたか（原因）</h3>
+<p>
+<code>genShape()</code>（<code>engine-core.js</code>）のプリミティブ（<code>rect</code> / <code>circ</code> / <code>box</code> / <code>cyl</code> /
+<br>
+<code>triPrism</code> / <code>triPyramid</code>）は、面内の座標を <code>q()</code> で直接組み立てていました。
+<br>
+<code>q()</code> は <code>l2wRaw()</code> 相当の式を<strong>自前で書いていた</strong>ため、<code>L2W()</code> が掛けている
+<br>
+<strong>オブジェクトの傾き（<code>rotX</code> / <code>rotZ</code>）が掛かりません</strong>。
+</p>
+<ul>
+<li>アセット（<code>type:"asset"</code>）の線は <code>lineA()</code> / <code>polyA()</code> → <code>L2W()</code> を通るので傾きます。
+</li>
+<li>プリミティブの線は傾かない → <strong>面（塗り）だけが傾いて、線が元の向きに取り残される</strong>。
+<br>
+これが「円・球が回転しても線が付いてこない」の正体でした（円は3Dの傾きで顕著）。
+</li>
+</ul>
+<h3 id="5t-2-直したこと">5T-2. 直したこと</h3>
+<table><thead><tr><th>直した所</th><th>内容</th></tr></thead><tbody>
+<tr><td><code>genShape()</code> の <code>q()</code></td><td>返す直前に <strong><code>applyObjectTilt(ob, 点)</code></strong> を1回掛ける（傾き0のときは素通し）。プリミティブ全部が同時に直る</td></tr>
+<tr><td><code>circleGizmo(o)</code>（新規）</td><td>円・円柱の<strong>半径ハンドル1本</strong>（<code>circle-radius</code>）。<code>ra</code> と <code>rb</code> を同じ値へ書き換えるので<strong>常に正円</strong>。高さは上下の面で従来どおり</td></tr>
+<tr><td>円の面ハンドル</td><td><code>circ</code> では <code>u+</code> / <code>u-</code> / <code>v+</code> / <code>v-</code> を<strong>出さない</strong>（出すと楕円になる）</td></tr>
+<tr><td><code>stoolGizmo(o)</code>（新規）</td><td>丸椅子の<strong>6本</strong>（座面・ポール・台座の半径と高さ）。半径3本は右、高さ3本は左へ振り分け</td></tr>
+<tr><td>丸椅子の面ハンドル</td><td><code>u+</code> / <code>u-</code> を出さない（幅＝座面の半径1つで決まるため）</td></tr>
+<tr><td><code>stoolGeometry(o)</code></td><td>6つの値を返す形に拡張（<code>seatR</code> / <code>seatT</code> / <code>legR</code> / <code>legH</code> / <code>baseR</code> / <code>baseH</code>、<code>baseTop</code> / <code>poleTop</code> / <code>seatBottom</code>）</td></tr>
+<tr><td><code>linesStool()</code></td><td>各段「上下の輪＋シルエット2本」＝<strong>12本</strong>に。<code>stoolSilhouetteAngles(o)</code> で視線に直角な位置を出すので、回転・傾きにも追従</td></tr>
+<tr><td><code>linesSphere()</code></td><td>輪郭円を<strong>半径1.04倍・カメラ側へ1%</strong> ずらし、面との前後判定で破線にならないようにした。加えて<strong>赤道の線を1本</strong>足し、傾きが線で分かるようにした</td></tr>
+<tr><td>丸椅子の面</td><td><code>cylinder(g.seatR, …)</code> / <code>cylinder(g.legR, …)</code> / <code>cylinder(g.baseR, …)</code> と、<code>stoolGeometry(o)</code> の値で作る（以前は座面が <code>min(w,d)/2</code> 固定で、半径を変えると面だけ追従しなかった）</td></tr>
+<tr><td>丸椅子の外接範囲</td><td><code>obBounds()</code> に専用の分岐（3段のうち一番太い半径で計算）</td></tr>
+</tbody></table>
+<ul>
+<li>数値パネル（<code>#stoolP</code>）も6項目に拡張（座面の半径／座面の高さ／ポールの半径／
+<br>
+ポールの高さ／台座の半径／台座の高さ）。画面ハンドルと同じ値を双方向に編集します。
+</li>
+</ul>
+<h3 id="5t-3-実測実ポインター・2026-11-02">5T-3. 実測（実ポインター・2026-11-02）</h3>
+<table><thead><tr><th>操作</th><th>変化</th></tr></thead><tbody>
+<tr><td>円柱（円＋押し出し1 m）の<strong>半径</strong>の四角をドラッグ</td><td><code>ra / rb 0.625 → 0.934</code>（<code>h</code> は不変、常に <code>ra = rb</code>）</td></tr>
+<tr><td>同じ円柱を <code>rot 35 / rotX 20 / rotZ 10</code> にしてから半径をドラッグ</td><td><code>0.934 → 1.152</code>（掴める・正円を保つ）</td></tr>
+<tr><td>円柱の<strong>上面</strong>をドラッグ（高さ）</td><td><code>h 1.000 → 1.186</code>（<code>ra = rb</code> は不変）</td></tr>
+<tr><td>丸椅子の座面の半径をドラッグ</td><td><code>seatR 0.18 → 0.36</code>（<code>ra = rb = 0.36</code>）</td></tr>
+<tr><td>丸椅子のポールの半径をドラッグ</td><td><code>legR 0.04 → 0.108</code>（<code>min(seatR, baseR)</code> で上限）</td></tr>
+<tr><td>丸椅子の台座の半径をドラッグ</td><td><code>baseR 0.108 → 0.330</code></td></tr>
+<tr><td>丸椅子の座面の高さをドラッグ</td><td><code>seatT 0.059 → 0.236</code>（<code>legH</code> がその分だけ縮む）</td></tr>
+<tr><td>丸椅子のポールの高さをドラッグ</td><td><code>legH 0.173 → 0.351</code>（<code>h</code> が伸びる。座面・台座の厚みは不変）</td></tr>
+<tr><td>丸椅子の台座の高さをドラッグ</td><td><code>baseH 0.041 → 0.218</code></td></tr>
+<tr><td>回転・傾きの追従（全アセット31種を棚から追加して監査）</td><td><code>rot 40°</code> / <code>rotX 30°</code> / <code>rotZ 25°</code> の<strong>すべてで線画の点列が変化</strong>。例外・ページエラー 0</td></tr>
+</tbody></table>
+<h3 id="5t-4-つまずいた所重要">5T-4. つまずいた所（重要）</h3>
+<ul>
+<li><strong><code>q()</code> の中だけで傾きを掛ける</strong>。<code>genShape()</code> の戻り値へ一括で掛けると、
+<br>
+<code>L2W()</code> 経由のアセット線に<strong>二重に掛かって</strong>位置がずれる（球の輪郭が面から
+<br>
+0.65 m ずれて見えた）。傾きは「<code>L2W</code> を通らない座標」の所だけで掛けること。
+</li>
+<li><strong>ハンドルの位置は本体のシルエットの上に置かない</strong>。丸椅子は 0.45 m しかないので、
+<br>
+半径ハンドルを外周の上に置くと面ハンドルと重なり、掴んだ方と違う値が動いた
+<br>
+（症状：半径を動かしたのに <code>ra</code> だけが変わって楕円になる）。外周から外へ出し、
+<br>
+高さハンドルは反対側へ振り分けること。
+</li>
+<li><strong><code>特殊ハンドルは</code>hitGizmo()<code> の </code>special` 分岐に型ごと登録が必要</strong>。
+<br>
+今回は <code>active.type === "circ"</code> と <code>active.asset === "stool"</code> を追加した。
+</li>
+<li><strong>Playwright のクリック座標は「キャンバス座標 → ページ座標」の変換が要る</strong>。
+<br>
+この画面はキャンバスの CSS サイズ（1266×713 など）と内部サイズ <code>W × H</code>（1600×900）が
+<br>
+違うので、<code>x' = r.left + (x·Z + ox)·r.width / W</code> で変換する。
+<br>
+さらに<strong>アセット棚を開いたままだと、ハンドルの上に棚のボタンが重なって掴めない</strong>（必ず閉じる）。
+</li>
+<li><code>newAsset()</code> は <code>evaluate</code> の中から直接呼ばない（グローバルに無く、<code>undefined</code> が返る）。
+<br>
+アセットの生成は<strong>棚のボタンを押す</strong>のが確実。
+</li>
+</ul>
+<hr>
+<h2 id="5u-屋台の接地線・画像の全削除・全体最適化2026-11-02-追加">5U. 屋台の接地線・画像の全削除・全体最適化（2026-11-02 追加）</h2>
+<h3 id="5u-1-屋台の壁の接地部に線が無かった">5U-1. 屋台の壁の接地部に線が無かった</h3>
+<p>
+コの字の壁が<strong>地面に接する線</strong>が抜けていた。<code>linesStall()</code> は「壁の上端と下端」を
+<br>
+四角として描いていたが、その四角は壁の<strong>断面</strong>（奥行き方向の面）であって、
+<br>
+<strong>外側から見た接地線</strong>ではなかった。
+</p>
+<p>
+<code>asset.js</code> の <code>linesStall()</code> の <code>3)</code> の直後に 3b) を追加した。
+</p>
+<pre><code class="language-js">// 3b) コの字の外側の底（壁が地面に接する線）。奥の壁の底は 2) の四角で描かれるので左右の2本だけ。
+[-hw, hw].forEach((x) =&gt; out.push(lineA(o, [[x, -hd, 0], [x, hd, 0]], c)));</code></pre>
+<ul>
+<li><code>hw</code>,<code>hd</code> は壁の中心線の半分（<code>w/2 - t/2</code>, <code>d/2 - t/2</code>）。
+</li>
+<li>結果：屋台の線は <strong>21本 → 23本</strong>。
+</li>
+<li>接地線のワールドYは <code>8.88 → 10.75</code>（オブジェクトの原点高さの分だけ上）。左右2本とも<strong>床と同じ高さ</strong>に出る。
+</li>
+</ul>
+<p>
+確認は <code>linesStall()</code> の出力線を<span class="bl">ワールド座標</span>に分解し、床の高さ（<code>gy = L2W(o,0,0,0)[1]</code>）と
+<br>
+一致する線分を探す方法で行った（<code>z = 0</code> の水平線分として探すと、<code>polyA</code> が細分されているため拾えない）。
+</p>
+<h3 id="5u-1b-内側の稜線が消えていたピンクで示された所">5U-1b. 内側の稜線が消えていた（ピンクで示された所）</h3>
+<p>
+屋台を正面から見たとき、<strong>壁の内面どうしが交わる奥の縦線</strong>が無く、面が1枚の板に見えていた。
+<br>
+原因は2つ。
+</p>
+<ol>
+<li><code>linesStall()</code> の稜線は「内側4本」を <code>y = hd</code>（奥の壁の<strong>外側</strong>の面）に取っていた。
+<br>
+本当の内側の角は <code>y = hd - t</code>（奥の壁の内面）で、そこには線が1本も無かった。
+</li>
+<li>④b の床の四角も奥を <code>hd</code> まで伸ばしていたため、内側の接地線が奥の壁の外側の線と重なり、
+<br>
+内側だけ線が無いように見えていた。
+</li>
+</ol>
+<p>
+直したこと（<code>asset.js</code> の <code>linesStall()</code>）:
+</p>
+<ul>
+<li>④b の奥を <code>hd</code> → <strong><code>hd - t</code></strong> に変更。
+</li>
+<li>④c を追加（5本）… 奥の縦2本 <code>x = ±(hw - t)</code>, <code>y = hd - t</code>, <code>z = 0 → roofBottom</code>／
+<br>
+奥の壁の内面の上端1本／左右の壁の内面の上端2本（<code>y = -hd → hd - t</code>, <code>z = roofBottom</code>）。
+</li>
+<li>屋台の線は <strong>23本 → 28本</strong>。
+</li>
+</ul>
+<p>
+<strong>欠けている線の機械的な見つけ方</strong>（今回作った方法・以後も使える）:
+</p>
+<ol>
+<li>屋台を5つの箱（奥の壁・左右の壁・カウンター・屋根）に分け、それぞれの<strong>12辺</strong>を出す。
+</li>
+<li>各辺を24分割し、各点を投影して<strong>深度バッファと比べる</strong>（点が手前にある＝見える点だけ残す）。
+</li>
+<li>見える点の周囲2pxに線の画素が無い辺を「線が無い辺」として列挙する。
+</li>
+</ol>
+<p>
+実測（3D視点・屋台1台）:
+</p>
+<table><thead><tr><th>辺</th><th>修正前</th><th>修正後</th></tr></thead><tbody>
+<tr><td>奥の壁の内面 上端（<code>y = hd - t</code>, <code>z = roofBottom</code>）</td><td>11点中10点に線なし</td><td>線あり</td></tr>
+<tr><td>左の壁の内面 上端（<code>x = -hw + t</code>）</td><td>22点中17点に線なし</td><td>線あり</td></tr>
+<tr><td>奥の壁の内面の縦の角（<code>x = ±(hw - t)</code>, <code>y = hd - t</code>）</td><td><strong>線そのものが無い</strong></td><td>線あり（高いカメラでは下側がカウンターに隠れる＝正しい遮蔽）</td></tr>
+</tbody></table>
+<p>
+残った2件は<strong>どちらも偽の検出</strong>（箱の辺が別の箱の内部を通る「実在しない辺」と、
+<br>
+長い辺を投影したときの弦の誤差 1〜4px）。
+</p>
+<h3 id="5u-2-画像ファイルを全削除">5U-2. 画像ファイルを全削除</h3>
+<ul>
+<li><code>check/</code>（確認用スクショ置き場）を丸ごと削除。
+</li>
+<li><code>uploads/</code> の <code>*.png</code> / <code>*.webp</code> を削除（<strong>データの <code>uploads/屋台.json</code> は残す</strong>）。
+</li>
+<li>以後、<strong>作業の1ステップが終わるたびに画像は作らない</strong>（報告も文字だけ）。
+</li>
+</ul>
+<h3 id="5u-3-全体最適化挙動は変えない">5U-3. 全体最適化（挙動は変えない）</h3>
+<p>
+スクリプト全体を見直し、<strong>出力が1画素も変わらない範囲</strong>で3か所を直した。
+<br>
+計測シーンは「<code>stall</code> / <code>stool</code> / <code>circle</code> / <code>windowGrid</code> / <code>building</code> を各6体＝30オブジェクト、線450本、三角形2,580枚」。
+</p>
+<table><thead><tr><th>直した所</th><th>内容</th><th>前</th><th>後</th></tr></thead><tbody>
+<tr><td><code>buildExportDepth()</code> の <code>putTri()</code></td><td>三角形ごとに外接矩形の全画素を重心座標で判定 → <strong>走査線方式</strong>（行ごとに辺の交点から <code>xL/xR</code> を出し、行内は1次式の増分 <code>d0/d1/d2</code> で加算）</td><td>413.7 ms</td><td>26.7 ms</td></tr>
+<tr><td><code>render()</code> の深度バッファ再確保</td><td><code>new Float32Array()</code> は 0 初期化なので、作り直した直後の1フレームだけ<strong>面の外の線が全部隠れていた</strong>。<code>fill(Infinity)</code> を追加</td><td>（潜在バグ）</td><td>—</td></tr>
+<tr><td><code>strokeW()</code> の細分</td><td>区間ごとに <code>V.nrm()</code> を2回していた → <strong>直前の点の<span class="bl">正規化</span>ベクトルを使い回す</strong></td><td>—</td><td>数%</td></tr>
+</tbody></table>
+<p>
+結果（同じシーン）：
+</p>
+<ul>
+<li><code>render</code> <strong>438.6 ms → 67.4 ms</strong>（約6.5倍）
+</li>
+<li><code>lineLayer(hidden)</code> 63 ms → 44 ms、<code>drawObjectSurfaces</code> 14.6 ms
+</li>
+</ul>
+<p>
+<strong>出力が変わっていないことの確認</strong>（どちらも差 0 画素）:
+</p>
+<ul>
+<li>新旧の深度バッファ … <code>onlyNew 0</code> / <code>onlyOld 4</code>（144万画素中のシルエット端の丸め差のみ）
+</li>
+<li>隠線処理をかけた線画 … <code>linePxOld 35694 = linePxNew 35694</code>（<code>differ 0</code>）
+</li>
+<li>通常の線画 … <code>plainPxOld 125603 = plainPxNew 125603</code>（<code>differ 0</code>）
+</li>
+</ul>
+<h3 id="5u-3b-さらに軽くする2026-11-02・2回目">5U-3b. さらに軽くする（2026-11-02・2回目）</h3>
+<p>
+1回目で一番重かった深度バッファは片付いたので、次に<strong>「同じ計算を毎フレームやり直している所」</strong>を潰した。
+</p>
+<table><thead><tr><th>直した所</th><th>内容</th><th>30オブジェクトでの実測</th></tr></thead><tbody>
+<tr><td>背景レイヤのキャッシュ <code>backgroundLayer()</code></td><td>用紙色・参考写真・床の色・<strong>床グリッド</strong>を別キャンバスに描き、カメラと設定が同じなら貼るだけにする（床グリッドだけで 7ms/フレームあった）</td><td>同じ状態の描き直し <strong>84 → 38.9 ms</strong></td></tr>
+<tr><td>深度バッファのキャッシュ <code>exportDepthKey()</code></td><td>「大きさ・変換・カメラ・<code>P</code>・見えているオブジェクトの中身」が同じなら作り直さない（キー作りは30個で 0.04ms）</td><td>上と同じ描き直しに含まれる（深度20msが0になる）</td></tr>
+<tr><td>深度の内側判定</td><td>重心座標は和が必ず1なので「全部負」側の許容は不要（`</td><td></td><td>` を削る）。旧式と同じ結果になることを確認済み</td><td>わずか</td></tr>
+</tbody></table>
+<p>
+<strong>ハンドルをドラッグしているフレーム</strong>は形が毎回変わるので深度は作り直しになる（キャッシュは効かない）。
+<br>
+それでも背景キャッシュで <strong>81.5 → 72.4 ms</strong>。
+</p>
+<p>
+<strong>キャッシュが古い絵を出さないことの確認</strong>（<code>__noBgCache</code> / <code>__noDepthCache</code> を立てた場合と
+<br>
+画面の全画素を比較し、<strong>8通りすべてで一致</strong>）:
+</p>
+<table><thead><tr><th>変えたもの</th><th>一致</th></tr></thead><tbody>
+<tr><td>何もしない（同じ状態の描き直し）</td><td>✓</td></tr>
+<tr><td>選択の変更</td><td>✓</td></tr>
+<tr><td>オブジェクトの移動</td><td>✓</td></tr>
+<tr><td>回転</td><td>✓</td></tr>
+<tr><td>寸法の変更</td><td>✓</td></tr>
+<tr><td>カメラ移動</td><td>✓</td></tr>
+<tr><td>ズーム・移動</td><td>✓</td></tr>
+<tr><td>削除</td><td>✓</td></tr>
+</tbody></table>
+<h3 id="5u-4-見直したが見送った所重要">5U-4. 見直したが見送った所（重要）</h3>
+<ul>
+<li><strong>同名関数 <code>wallSideSignParent</code> / <code>wallSideSignChildren</code> が2本ある</strong>（<code>asset-controller.js</code> と
+<br>
+<code>studio-ui.js</code>）。ただし<strong>別スコープ（IIFE内とブリッジのメソッド側）なので衝突していない</strong>。
+<br>
+統合は「整理」であって不具合修正ではないので、挙動を変えない今回の範囲では触っていない。
+</li>
+<li><strong>三角形の巻き方向による裏面カリングは使えない</strong>。シーンの三角形は <code>pos 174 / neg 256</code> と
+<br>
+向きが混在している。
+</li>
+<li><strong><code>strokeWVisible()</code> の細分（<code>worldLength * 10</code>）はそのまま</strong>。画面距離基準に変えると
+<br>
+隠線判定のサンプル点が変わり、線の見え方が変わる可能性があるため。
+</li>
+<li><strong><code>buildExportDepth()</code> は1本の共有 <code>Float32Array</code> を返す</strong>。新旧を比べるときは
+<br>
+<strong>先にコピーを取る</strong>（先に旧版を走らせるとバッファが壊れ、「新だけ無限遠」という偽の差分が出る）。
+</li>
+</ul>
+<hr>
+<h2 id="5v-結合オブジェクトの回転2026-11-02-追加・同日-最終形">5V. 結合オブジェクトの回転（2026-11-02 追加・同日 最終形）</h2>
+<p>
+「結合したオブジェクトを回すと位置がずれる／動く」の修正。
+<br>
+ユーザーの保存データ（<code>perspective-20261102-0224.json</code>・結合体3つ）で再現・測定した。
+</p>
+<h3 id="5v-1-原因3つ重なっていた">5V-1. 原因（3つ重なっていた）</h3>
+<p>
+<strong>① 軸を毎回作り直していた。</strong>
+<br>
+回転の軸を「そのときの外接箱の中心」から計算し直していた。箱は回すと形が変わるので
+<br>
+中心も動く（30°ごとに 0.16〜0.68 m）。そのため回すたびに別の点を中心に回っていた。
+</p>
+<p>
+<strong>② 子パーツの <code>off</code> を回していなかった。</strong>
+<br>
+パーツの位置は <code>ca/cb</code>（面の中の座標）と <code>off</code>（ワールド方向の平行移動）に分かれている。
+<br>
+位置だけ回して <code>off</code> を据え置くと、その分だけワールド軸のまま取り残される。
+<br>
+実データの <code>off = [5.15, 0, -0.55]</code> を −45° 回すと <strong>3.96 m</strong> ずれていた。
+</p>
+<p>
+<strong>③ 角度の決まりが2種類あって、形だけ逆に回っていた（これが一番大きい）。</strong>
+<br>
+図形の <code>rot</code>（面の中の回転）と、回転で使う中心移動の式が<strong>逆向き</strong>だった。
+</p>
+<table><thead><tr><th>計算</th><th>式</th><th>向き</th></tr></thead><tbody>
+<tr><td>形の <code>rot</code>（<code>l2wRaw</code>）</td><td><code>x' = x·cos − y·sin</code>, <code>y' = x·sin + y·cos</code></td><td>＋で反時計</td></tr>
+<tr><td>中心・<code>off</code> の移動（旧 <code>rotateCompoundBy</code>）</td><td><code>x' = x·cos + z·sin</code>, <code>z' = −x·sin + z·cos</code></td><td>＋で時計</td></tr>
+</tbody></table>
+<p>
+そのため「中心は ＋15° 回るのに、形は −15° 回る」＝ <strong>形が二重に回って 30° ずれる</strong>。
+<br>
+パーツの中心どうしの距離は変わらない（＝剛体に見える）ので、中心だけで測ると気づけない。
+<br>
+<strong>角の点まで測って初めて出た</strong>（中心だけで確認していたのが、直ったと誤認した原因）。
+</p>
+<p>
+<strong>④（おまけ）接着しているパーツ。</strong> 結合した横壁看板は、外に残っている親の壁へ
+<br>
+吸い戻されていた（<code>syncAttachedPart</code>）。
+</p>
+<h3 id="5v-2-直したこと">5V-2. 直したこと</h3>
+<p>
+<strong>軸は一度決めたら保存する</strong>（<code>o.spinPivot</code>）。以後はその点で回す。
+</p>
+<pre><code class="language-js">function compoundSpinPivot(o) {
+    const sp = o?.spinPivot;                       // 保存した軸を優先
+    if (sp &amp;&amp; Number.isFinite(sp[0])) return [sp[0], sp[1], sp[2]];
+    …無ければ いまの外接箱の中心…
+}</code></pre>
+<p>
+<strong>パーツごとの「外側の回転（ヨー）」<code>spin</code> を新設</strong>（<code>engine-core.js</code>）。
+<br>
+<code>k = 0/2</code> の縦の面は <code>rot</code> ではヨーを表せないため、座標変換の一番外側に
+<br>
+<code>spin</code>（角度）＋<code>spinPivot</code>（中心）を足した。<code>l2wRaw()</code> と <code>genShape()</code> の
+<br>
+点の計算、<code>L2W()</code> の壁沿い基底の分岐、<code>translateDefinition()</code>、<code>obBounds()</code> の
+<br>
+すべてが同じ順番（spin → 傾き）で通るので、線画・当たり判定・ハンドルがそろって動く。
+</p>
+<p>
+<strong>角度の決まりを1つにそろえた</strong>（形に合わせる）。
+</p>
+<pre><code class="language-js">// 水平面(k=1)のパーツ：形の rot は“引く”（中心移動と逆向きの決まりのため）
+q.rot = wrap180((Number(q.rot) || 0) - dDeg);
+// それ以外(k=0/2 など)：外側のヨーで回す（前から回してある場合は1回転に合成）
+q.spin = wrap180(s0 + dDeg);
+q.spinPivot = spinComposePivot(Ps, s0, pivot, dDeg);</code></pre>
+<p>
+<code>spinComposePivot()</code> は「(s度・中心Ps) の回転のあとに (deg度・中心P) を掛ける」と
+<br>
+「(s+deg度・中心P2) の1回転」に等しくなる P2 を 2×2 の連立方程式で解く。
+<br>
+これで何度でも回せる（回すたびに形が崩れない）。
+</p>
+<p>
+<strong>結合したパーツは外の親へ接着させない</strong>（<code>detachPart</code>）。
+<br>
+位置は結合した時点で <code>ca/cb/lift</code> に入っているので、見た目は変わらない。
+<br>
+分離したときは元のデータ（接着情報）がそのまま残る。
+</p>
+<p>
+<strong>回したあとの「箱の中心へ戻す」処理は廃止</strong>。剛体として正しく回るので戻す必要がない
+<br>
+（戻すと、その分だけ形が平行移動して非剛体になっていた）。
+</p>
+<h3 id="5v-3-実測実ブラウザ・ユーザーのjson">5V-3. 実測（実ブラウザ・ユーザーのJSON）</h3>
+<p>
+15°ずつ24回（360°）回して、パーツの<strong>中心と角</strong>（1パーツ5点）を毎回測った。
+</p>
+<table><thead><tr><th>結合体</th><th>パーツ</th><th>距離の誤差</th><th>軸まわりの回転との誤差</th><th>360°で元に戻る</th></tr></thead><tbody>
+<tr><td><code>mvqump98zcwr</code>（2個・水平面のみ）</td><td>2</td><td><strong>0</strong></td><td><strong>0</strong></td><td><strong>0</strong></td></tr>
+<tr><td><code>mvqphws5dc9o</code>（2個・水平面のみ）</td><td>2</td><td><strong>0</strong></td><td><strong>0</strong></td><td><strong>0</strong></td></tr>
+<tr><td><code>mvs9y5jmwuvi</code>（4個・縦の面＋<code>off</code>入り）</td><td>4</td><td><strong>0</strong></td><td><strong>0</strong></td><td><strong>0</strong></td></tr>
+<tr><td>自作（<code>k=1</code>＋<code>k=2</code>＋<code>k=0</code>＋<code>off</code>）</td><td>3</td><td><strong>0</strong></td><td><strong>0</strong></td><td><strong>0</strong></td></tr>
+</tbody></table>
+<p>
+修正前は同じ測り方で 距離誤差 <strong>0.375〜2.9</strong>／形が最大 <strong>30°</strong> ずれていた。
+</p>
+<p>
+<strong>操作ごとの実測（実ポインター）</strong>
+</p>
+<table><thead><tr><th>操作</th><th>結果</th></tr></thead><tbody>
+<tr><td>3Dの輪（リング）を実ポインターでドラッグ</td><td><code>rot</code> が −45 → −30 → −15 → 15 → 75 と進む／輪の中心は画面 (810,643) のまま<strong>動かない</strong></td></tr>
+<tr><td>数値パネルの <code>rot</code> に +45（3D・前・上・横の4ビュー）</td><td>3結合体すべて 距離誤差 <strong>0</strong>／軸の移動 <strong>0</strong>／軸の画面位置 <strong>0</strong></td></tr>
+<tr><td>回したあとに幅（<code>w</code>）を変える</td><td>破綻なし（NaN・消滅なし）・<code>spin</code> と <code>rot</code> が正しく残る</td></tr>
+<tr><td>屋台・丸椅子など既存アセットの自己点検</td><td><code>check-all-assets.js</code> → <strong>すべてOK</strong>（屋台の線28本）</td></tr>
+</tbody></table>
+<h3 id="5v-4-追加修正形の向きだけが逆へ回っていた同日・角の点で発見">5V-4. 追加修正：形の向きだけが逆へ回っていた（同日・角の点で発見）</h3>
+<p>
+5V-2 までの修正で<strong>パーツの中心どうしの距離は完全に保たれていた</strong>（誤差 0）が、
+<br>
+<strong>形（四角）の角の点</strong>まで測ると 15° 回すごとに最大 <strong>1.0 m</strong> ずれていた。
+</p>
+<p>
+原因は<strong>回転の向きの決まりが2種類あったこと</strong>。<code>l2wRaw()</code> の面の中の回転 <code>rot</code> は
+<br>
+(x,z) 平面で「＋が反時計」、結合体の回転（中心・<code>off</code>・<code>spin</code>）は「＋が時計」。
+<br>
+そのため中心は時計回りに進むのに、形だけが反時計回りに回っていた
+<br>
+（＝パーツがその場で逆に回りながら公転する＝「位置がずれる／形が動く」に見える）。
+</p>
+<pre><code class="language-js">// 水平面(k=1)のパーツ：rot は中心移動と逆向きの決まりなので“引く”
+q.rot = wrap180((Number(q.rot) || 0) - dDeg);
+// それ以外(k=0/2 など)：外側のヨー(spin)で回す
+q.spin = wrap180(s0 + dDeg);
+q.spinPivot = spinComposePivot(Ps, s0, pivot, dDeg);</code></pre>
+<p>
+<strong>測り方</strong>：パーツ1つにつき7点（中心＋面内の四隅＋上下の角2点）を取り、
+<br>
+24回×15°（360°）回す。中心だけで見ると誤差0のままなので、<strong>角の点まで測る</strong>。
+</p>
+<table><thead><tr><th>結合体</th><th>パーツ</th><th>点</th><th>距離の誤差</th><th>軸からの半径の誤差</th><th>360°で戻る</th></tr></thead><tbody>
+<tr><td><code>mvqump98zcwr</code></td><td>2</td><td>14</td><td>2.7e-15</td><td>4.4e-16</td><td>1.8e-15</td></tr>
+<tr><td><code>mvqphws5dc9o</code></td><td>2</td><td>14</td><td>3.6e-15</td><td>4.4e-16</td><td>8.9e-16</td></tr>
+<tr><td><code>mvs9y5jmwuvi</code>（縦の面＋<code>off</code>入り）</td><td>4</td><td>28</td><td>9.8e-15</td><td>8.9e-16</td><td>4.0e-15</td></tr>
+</tbody></table>
+<p>
+修正前は同じ測り方で1回の15°で <strong>1.0 m</strong> ずれていた。
+<br>
+既存の点検（<code>views2.js</code> / <code>rigid2.js</code> / <code>userjson.js</code> / <code>smoke.js</code> / <code>combsep.js</code> /
+<br>
+<code>sep2.js</code> / <code>scaleafter.js</code> / <code>tiltreal.js</code>）は修正後もすべて従来どおりの値で通っている。
+</p>
+<hr>
+<h3 id="5v-5-残っている制限重要">5V-5. 残っている制限（重要）</h3>
+<ul>
+<li><strong>大きさ（<code>w/dp/h</code>）の変更は、回したあとの結合体では近似</strong>。
+<br>
+ワールド軸方向へ拡縮する操作は、回転した長方形では厳密には表せない
+<br>
+（既存の実装と同じ近似。破綻はしないが、指定した幅にぴったりならないことがある）。
+</li>
+<li><strong>分離したパーツは <code>spin</code> を持ったまま</strong>になる。見た目は完全に同じだが、
+<br>
+数値パネルの <code>rot</code> は <code>spin</code> を含まない値なので、分離後に数字を見ると
+<br>
+「見た目と数字が違う」ように見える（回転軸が別だから）。
+</li>
+<li><strong>軸（<code>spinPivot</code>）は、寸法を変えても同じ点のまま</strong>。そのため
+<br>
+「大きくしてから回す」と、新しい見た目の中心ではなく元の軸で回る。
+</li>
+<li>結合の軸は最初の1回だけ「外接箱の中心」で決まり、以後は保存された軸を使う。
+</li>
+</ul>
+<hr>
+<h2 id="5w-手すり新アセット・2026-11-02-追加">5W. 手すり（新アセット・2026-11-02 追加）</h2>
+<h3 id="5w-1-何を足したか">5W-1. 何を足したか</h3>
+<p>
+写真の白い手すりを <strong><code>railing</code>（手すり）</strong> として追加した。柱（両端）＋上下2本の横桟＋
+<br>
+縦の棒（桟）という、护栏（ガードレール）の形。<strong>縦桟の本数・形・太さ・下の横桟の高さ</strong>を
+<br>
+画面と数値欄の両方から変えられる。
+</p>
+<table><thead><tr><th>項目</th><th>値</th></tr></thead><tbody>
+<tr><td>キー</td><td><code>railing</code>（棚のグループは「街・パーツ」、アイコンは <code>⌗</code>）</td></tr>
+<tr><td>初期寸法</td><td>幅 2 × 奥行き 1.2 × 高さ 1.05</td></tr>
+<tr><td>形</td><td><code>railingShape</code> ＝ <code>"u"</code>（コの字・既定） / <code>"l"</code>（L字） / <code>"line"</code>（直線）</td></tr>
+<tr><td>縦桟の本数</td><td><code>railingCount</code>（既定 5、1〜40。ただし<strong>形の区間数が下限</strong>：直線1・L字2・コの字3）</td></tr>
+<tr><td>角材の太さ</td><td><code>railingThickness</code>（既定 0.045、上限 <code>min(w,d)·0.22</code> と <code>h·0.22</code> の小さい方）</td></tr>
+<tr><td>柱の太さ</td><td><code>railingPostSize</code>（既定 0.075、角材の太さ以上）</td></tr>
+<tr><td>下の横桟</td><td><code>railingBottomGap</code>（下端の高さ。既定 0.12、上限 <code>h − 3t</code>）</td></tr>
+<tr><td>線画 / 面</td><td><strong>96本 / 228三角形</strong>（形・本数で変わる）</td></tr>
+</tbody></table>
+<p>
+形は「手前（−Y）の桟」を必ず含む。コの字は右奥 → 右手前 → 左手前 → 左奥、
+<br>
+L字は手前＋左、直線は手前だけ。柱は桟の角（同じ座標は1本にまとめる）に立つ。
+</p>
+<p>
+寸法はすべて <strong><code>railingGeometry(o)</code></strong>（<code>engine-tools.js</code>）が決める。線画（<code>linesRailing</code>）・
+<br>
+面（<code>surfaceTriangles</code>）・ハンドル・数値パネルが同じ値を見るので、どこを編集しても食い違わない。
+</p>
+<pre><code>t     = 角材の断面（横桟・縦桟の太さ）        barT = t · 0.55（縦桟は細い）
+post  = 柱の断面                             柱の中心は端から post/2 内側
+zTop0 = h − t                                上の横桟の下端＝縦桟の上端
+zBot1 = min(h − t, bottom + t)               下の横桟の上端＝縦桟の下端
+縦桟は区間の長さで本数を配分（合計が count 本になるよう端数を寄せる）</code></pre>
+<h3 id="5w-2-編集できるところ画面・数値欄の両方">5W-2. 編集できるところ（画面・数値欄の両方）</h3>
+<table><thead><tr><th>変える値</th><th>画面</th><th>数値欄</th></tr></thead><tbody>
+<tr><td>形（直線・L字・コの字）</td><td>—</td><td><code>#railingShape</code>（セレクト）</td></tr>
+<tr><td><strong>縦桟の本数</strong></td><td>上の横桟の真ん中から真上へ出る<strong>水色の四角（<code>railing-count</code>）</strong>を上下にドラッグ（40px で1本、整数に丸め）</td><td>「本数」欄＋<strong>−＋ボタン</strong>（下限は形の区間数）</td></tr>
+<tr><td>角材の太さ</td><td>上の横桟の左端から手前へ出る<strong>オレンジの四角（<code>railing-thickness</code>）</strong></td><td>「角材の太さ」欄</td></tr>
+<tr><td>下の横桟の高さ</td><td>手前の下の横桟から手前へ出る<strong>オレンジの四角（<code>railing-bottom</code>）</strong></td><td>「下の横桟の高さ」欄</td></tr>
+<tr><td>幅・奥行き・高さ</td><td>いつもの白い面ハンドル（<code>u±</code> / <code>v±</code> / <code>top</code> / <code>base</code>）</td><td>数値パネルの <code>w</code> / <code>d</code> / <code>h</code></td></tr>
+<tr><td>柱の太さ</td><td>—</td><td>「柱の太さ」欄</td></tr>
+</tbody></table>
+<ul>
+<li><strong>3D・正面・横・上の4ビューすべてで同じハンドルが出る</strong>（<code>specialGizmo</code> の一覧に
+<br>
+<code>railing</code> を入れ、<code>beginGizmo</code> の特殊ハンドル判定にも <code>railing-</code> を足してある）。
+</li>
+<li>本数のハンドルは値が整数なので、ラベルも小数を付けずに「本数 7」と出す
+<br>
+（<code>handles.count.integer = true</code>）。
+</li>
+</ul>
+<h3 id="5w-3-直したこと同日追加で見つかった2つの不具合">5W-3. 直したこと（同日、追加で見つかった2つの不具合）</h3>
+<ol>
+<li><strong>面（塗り）が<span class="rd">包絡箱</span>1枚だった。</strong> <code>exportSurfaceTriangles()</code> に <code>kind === "railing"</code> の
+<br>
+分岐が無く、最後の <code>addExportBoxFaces()</code>（＝外接箱をそのまま塗る）に落ちていた。
+<br>
+<strong>面ONの初期状態で、手すりの周りに箱が1枚かぶさる</strong>（＝実際の形の外側を塗る）状態だった。
+<br>
+部材ごと（柱・足元の板・上下の横桟・縦桟）に箱を作る分岐を足して <strong>12 → 228三角形</strong>。
+<br>
+塗りは<strong>重ねない</strong>：足元の板は床〜足元の高さ、柱はその上、横桟は柱と柱の間（<code>len − post</code>）。
+<br>
+重ねると半透明の塗りが二重になって濃くなるため。
+</li>
+<li><strong>3Dで高さ（上下の面）を掴めなかった。</strong> <code>gizmo()</code> の <code>solid</code> 一覧に <code>railing</code> が
+<br>
+無く、面ハンドルが横4枚（<code>u±</code> / <code>v±</code>）しか作られていなかった。
+<br>
+<code>solid</code> に追加して <strong><code>top</code> / <code>base</code> も出る</strong>ようにした（＝ビューによる編集能力の差を無くす）。
+</li>
+</ol>
+<h3 id="5w-4-実測実ポインター・2026-11-02">5W-4. 実測（実ポインター・2026-11-02）</h3>
+<table><thead><tr><th>操作</th><th>結果</th></tr></thead><tbody>
+<tr><td>棚の <code>⌗手すり</code> を押して追加</td><td>w2 / d1.2 / h1.05、線96本、形 <code>u</code>、縦桟5本、柱4本</td></tr>
+<tr><td>本数のハンドルを 90px 上へドラッグ（3D）</td><td>5 → 7 本、数値欄も 7</td></tr>
+<tr><td>本数のハンドルを 240px 下へドラッグ</td><td>3 本でストップ（コの字の区間数＝下限）、数値欄も 3</td></tr>
+<tr><td>上の面（<code>top</code>）を 60px 上へドラッグ（3D）</td><td>高さ 1.05 → 1.367（<strong>3Dでも高さを変えられる</strong>）</td></tr>
+<tr><td>本数のハンドルを4ビューでドラッグ</td><td>3D 5→7 ／ 正面 7→9 ／ 横 9→11 ／ 上 11→9（上ビューは画面の向きが違うため減少）</td></tr>
+<tr><td>形を <code>u</code> → <code>l</code> → <code>line</code> に切替</td><td>線 110 → 87 → 64本、横桟 3 → 2 → 1区間</td></tr>
+<tr><td>数値欄（t 0.08 / post 0.12 / bottom 0.3 / count 7）</td><td>すべて反映。形・本数を変えても線画の形は正しい</td></tr>
+<tr><td>面ONの塗りの被覆率（自分の外接箱のうち塗られた割合）</td><td>手すり <strong>0.384</strong>（屋台 0.989＝ほぼ箱）＝隙間は塗られていない</td></tr>
+<tr><td><code>check-all-assets.js</code></td><td>すべてOK（面228三角形／面ハンドル <code>u±</code> <code>v±</code> <code>top</code> <code>base</code>／ページエラー0）</td></tr>
+</tbody></table>
+<h3 id="5w-5-つまずいた所重要">5W-5. つまずいた所（重要）</h3>
+<ul>
+<li><strong>新しい特殊ハンドルを足したら <code>beginGizmo</code> の <code>else if</code> 一覧にも足す。</strong>
+<br>
+<code>hitGizmo()</code> だけ通っていても、<code>beginGizmo()</code> の分岐に無いとドラッグが効かない
+<br>
+（当たり判定は反応するのに値が変わらない、という症状になる）。<code>railing-</code> で実際に発生した。
+</li>
+<li><strong>数cmの値はハンドルの感度（<code>scale</code>）を下げる。</strong> 既定は「画面60pxで1m」なので、
+<br>
+角材の太さ 0.045 のような値は数pxで振り切れる。<code>thickness</code> は 1000、<code>bottom</code> は 420、
+<br>
+本数は 40px/本にした。
+</li>
+<li><strong>足元の板は柱の1.5倍まで。</strong> それ以上広げると外接箱（<code>w</code>×<code>d</code>）からはみ出して
+<br>
+選択枠とずれる。
+</li>
+<li><strong>ASCII で線画を確認するときの座標</strong>：手すりは「奥行きが Y・高さが Z」。
+<br>
+正面は <code>x→右, y(奥行き)→上</code>、俯瞰は <code>x→右, y(奥行き)→下</code> で落とす
+<br>
+（<code>z</code> を画面の縦に使うと柱だけが残って形が分からない）。
+</li>
+</ul>
+<hr>
+<h2 id="5x-面onのときの線画を根本から直す2026-11-02-追加">5X. 面ONのときの線画を根本から直す（2026-11-02 追加）</h2>
+<p>
+「面ONにすると、描かなくていい線まで描いている」という指摘への対応。
+<br>
+原因は<strong>隠線除去（深度バッファ）の判定</strong>にあり、線のデータ自体ではなかった。
+<br>
+データ側は <code>genShape</code> の段階で「同じ稜線を2本持っている」ぶんを印（<code>.dup</code>）で間引いている。
+</p>
+<h3 id="5x-1-何が起きていたか">5X-1. 何が起きていたか</h3>
+<table><thead><tr><th>症状</th><th>原因</th></tr></thead><tbody>
+<tr><td>面と面が接する稜線（壁の下端と台の上面など）が<strong>点線状に欠ける</strong></td><td>線の奥行きと面の奥行きが数mm食い違い、画素ごとに判定が反転していた</td></tr>
+<tr><td>面を<strong>真横から見ている所</strong>で線が点線になる</td><td>1画素の中でも面の奥行きが大きく変わるため、中心1画素の比較では足りなかった</td></tr>
+<tr><td>自分の面の上に乗っている稜線が<strong>消える</strong></td><td>深度バッファは「いちばん手前の面」しか持たず、線が自分の面の数mm奥と判定されていた</td></tr>
+<tr><td>遮蔽物との境目で線が<strong>数十px ずれて切れる</strong></td><td>区間の刻みがワールド長 10cm 固定だった（拡大するほど誤差が目立つ）</td></tr>
+</tbody></table>
+<h3 id="5x-2-直したことengine-renderjs">5X-2. 直したこと（<code>engine-render.js</code>）</h3>
+<ol>
+<li><strong>面の持ち主（ID）を持つようにした</strong> … <code>buildExportDepth()</code> が深度と一緒に
+<br>
+<code>depthOwner</code>（画素ごとのオブジェクト番号）を書く。線の画素の面が「その線の持ち主」で
+<br>
+奥行きがほぼ同じなら、その線は自分の面の稜線なので描く（<code>SELF_EDGE_EPS = 0.02</code>）。
+<br>
+Blender の線画アドオン（FreePencil2）が使っている「面IDごとの可視判定」と同じ考え方。
+</li>
+<li><strong>接している線は近くの画素も見る</strong> … <code>nearVisible()</code> が 3×3 画素の奥行きの
+<br>
+<strong>ばらつき</strong>を見て、真横に近い面ほど許容を広げる（上限 25cm）。
+<br>
+これで「点線」「継ぎ目で切れる」が消えた。
+</li>
+<li><strong>区間の刻みを画面上の長さにした</strong> … 2点の投影結果から内部を補間する
+<br>
+（直線は透視投影でも画面上は直線、奥行きは 1/奥行き が1次）。
+<br>
+刻みは 6px（ドラッグ中は 20px）。遮蔽物との境目で線が切れる位置が合う。
+<br>
+さらに「区間全体が同じ状態か」を粗く先に調べ、境界が無い区間は刻まない。
+</li>
+<li><strong>投影は点ごとに1回</strong> … 以前は区間の両端でもう一度投影していた（同じ点を2回計算）。
+</li>
+</ol>
+<h3 id="5x-3-実測playwright・1400900">5X-3. 実測（Playwright・1400×900）</h3>
+<table><thead><tr><th>シーン</th><th>線の画素数（面ON）</th><th>参考：隠線を切った場合</th><th>描画時間</th></tr></thead><tbody>
+<tr><td>屋台1</td><td>6,817</td><td>14,334</td><td>変化なし</td></tr>
+<tr><td>屋台＋手すり</td><td>18,273</td><td>28,703</td><td>変化なし</td></tr>
+<tr><td>手すり10</td><td>—</td><td>—</td><td><code>render</code> 31 → 36ms（隠線 14 → 18.5ms）</td></tr>
+</tbody></table>
+<ul>
+<li>線の本数・形は変わらない（<code>check-all-assets.js</code> 屋台28本、<code>views2</code>／<code>railviews2</code> 全ビュー異常なし）。
+</li>
+<li>奥に隠れる物は隠れたまま：丸椅子を建物の奥へ 0.3／0.6／1.5／3m と離しても
+<br>
+線の画素数は 4,493 で一定（＝完全に隠れている）。
+</li>
+<li>ドラッグ中は刻みを 20px にして、操作中の描画を軽くしている。
+</li>
+</ul>
+<h3 id="5x-4-つまずいた所重要">5X-4. つまずいた所（重要）</h3>
+<ul>
+<li><strong><code>lineLayer()</code> の戻り値は毎回同じキャンバス（<code>LC</code>）。</strong> 隠線あり／なしの画素数を
+<br>
+比べるときに両方を変数へ取ると、両方が同じ（後から描いた方の）内容になる。
+<br>
+<strong>1回描くごとに数える</strong>こと。これで一度「隠線が効いていない」と誤診した。
+</li>
+<li><strong>許容量（<code>CG.depthEps</code>）は 6mm＋奥行きの 0.08% にした。</strong> 小さすぎると接している
+<br>
+稜線が点線になり、大きすぎると細い部材の奥の線が透ける。
+</li>
+<li><strong><code>scr3()</code> は <code>depth</code> を返さない。</strong> 奥行きが要る所は <code>projPoint()</code> / <code>exportPoint()</code> を使う。
+</li>
+</ul>
+<h3 id="5x-5-同じ日にもう一段軽くしたこと">5X-5. 同じ日にもう一段軽くしたこと</h3>
+<table><thead><tr><th>直した所</th><th>中身</th><th>効果（Playwright 実測）</th></tr></thead><tbody>
+<tr><td>カメラ回転を行列に</td><td><code>cam()</code> が点1つごとに <code>Math.sin/cos</code> を6回呼んでいたのを、3×3 行列（<code>camMatrix()</code>）にして<strong>カメラが変わった時だけ</strong>作り直す</td><td>計算結果は<strong>ビット一致</strong>（ランダム300点×2視点で誤差0）。1フレームの三角関数呼び出しが数万回→数回</td></tr>
+<tr><td>深度バッファの早期Z</td><td>三角形を塗る前に、外接矩形の 6×6 点を格子状に見て「全部すでに手前の面で覆われている」なら塗らない</td><td>深度バッファ <strong>30.7 → 21.8ms（−29%）</strong>。深度の差は 1,440,000 画素中 584画素（0.04%）だけ</td></tr>
+<tr><td>深度バッファの使い回し</td><td>カメラ・オブジェクトが変わっていなければ前回の深度をそのまま使う（<code>__noDepthCache</code> で無効化可）</td><td>選択替えなど「形が変わらない描き直し」で 20ms → 0.05ms</td></tr>
+<tr><td>投影は点ごとに1回</td><td>隠線の判定で区間の両端を二重に投影していたのをやめ、点の投影結果を使い回す</td><td>線の多い場面（手すり10台・1,100本）の描画 <strong>50.5 → 29ms</strong></td></tr>
+</tbody></table>
+<ul>
+<li>背景（用紙色・床グリッド・参考写真）は既にキャッシュ済み（<code>backgroundLayer()</code> / <code>__noBgCache</code>）。
+</li>
+<li>ドラッグ中の描画は <code>renderSoon()</code>（<code>requestAnimationFrame</code> で1フレーム1回）にまとめた。
+<br>
+ポインタ移動が描画より速い環境（高リピートのマウス・ペン）で、入力待ちが溜まらない。
+</li>
+</ul>
+<hr>
+<h2 id="5r-全体の軽量化2026-11-01">5R. 全体の軽量化（2026-11-01）</h2>
+<p>
+「重くなってきた」との指摘を受けて、スクリプトを見直した。方針は
+<br>
+<strong>「同じ計算を2か所に書かない」「毎フレーム同じオブジェクトを作らない」</strong>。
+</p>
+<h3 id="5r-1-重複の解消">5R-1. 重複の解消</h3>
+<table><thead><tr><th>直した所</th><th>以前</th><th>現在</th></tr></thead><tbody>
+<tr><td>ベランダの寸法</td><td><code>asset.js</code> の <code>linesBalcony</code> と <code>engine-tools.js</code> の <code>balconyGeometry</code> に同じ丸めが2か所</td><td><code>balconyGeometry()</code> 1か所。<code>linesBalcony</code> もそれを呼ぶ</td></tr>
+<tr><td>ベランダの面</td><td><code>surfaceTriangles</code> に丸めを3たび書き直し</td><td>同じ <code>balconyGeometry()</code> を使用</td></tr>
+<tr><td>コの字壁</td><td>—</td><td><code>uWallGeometry()</code> 1か所（線画・面・ハンドル・パネルが共用）</td></tr>
+<tr><td>面の色・不透明度</td><td>三角形1枚ごとに <code>surfaceColor()</code> と <code>surfaceAlpha().toFixed(3)</code></td><td>オブジェクト1個につき1回だけ</td></tr>
+</tbody></table>
+<h3 id="5r-2-描画の高速化">5R-2. 描画の高速化</h3>
+<ul>
+<li><strong><code>Path2D.closePath()</code> をやめた</strong>。<code>fill()</code> は閉じた領域として塗るので呼ぶ必要がない。
+<br>
+Chromium ではこの1回が約16µsかかり、三角形1万枚で<strong>200ms以上</strong>を占めていた（実測）。
+<br>
+縁取り用のパスは <code>lineTo</code> で始点へ戻す。
+</li>
+<li><strong>面の投影を専用の投影器にまとめた</strong>（<code>surfaceProjector()</code>）。以前は頂点1つにつき
+<br>
+<code>V.add()</code>→<code>V.nrm()</code>→<code>scr()</code>→<code>exportPoint()</code> と配列を4個作り、三角関数も毎回計算していた。
+<br>
+いまはフレームの先頭でカメラの係数を1回だけ求め、使い回しの点へ書き込む。
+<br>
+魚眼（<code>T === "f"</code>）のときだけ従来の経路へ落ちる。
+</li>
+<li><strong>画面外・サブピクセルの三角形を捨てる</strong>（<code>SURF_MIN_AREA = 0.3px²</code>、画面外は8px余白で判定）。
+</li>
+<li><strong>継ぎ目隠しの縁取りは画面上 4px² 以上の三角形だけ</strong>に絞った（小さい三角形は縁を描いても
+<br>
+画素に埋もれるだけ）。
+</li>
+</ul>
+<h3 id="5r-3-実測140オブジェクト・1280820">5R-3. 実測（140オブジェクト・1280×820）</h3>
+<table><thead><tr><th>項目</th><th>以前</th><th>現在</th></tr></thead><tbody>
+<tr><td>面描画パスの計算（投影＋仕分け＋パス構築）</td><td>約 446ms</td><td>約 41ms</td></tr>
+<tr><td>うちパス構築のみ（14,435三角形）</td><td>414.7ms</td><td>9.8ms</td></tr>
+<tr><td>ハンドルのドラッグ倍率（薄い寸法）</td><td>画面上の長さがそのまま倍率（数px＝数十cm 飛ぶ）</td><td>最低 60px/m（細かい値も掴める）</td></tr>
+</tbody></table>
+<p>
+残りの時間は<strong>三角形のラスタライズ</strong>（ソフトウェア描画）で、GPU のある通常のブラウザでは
+<br>
+もっと速い。三角形の枚数そのものはアセットの分割数で決まるため、ここは触っていない。
+</p>
+<hr>
+<h2 id="6-不要ファイルの削除">6. 不要ファイルの削除</h2>
+<h3 id="6-1-2026-11-01未使用スクリプト・画像を全削除">6-1. 2026-11-01：未使用スクリプト・画像を全削除</h3>
+<table><thead><tr><th>削除したもの</th><th>中身</th><th>判断</th></tr></thead><tbody>
+<tr><td><code>engine.js</code></td><td>ソースを結合しただけの生成物（どこからも読み込まれていない）</td><td><code>build-city-grid.py</code> の書き出しも廃止</td></tr>
+<tr><td><code>script.js</code></td><td>同上（<code>engine.js</code> ＋ asset ＋ controller ＋ ui）</td><td>同上</td></tr>
+<tr><td><code>_real.png</code></td><td>画面のスクリーンショット</td><td>アプリ・資料から参照なし</td></tr>
+<tr><td><code>orth-edit-check.png</code> / <code>orth-handles-check.png</code></td><td>間取りハンドルの確認画像</td><td>同上（本文の該当箇所は「画像は残していない」に変更）</td></tr>
+<tr><td><code>person-joints-check.png</code> / <code>person-window-fix-check.png</code></td><td>関節・窓の確認画像</td><td>同上</td></tr>
+<tr><td><code>roof-thickness-check.png</code></td><td>屋根の板厚の確認画像</td><td>同上</td></tr>
+<tr><td><code>lock-feature-check.png</code> / <code>handle-fix-check.png</code></td><td>ロック・ハンドルの確認画像</td><td>同上</td></tr>
+</tbody></table>
+<p>
+確認画像は毎回 Playwright で撮り直せるため、リポジトリには残さない方針にした。
+<br>
+<code>grep</code> で「HTML・CSS・JS から画像を1枚も参照していない」ことを確認してから削除している。
+</p>
+<h3 id="6-2-2026-10-29不要ファイルの削除既存の記録">6-2. 2026-10-29：不要ファイルの削除（既存の記録）</h3>
+<table><thead><tr><th>削除したもの</th><th>内容</th></tr></thead><tbody>
+<tr><td><code>uploads/</code> の画像 9点</td><td>参照用スクリーンショット7枚、写真2枚（約2.1MB）</td></tr>
+<tr><td><code>wallsign-bevel-check.png</code></td><td>形状確認用の検証画像</td></tr>
+<tr><td><code>uploads/*.json</code> 3点</td><td>保存済みオブジェクトの作例（コードから参照なし）</td></tr>
+<tr><td><code>city-grid-object-template.json</code></td><td>JSON書式の見本（コードから参照なし）</td></tr>
+<tr><td><code>asset-builder.html</code></td><td>単体のアセット作成ツール（起動には不要）</td></tr>
+<tr><td><code>tools/</code></td><td>監査・スナップショットの検証ツール</td></tr>
+<tr><td><code>.config/</code></td><td>ブラウザのキャッシュ・クラッシュダンプ</td></tr>
+<tr><td>Markdown 4本</td><td>本ファイルへ統合（README / CODE_GUIDE / OBJECT_SPEC / 旧cleanup-notes / optimization-report）</td></tr>
+<tr><td><code>uploads/perspective-ruler-grid.html</code></td><td>元になった参照HTML（不要になったため <code>uploads/</code> ごと削除）</td></tr>
+</tbody></table>
+<p>
+残しているもの：<code>cyberpunk-city-studio.html</code>、ソース5本、<code>index.html</code>＋CSS2本、<code>build-city-grid.py</code>、<code>.prettierrc.json</code>、本ドキュメント（計12ファイル）。
+</p>
+<hr>
+<h2 id="7-今後アセットを追加するときの手順">7. 今後アセットを追加するときの手順</h2>
+<p>
+<code>asset_re.js</code> の追加はこの形で入りました。次に足すときも同じ順で進めると安全です。
+</p>
+<ol>
+<li><strong><code>ASSETS</code> に定義を追加</strong>（label / glyph / w・d・h / 固有の初期値 / accent）
+</li>
+<li><strong><code>lines◯◯(ctx)</code> を1本作る</strong>。<code>ctx</code> は <code>{ o, kind, w, d, h, c, a, out }</code>。
+<br>
+<code>out.push(...)</code> で線を積むだけで、<code>return</code> は不要（<code>assetLines</code> がまとめて返す）
+</li>
+<li><strong><code>ASSET_LINE_BUILDERS</code> に <code>キー: lines◯◯</code> を登録</strong>（形が同じなら2つのキーで同じ関数を指してよい）
+</li>
+<li><strong><code>normalizedAsset</code> に正規化を追加</strong>（古い保存データ・範囲外の値・追加フィールドの既定値）
+</li>
+<li><strong><code>obBounds</code> に外接範囲を追加</strong>（選んだときの枠・当たり判定・ボックス選択がこれを使う）
+</li>
+<li><strong><code>exportSurfaceTriangles</code> に面を追加</strong>。ここを忘れると面表示と背面処理だけ<strong><span class="rd">包絡箱</span></strong>の近似になる
+<br>
+（今回まさにこれが起きていました）。断面を押し出して閉じた立体にするのが安全
+</li>
+<li><strong><code>newAsset</code>（asset-controller.js）に初期値のコピーを追加</strong>。定義表の固有値は自動では移らない
+</li>
+<li><strong>パネルが要るなら</strong> engine-core.js に <code>&lt;div id=◯◯P&gt;</code> を追加し、studio-ui.js で
+<br>
+<code>sync◯◯Panel()</code>（値をUIへ）＋ <code>setOb()</code>（UIから値へ）を書き、<code>render()</code> のフックへ登録
+</li>
+<li><strong>確認</strong>：<code>node --check</code> → <code>python3 build-city-grid.py</code> → 全アセットを1体ずつ置いて
+<br>
+線画・面・外接範囲が出るか（今回のテストと同じ）→ コピー・Undo・保存/読込・4ビュー
+</li>
+</ol>
+<blockquote><p>既存アセットの線画・面の枚数を変えていないかは、<strong>全アセットのハッシュ比較</strong>で機械的に確認できます。 今回は「24アセットすべて枚数一致・新規4種のみ増加」を確認しました。</p></blockquote>
+<h3 id="7-1-コードの書き方スタイル">7-1. コードの書き方（スタイル）</h3>
+<ul>
+<li>4スペース・ダブルクォート・セミコロン・末尾カンマ：<code>.prettierrc.json</code> と既存コードに一致しています
+</li>
+<li>ただし<strong>既存5ファイルは prettier で整形されていません</strong>。<code>prettier --write</code> をかけると
+<br>
+約35,000行が書き換わるため、かけるなら単独の作業として行い、<code>python3 build-city-grid.py</code> と
+<br>
+形状チェックをセットで実行してください
+</li>
+<li>節見出しは <code>// ===== n. 見出し =====</code>。形ごとの関数は「<span class="mk">1形状=1関数</span>」で、コメントは関数の直前へ
+</li>
+</ul>
+<hr>
+<h2 id="8-検証のしかた">8. 検証のしかた</h2>
+<p>
+毎回の確認手順（すべて実行済み）。
+</p>
+<ol>
+<li><code>node --check</code> … ソース5本（<code>engine-core</code> / <code>engine-tools</code> / <code>asset</code> / <code>asset-controller</code> / <code>studio-ui</code>）
+</li>
+<li><code>python3 build-city-grid.py</code> … 単体HTMLを再生成
+</li>
+<li>jsdom でHTMLを起動し、棚の全アセットを1体ずつ置いて <code>genShape</code>（線画）と <code>exportSurfaceTriangles</code>（面）を生成 → <strong>エラー0</strong> を確認
+</li>
+<li>操作の回帰 … 看板のパネル編集・3ビュー×2ハンドル・コピー＆Undo、凹窓階層建物の窓配置／接合部／階高／端の壁幅／ベベル0、縁付き階層建物、隅切り開口、パスパイプ、間取り4ビュー、背面処理の遮蔽
+</li>
+</ol>
+<h3 id="8-0-1コマンドの自己点検-check-all-assetsjs2026-11-02-追加">8-0. 1コマンドの自己点検 <code>check-all-assets.js</code>（2026-11-02 追加）</h3>
+<p>
+アセットやエンジン（<code>asset.js</code> / <code>engine-core.js</code> / <code>engine-tools.js</code>）を触ったあと、
+<br>
+<strong>まずこれを1回走らせる</strong>。実ブラウザで本物のHTMLを開き、棚の全アセットを1個ずつ置いて調べる。
+</p>
+<pre><code class="language-bash">node check-all-assets.js ; echo "exit=$?"     # 失敗があれば exit=1</code></pre>
+<p>
+見ていること:
+</p>
+<ol>
+<li>棚の全カードが押せて追加できること（<code>sign</code> / <code>wallSideSign</code> は壁付け部品でカードが無いので「対象外」）
+</li>
+<li><code>genShape()</code>（線画）が例外を出さず、線が1本以上あること
+</li>
+<li><code>rot</code> / <code>rotX</code> / <code>rotZ</code> を与えると線画の点列が<strong>変わる</strong>こと（回転に線が追従する）
+</li>
+<li>円（<code>circ</code>）と丸椅子が常に正円（<code>ra === rb</code>）
+</li>
+<li><code>specialGizmo()</code> が画面ハンドルを返すこと
+</li>
+<li><strong>屋台の線が28本</strong>であること（接地線2本＋内側の稜線5本を含む）
+</li>
+<li>ページエラーが0件
+</li>
+</ol>
+<p>
+出力例（2026-11-02・全部OKのとき）:
+</p>
+<pre><code>アセット 29 ／ 棚にカード無し（対象外） 2 sign,wallSideSign
+線画が出ない・回転に追従しない・例外: 0 []
+正円（circle/stool）: [["circle",true],["stool",true]]
+屋台の線: 28本（OK）
+ページエラー: 0 []
+=&gt; すべてOK</code></pre>
+<p>
+これは「形が壊れていないか」を見るためのもので、<strong>ハンドルを実際にドラッグして値が動くか</strong>は
+<br>
+別（下の 8-1 の実ポインタ検証）。以前の <code>regress19.js</code> は同じ目的だったが、
+<br>
+<code>sign</code> / <code>wallSideSign</code> を失敗として数えて毎回「2件NG」と出ていたので置き換えた。
+</p>
+<p>
+形状が変わっていないことの機械的な確認は「全アセットの線画・面を文字列化してハッシュ比較」で行っていた（<code>tools/scene-snapshot.js</code>。削除済みだが同じ考え方で再作成できる）。
+</p>
+<h3 id="8-1-実ブラウザでのハンドル検証2026-10-29-追加・以後これを使う">8-1. 実ブラウザでのハンドル検証（2026-10-29 追加・以後これを使う）</h3>
+<p>
+jsdom のプローブは「<code>pointerdown</code> で値が変わったか」しか見られず、
+<br>
+<strong>200px ドラッグして 0.5度しか動かない</strong>ような「編集できない」状態を見逃す。
+<br>
+以後、ハンドルの確認は実ブラウザで行う。
+</p>
+<pre><code class="language-bash">mkdir -p /tmp/jt &amp;&amp; cd /tmp/jt &amp;&amp; npm i playwright
+PLAYWRIGHT_BROWSERS_PATH=/tmp/pw npx playwright install chromium
+# 依存ライブラリが無い環境では apt-get download → dpkg-deb -x で展開し LD_LIBRARY_PATH を通す
+PLAYWRIGHT_BROWSERS_PATH=/tmp/pw LD_LIBRARY_PATH=/tmp/libs/usr/lib/x86_64-linux-gnu:/tmp/libs/usr/lib \
+  node accept.js   # 4ビュー×6ハンドルの変化量を表で出す</code></pre>
+<p>
+プローブの作り方で踏んだ罠（同じ間違いをしないこと）:
+</p>
+<ul>
+<li><code>page.reload()</code> を <code>page.goto()</code> より先に呼ぶと <code>obOf</code> 未定義で全滅する。<strong>最初に <code>goto</code></strong>。
+</li>
+<li>ハンドルの画面座標は <code>clientX = rect.left + (s.x*Z + ox) * rect.width / W</code>（<code>pos(e)</code> の逆算）。
+</li>
+<li>アセットカードは初期状態で非表示。<code>page.click('[data-asset=...]')</code> はタイムアウトするので
+<br>
+<code>page.evaluate(() =&gt; document.querySelector(...).click())</code> を使う。
+</li>
+<li>アセットは<strong>世界原点に置かれる</strong>。間取り（前/横/上）は <code>#viewFloorFront</code> 等のボタンで入ると
+<br>
+<code>fitFloorPlan()</code> が勝手に寄せてくれるが、3Dは寄せない。3Dで試すときは
+<br>
+カメラの注視点（<code>fitFloorPlan</code> と同じ式、<code>FLOOR_CAMERA_RAY=3</code>）へ対象を移す。
+</li>
+<li>1つのハンドルを動かすと<strong>残りのハンドルの位置も変わる</strong>。ハンドルごとに
+<br>
+初期状態（<code>JSON.stringify(obOf(sel))</code> を保存 → <code>setOb(sel, JSON.parse(...))</code>）へ戻してから測る。
+</li>
+<li>変化の比較は<strong>キーの和集合</strong>で行う。<code>Object.keys(before)</code> だけを見ると
+<br>
+「未設定のキーが新しく入った」変化を見逃す（実際にこれで誤判定した）。
+</li>
+<li>ハンドルを掴んだ後も、クランプ上限に達していると「変化なし」になる。
+<br>
+上の「毎回初期状態へ戻す」を守らないと、2つ目以降が全部 NG に見える。
+</li>
+</ul>
+<h2 id="5y-画面上のラベルと回転ギズモの見え方2026-11-01-追加">5Y. 画面上のラベルと回転ギズモの見え方（2026-11-01 追加）</h2>
+<h3 id="5y-1-ラベルは白いチップ濃い文字に統一gzlabel">5Y-1. ラベルは「白いチップ＋濃い文字」に統一（<code>gzLabel()</code>）</h3>
+<p>
+背景が白い用紙になったあとも、ハンドルの名前と値はハンドルと同じ明るい色
+<br>
+（<code>#fff0b0</code> / <code>#ffd0a8</code> / <code>#d8fff0</code> など）で描いていたため、白背景ではほぼ読めなかった。
+<br>
+<code>engine-gizmo.js</code> の <code>gzLabel(c, text, x, y, color, font)</code> に一本化し、次の見た目にした。
+</p>
+<ul>
+<li>白い角丸チップ（<code>rgba(255,255,255,.95)</code>＋薄い影）・文字は濃い色 <code>#1f2933</code>
+</li>
+<li>ハンドルの色は<strong>チップの枠と左端の細い帯</strong>で示す（<code>gzLabelTone()</code> で明るい色を暗くしてから使う）
+</li>
+<li><code>font</code> は画面上のピクセル数。内部で <code>Z</code> で割るので、ズームしても大きさが変わらない
+</li>
+</ul>
+<p>
+同じフレームに置いたチップの矩形は <code>gzLabelRects</code> に貯め、<strong>重なるときは上へ逃がす</strong>
+<br>
+（16回まで上・16回まで下・最後は右）。屋台の「屋根の高さ」と「壁の厚さ」のように
+<br>
+近い位置に並ぶラベルが重なって読めなくなっていたのを解消した。
+<br>
+矩形は <code>c.getTransform()</code> で<strong>デバイスpxに直してから</strong>比較する。呼び出し側によっては
+<br>
+描画変換がズーム付き（<code>Z, ox, oy</code>）だったり素のpxだったりするため、そのままの座標で
+<br>
+比べると別の変換どうしのラベルを見落とす（間取りの「上端」と専用ハンドルがこれで重なっていた）。
+<br>
+位置の記憶は <code>render()</code> の先頭で <code>gzLabelReset()</code> が捨てる（1フレーム分だけ有効）。
+</p>
+<h3 id="5y-2-回転ギズモの輪の大きさをそろえる">5Y-2. 回転ギズモの輪の大きさをそろえる</h3>
+<p>
+以前は上下リング（<code>g.ring</code>）だけ <code>max(ra, rb) * 1.4</code>、左右・手前奥の傾きリングは
+<br>
+<code>対角 * 0.42 + 0.2</code> と<strong>別々の式</strong>で、同じギズモなのに輪の大きさが違っていた。
+<br>
+外周の輪（画面に平行な輪）も最大の輪の1.12倍で、いちばん目立つ円になっていた。
+</p>
+<ul>
+<li>3本とも <code>ringR = clamp(対角 * 0.5, 0.45, 60)</code> の同じ半径にした
+</li>
+<li>外周の輪は最大の輪の <strong>1.03倍</strong>（ほぼ同じ大きさ）
+</li>
+<li>中心の輪・回転中の破線は白背景で見えなかったので灰色（<code>#5a6b78</code> / <code>#7d8b96</code>）にした
+</li>
+<li>上下リングは<strong>形の底面（z0）</strong>に置いたまま。中心の高さに置くと、左右・手前奥の
+<br>
+白い面ハンドル（<code>±ra</code> / <code>±rb</code>）と画面上で重なり、<strong>回転と寸法ハンドルを取り違える</strong>
+<br>
+（実際に <code>hitGizmo</code> が面を返すようになり、リングを掴めなくなった）
+</li>
+</ul>
+<h3 id="5y-3-間取りビュー前・横・上でも回転ギズモを掴める">5Y-3. 間取りビュー（前・横・上）でも回転ギズモを掴める</h3>
+<p>
+<code>studio-ui.js</code> の間取りモードは <code>document</code> の capture 段階で
+<br>
+<code>e.__cityFloorPlanPreempt = true</code> を立て、<code>engine-input.js</code> の通常処理を止めていた。
+<br>
+そのため3Dでは回せるのに、前・横・上ではリングを掴んでも何も起きなかった。
+</p>
+<p>
+<code>hitGizmo()</code> が <code>ring</code> / <code>tiltring</code> を返したときだけプリエンプトを立てず、
+<br>
+<code>e.__cityGizmoTakes = true</code> にして回転を <code>engine-input.js</code> に渡すようにした
+<br>
+（間取り側の <code>cv</code> listener はこのフラグが立っている操作を無視する）。
+<br>
+これで<strong>ビューによって編集できる項目が変わる</strong>状態が解消した。
+<br>
+間取りのパン（何もない所のドラッグ）と選択解除のタップは従来どおり動く。
+</p>
+<h2 id="5z-ベベルの線画とドラッグ中の深度バッファ2026-11-02-追加">5Z. ベベルの線画と、ドラッグ中の深度バッファ（2026-11-02 追加）</h2>
+<h3 id="5z-1-ベベル角の面取りは線画にしない">5Z-1. ベベル（角の面取り）は線画にしない</h3>
+<p>
+凹窓階層建物（<code>recessedStackedBuilding</code>）は、面取りの弧の上にある縦の稜線を
+<br>
+最初から描いていなかった（<code>linesRecessedStackedBuilding</code> の <code>inBevelArc</code> 判定）。
+<br>
+この扱いを全アセットの共通ルールにした。
+</p>
+<pre><code class="language-js">// asset.js — 弧の上の点には印だけ付ける（描くかどうかは描画側が決める）
+function beveledEdgeMark(index, offset, segments, group = 0) {
+    const b = Math.abs(Number(offset) || 0),
+        seg = beveledBoxSegments(segments),
+        n = seg + 1,
+        i = ((index % n) + n) % n;
+    if (b &lt;= 0.000001 || seg &lt;= 1) return null;   // ベベル無し・平らな面取り1枚は普通の稜線
+    return { key: group + ":" + Math.round((index - i) / n), apex: i === Math.round((n - 1) / 2) };
+}
+// 呼び出し側：line.seam = mark.key; line.seamApex = mark.apex;</code></pre>
+<ul>
+<li><code>group</code> は「同じオブジェクトの中の何個目の箱か」。階層建物は1台に箱が複数あるので、
+<br>
+階ごとに別々の縦線を選べるようにする（これが無いと全階で1本しか選ばれなかった）。
+</li>
+<li><strong>面ON</strong>：<code>updateSeamPicks()</code> が「箱×角」ごとに<strong>輪郭になっている1本だけ</strong>を選ぶ。
+<br>
+輪郭かどうかは、線の左右5pxの奥行きを深度バッファで比べ、片側だけ面が無い（または
+<br>
+ずっと奥）なら輪郭、両側とも面なら面の中（＝手前を向いた角なので描かない）。
+</li>
+<li><strong>線だけ表示</strong>：<code>strokeW()</code> が <code>seamApex</code>（角のいちばん外側）の1本だけを描く。
+</li>
+<li>使っている場所：<code>linesBeveledBox</code> / <code>beveledWireBoxA</code>（横壁看板のベベル）/
+<br>
+<code>linesStackedBuilding</code> の <code>addBeveledBox</code>（ベベル階層建物）。
+</li>
+<li><strong>今後ベベルのあるアセットを足すときも、縦辺を描く前にこの判定を入れること。</strong>
+</li>
+</ul>
+<table><thead><tr><th>アセット</th><th>変更前（全縦線）</th><th>弧の途中だけ消す</th><th>現在（面ON）</th></tr></thead><tbody>
+<tr><td>ベベル直方体（ベベル4・押し出し2.4m）</td><td>20本</td><td>10本</td><td><strong>角ごとに輪郭の1本だけ</strong></td></tr>
+<tr><td>ベベル階層建物（4階）</td><td>169本</td><td>73本</td><td><strong>箱×角ごとに輪郭の1本だけ</strong></td></tr>
+</tbody></table>
+<h3 id="5z-1b-面の塗りを隠れた三角形の除去で速くする案は撤回2026-11-02">5Z-1b. 面の塗りを「隠れた三角形の除去」で速くする案は撤回（2026-11-02）</h3>
+<p>
+面（塗り）の高速化として、隠線と同じ深度バッファを使い
+<br>
+「手前の面に完全に隠れている三角形は塗らない」を実装して測ったが、<strong>採用しない</strong>。
+</p>
+<table><thead><tr><th>方法</th><th><code>drawObjectSurfaces</code></th><th>無効時との画素差</th></tr></thead><tbody>
+<tr><td>重心＋頂点寄り3点の4点判定</td><td>17.2 → 10.8ms</td><td>1,848px（うち塗り残し 1,654px）</td></tr>
+<tr><td>三角形の内側を面積に応じた刻みで走査</td><td>〜11ms</td><td>塗り残し 148px</td></tr>
+<tr><td>1画素ずつ全走査</td><td>差なし（10.7 → 約17ms相当）</td><td>塗り残し 87px</td></tr>
+</tbody></table>
+<ul>
+<li>塗り残しの原因は深度式のずれではなく（投影・深度は13,140点で完全一致）、
+<br>
+<strong>三角形が遮蔽物の輪郭に少しだけはみ出しているのに、判定点がすべて隠れ側になる</strong>こと。
+</li>
+<li>1画素ずつ見れば取りこぼしは減るが、その走査費用が塗りの節約分を打ち消して<strong>時間が変わらない</strong>。
+<br>
+さらに残る87pxは深度バッファとCanvasの被覆判定の半画素差で、原理的に消えない。
+</li>
+<li>「見た目を変えない最適化」の条件を満たせないため、<code>drawObjectSurfaces</code> は元の実装へ戻した。
+<br>
+この方向（隠れた三角形を捨てる）は<strong>再試行しない</strong>。
+</li>
+</ul>
+<h3 id="5z-2-ドラッグ中は動いた1台ぶんだけ深度を作り直すdirty-rect">5Z-2. ドラッグ中は「動いた1台ぶん」だけ深度を作り直す（dirty rect）</h3>
+<p>
+面ONの隠線は、面の奥行きを1枚の深度バッファへ塗ってから線を判定している。
+<br>
+以前はオブジェクトが1台でも動くと<strong>全面を作り直していた</strong>（実測 11〜21ms/フレーム）。
+</p>
+<p>
+<code>buildExportDepth()</code> を次の2段構えに変えた。
+</p>
+<ol>
+<li><strong>静止分のキャッシュ</strong>：<code>動いている1台を除いた面</code>の奥行きを
+<br>
+<code>depthStatic</code> に作る（キーはカメラ・設定・その他のオブジェクトの中身）。
+</li>
+<li><strong>毎フレーム</strong>：前フレームで動いていた1台が塗った行を消す → 静止分を
+<br>
+<code>Float32Array.set()</code> で貼る → 動いた1台の面だけを塗る。
+</li>
+</ol>
+<p>
+「どの1台が動いたか」は、フレームごとにオブジェクトの JSON を比べて
+<br>
+<strong>1台だけ変わった</strong>ときを検出して決める（複数選択の一括変形・追加/削除・カメラ移動は
+<br>
+従来どおり全面計算）。塗る本体は <code>rasterizeDepthInto()</code> に切り出して共用する。
+</p>
+<p>
+実測（手すり×6＋ベベル階層建物×4＝10台・952本・3,928三角形、1400×900）:
+</p>
+<table><thead><tr><th></th><th>時間</th></tr></thead><tbody>
+<tr><td>全面計算（従来）</td><td>約 21ms</td></tr>
+<tr><td>dirty rect（2フレーム目以降）</td><td>約 4.8ms（消去＋貼り直し 2.8／動いた1台 2.1）</td></tr>
+<tr><td>ドラッグ開始の1フレームだけ</td><td>＋約 30ms（静止分キャッシュの作成）</td></tr>
+</tbody></table>
+<p>
+正しさの確認：移動・回転（rot）・傾き（rotX/rotZ）・拡大（ra）の6通りで、
+<br>
+dirty rect の画面と全面再計算の画面が<strong>ピクセル単位で一致</strong>することを確認した
+<br>
+（<code>window.__noDirtyDepth = true</code> で従来経路に切り替えられる）。
+<br>
+<code>window.__noDepthCache = true</code> は従来どおり「毎回作り直す」スイッチ。
+</p>
+<h3 id="5z-2b-dirty-rect-の不具合修正2026-11-02">5Z-2b. dirty rect の不具合修正（2026-11-02）</h3>
+<p>
+<strong>症状</strong>：オブジェクトを1台だけ置いて回転させると、面ONの線が大量に消えた
+<br>
+（ベベル直方体 rot35 で 4,493 → 2,673 画素）。<code>window.__noDirtyDepth = true</code> にすると
+<br>
+5,305 画素に戻ることから、dirty rect 経路が原因と判明。
+</p>
+<p>
+<strong>原因</strong>：消す行の範囲を
+<br>
+<code>Math.min(depthMovingUsedY0, depthStatic.y0)</code> で決めていた。シーンに1台しか無いと
+<br>
+「静止分」は空（<code>y0 = Infinity</code>）になり、<code>Math.min(...)</code> が <code>Infinity</code> になって
+<br>
+<strong>前フレームの奥行きを1行も消していなかった</strong>。残った奥行きが手前にあるため、
+<br>
+線が「別の面に隠れている」と誤判定されて消えていた。
+</p>
+<p>
+<strong>修正</strong>：有限な値だけを使って min/max を取る（空の側は無視する）。
+<br>
+1台だけの場面でも、前フレームで動いた1台が塗った行が正しく消える。
+</p>
+<p>
+<strong>確認</strong>：1台／2台の両方で、rot 0→25→50→75 と動かしながら
+<br>
+dirty 経路と全面再計算の描画を画素比較 → <strong>全ケース diff 0</strong>。
+</p>
+<h3 id="5z-4-数値欄のを全パネルへ2026-11-02-追加">5Z-4. 数値欄の「−／＋」を全パネルへ（2026-11-02 追加）</h3>
+<p>
+数値欄（<code>input.nv</code>）の左右に <code>−</code> <code>＋</code> を差し込むようにした（<code>studio-ui.js</code> の
+<br>
+<code>installNvSteppers()</code> / <code>nudgeNv()</code>、見た目は <code>style.css</code> の <code>.nvstep</code>）。
+</p>
+<ul>
+<li>押すと <code>step</code> ぶんだけ動かし、<strong>数値欄を直接打ったときと同じ経路</strong>（<code>input</code> → <code>change</code>）へ
+<br>
+流すので、画面ハンドル・数値欄・元に戻す（Undo）の扱いが欄ごとに食い違わない。
+</li>
+<li><code>min</code> / <code>max</code> を尊重し、刻みに合わせた桁数で表示する（<code>0.05</code> 刻みなら小数2桁）。
+</li>
+<li>手すりの本数のように専用の −／＋ が既にある欄は、<code>previousElementSibling</code> が
+<br>
+ボタンなので飛ばす（二重に付かない）。
+</li>
+<li>アセットごとのパネルは後から組み立てられるため、<code>#side</code> を <code>MutationObserver</code> で見て
+<br>
+増えた欄へ付け足す（差し込んだボタン自身も <code>childList</code> を揺らすが <code>dataset</code> で除外して止まる）。
+</li>
+<li>実測：手すりの角材の太さ <code>0.036 → 0.026 → 0.031</code> が押した回数どおりに動き、
+<br>
+線画・面・画面ハンドルが同時に追従（<code>/tmp/jt/nvstep.js</code>）。UI総当たり 726操作でエラー0。
+</li>
+</ul>
+<h3 id="5z-5-線の一括ストローク化は撤回・面idによる平面の内側の線の除去を採用2026-11-02-追加">5Z-5. 線の一括ストローク化は撤回・面IDによる「平面の内側の線」の除去を採用（2026-11-02 追加）</h3>
+<p>
+<strong>(a) 同じ色・太さの線を1本の Path2D にまとめる案 → 撤回</strong>
+</p>
+<p>
+<code>strokeTarget(c, s)</code>（色＋<code>effectiveLineWidth</code> ごとに <code>Path2D</code> へ溜める sink）と
+<br>
+<code>flushStrokeBatch(c)</code> を作り、<code>lineLayer()</code> で全線をまとめて <code>stroke</code> した。
+</p>
+<table><thead><tr><th>項目</th><th>1本ずつ（従来）</th><th>一括</th><th>判定</th></tr></thead><tbody>
+<tr><td><code>stroke()</code> の呼び出し回数（10台・1,336本）</td><td>728回</td><td><strong>16回</strong></td><td>減った</td></tr>
+<tr><td><code>lineLayer()</code> の時間</td><td>19.8ms</td><td>22.7〜25.1ms</td><td><strong>悪化</strong></td></tr>
+<tr><td><code>render()</code>＋描画完了まで（<code>getImageData</code> で同期）</td><td>51.2ms</td><td>50.3ms</td><td>差なし</td></tr>
+<tr><td>画素差（同条件）</td><td>—</td><td>47〜14,806px</td><td>交差部の濃さが変わる</td></tr>
+</tbody></table>
+<ul>
+<li>Canvas2D の描画は GPU 側でまとめて処理されるため、JS 側の呼び出し回数を減らしても
+<br>
+フレーム時間は短くならない（呼び出し1回あたりの費用がほぼゼロ）。
+<br>
+1,300本を1つのパスにすると、かえって経路データの構築が重くなる。
+</li>
+<li>画素差の主因は、**色ごとにまとめた結果、色の違う線どうしの描画順が入れ替わり、
+<br>
+交差部の濃さが変わる**こと（半透明の重なり・アンチエイリアスの合成順）。
+</li>
+<li>「見た目を変えずに速くする」という条件を満たせないので<strong>コードごと撤去</strong>した
+<br>
+（<code>strokeW</code> / <code>strokeWVisible</code> は <code>c</code> へ直接描く形に戻してある）。
+</li>
+</ul>
+<p>
+<strong>(b) 面IDバッファで「平面の内側を通る線」を落とす → 採用</strong>
+</p>
+<p>
+FreePencil2 の「面ID＋法線バッファ」方式のうち、線の除去に必要な部分だけを実装。
+</p>
+<ul>
+<li><code>rasterizeDepthInto()</code> が深度を書くのと同じ画素で <code>depthFace[]</code> に<strong>面ID</strong>を書く。
+<br>
+面IDは三角形の<strong>平面（法線＋原点からの距離）を量子化したキー</strong>から決めるので、
+<br>
+同じ平面上の三角形（四角形を2枚に割ったもの・隣り合う同一平面の面）は同じIDになる。
+<br>
+番号は <code>facePlaneIds</code>（Map）で管理し、<strong>作り直しても消さない</strong>
+<br>
+（静止分キャッシュ <code>depthStatic.face</code> に残った番号と衝突させないため）。
+</li>
+<li><code>accept()</code> で、線の点が<strong>自分の面の上</strong>にあるとき、その画素の上下左右3pxの面IDを調べ、
+<br>
+<strong>4方向すべて同じ面IDなら「面の内側の線」として描かない</strong>（<code>window.__noFaceCull</code> で無効化）。
+</li>
+<li><strong>左右2方向だけで判定してはいけない</strong>：板の厚みが1画素未満の細い部材（手すりの角材・
+<br>
+ベベル階層建物のスラブ）では、縁の線まで「面の内側」と誤判定され、
+<br>
+<strong>線が破線状に欠ける</strong>（実測：ベベル階層建物のスラブが点線になった）。上下も見ると解消する。
+</li>
+</ul>
+<table><thead><tr><th>アセット（単体・面ON）</th><th>面ID除去なし</th><th>あり</th><th>差</th></tr></thead><tbody>
+<tr><td>屋台（<code>stall</code>）</td><td>7,512px</td><td>6,560px</td><td>−952</td></tr>
+<tr><td>凹窓階層建物</td><td>3,920px</td><td>3,018px</td><td>−1,007</td></tr>
+<tr><td>手すり／ベベル階層建物／ベランダ／丸椅子／建物</td><td>—</td><td>—</td><td><strong>0（変化なし）</strong></td></tr>
+<tr><td>手すり6＋ベベル階層建物4（10台）</td><td>63,336px</td><td>63,336px</td><td>0</td></tr>
+</tbody></table>
+<ul>
+<li>消えるのは「部材どうしが同じ平面で接している継ぎ目」（屋台のカウンター前面とコの字の壁、
+<br>
+凹窓建物の同一平面上の面）で、<strong>輪郭・稜線・細い部材の縁は残る</strong>。
+</li>
+<li>費用：<code>buildExportDepth</code> の全面再計算が 27.6 → 29.4ms（+1.8ms、面を1万画素以上塗る場面）。
+<br>
+面ON（隠線あり）のときだけ作る。
+</li>
+</ul>
+<h3 id="5z-6-面の層・線の層を作り直さない2026-11-02-追加">5Z-6. 面の層・線の層を作り直さない（2026-11-02 追加）</h3>
+<p>
+<code>drawObjectSurfaces()</code> と <code>lineLayer()</code> は毎回すべて描き直していたが、
+<br>
+<strong>カメラ・用紙・設定・オブジェクト・選択が前回と同じなら、前回の層をそのまま使う</strong>ようにした。
+</p>
+<ul>
+<li>判定は「前回と同じキーか」だけ（<code>surfaceLayerCache</code> / <code>lineLayerKey</code>）。
+<br>
+キーは <code>W,H,Z,ox,oy</code> ＋ <code>JSON.stringify(P)</code> ＋ 見えているオブジェクトの <code>JSON.stringify</code> ＋ <code>sel</code>
+<br>
+（線の層は <code>bin</code> と <code>hidden</code>・書き出し変換 <code>tf</code> も含む）。1フレームあたり 0.3〜0.5ms。
+</li>
+<li>逃げ道：<code>window.__noSurfCache</code> / <code>window.__noLineCache</code>。
+</li>
+<li>編集中の線（<code>withCur</code>）が乗るときは、線の層は内容が毎フレーム変わるのでキャッシュしない。
+</li>
+<li>層が2枚以上（不透明度の違うオブジェクトが混在）のときは、面の層はキャッシュしない
+<br>
+（オフスクリーンは1枚を使い回しているため）。
+</li>
+</ul>
+<p>
+<strong>内訳の実測（1400×900・手すり6＋ベベル階層建物4＝10台・三角形3,912枚）</strong>
+</p>
+<table><thead><tr><th>工程</th><th>時間</th></tr></thead><tbody>
+<tr><td>三角形の収集（投影・クリップ・面積）</td><td>1.4ms</td></tr>
+<tr><td>奥行き順の並べ替え</td><td>1.9〜2.8ms</td></tr>
+<tr><td>三角形パスの生成（<code>moveTo</code>/<code>lineTo</code>）</td><td><strong>1.4ms</strong></td></tr>
+<tr><td><code>fill</code> / <code>stroke</code> の発行</td><td>0.1〜0.5ms</td></tr>
+<tr><td>層の合成（<code>drawImage</code> で本番キャンバスへ）</td><td><strong>13.0ms</strong></td></tr>
+</tbody></table>
+<ul>
+<li>パス生成はすでに軽く（1.4ms）、<strong>重いのは層のラスタライズと合成（13ms）</strong>だった。
+<br>
+つまり「三角形パス生成の削減」では速くならず、<strong>作り直さないこと</strong>が効く。
+</li>
+<li>効果（同じ絵を描き直すとき）：<code>render()</code> <strong>50.2 → 27.4ms</strong>（−45%）。
+<br>
+1台を動かし続けるドラッグ中は 60 → 58ms で変わらない（キーが毎フレーム変わるため）。
+</li>
+<li>画素差：キャッシュあり／なしで <strong>0</strong>（<code>/tmp/jt/linecache.js</code>）。
+</li>
+<li>三角形をまとめる枚数（400 → 200/800/1600/4000）を測ったが、差は誤差の範囲だったので 400 のまま。
+</li>
+</ul>
+<h3 id="5z-7-studio-uijs-を3ファイルへ分割2026-11-02-追加">5Z-7. <code>studio-ui.js</code> を3ファイルへ分割（2026-11-02 追加）</h3>
+<p>
+<code>studio-ui.js</code>（6,101行・1つの IIFE）を、共有の道具箱と間取りモードに分けた。
+</p>
+<table><thead><tr><th>ファイル</th><th>行数</th><th>中身</th></tr></thead><tbody>
+<tr><td><code>studio-lib.js</code></td><td>29</td><td><code>window.CityGridStudio</code>（<code>SH</code>）を作り、<code>el</code> / <code>side</code> / <code>stage</code> / <code>capturePointer</code> / <code>orthHandleGap</code> を置く</td></tr>
+<tr><td><code>studio-ui.js</code></td><td>3,381</td><td>クイック操作・作業画面・シーン一覧・アセット固有パネル・視点プリセット・初期化</td></tr>
+<tr><td><code>studio-floorplan.js</code></td><td>2,761</td><td>間取りモード（もとの「5. 間取りモードの選択・移動・編集」をそのまま移した）</td></tr>
+</tbody></table>
+<ul>
+<li><strong>読み込み順は <code>studio-lib.js</code> → <code>studio-ui.js</code> → <code>studio-floorplan.js</code></strong>
+<br>
+（<code>index.html</code> と <code>build-city-grid.py</code> の両方で同じ順にすること。単体HTMLは別の順で結合されていたため、
+<br>
+一度「<code>el("floorRotateLeft")</code> が null」で落ちた）。
+</li>
+<li>やり取りする名前だけ <code>SH</code>（<code>window.CityGridStudio</code>）を通す。
+<ul>
+<li>間取り → UI：<code>quick</code> / <code>sceneObjects</code> / <code>fitFloorPlan</code>（<strong>呼ぶときに引く</strong>ので読み込み順に依らない）
+</li>
+<li>UI → 間取り：<code>FLOOR_CAMERA_RAY</code> / <code>floorPlanDock</code> / <code>floorPlanWorldAt</code> / <code>floorPlanSideWorldAt</code> /
+<br>
+<code>floorPlanFrontWorldAt</code> / <code>syncFloorPlanDockLayout</code> / <code>syncFloorPlanSelection</code>
+</li>
+<li><code>floorPlanDrag</code> だけは両方で書き換えるので、<code>Object.defineProperty</code> で<strong>入れ物</strong>として見せる。
+</li>
+</ul>
+</li>
+<li>UI 側の初期化が間取り側の関数を呼ぶ箇所は <code>SH.syncFloorPlanDockLayout?.()</code> のように任意呼び出しにして、
+<br>
+読み込み途中でも落ちないようにした（<code>window.cityGridStudioBridge</code> の <code>syncFloorPlanDockLayout</code> も同じ）。
+</li>
+<li>確認：<code>node --check</code> 全ファイル → <code>./build.sh</code> → <code>check-all-assets.js</code>「すべてOK」（ページエラー0）
+<br>
+→ UI総当たり 726操作でエラー0 → 間取り画面のスクリーンショットで選択・ハンドル・ドックを目視。
+</li>
+</ul>
+<h3 id="5z-8-単体htmlの軽量化の実測2026-11-02-追加">5Z-8. 単体HTMLの軽量化の実測（2026-11-02 追加）</h3>
+<ul>
+<li>中身の割合：<code>&lt;script id="engine"&gt;</code> 432KB ／ <code>&lt;script id="studio-ui"&gt;</code> 472KB ／ CSS 31KB。
+<br>
+未使用の関数は <strong>0</strong>（トップレベル関数527個すべてが1か所以上から参照されている）、
+<br>
+未使用の CSS クラスも <strong>0</strong>。同名の関数は <code>wallSideSignParent</code> / <code>wallSideSignChildren</code> の2組だけで、
+<br>
+どちらも別スコープ・別の引数（片方は <code>sel</code> 既定、もう片方は <code>id</code>・<code>children</code> を受ける）なので統合しない。
+</li>
+<li>コメントと空行を落とすと <strong>1.08MB → 0.87MB（−19%）</strong>。
+<br>
+ソース側の説明は残したいので、既定のビルドはそのまま、
+<br>
+<code>./build.sh --min</code> を付けたときだけ <code>cyberpunk-city-studio.min.html</code> を書き出す。
+<br>
+軽量版は通常版と<strong>同じ画素</strong>（ハッシュ一致）・ページエラー0を確認済み。
+</li>
+</ul>
+<h3 id="5z-9-動かしている間を軽くする投影の使い回しと奥行きの塗り直し範囲の修正・2026-11-02-追加">5Z-9. 動かしている間を軽くする（投影の使い回しと、奥行きの塗り直し範囲の修正・2026-11-02 追加）</h3>
+<p>
+<strong>(a) 線の点の投影をキャッシュ（<code>projPtsCache</code>）</strong>
+</p>
+<p>
+<code>strokeWVisible()</code> は線の点ごとに <code>projPoint()</code>（カメラ変換＋三角関数）を呼んでいた。
+<br>
+投影結果は<strong>カメラ・用紙・ズーム・レンズ・画面の大きさ</strong>だけで決まるので、
+<br>
+同じ条件の間は前回の結果（<code>{x, y, depth, ok}</code> の配列）をそのまま使う。
+</p>
+<ul>
+<li>キーは <code>tf</code> / <code>Z,ox,oy</code> / <code>T</code> / <code>orthView</code> / <code>W,H</code> / <code>JSON.stringify(P)</code>。
+</li>
+<li>1つの線オブジェクトは、形が変わると <code>regenObjects()</code> が作り直して<strong>別のオブジェクト</strong>になるので、
+<br>
+古い投影が残ることはない（<code>WeakMap</code> なので GC も効く）。
+</li>
+<li>逃げ道：<code>window.__noProjCache</code>。
+</li>
+<li>効果：カメラを固定したドラッグ 1フレーム <strong>30.8〜38.2ms → 27.1ms</strong>。
+</li>
+<li>正しさ：カメラ移動・上下・前後・回頭・ズーム（<code>ga</code>・<code>Z</code>）・画面移動・物体の回転/寸法変更・
+<br>
+オブジェクト追加・別の物体の移動・3つの標準ビュー（正面/真上/3D）の<strong>15通りで画素差 0</strong>。
+</li>
+</ul>
+<p>
+<strong>(b) 奥行きバッファの「動いた1台」の塗り直しが、行（y）しか見ていなかった</strong>
+</p>
+<ul>
+<li><strong>症状</strong>：オブジェクトを<strong>1台だけ</strong>置いて回転させると、面ONの線が大量に消える
+<br>
+（ベベル階層建物 rot35 で dirty 2,971px / 全面 4,909px、−1,938px）。
+<br>
+2台以上あると静止分があるため目立たず、<strong>1台のときだけ</strong>出る。
+</li>
+<li><strong>原因</strong>：塗り直す範囲を <code>depthMovingUsedY0/Y1</code>（行）だけで決めていた。
+<br>
+回転すると画面内の<strong>横</strong>の位置も変わるので、前フレームの奥行きが横にはみ出したまま残り、
+<br>
+その「近すぎる奥行き」で線が隠されていた。
+</li>
+<li><strong>修正</strong>：<code>movingRectOf()</code> で動いている1台の画面矩形（x も）を出し、
+<br>
+<strong>前フレームの矩形と今回の矩形の和</strong>を消してから静止分を貼り直す。
+<br>
+直前に全面再計算した直後だけは前フレームの矩形が分からないので、その1回は前回塗った行全体を消す。
+</li>
+<li><strong>確認</strong>：屋台の回転・移動・寸法変更、ベベル階層建物の回転、手すり＋建物の混在、丸椅子の回転で
+<br>
+dirty 経路と全面再計算が<strong>全ケース画素差 0</strong>。回転 0→90° の線の量も
+<br>
+4,373〜5,102px でなめらか（修正前は途中で 40% 抜けていた）。
+</li>
+</ul>
+<p>
+<strong>時間（1400×900・手すり6＋ベベル階層建物4）</strong>
+</p>
+<table><thead><tr><th>操作</th><th><code>buildExportDepth</code></th><th><code>render</code> 全体</th></tr></thead><tbody>
+<tr><td>1台を移動（dirty）</td><td>1.4ms</td><td>56.8ms</td></tr>
+<tr><td>1台を回転（dirty）</td><td>10.5ms</td><td>56.5ms</td></tr>
+<tr><td>全面再計算（<code>__noDirtyDepth</code>）</td><td>22.5ms</td><td>75.7ms</td></tr>
+</tbody></table>
+<p>
+回転は矩形が大きくなるため移動より高い。<strong>全面より約25%軽い</strong>。
+</p>
+<h3 id="5z-10-線の二値化アンチエイリアスを消すの内訳2026-11-02-追加">5Z-10. 線の二値化（アンチエイリアスを消す）の内訳（2026-11-02 追加）</h3>
+<p>
+<code>#bin</code>（「線画のアンチエイリアスをオフ（二値）」）は<strong>既定でオン</strong>。この処理の内訳を測った。
+</p>
+<table><thead><tr><th>工程</th><th>時間（890×760 の範囲・10台のシーン）</th></tr></thead><tbody>
+<tr><td><code>strokeBox()</code>（線が写っている範囲を求める）</td><td>4.0ms → <strong>0.38ms</strong>（投影キャッシュを使い回すようにした）</td></tr>
+<tr><td><code>getImageData()</code>（画素の読み出し）</td><td><strong>10〜15ms</strong>（いちばん重い）</td></tr>
+<tr><td>しきい値の適用（アルファを 0/255 へ）</td><td>1〜2ms</td></tr>
+<tr><td><code>putImageData()</code></td><td>0.4ms</td></tr>
+</tbody></table>
+<ul>
+<li>二値化そのものを止めると <code>render</code> は 50ms → 37ms。つまり<strong>二値化だけで約12ms</strong>使っている。
+</li>
+<li>重いのは画素の読み書き（<code>getImageData</code> の読み戻し）。<strong>見た目を変えずに消す方法は無い</strong>ので、
+<br>
+いまは「線の層を作り直したときだけ」実行する形（層のキャッシュが効いている静止時は走らない）で止めている。
+</li>
+<li>しきい値の適用は <code>Uint32Array</code> で4バイトまとめて見る形にした（旧ループと<strong>画素差 0</strong>）。
+</li>
+<li>次の候補：<strong>動いた1台の線の範囲だけ二値化する</strong>（前フレームとの差分矩形）。
+<br>
+ただし線の層は毎回すべて描き直しているため、レイヤーを「生の線」と「二値化済み」の2枚に分ける設計変更が要る。
+</li>
+</ul>
+<h3 id="5z-11-試して採らなかった2案とdirty-depth-のバグ修正2026-11-02-追加">5Z-11. 試して<strong>採らなかった</strong>2案と、dirty depth のバグ修正（2026-11-02 追加）</h3>
+<h4 id="a-二値化を変化した矩形だけ更新する案--不採用">(a) 二値化を「変化した矩形だけ」更新する案 → 不採用</h4>
+<p>
+5Z-10 の「次の候補」。線の層を <strong>生の線（<code>LC</code>）</strong> と <strong>二値化済み（<code>LB</code>）</strong> の2枚持ちにし、
+<br>
+動いたオブジェクトの矩形だけ <code>LB</code> を作り直して <code>LC</code> に重ねる方式を実装した。
+</p>
+<ul>
+<li>正しさは完璧だった：15通り（移動2・回転・寸法・別物体移動・追加2・カメラ移動・回頭・ズーム・削除・選択・上面/パースビュー）で<strong>画素差 0</strong>。
+</li>
+<li>しかし<strong>速くならなかった</strong>（むしろ遅い）：
+</li>
+</ul>
+<table><thead><tr><th>場面</th><th>全面二値化（元の方式）</th><th>矩形だけ二値化（試作）</th></tr></thead><tbody>
+<tr><td>1台移動（890×760 の層）</td><td><strong>50.0ms</strong></td><td>47.6ms</td></tr>
+<tr><td>カメラ移動（層が全画面）</td><td><strong>95.4ms</strong></td><td>56.5ms</td></tr>
+</tbody></table>
+<ul>
+<li>原因：層をもう1枚経由すると、GPU からの読み戻し（<code>getImageData</code>）が<strong>回数として増える</strong>。
+<br>
+二値化のコストは面積より<strong>呼び出し回数と同期（readback の待ち）</strong>で決まるため、面積を減らしても得にならない。
+</li>
+<li>5Z-10 の「<code>getImageData</code> が支配的」という計測と合わせて、<strong>この方向は打ち切り</strong>（<code>LB</code>／<code>binState</code>／<code>lineTrackBox</code> は撤去済み）。
+</li>
+</ul>
+<h4 id="b-二値化の範囲を実際に描いた線の範囲に絞る案--不採用">(b) 二値化の範囲を「実際に描いた線の範囲」に絞る案 → 不採用</h4>
+<p>
+<code>strokeWVisible()</code> の <code>lineTo</code> 地点でインクの外接矩形を取り、<code>strokeBox()</code>（全投影点から求める範囲）の代わりに使う案。
+</p>
+<ul>
+<li>範囲は 892×762 → 実測で同じ 892×762（画面の 54%）。建物が画面をほぼ埋めるため小さくならない。
+</li>
+<li>効果：<code>render</code> <strong>24.4ms／23.1ms（採用案） vs 23.7ms（絞らない）</strong>＝<strong>差なし</strong>。
+<br>
+<code>getImageData</code> のコストは面積に比例せず<strong>固定の待ち</strong>が支配的なため。
+</li>
+<li><strong>画素差は9場面すべて 0</strong> だったが、効果が無いので<strong>撤去</strong>した（<code>inkBox</code> は削除済み）。
+</li>
+</ul>
+<h4 id="c-dirty-depth-の塗り直し範囲が行yだけだったバグ--修正">(c) dirty depth の塗り直し範囲が「行（Y）」だけだったバグ → 修正</h4>
+<p>
+5Z-9 の dirty rect は、塗り直す範囲を<strong>前フレームの線の行範囲（Y のみ）</strong>で決めていた。
+<br>
+そのため<strong>1台だけ回転</strong>させたとき、横（X）方向にはみ出した線が塗り直されず、面ONの線が大量に消えた。
+</p>
+<ul>
+<li>症状の実測：ベベル階層建物を 35° 回転 → 線が <strong>2,971px</strong>（全面なら 4,909px）＝<strong>−40%</strong>。
+</li>
+<li>修正：<code>movingRectOf()</code> で <strong>X も含む矩形</strong>を出し、<strong>前フレームの矩形と今回の矩形の和</strong>を塗り直す。
+<br>
+全面を作った直後の1回だけは前回の行全体を消す（履歴が無いため）。
+</li>
+<li>確認：屋台の回転／移動／寸法変更、ベベル階層建物の回転、手すり＋建物の混在、丸椅子の回転で
+<br>
+<strong>dirty と全面再計算がすべて画素差 0</strong>。回転 0→90° の線の量も 4,373〜5,102px で滑らかに変化する。
+</li>
+</ul>
+<p>
+<strong>教訓</strong>：dirty rect は「動いた物体の投影範囲」ではなく「<strong>前フレームでそこにあった絵</strong>」も含めて和を取る。
+</p>
+<h3 id="5z-12-画面まわりの片付け描画のまとめ方・共通関数・ビルドの既定・2026-11-02-追加">5Z-12. 画面まわりの片付け（描画のまとめ方・共通関数・ビルドの既定・2026-11-02 追加）</h3>
+<h4 id="a-engine-inputjs-の単発イベントも-rendersoon-に寄せた">(a) <code>engine-input.js</code> の単発イベントも <code>renderSoon()</code> に寄せた</h4>
+<p>
+<code>engine-input.js</code> には <code>render()</code>（その場で描く）呼び出しが19か所あった。
+<br>
+ドラッグ中のように毎フレーム呼ばれる場所は仕方ないが、<strong>1回押しただけの操作</strong>は
+<br>
+その場で描く必要がない（<code>requestAnimationFrame</code> にまとめたほうが、連打・キーリピートで無駄な描画が減る）。
+</p>
+<ul>
+<li><code>renderSoon()</code> へ変更（15か所）：ズームのリセット、ボックス選択の確定、消しゴム／範囲／ペンの開始と終了、
+<br>
+カメラロックの巻き戻し、定規のドラッグ、取り消し／やり直し、全消去、矢印キーの視点移動、線幅の同期。
+</li>
+<li><code>render()</code> のまま残した（4か所）：ホイールのレンズ変更・ホイールのズーム・視点ドラッグ中の2か所。
+<br>
+いずれも<strong>毎フレーム呼ばれる連続操作</strong>で、同じフレーム内で視点の計算を続けて行うため即時描画のままにした。
+</li>
+<li><code>renderSoon()</code> は「すでに予約済みなら何もしない」ので、同じフレームの複数イベントは1回の描画にまとまる。
+<br>
+<code>render()</code> 側も予約を取り消してから描くので、二重描画にはならない。
+</li>
+<li>確認：<code>uisweep.js</code>（UI 726操作）でエラー0、<code>smoke</code>／<code>views2</code>／<code>railviews2</code>／<code>ringreal</code>／<code>userjson</code>／<code>check-all-assets</code> すべて変化なし。
+</li>
+</ul>
+<h4 id="b-clamp-を-engine-libjs-へ移した">(b) <code>clamp()</code> を <code>engine-lib.js</code> へ移した</h4>
+<p>
+<code>clamp()</code>（値を範囲内に収める）は全部で <strong>300か所以上</strong>から呼ばれているのに、
+<br>
+<code>engine-input.js</code> の途中に <code>const clamp = ...</code> と書いてあった（動いてはいるが置き場所が不自然）。
+</p>
+<ul>
+<li><code>engine-lib.js</code> に <code>clamp()</code> を定義し、<code>CG.clamp</code> として公開。あわせて <code>window.clamp</code> としても見せたので、
+<br>
+既存の <code>clamp(...)</code> 呼び出しは1か所も書き換えていない。
+</li>
+<li><code>engine-input.js</code> の宣言は削除（重複定義を作らない）。
+</li>
+<li>確認：<code>CG.clamp(5, 0, 3) === 3</code>、<code>typeof clamp === "function"</code>、ページエラー0。
+</li>
+</ul>
+<h4 id="c-buildsh-が既定で軽量版も作るようにした">(c) <code>./build.sh</code> が既定で軽量版も作るようにした</h4>
+<p>
+これまで <code>--min</code> を付けたときだけ <code>cyberpunk-city-studio.min.html</code> を作っていたため、
+<br>
+<strong>軽量版だけ古いまま残る</strong>ことがあった（実際に1世代ずれていた）。
+</p>
+<ul>
+<li><code>./build.sh</code> で通常版と軽量版の両方を生成する。軽量版が不要なときは <code>./build.sh --no-min</code>。
+</li>
+<li>確認：通常版と軽量版の<strong>画素ハッシュが一致</strong>（<code>3186361094</code>、1400×900・手すり3＋ベベル階層建物2）。
+<br>
+サイズは 1,088,022B ／ 876,051B。
+</li>
+</ul>
+<h3 id="5z-13-手すりの見えない面の線を減らした2026-11-02-追加">5Z-13. 手すりの「見えない面」の線を減らした（2026-11-02 追加）</h3>
+<p>
+手すり1台は 110本（線分1,428本）の線で描かれていた。うち<strong>必ず隠れる面の稜線</strong>を最初から描かないようにした。
+</p>
+<table><thead><tr><th>部材</th><th>これまで</th><th>これから</th><th>理由</th></tr></thead><tbody>
+<tr><td>縦の棒（横桟に挟まれた部分）</td><td><code>wireBoxA()</code>＝上下の四角＋縦4本</td><td><code>wireBoxVA()</code>＝縦4本だけ</td><td>上下の面は横桟の中に必ず隠れる。面ONでは隠線処理で消えるが、面OFFの線画では「見えない線」が残って線が混む</td></tr>
+<tr><td>柱（床から横桟の上端まで）</td><td>上面の四角＋下面の四角＋縦4本</td><td><code>wireBoxNoTopA()</code>＝下面＋縦4本</td><td>上端は横桟の上面と同じ高さなので、同じ場所に線が二重に出る（面ON・面OFFとも）</td></tr>
+</tbody></table>
+<p>
+<strong>実測</strong>（1台・ビューポート1200×800）
+</p>
+<table><thead><tr><th>項目</th><th>前</th><th>後</th></tr></thead><tbody>
+<tr><td>線の本数（<code>S</code> の要素数）</td><td>110本</td><td><strong>96本</strong></td></tr>
+<tr><td>線分の本数（点の差の合計）</td><td>1,428本</td><td><strong>1,368本</strong></td></tr>
+<tr><td>画素の差（面ON）</td><td>—</td><td><strong>60px</strong>（うち線が減ったぶん 36px。12,619px 中）</td></tr>
+<tr><td>画素の差（面OFF）</td><td>—</td><td><strong>73px</strong>（うち 37px）</td></tr>
+<tr><td>6台＋建物4台のフレーム</td><td>9,538点</td><td>9,238点</td></tr>
+</tbody></table>
+<ul>
+<li>30アセットすべてを1台ずつ描いて<strong>前後の画素ハッシュを比較</strong>し、変わったのは<strong>手すりだけ</strong>であることを確認した。
+</li>
+<li>面ONの画像を目視でも確認（柱・横桟・棒・足元板の構成は同じで、二重線だけが消えている）。
+</li>
+<li>隠線処理（<code>strokeWVisible</code>）はそのまま。<strong>「最初から描かない」ぶんだけ軽くなる</strong>ので、
+<br>
+線画の本数削減と描画の軽量化が同時に効く。
+</li>
+</ul>
+<p>
+<strong>注意</strong>：同じ考え方は他のアセットにも使えるが、<strong>必ず画素比較をしてから</strong>採用する
+<br>
+（面OFFの線画は納品物なので、消してよい線かどうかを目で確かめる）。
+</p>
+<h3 id="5z-14-面の層を動いた1台の範囲だけ塗り直す線の層のキャッシュが効いていなかった件2026-11-02-追加">5Z-14. 面の層を「動いた1台の範囲」だけ塗り直す／線の層のキャッシュが効いていなかった件（2026-11-02 追加）</h3>
+<h4 id="a-重要面onのとき線の層のキャッシュが一度も効いていなかった--修正">(a) 【重要】面ONのとき、線の層のキャッシュが一度も効いていなかった → 修正</h4>
+<p>
+<code>lineLayer()</code> のキャッシュは「描いている途中の線（<code>cur</code>）を混ぜたら作り直す」ために
+<br>
+<code>withCur</code> が true なら必ず作り直していた。ところが<strong>呼び出し側は面ONのとき常に <code>withCur=true</code> を渡している</strong>
+<br>
+（<code>render()</code> の <code>lineLayer(true, true, W, H, null, true)</code>）。結果、**面ONでは毎フレーム線の層を
+<br>
+全部描き直していた**（1フレーム 実測 19〜20ms の無駄）。
+</p>
+<ul>
+<li>修正：<code>cur</code> も <code>prev</code>（消しゴムの直前の線）も無いときは、描き足すものが無いので
+<br>
+<code>withCur=false</code> と同じ絵になる。この判定（<code>curEff</code>）をキャッシュの条件とキーに使う。
+</li>
+<li>実測（手すり6＋ベベル階層建物4、1400×900、ヘッドレス）：
+</li>
+</ul>
+<table><thead><tr><th>場面</th><th>修正前</th><th>修正後</th></tr></thead><tbody>
+<tr><td>静止・面ON</td><td>27.6ms</td><td><strong>10.8ms</strong></td></tr>
+<tr><td>静止・面OFF</td><td>約28ms</td><td><strong>7.0ms</strong></td></tr>
+<tr><td>線の層の作り直し回数（静止5フレーム）</td><td>5回</td><td><strong>0回</strong></td></tr>
+</tbody></table>
+<p>
+静止しているとき・パネルを触っているとき・ホバーしたときなど、<strong>絵が変わらない場面すべて</strong>が軽くなる。
+<br>
+絵の中身は変わらない（同じ状態でキャッシュあり／無しの画素差 0 を確認）。
+</p>
+<h4 id="b-面の層を動いた1台の範囲だけ塗り直す採用">(b) 面の層を「動いた1台の範囲」だけ塗り直す（採用）</h4>
+<p>
+面は「1枚の層に不透明で塗ってから、最後に半透明で1回だけ貼る」方式（重なった場所が濃くならないため）。
+<br>
+重いのは貼るほうではなく<strong>層を塗り直すほう</strong>なので、3段階に分けた。
+</p>
+<ol>
+<li>何も変わっていない → 前回の層をそのまま貼る（実測 1.3ms）
+</li>
+<li>1台だけ動いた／回った → <strong>その1台の範囲（前フレームの範囲と今回の範囲の和）だけ</strong>塗り直す
+</li>
+<li>カメラが動いた／台数が変わった／不透明度が台ごとに違う → 全部作り直す
+</li>
+</ol>
+<p>
+2 のときは、塗り直す範囲にかかる三角形を<strong>全オブジェクトから</strong>集め直し、奥から順に塗って
+<br>
+その範囲にクリップする（範囲の外は前回の絵がそのまま残る）。範囲が層の外へはみ出すときは、
+<br>
+層を広げて中身を引き継ぐ（作り直さない）。
+</p>
+<ul>
+<li>画素の一致：12通り（移動・回転・寸法・2台同時・追加・カメラ移動・ズーム・標準ビュー3種・削除・
+<br>
+面の入切・画面外への移動・画面外から戻す）で「部分塗り直し」と「全部作り直し」の<strong>画素差 0</strong>。
+</li>
+<li>速さ（手すり6＋建物4、オブジェクト1台を実際に動かす。<code>__noSurfFull</code> で全部作り直しと比較）：
+</li>
+</ul>
+<table><thead><tr><th>回</th><th>全部作り直し</th><th>部分塗り直し</th></tr></thead><tbody>
+<tr><td>1</td><td>58.8ms</td><td><strong>43.8ms</strong></td></tr>
+<tr><td>2</td><td>59.1ms</td><td><strong>52.8ms</strong></td></tr>
+</tbody></table>
+<ul>
+<li>逃げ道スイッチ：<code>window.__noSurfFull = true</code> で「毎回すべて作り直す」動きに戻せる。
+</li>
+</ul>
+<h4 id="c-面を層なしで直接塗る案--不採用">(c) 面を層なしで直接塗る案 → 不採用</h4>
+<p>
+層を作らず、本番のキャンバスへ「同じ不透明度の三角形を1本のパスで1回だけ塗る」案。
+<br>
+層の生成と貼り合わせ（実測 8ms）が消えるので速くなる（33.1 → 26.5ms）が、<strong>絵が変わる</strong>ので不採用。
+</p>
+<ul>
+<li>理由：色ごとに別のパスで塗るため、<strong>色の違う面が重なる場所で不透明度が積み上がる</strong>（乗算のように濃くなる）。
+<br>
+これは「面ありのとき、重なった面が濃くなってはいけない」という約束に反する。
+</li>
+<li>実測の画素差：5台で 13,507px、9台で 122,844px。縁取り（継ぎ目隠し）を足すと逆に増えた（91,657px）。
+</li>
+</ul>
+<h4 id="d-400枚ずつの区切りをやめる案--不採用">(d) 400枚ずつの区切りをやめる案 → 不採用</h4>
+<p>
+1本のパスに入れる三角形の区切り（400枚）を無くす案。<strong>速くならず</strong>（31.8 → 32.1ms）、
+<br>
+画素も 6,416px 変わる（最大差 2＝ごく薄い差だが、見た目を変えない条件を満たさない）。
+</p>
+<h4 id="e-ペンで描いた線を層のキャッシュ署名に含めた">(e) ペンで描いた線を層のキャッシュ署名に含めた</h4>
+<p>
+層のキャッシュ判定は「オブジェクトの状態」だけで決めていた。ペンで描いた線（<code>ob</code> を持たない線）は
+<br>
+署名に入っていないため、線を動かしても層が古いまま残る可能性があった。
+<br>
+<code>freeLineSig()</code>（座標・色・太さを畳んだ小さな数値）を作ってキーに混ぜた。
+<br>
+再現テスト（ペンで2本描く→消しゴムで消す）では<strong>修正前後とも画素差 0</strong>だった
+<br>
+（ペン描き中は <code>curEff</code> で必ず作り直し、消しゴムは <code>prev</code> を通るため）。念のための保険として残す。
+</p>
+<h4 id="f-テストを-tests-に置いたtmp-は残らないため">(f) テストを <code>tests/</code> に置いた（<code>/tmp</code> は残らないため）</h4>
+<table><thead><tr><th>ファイル</th><th>内容</th></tr></thead><tbody>
+<tr><td><code>tests/setup.sh</code></td><td>Playwright・ブラウザ・共有ライブラリの準備（1回だけ）</td></tr>
+<tr><td><code>tests/run.sh</code></td><td>テスト実行役（<code>LD_LIBRARY_PATH</code> と <code>NODE_PATH</code> を渡す）</td></tr>
+<tr><td><code>tests/lib.js</code></td><td>単体HTMLを開く／アセットを置く共通処理</td></tr>
+<tr><td><code>tests/pixel-surfaces.js</code></td><td>面の部分塗り直しと全部作り直しの画素一致（12通り）</td></tr>
+<tr><td><code>tests/pixel-free-lines.js</code></td><td>ペンで描いた線と消しゴムの画素一致</td></tr>
+<tr><td><code>tests/pixel-line-cache.js</code></td><td>線の層のキャッシュが古い絵を返さないこと（面の入切×二値化の入切×8操作＝32通り）</td></tr>
+<tr><td><code>tests/ui-sweep.js</code></td><td>画面上の操作をひととおり押してページエラー0を確認</td></tr>
+<tr><td><code>tests/perf.js</code></td><td>静止・ドラッグ・カメラ・キャッシュ無し・二値化OFFの実測</td></tr>
+</tbody></table>
+</div>
+</body>
+</html>

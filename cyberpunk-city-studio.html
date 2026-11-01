@@ -1805,6 +1805,8 @@ body.cameraLocked #cv {
      1. CG.depthEps()      … 隠線判定の許容量（奥行きに応じて変える）
      2. CG.lineDedup*      … 同じ線分を2回描かないための「この1回で描いた線分」の記録
 
+     3. CG.clamp()          … 値を範囲内に収める（全モジュールで使う）
+
    使い方
      - 隠線の判定：`if (depth > z + CG.depthEps(depth)) 隠れている`
      - 線の重複よけ：`CG.lineDedup.begin()` → 描く → `CG.lineDedup.end()`
@@ -1909,7 +1911,18 @@ body.cameraLocked #cv {
         },
     };
 
-    global.CG = Object.assign(global.CG || {}, { depthEps, lineDedup });
+    // ===== 3. 値を範囲内に収める ==============================================
+    // 画面の座標・寸法・カメラの角度など、あらゆる場所で使う。
+    // 以前は engine-input.js の途中で `const clamp = ...` と宣言していたが、
+    // 「どのモジュールからも使う小さな計算」はここに置く方針に合わせて移した。
+    function clamp(v, a, b) {
+        return Math.max(a, Math.min(b, v));
+    }
+
+    global.CG = Object.assign(global.CG || {}, { depthEps, lineDedup, clamp });
+    // 既存の呼び出し（clamp(...) が300か所以上）を書き換えずに済むよう、
+    // これまでどおり名前だけの関数としても見せる。
+    if (!global.clamp) global.clamp = clamp;
 })(typeof window !== "undefined" ? window : globalThis);
 
 /* City Grid Studio engine core.
@@ -10070,6 +10083,11 @@ function rasterizeDepthInto(buf, own, ownerMap, list, cw, ch, tf, used, face) {
         if (y1 < y0) return;
         if (y0 < used.y0) used.y0 = y0;
         if (y1 > used.y1) used.y1 = y1;
+        // 列の範囲も覚える（動いた1台の塗り直しで、横にはみ出した古い奥行きを消すため）。
+        const ux0 = Math.max(0, Math.floor(minX)),
+            ux1 = Math.min(cw - 1, Math.ceil(maxX));
+        if (ux0 < used.x0) used.x0 = ux0;
+        if (ux1 > used.x1) used.x1 = ux1;
         const d0 = -(p1.y - p0.y) / area, // 重心座標の x 方向の増分
             d1 = -(p2.y - p1.y) / area,
             d2 = -(p0.y - p2.y) / area;
@@ -10134,7 +10152,10 @@ function rasterizeDepthInto(buf, own, ownerMap, list, cw, ch, tf, used, face) {
 // 1台だけ動いているとき（＝ドラッグ中）は、その1台を除いた面の奥行きを
 // そのまま使い回し、動いた1台の面だけを塗り直す（dirty rect）。
 // 全面を作り直すと実測 11〜21ms かかるが、この経路は 2〜4ms で済む。
-let depthLast = null, // { ctxKey, ids, sigs }
+// 前フレームで「動いていた1台」が塗った範囲（列も持つ）。
+// 行だけだと、回転して横にはみ出した古い奥行きが残り、線が余計に隠れる。
+let depthMovingRect = null, // { x0, y0, x1, y1 }
+    depthLast = null, // { ctxKey, ids, sigs }
     depthStatic = null, // { key, len, buf, owner, y0, y1 }
     depthMovingUsedY0 = Infinity,
     depthMovingUsedY1 = -Infinity;
@@ -10233,39 +10254,62 @@ function buildExportDepth(cw, ch, tf) {
             );
             depthStatic = st;
         }
-        // 1) 前フレームで動いていた1台が塗った行を消し、
+        // 1) 前フレームで動いていた1台が塗った範囲を消し、
         // 2) 静止分をそこへ貼り直し、3) 動いた1台を塗り直す。
-        // 全面 fill（100万要素）を避け、必要な行だけを触る。
-        // 消す行は「前フレームで動いていた1台が塗った行」と「静止分が塗った行」の和。
-        // どちらかが空（1台しか無いとき静止分は空）でも、もう片方だけで正しく消えるように
-        // 有限な値だけで min/max を取る。以前はここが Infinity になり、1台だけの場面で
-        // 前フレームの奥行きが残って、線が隠れすぎる不具合になっていた。
-        const c0 = Math.min(
-                Number.isFinite(depthMovingUsedY0) ? depthMovingUsedY0 : Infinity,
-                Number.isFinite(depthStatic.y0) ? depthStatic.y0 : Infinity,
-            ),
-            c1 = Math.max(
-                Number.isFinite(depthMovingUsedY1) ? depthMovingUsedY1 : -Infinity,
-                Number.isFinite(depthStatic.y1) ? depthStatic.y1 : -Infinity,
-            ),
-            clr0 = Math.max(0, c0),
-            clr1 = Math.min(ch - 1, c1);
-        if (clr1 >= clr0 && Number.isFinite(clr0)) {
-            depth.fill(Infinity, clr0 * cw, (clr1 + 1) * cw);
-            depthOwner.fill(0, clr0 * cw, (clr1 + 1) * cw);
-            if (depthFace) depthFace.fill(0, clr0 * cw, (clr1 + 1) * cw);
+        // 全面 fill（100万要素）を避け、必要な矩形だけを触る。
+        //
+        // 消す範囲は「前フレームのその1台の矩形」と「今回のその1台の矩形」の和。
+        // 行（y）だけを見ていると、回転して横にはみ出した古い奥行きが残り、
+        // その奥行きで線が隠されて「線が減る」不具合になる（1台だけの場面で顕著）。
+        const nowRect = movingRectOf(moving, cw, ch, tf),
+            prevRect = depthMovingRect;
+        let rx0, ry0, rx1, ry1;
+        if (prevRect) {
+            rx0 = Math.max(0, Math.min(prevRect.x0, nowRect.x0));
+            rx1 = Math.min(cw - 1, Math.max(prevRect.x1, nowRect.x1));
+            ry0 = Math.max(0, Math.min(prevRect.y0, nowRect.y0));
+            ry1 = Math.min(ch - 1, Math.max(prevRect.y1, nowRect.y1));
+        } else {
+            // 直前に全面を作り直した直後は、前フレームの矩形が分からない。
+            // そのときだけ「前回塗った行すべて」を消して、取りこぼしを残さない。
+            rx0 = 0;
+            rx1 = cw - 1;
+            ry0 = Number.isFinite(depthUsedY0) ? Math.max(0, depthUsedY0) : 0;
+            ry1 = Number.isFinite(depthUsedY1) ? Math.min(ch - 1, depthUsedY1) : ch - 1;
         }
-        if (depthStatic.y1 >= depthStatic.y0) {
-            const sy0 = Math.max(0, Math.floor(depthStatic.y0)),
-                sy1 = Math.min(ch - 1, Math.ceil(depthStatic.y1));
-            depth.set(depthStatic.buf.subarray(sy0 * cw, (sy1 + 1) * cw), sy0 * cw);
-            depthOwner.set(depthStatic.owner.subarray(sy0 * cw, (sy1 + 1) * cw), sy0 * cw);
-            if (depthFace) depthFace.set(depthStatic.face.subarray(sy0 * cw, (sy1 + 1) * cw), sy0 * cw);
+        if (ry1 >= ry0 && rx1 >= rx0) {
+            // 静止分があるときは、上の貼り直しが全画素を上書きするので、
+            // 先に Infinity で消す必要はない（消すとメモリを2倍触ることになる）。
+            // 静止分が空（シーンに1台だけ）のときだけ、範囲を明示的に消す。
+            const hasStatic = depthStatic.y1 >= depthStatic.y0;
+            if (!hasStatic) {
+                for (let y = ry0; y <= ry1; y++) {
+                    const s0 = y * cw + rx0,
+                        s1 = y * cw + rx1 + 1;
+                    depth.fill(Infinity, s0, s1);
+                    if (depthOwner) depthOwner.fill(0, s0, s1);
+                    if (depthFace) depthFace.fill(0, s0, s1);
+                }
+            }
+            if (hasStatic) {
+                const sy0 = Math.max(Math.max(0, Math.floor(depthStatic.y0)), ry0),
+                    sy1 = Math.min(Math.min(ch - 1, Math.ceil(depthStatic.y1)), ry1);
+                for (let y = sy0; y <= sy1; y++) {
+                    const s0 = y * cw + rx0,
+                        s1 = y * cw + rx1 + 1;
+                    depth.set(depthStatic.buf.subarray(s0, s1), s0);
+                    if (depthOwner) depthOwner.set(depthStatic.owner.subarray(s0, s1), s0);
+                    if (depthFace) depthFace.set(depthStatic.face.subarray(s0, s1), s0);
+                }
+            }
         }
-        const used = { y0: Infinity, y1: -Infinity };
+        const used = { y0: Infinity, y1: -Infinity, x0: Infinity, x1: -Infinity };
         rasterizeDepthInto(depth, depthOwner, ownerMap, [moving], cw, ch, tf, used, window.__noFaceBuf ? null : depthFace);
         depthMovingUsedY0 = used.y0;
         depthMovingUsedY1 = used.y1;
+        depthMovingRect = Number.isFinite(used.x0)
+            ? { x0: used.x0, y0: Math.max(0, used.y0), x1: used.x1, y1: Math.min(ch - 1, used.y1) }
+            : nowRect;
         depthUsedY0 = Math.min(depthStatic.y0, Number.isFinite(used.y0) ? used.y0 : Infinity);
         depthUsedY1 = Math.max(depthStatic.y1, Number.isFinite(used.y1) ? used.y1 : -Infinity);
         depthOwnerMap = ownerMap;
@@ -10286,7 +10330,8 @@ function buildExportDepth(cw, ch, tf) {
     depthUsedY1 = -Infinity;
     depthMovingUsedY0 = Infinity;
     depthMovingUsedY1 = -Infinity;
-    const used = { y0: Infinity, y1: -Infinity };
+    depthMovingRect = null;
+    const used = { y0: Infinity, y1: -Infinity, x0: Infinity, x1: -Infinity };
     rasterizeDepthInto(depth, depthOwner, ownerMap, objs, cw, ch, tf, used, window.__noFaceBuf ? null : depthFace);
     depthUsedY0 = used.y0;
     depthUsedY1 = used.y1;
@@ -10312,6 +10357,34 @@ function silhouetteAt(depth, cw, ch, x, y, d) {
         a = side(-3) - d,
         b = side(3) - d;
     return (a > 0.5 && b < 0.05) || (b > 0.5 && a < 0.05);
+}
+// 動いている1台の画面矩形（デバイスpx）。奥行きバッファの塗り直し範囲を決める。
+// 三角形の投影だけを見るので、ラスタライズよりずっと安い。
+function movingRectOf(o, cw, ch, tf) {
+    const tris = surfaceTriangles(o);
+    let x0 = Infinity,
+        y0 = Infinity,
+        x1 = -Infinity,
+        y1 = -Infinity;
+    for (let i = 0; i < tris.length; i++) {
+        const tr = tris[i];
+        for (let j = 0; j < 3; j++) {
+            const p = exportPoint(tr[j], tf || [1, 0, 0, 1, 0, 0]);
+            if (!p) continue;
+            if (p.x < x0) x0 = p.x;
+            if (p.x > x1) x1 = p.x;
+            if (p.y < y0) y0 = p.y;
+            if (p.y > y1) y1 = p.y;
+        }
+    }
+    if (!Number.isFinite(x0)) return { x0: 0, y0: 0, x1: cw - 1, y1: ch - 1 };
+    // 2px の余白（輪郭の取りこぼし防止）と画面内外の丸め。
+    return {
+        x0: Math.max(0, Math.floor(x0) - 2),
+        y0: Math.max(0, Math.floor(y0) - 2),
+        x1: Math.min(cw - 1, Math.ceil(x1) + 2),
+        y1: Math.min(ch - 1, Math.ceil(y1) + 2),
+    };
 }
 // その画素の面ID（0 は「面が無い」）。
 function faceIdAt(cw, ch, x, y) {
@@ -10473,8 +10546,8 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     // 以前は区間の各点を毎回投影していたため、細かく刻むほど遅くなっていた。
     const lerpFlag = !orthView && T !== "f";
     // 投影は点ごとに1回だけ（以前は区間の両端でもう一度投影していた）。
-    const pj = new Array(s.p.length);
-    for (let i = 0; i < s.p.length; i++) pj[i] = projPoint(s.p[i], tf);
+    // カメラが同じ間は、前回の投影結果をそのまま使う。
+    const pj = projPtsFor(s, tf);
     s.p.forEach((v, i) => {
         if (i) {
             const a = s.p[i - 1];
@@ -10546,11 +10619,17 @@ function strokeBox(cw, ch, tf) {
         if (e.x > x1) x1 = e.x;
         if (e.y > y1) y1 = e.y;
     };
+    // 投影は線の描画で済んでいるので、その結果を使い回す（全点を投影し直さない）。
     S.forEach((s) => {
         if (s.ob && !objectVisible(s.ob)) return;
-        for (let i = 0; i < s.p.length; i++) add(projPoint(s.p[i], tf));
+        const pj = projPtsFor(s, tf);
+        for (let i = 0; i < pj.length; i++) add(pj[i]);
     });
-    if (prev) prev.forEach((s) => { for (let i = 0; i < s.p.length; i++) add(projPoint(s.p[i], tf)); });
+    if (prev)
+        prev.forEach((s) => {
+            const pj = projPtsFor(s, tf);
+            for (let i = 0; i < pj.length; i++) add(pj[i]);
+        });
     if (!(x1 >= x0 && y1 >= y0)) return null;
     const pad = 3,
         bx = Math.max(0, Math.floor(x0) - pad),
@@ -10564,24 +10643,73 @@ function strokeBox(cw, ch, tf) {
 // カメラ・用紙・設定・オブジェクト・選択のどれかが変われば必ず作り直す。
 // 編集中の線（withCur）が乗るときは、内容が毎フレーム変わるので使わない。
 let lineLayerKey = null;
-function lineLayerSignature(view, cw, ch, tf, hidden) {
-    let k = (view ? 1 : 0) + "," + cw + "," + ch + "," + (tf ? tf.join(",") : "-") + "," + hidden + "," + Z + "," + ox + "," + oy + "," + (sel ?? "") + "|" + JSON.stringify(P) + "|";
-    const seen = new Set();
-    S.forEach((s) => {
-        const o = s && s.ob;
-        if (!o || !objectVisible(o) || seen.has(o.id)) return;
-        seen.add(o.id);
-        k += JSON.stringify(o) + ";";
-    });
-    return k;
+// 線の点の投影結果（画面座標・奥行き）を線ごとに覚えておく。
+// 投影はカメラ・用紙・ズーム・レンズが変わらなければ同じ値になるので、
+// カメラを固定したドラッグ中は毎フレームの投影計算（点数 × 三角関数）が丸ごと省ける。
+// 値は入力だけで決まるので、使い回しても結果は1画素も変わらない。
+const projPtsCache = new WeakMap();
+let projKeyValue = null;
+function projCameraKey(tf) {
+    return (
+        (tf ? tf.join(",") : Z + "," + ox + "," + oy) +
+        "|" + T + "|" + (orthView ? 1 : 0) + "|" + W + "," + H + "|" + JSON.stringify(P)
+    );
+}
+// 線1本ぶんの投影結果。同じ条件（カメラ・用紙・ズーム）なら前回の配列を使い回す。
+// 1本ぶんの投影結果。同じ条件なら前回の配列を使い回す。
+function projPtsFor(s, tf) {
+    const hit = projPtsCache.get(s);
+    if (!window.__noProjCache && hit && hit.key === projKeyValue) return hit.pj;
+    const pj = new Array(s.p.length);
+    for (let i = 0; i < s.p.length; i++) pj[i] = projPoint(s.p[i], tf);
+    projPtsCache.set(s, { key: projKeyValue, pj });
+    return pj;
+}
+// オブジェクトに属さない線（ペンで描いた線）の署名。
+// 層のキャッシュ判定は「オブジェクトの状態」だけで決めていたため、ペンで描いた線を
+// あとから動かしても層が古いまま残ることがあった（線が動かない／消えない）。
+// 座標と色・太さを小さな数値へ畳んで key に混ぜる。
+function freeLineSig() {
+    let h = 0,
+        n = 0;
+    for (let i = 0; i < S.length; i++) {
+        const s = S[i];
+        if (!s || s.ob) continue;
+        n++;
+        const p = s.p || [];
+        for (let k = 0; k < p.length; k++) {
+            const q = p[k];
+            h = (Math.imul(h, 31) + ((q[0] * 1000) | 0) + ((q[1] * 1000) | 0) * 7919 + ((q[2] * 1000) | 0) * 104729) | 0;
+        }
+        const c = s.c || "";
+        for (let k = 0; k < c.length; k++) h = (Math.imul(h, 131) + c.charCodeAt(k)) | 0;
+        h = (Math.imul(h, 131) + Math.round((Number(s.w) || 0) * 97)) | 0;
+    }
+    return n + ":" + h;
 }
 function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     // tf=書き出し用の変換 [拡大,0,0,拡大,ずれx,ずれy]
-    const cacheable = !window.__noLineCache && !withCur;
-    if (cacheable && LC && LC.width === cw && LC.height === ch && lineLayerKey) {
-        const k = lineLayerSignature(view, cw, ch, tf, hidden) + "|" + $("bin").checked;
-        if (k === lineLayerKey) return LC;
-        lineLayerKey = null;
+    // このフレームの投影キー（投影キャッシュの判定に使う）。
+    projKeyValue = projCameraKey(tf);
+    const binOn = $("bin").checked;
+    // オブジェクトごとの今の状態（層のキャッシュ判定に使う）。
+    const sigs = new Map();
+    S.forEach((s) => {
+        const o = s && s.ob;
+        if (!o || !objectVisible(o) || sigs.has(o.id)) return;
+        sigs.set(o.id, JSON.stringify(o));
+    });
+    // 「描いている途中の線」を混ぜるかどうか。cur も prev も無いときは混ざるものが無いので、
+    // 層の中身は withCur=false のときと同じになる。呼び出し側は面ONのとき常に withCur=true を
+    // 渡してくるため、この区別をしないと**面ONでは層のキャッシュが一切効かなくなる**（実測 -19ms/フレーム）。
+    const curEff = !!withCur && !!(cur || prev);
+    const camKey = projKeyValue + "|" + (hidden ? 1 : 0) + "|" + cw + "," + ch + "|" + (view ? 1 : 0) + "|" + (sel ?? "");
+    const key =
+        camKey + "|" + (curEff ? 1 : 0) + "|" + (binOn ? 1 : 0) + "|" + freeLineSig() + "|" +
+        [...sigs].map(([id, sg]) => id + ":" + sg).join(";");
+    // 同じ絵が続くときは層を作り直さない（層の描き直しは実測20〜30ms）。
+    if (!window.__noLineCache && LC && LC.width === cw && LC.height === ch && lineLayerKey && key === lineLayerKey) {
+        return LC;
     }
     if (!LC || LC.width !== cw || LC.height !== ch) {
         LC = document.createElement("canvas");
@@ -10602,19 +10730,24 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     });
     if (withCur) drawCur(x);
     if (withCur && prev) prev.forEach((s) => strokeW(x, s));
-    // 次回の比較用（二値化の有無も含める）。
-    if (cacheable) lineLayerKey = lineLayerSignature(view, cw, ch, tf, hidden) + "|" + $("bin").checked;
+    lineLayerKey = curEff ? null : key;
     if ($("bin").checked) {
         // 二値化：しきい値以上の画素だけ完全に不透明にする。
-        // 以前は毎フレーム canvas 全体（例 1600×900＝144万画素）を読み書きしていた。
-        // 実際に線がある範囲だけを処理すれば同じ結果で、はるかに軽い。
+        // 線がある範囲だけを処理すれば同じ結果（全体だと 100万画素以上を読み書きする）。
+        // ※「変わった範囲だけ二値化する」案（層を2枚に分ける）も試したが、
+        //   層をもう1枚経由すると GPU からの読み戻しが増えて、かえって遅かった。
         x.setTransform(1, 0, 0, 1, 0, 0);
         const box = strokeBox(cw, ch, tf || [Z, 0, 0, Z, ox, oy]);
         if (box) {
             const im = x.getImageData(box.x, box.y, box.w, box.h),
                 d = im.data,
                 t = P.bt;
-            for (let i = 3; i < d.length; i += 4) d[i] = d[i] < t ? 0 : 255;
+            // アルファだけを 0 / 255 に落とす（4バイトをまとめて見たほうが速い）。
+            const u32 = new Uint32Array(d.buffer, d.byteOffset, d.length >> 2);
+            for (let i = 0; i < u32.length; i++) {
+                const v = u32[i];
+                u32[i] = (v >>> 24) < t ? 0 : v | 0xff000000;
+            }
             x.putImageData(im, box.x, box.y);
         }
     }
@@ -10798,18 +10931,6 @@ function surfaceAlpha(o) {
 // 透明度が積み上がって乗算したように濃くなる（開口の奥の壁・柱の裏など）。
 // そこで不透明度ごとに1枚の層へ不透明で描き、最後にまとめて1回だけ合成する。
 let surfaceLayerCanvas = null;
-function surfaceLayerCanvasFor(w, h) {
-    // 毎フレーム大きさが変わると再確保が続くので、64px 単位に丸めて使い回す。
-    const step = 64,
-        cw = Math.max(step, Math.ceil(w / step) * step),
-        ch = Math.max(step, Math.ceil(h / step) * step);
-    if (!surfaceLayerCanvas) surfaceLayerCanvas = document.createElement("canvas");
-    if (surfaceLayerCanvas.width !== cw || surfaceLayerCanvas.height !== ch) {
-        surfaceLayerCanvas.width = cw;
-        surfaceLayerCanvas.height = ch;
-    }
-    return surfaceLayerCanvas;
-}
 // 面描画用の投影器を作る。
 // 従来は1頂点ごとに V.add() → V.nrm() → scr() → exportPoint() と配列を4個作り、
 // 三角関数もその都度計算していた（140オブジェクトで毎フレーム約17万個の配列）。
@@ -10880,9 +11001,96 @@ function blitSurfaceLayer(c, box) {
     c.drawImage(surfaceLayerCanvas, 0, 0, box.dw, box.dh, box.dx0, box.dy0, box.dw, box.dh);
     c.restore();
 }
-// 前回の層と条件が同じなら作り直さない（層の再ラスタライズは実測13ms）。
-// 動かしていないのに描き直す場面（ホバー・パネル操作・ギズモの当たり判定など）で効く。
-let surfaceLayerCache = null;
+// ===== 面の層（オフスクリーン）の作り直しを減らす =====
+// 面は「1枚の層に不透明で塗ってから、最後に半透明で1回だけ貼る」方式。
+// 三角形を1枚ずつ半透明で塗ると、重なった場所だけ濃くなる（乗算したように見える）ため
+// この形は変えられない。重いのは貼るほうではなく、層を塗り直すほう（実測 8ms）。
+// そこで3段階に分ける。
+//   1. 何も変わっていない          → 前回の層をそのまま貼る（実測 1.3ms）
+//   2. 1台だけ動いた／回った       → その1台の範囲（前フレームと今回の範囲の和）だけ塗り直す
+//   3. カメラが動いた／台数が変わった → 全部作り直す
+// 2 のときは、塗り直す範囲にかかる三角形を「全オブジェクトから」集めて奥から順に塗り、
+// その範囲にクリップする。範囲の外は前回の絵がそのまま残るので、仕上がりは全体を作り直した
+// ときと同じになる（＝見た目は変わらない）。
+let surfaceLayerCache = null; // 前回の層（key が同じなら貼るだけ）
+let surfState = null; // 台ごとの三角形と層の範囲（部分的な塗り直し用）
+
+function surfaceLayerNew(w, h) {
+    const cvNew = document.createElement("canvas");
+    cvNew.width = Math.max(1, Math.ceil(w));
+    cvNew.height = Math.max(1, Math.ceil(h));
+    return cvNew;
+}
+// 三角形の外接範囲（画面の拡大を掛ける前の座標）。
+function surfTriBox(t) {
+    const x0 = Math.min(t.x0, t.x1, t.x2),
+        x1 = Math.max(t.x0, t.x1, t.x2),
+        y0 = Math.min(t.y0, t.y1, t.y2),
+        y1 = Math.max(t.y0, t.y1, t.y2);
+    t.bx0 = x0;
+    t.by0 = y0;
+    t.bx1 = x1;
+    t.by1 = y1;
+}
+// 集めた三角形を層へ塗る。list は奥→手前の順に並べておくこと。
+// clip を渡すと、その範囲（拡大を掛ける前の座標）だけを塗る。
+function paintSurfaceTris(lc, list, clip) {
+    if (!list.length) return;
+    if (clip) {
+        lc.save();
+        lc.beginPath();
+        lc.rect(clip.x0, clip.y0, clip.x1 - clip.x0, clip.y1 - clip.y0);
+        lc.clip();
+    }
+    lc.lineJoin = "round";
+    lc.globalAlpha = 1; // 層の中は不透明。重なっても濃くならない。
+    lc.lineWidth = 1 / Math.max(0.25, Z);
+    // 色ごとにまとめる（同じ色は1本のパスへ）。
+    const byColor = new Map();
+    list.forEach((t) => {
+        let arr = byColor.get(t.color);
+        if (!arr) byColor.set(t.color, (arr = []));
+        arr.push(t);
+    });
+    byColor.forEach((arr, col) => {
+        // 1本のパスへまとめすぎると、三角形が数千枚あるアセットでパス構築が重くなる。
+        const chunk = 400;
+        lc.fillStyle = col;
+        lc.strokeStyle = col;
+        for (let i = 0; i < arr.length; i += chunk) {
+            const path = new Path2D(),
+                edge = new Path2D(),
+                end = Math.min(i + chunk, arr.length);
+            let hasEdge = false;
+            for (let k = i; k < end; k++) {
+                const t = arr[k],
+                    // 同じパスへ複数の三角形を入れると、巻き方向が逆の三角形どうしが
+                    // 打ち消し合って塗りが抜ける。全三角形の巻き方向をそろえてから1本にする。
+                    flip = t.area < 0,
+                    q1x = flip ? t.x2 : t.x1,
+                    q1y = flip ? t.y2 : t.y1,
+                    q2x = flip ? t.x1 : t.x2,
+                    q2y = flip ? t.y1 : t.y2;
+                // closePath() は fill() が自動で閉じるので呼ばない（1回 16µs かかる）。
+                path.moveTo(t.x0, t.y0);
+                path.lineTo(q1x, q1y);
+                path.lineTo(q2x, q2y);
+                // 縁取りは隣り合う三角形の継ぎ目が透けて細い筋に見えるのを防ぐため。
+                if (Math.abs(t.area) >= SURF_STROKE_AREA) {
+                    edge.moveTo(t.x0, t.y0);
+                    edge.lineTo(q1x, q1y);
+                    edge.lineTo(q2x, q2y);
+                    edge.lineTo(t.x0, t.y0);
+                    hasEdge = true;
+                }
+            }
+            lc.fill(path, "nonzero");
+            if (hasEdge) lc.stroke(edge);
+        }
+    });
+    if (clip) lc.restore();
+}
+
 function drawObjectSurfaces(c) {
     if (!P.surfaceMode) return;
     const objs = [],
@@ -10894,160 +11102,234 @@ function drawObjectSurfaces(c) {
         objs.push(o);
     });
     if (!objs.length) return;
-    const key =
-        "surf|" + W + "," + H + "," + Z + "," + ox + "," + oy + "|" +
-        JSON.stringify(P) + "|" + objs.map((o) => JSON.stringify(o)).join(";");
+    // カメラ（と用紙の設定）が同じで、台も同じなら「動いた台」だけ塗り直せる。
+    const cam = W + "," + H + "," + Z + "," + ox + "," + oy + "|" + JSON.stringify(P);
+    const sigs = objs.map((o) => o.id + ":" + JSON.stringify(o));
+    const ids = objs.map((o) => o.id).join(",");
+    const key = "surf|" + cam + "|" + sigs.join(";");
+    // 1. 何も変わっていない：前回の層をそのまま貼る。
     if (!window.__noSurfCache && surfaceLayerCache && surfaceLayerCache.key === key) {
         blitSurfaceLayer(c, surfaceLayerCache);
         return;
     }
-    surfaceLayerCache = null;
+    // 不透明度が台ごとに違うときは、層を分ける必要があるので部分的な塗り直しはしない。
+    let alphaOne = null;
+    for (let i = 0; i < objs.length; i++) {
+        const a = Number(surfaceAlpha(objs[i]).toFixed(3));
+        if (alphaOne === null) alphaOne = a;
+        else if (a !== alphaOne) {
+            alphaOne = null;
+            break;
+        }
+    }
+    const prev = surfState;
+    const partial =
+        !window.__noSurfFull &&
+        alphaOne !== null &&
+        !!prev &&
+        prev.cam === cam &&
+        prev.ids === ids &&
+        prev.alphaOne === alphaOne &&
+        !!surfaceLayerCanvas;
     const proj = surfaceProjector(),
-        tris = [];
-    objs.forEach((o) => {
+        next = { cam, ids, alphaOne, entries: new Map(), box: prev && partial ? { ...prev.box } : null },
+        changed = [];
+    objs.forEach((o, i) => {
+        const old = partial ? prev.entries.get(o.id) : null;
+        if (old && old.sig === sigs[i]) {
+            next.entries.set(o.id, old);
+            return;
+        }
         const list = surfaceTriangles(o);
-        if (!list.length) return;
-        // 色と不透明度はオブジェクトごとに1回だけ求める。
-        // 従来は三角形ごとに surfaceColor() / surfaceAlpha().toFixed(3) を呼んでいた。
-        const color = surfaceColor(o),
-            alpha = Number(surfaceAlpha(o).toFixed(3));
-        for (let i = 0; i < list.length; i++) {
-            const tr = list[i];
-            let a, b, e;
-            if (proj) {
-                if (!proj(tr[0], SURF_P0) || !proj(tr[1], SURF_P1) || !proj(tr[2], SURF_P2)) continue;
-                a = SURF_P0;
-                b = SURF_P1;
-                e = SURF_P2;
-            } else {
-                a = exportPoint(tr[0], SURF_IDENT);
-                b = exportPoint(tr[1], SURF_IDENT);
-                e = exportPoint(tr[2], SURF_IDENT);
-                if (!a || !b || !e) continue;
+        const ent = { sig: sigs[i], tris: null, box: null };
+        if (list && list.length) {
+            const color = surfaceColor(o),
+                alpha = Number(surfaceAlpha(o).toFixed(3)),
+                out = [];
+            let bx0 = Infinity,
+                by0 = Infinity,
+                bx1 = -Infinity,
+                by1 = -Infinity;
+            for (let k = 0; k < list.length; k++) {
+                const tr = list[k];
+                let a, b, e;
+                if (proj) {
+                    if (!proj(tr[0], SURF_P0) || !proj(tr[1], SURF_P1) || !proj(tr[2], SURF_P2)) continue;
+                    a = SURF_P0;
+                    b = SURF_P1;
+                    e = SURF_P2;
+                } else {
+                    a = exportPoint(tr[0], SURF_IDENT);
+                    b = exportPoint(tr[1], SURF_IDENT);
+                    e = exportPoint(tr[2], SURF_IDENT);
+                    if (!a || !b || !e) continue;
+                }
+                // 画面の外に丸ごと出ている三角形は塗らない。
+                if (
+                    (a.x < -SURF_CULL_PAD && b.x < -SURF_CULL_PAD && e.x < -SURF_CULL_PAD) ||
+                    (a.x > W + SURF_CULL_PAD && b.x > W + SURF_CULL_PAD && e.x > W + SURF_CULL_PAD) ||
+                    (a.y < -SURF_CULL_PAD && b.y < -SURF_CULL_PAD && e.y < -SURF_CULL_PAD) ||
+                    (a.y > H + SURF_CULL_PAD && b.y > H + SURF_CULL_PAD && e.y > H + SURF_CULL_PAD)
+                )
+                    continue;
+                const area = (b.x - a.x) * (e.y - a.y) - (b.y - a.y) * (e.x - a.x);
+                if (Math.abs(area) < SURF_MIN_AREA) continue;
+                const t = {
+                    color,
+                    alpha,
+                    depth: (a.depth + b.depth + e.depth) / 3,
+                    area,
+                    x0: a.x,
+                    y0: a.y,
+                    x1: b.x,
+                    y1: b.y,
+                    x2: e.x,
+                    y2: e.y,
+                };
+                surfTriBox(t);
+                if (t.bx0 < bx0) bx0 = t.bx0;
+                if (t.by0 < by0) by0 = t.by0;
+                if (t.bx1 > bx1) bx1 = t.bx1;
+                if (t.by1 > by1) by1 = t.by1;
+                out.push(t);
             }
-            // 画面の外に丸ごと出ている三角形は塗らない。
-            if (
-                (a.x < -SURF_CULL_PAD && b.x < -SURF_CULL_PAD && e.x < -SURF_CULL_PAD) ||
-                (a.x > W + SURF_CULL_PAD && b.x > W + SURF_CULL_PAD && e.x > W + SURF_CULL_PAD) ||
-                (a.y < -SURF_CULL_PAD && b.y < -SURF_CULL_PAD && e.y < -SURF_CULL_PAD) ||
-                (a.y > H + SURF_CULL_PAD && b.y > H + SURF_CULL_PAD && e.y > H + SURF_CULL_PAD)
-            )
-                continue;
-            const area = (b.x - a.x) * (e.y - a.y) - (b.y - a.y) * (e.x - a.x);
-            if (Math.abs(area) < SURF_MIN_AREA) continue;
-            tris.push({
-                color,
-                alpha,
-                depth: (a.depth + b.depth + e.depth) / 3,
-                area,
-                x0: a.x,
-                y0: a.y,
-                x1: b.x,
-                y1: b.y,
-                x2: e.x,
-                y2: e.y,
+            if (out.length) {
+                ent.tris = out;
+                ent.box = { x0: bx0, y0: by0, x1: bx1, y1: by1 };
+            }
+        }
+        next.entries.set(o.id, ent);
+        changed.push([ent.box, old ? old.box : null]);
+    });
+    // 奥から手前へ（半透明でもオブジェクト同士の重なりが自然になる）。
+    const sortTris = (list) => list.sort((a, b) => b.depth - a.depth);
+    const toScreen = (u0, v0, u1, v1, pad) => {
+        const dx0 = Math.max(0, Math.floor(u0 * Z + ox) - pad),
+            dy0 = Math.max(0, Math.floor(v0 * Z + oy) - pad),
+            dx1 = Math.min(W, Math.ceil(u1 * Z + ox) + pad),
+            dy1 = Math.min(H, Math.ceil(v1 * Z + oy) + pad);
+        return { dx0, dy0, dx1, dy1, dw: dx1 - dx0, dh: dy1 - dy0 };
+    };
+    // 3. 全部作り直す（カメラが動いた／最初の1回／不透明度が混在）。
+    const fullPaint = (unionBox) => {
+        const all = [];
+        next.entries.forEach((e) => {
+            if (e.tris) for (let i = 0; i < e.tris.length; i++) all.push(e.tris[i]);
+        });
+        sortTris(all);
+        const b = unionBox || { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+        if (!unionBox) {
+            all.forEach((t) => {
+                if (t.bx0 < b.x0) b.x0 = t.bx0;
+                if (t.by0 < b.y0) b.y0 = t.by0;
+                if (t.bx1 > b.x1) b.x1 = t.bx1;
+                if (t.by1 > b.y1) b.y1 = t.by1;
             });
         }
-    });
-    // 遠い面から描く簡易ペインター法。半透明の面でもオブジェクト同士の重なりが自然になる。
-    tris.sort((a, b) => b.depth - a.depth);
-    // 不透明度が同じ面をまとめる（通常は全部 0.22 なので1グループ）。
-    const groups = new Map(),
-        boxes = [];
-    tris.forEach((t) => {
-        if (!groups.has(t.alpha)) groups.set(t.alpha, []);
-        groups.get(t.alpha).push(t);
-    });
-    groups.forEach((list, alpha) => {
-        // 面が写っている範囲だけを層にする。画面全体を毎回消して重ねると重いため。
-        let minX = Infinity,
-            minY = Infinity,
-            maxX = -Infinity,
-            maxY = -Infinity;
-        list.forEach((t) => {
-            const ax = Math.min(t.x0, t.x1, t.x2),
-                bx = Math.max(t.x0, t.x1, t.x2),
-                ay = Math.min(t.y0, t.y1, t.y2),
-                by = Math.max(t.y0, t.y1, t.y2);
-            if (ax < minX) minX = ax;
-            if (ay < minY) minY = ay;
-            if (bx > maxX) maxX = bx;
-            if (by > maxY) maxY = by;
+        if (!Number.isFinite(b.x0) || !Number.isFinite(b.y0)) return null;
+        const r = toScreen(b.x0, b.y0, b.x1, b.y1, 2);
+        if (r.dw <= 0 || r.dh <= 0) return null;
+        // 層は作り直す（中身が残っていると前の絵が透ける）。
+        surfaceLayerCanvas = surfaceLayerNew(r.dw, r.dh);
+        const lc = surfaceLayerCanvas.getContext("2d");
+        lc.setTransform(Z, 0, 0, Z, ox - r.dx0, oy - r.dy0);
+        paintSurfaceTris(lc, all, null);
+        const box = { alpha: alphaOne, dx0: r.dx0, dy0: r.dy0, dw: r.dw, dh: r.dh };
+        next.box = { x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, ...box };
+        return box;
+    };
+    if (!partial) {
+        const box = fullPaint(null);
+        if (box) {
+            blitSurfaceLayer(c, box);
+            surfState = next;
+            if (alphaOne !== null) surfaceLayerCache = { key, ...box };
+            else surfaceLayerCache = null;
+        }
+        return;
+    }
+    // 2. 動いた台の範囲だけ塗り直す。
+    // 前フレームでその台が写っていた範囲と、今回写る範囲の両方を消す必要がある
+    // （回転・移動では範囲が横にも広がる）。
+    let ux0 = Infinity,
+        uy0 = Infinity,
+        ux1 = -Infinity,
+        uy1 = -Infinity;
+    changed.forEach(([nb, ob]) => {
+        [nb, ob].forEach((b) => {
+            if (!b) return;
+            if (b.x0 < ux0) ux0 = b.x0;
+            if (b.y0 < uy0) uy0 = b.y0;
+            if (b.x1 > ux1) ux1 = b.x1;
+            if (b.y1 > uy1) uy1 = b.y1;
         });
-        if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
-        const dx0 = Math.max(0, Math.floor(minX * Z + ox) - 2),
-            dy0 = Math.max(0, Math.floor(minY * Z + oy) - 2),
-            dx1 = Math.min(W, Math.ceil(maxX * Z + ox) + 2),
-            dy1 = Math.min(H, Math.ceil(maxY * Z + oy) + 2),
-            dw = dx1 - dx0,
-            dh = dy1 - dy0;
-        if (dw <= 0 || dh <= 0) return;
-        const layer = surfaceLayerCanvasFor(dw, dh),
-            lc = layer.getContext("2d");
-        lc.setTransform(1, 0, 0, 1, 0, 0);
-        lc.clearRect(0, 0, dw, dh);
-        // 本番のキャンバスと同じズーム／移動を掛け、切り出した範囲の左上が原点に来るようにする。
-        lc.setTransform(Z, 0, 0, Z, ox - dx0, oy - dy0);
-        lc.lineJoin = "round";
-        lc.globalAlpha = 1; // 層の中は不透明。重なっても濃くならない。
-        // 色ごとに1本のパスへまとめてから塗る。三角形ごとに fill すると
-        // パス生成の回数が面の数だけ増えて重いので、同じ色はまとめる。
-        // 塗ったあと同色で縁をなぞるのは、隣り合う三角形の継ぎ目が
-        // 透けて細い筋に見えるのを防ぐため（塗りと同色なので線には見えない）。
-        const byColor = new Map();
-        list.forEach((t) => {
-            if (!byColor.has(t.color)) byColor.set(t.color, []);
-            byColor.get(t.color).push(t);
-        });
-        byColor.forEach((trisOfColor, col) => {
-            // 1本のパスへまとめすぎると、三角形が数千枚あるアセット（球・ベベル階層など）で
-            // パス構築が重くなる。400枚ずつに区切って塗る。
-            const chunk = 400;
-            lc.fillStyle = col;
-            lc.strokeStyle = col;
-            // 継ぎ目の隙間を埋める縁取りは「画面上で1px」になる太さにする。
-            // 変換に Z が掛かっているので、1/Z で1pxになる。
-            lc.lineWidth = 1 / Math.max(0.25, Z);
-            for (let i = 0; i < trisOfColor.length; i += chunk) {
-                const path = new Path2D(),
-                    edge = new Path2D(),
-                    end = Math.min(i + chunk, trisOfColor.length);
-                let hasEdge = false;
-                for (let k = i; k < end; k++) {
-                    const t = trisOfColor[k],
-                        // 同じパスへ複数の三角形を入れると、巻き方向が逆の三角形どうしが
-                        // 打ち消し合って塗りが抜ける（裏表の面が重なる立体で顕著）。
-                        // 全三角形の巻き方向をそろえてから1本のパスにする。
-                        flip = t.area < 0,
-                        q1x = flip ? t.x2 : t.x1,
-                        q1y = flip ? t.y2 : t.y1,
-                        q2x = flip ? t.x1 : t.x2,
-                        q2y = flip ? t.y1 : t.y2;
-                    // closePath() は fill() が自動で閉じるので呼ばない。
-                    // Chromium の Path2D.closePath() は1回あたり約16µsかかり、
-                    // 1万枚の三角形で200ms以上を占めていた（実測）。
-                    path.moveTo(t.x0, t.y0);
-                    path.lineTo(q1x, q1y);
-                    path.lineTo(q2x, q2y);
-                    // 縁取りは辺を描くので、閉じる辺は lineTo で戻す（closePath は使わない）。
-                    if (Math.abs(t.area) >= SURF_STROKE_AREA) {
-                        edge.moveTo(t.x0, t.y0);
-                        edge.lineTo(q1x, q1y);
-                        edge.lineTo(q2x, q2y);
-                        edge.lineTo(t.x0, t.y0);
-                        hasEdge = true;
-                    }
-                }
-                lc.fill(path, "nonzero");
-                if (hasEdge) lc.stroke(edge);
-            }
-        });
-        const box = { alpha, dx0, dy0, dw, dh };
-        blitSurfaceLayer(c, box);
-        boxes.push(box);
     });
-    // 層が1枚だけ（通常のケース）なら、そのまま次回使い回せる。
-    if (boxes.length === 1) surfaceLayerCache = { key, ...boxes[0] };
+    const cur = next.box;
+    if (!Number.isFinite(ux0) || !cur) {
+        const box = fullPaint(null);
+        if (box) {
+            blitSurfaceLayer(c, box);
+            surfState = next;
+            surfaceLayerCache = { key, ...box };
+        }
+        return;
+    }
+    const dr = toScreen(ux0, uy0, ux1, uy1, 2);
+    if (dr.dw <= 0 || dr.dh <= 0) {
+        // 画面の外だけの変化：層はそのまま。
+        blitSurfaceLayer(c, cur);
+        surfState = next;
+        surfaceLayerCache = { key, ...cur };
+        return;
+    }
+    // 層の外へはみ出すなら、層を広げて中身を引き継ぐ（作り直さない）。
+    const need = { x0: Math.min(cur.x0, dr.dx0), y0: Math.min(cur.y0, dr.dy0) },
+        needX1 = Math.max(cur.dx0 + cur.dw, dr.dx1),
+        needY1 = Math.max(cur.dy0 + cur.dh, dr.dy1);
+    if (need.x0 !== cur.dx0 || need.y0 !== cur.dy0 || needX1 !== cur.dx0 + cur.dw || needY1 !== cur.dy0 + cur.dh) {
+        // 少し余白を持たせて広げる（毎フレーム広げ直さないため）。
+        const pad = 96,
+            nx0 = Math.max(0, need.x0 - pad),
+            ny0 = Math.max(0, need.y0 - pad),
+            nx1 = Math.min(W, needX1 + pad),
+            ny1 = Math.min(H, needY1 + pad),
+            grown = surfaceLayerNew(nx1 - nx0, ny1 - ny0);
+        grown.getContext("2d").drawImage(surfaceLayerCanvas, cur.dx0 - nx0, cur.dy0 - ny0);
+        surfaceLayerCanvas = grown;
+        cur.dx0 = nx0;
+        cur.dy0 = ny0;
+        cur.dw = nx1 - nx0;
+        cur.dh = ny1 - ny0;
+        cur.x0 = nx0 / Z - ox / Z;
+        cur.y0 = ny0 / Z - oy / Z;
+        cur.x1 = nx1 / Z - ox / Z;
+        cur.y1 = ny1 / Z - oy / Z;
+    }
+    const lc = surfaceLayerCanvas.getContext("2d");
+    // 消す（拡大の影響を受けないよう、いったん等倍に戻してから）。
+    lc.save();
+    lc.setTransform(1, 0, 0, 1, 0, 0);
+    lc.clearRect(dr.dx0 - cur.dx0, dr.dy0 - cur.dy0, dr.dw, dr.dh);
+    lc.restore();
+    // 範囲にかかる三角形を全台から集め、奥から順に塗る（範囲にクリップする）。
+    const clipU = { x0: ux0 - 1 / Z, y0: uy0 - 1 / Z, x1: ux1 + 1 / Z, y1: uy1 + 1 / Z },
+        near = [];
+    next.entries.forEach((e) => {
+        if (!e.tris) return;
+        for (let i = 0; i < e.tris.length; i++) {
+            const t = e.tris[i];
+            if (t.bx0 > clipU.x1 || t.bx1 < clipU.x0 || t.by0 > clipU.y1 || t.by1 < clipU.y0) continue;
+            near.push(t);
+        }
+    });
+    sortTris(near);
+    lc.setTransform(Z, 0, 0, Z, ox - cur.dx0, oy - cur.dy0);
+    paintSurfaceTris(lc, near, clipU);
+    const box = { alpha: cur.alpha, dx0: cur.dx0, dy0: cur.dy0, dw: cur.dw, dh: cur.dh };
+    blitSurfaceLayer(c, box);
+    next.box = cur;
+    surfState = next;
+    surfaceLayerCache = { key, ...box };
 }
 // アセットを置いた直後の1回目の描画は、キャンバスの再ラスタライズが間に合わず
 // 輪郭線が欠けて見えることがある（クリックして描き直すと出る）。
@@ -11265,7 +11547,7 @@ $("zr").onclick = () => {
     Z = 1;
     ox = oy = 0;
     updZ();
-    render();
+    renderSoon();
 };
 cv.addEventListener(
     "wheel",
@@ -11443,7 +11725,7 @@ function stepErase(a, b) {
         n = Math.max(1, Math.ceil(d / (P.ew / 2)));
     for (let i = 1; i <= n; i++) eraseAt({ x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n });
 }
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// clamp() は engine-lib.js の共通ライブラリにある（CG.clamp と同じもの）。
 // 間取りのドラッグ状態はstudio-ui.jsのIIFE内で管理する。
 // 分割読み込みでは別スコープになるため、window経由の小さな橋を使う。
 const getCityFloorPlanDrag = () => window.cityFloorPlanGetDrag?.() || null;
@@ -11474,7 +11756,7 @@ function armBoxPending(start, pointerId, source = "canvas", meta = {}) {
         if (source === "floor") setCityFloorPlanDrag(null);
         boxSelect = { pointerId, start: { ...pending.start }, end: { ...pending.start }, source };
         clearSelection();
-        render();
+        renderSoon();
     }, 360);
 }
 // 戻り値: pending / cancel / floorPan。floorPanのときだけ従来の表示パンへ引き継ぐ。
@@ -11553,7 +11835,7 @@ function finishBoxSelection(end) {
     tool = "edit";
     setMode("draw");
     syncSel();
-    render();
+    renderSoon();
 }
 function drawBoxSelection(c) {
     if (!boxSelect) return;
@@ -11636,7 +11918,7 @@ function endBoxPointer(e, commit) {
     try {
         if (cv.hasPointerCapture?.(pointerId)) cv.releasePointerCapture(pointerId);
     } catch (err) {}
-    if (!commit) render();
+    if (!commit) renderSoon();
     return true;
 }
 function abortAllBoxPointers() {
@@ -11838,19 +12120,19 @@ cv.onpointerdown = (e) => {
             } else armBoxPending(p, e.pointerId, "canvas");
         }
         syncSel();
-        render();
+        renderSoon();
         return;
     }
     if (act === "draw" && tool === "border") {
         bd = true;
         CR = { x0: clamp(p.x, 0, W), y0: clamp(p.y, 0, H), x1: clamp(p.x, 0, W), y1: clamp(p.y, 0, H) };
-        render();
+        renderSoon();
         return;
     }
     if (act === "draw" && tool === "erase") {
         er = { base: S, last: p };
         stepErase(p, p);
-        render();
+        renderSoon();
         return;
     } // 消しゴム
     const sn = $("snap").value;
@@ -11888,7 +12170,7 @@ cv.onpointermove = (e) => {
         // 途中でロックした場合も、視点は記録した位置へ戻す。
         drag = null;
         enforceCameraLock();
-        render();
+        renderSoon();
         return;
     }
     if (drag) {
@@ -11958,7 +12240,7 @@ cv.onpointermove = (e) => {
             cur.p = [a, { x: a.x + u.x * t, y: a.y + u.y * t }];
         } // 定規の線上に投影
     }
-    render();
+    renderSoon();
 };
 cv.onpointerup = cv.onpointercancel = (e) => {
     if (e.pointerType === "touch") {
@@ -12027,7 +12309,7 @@ cv.onpointerup = cv.onpointercancel = (e) => {
         RD = [];
     }
     cur = null;
-    render();
+    renderSoon();
 }; // 向きに変換して保存
 
 // iPad Safariでキャンバス外へ指／ペンを離した場合の一般操作用保険。
@@ -12085,14 +12367,14 @@ const undo = () => {
         if (HU.length) {
             RD.push(S);
             S = HU.pop();
-            render();
+            renderSoon();
         }
     },
     redo = () => {
         if (RD.length) {
             HU.push(S);
             S = RD.pop();
-            render();
+            renderSoon();
         }
     };
 $("undo").onclick = undo;
@@ -12104,7 +12386,7 @@ $("clr").onclick = () => {
         // ロック中の線は残す（解除しない限り消えない、という約束を守る）。
         S = lockedLines;
         RD = [];
-        render();
+        renderSoon();
     }
 };
 addEventListener("keydown", (e) => {
@@ -12202,7 +12484,7 @@ addEventListener("keydown", (e) => {
     else if (e.key === "ArrowDown") setP("pitch", clamp(P.pitch - d, -89, 89));
     else return;
     sync();
-    render();
+    renderSoon();
 });
 
 // 書き出しメニューは上部バーの横スクロール領域に隠れないよう、body直下へ移動して表示する。
@@ -12228,7 +12510,7 @@ if (exportLineWidthInput)
         if (mainWidth && document.activeElement !== mainWidth) mainWidth.value = value.toFixed(1);
         const slider = $("pw");
         if (slider) slider.value = value;
-        render();
+        renderSoon();
     };
 syncExportLineWidth();
 exportToggle.onclick = (e) => {
@@ -13794,6 +14076,43 @@ function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
             lineA(o, [v[3], v[7]], color),
         ];
     return out;
+}
+// 上下の面の稜線を描かない箱（縦の棒専用）。
+// 横桟と横桟に挟まれた棒は、上端と下端が必ず横桟の中に隠れる。面ONのときは
+// 隠線処理で消えるが、面OFFの線画では「見えない線」が残って線が混む。
+// そこで最初から面を描かず、縦の4本だけを出す（線画の本数を減らす）。
+function wireBoxVA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
+    const x = w / 2,
+        y = d / 2;
+    return [
+        lineA(o, [[cx - x, cy - y, z0], [cx - x, cy - y, z1]], color),
+        lineA(o, [[cx + x, cy - y, z0], [cx + x, cy - y, z1]], color),
+        lineA(o, [[cx + x, cy + y, z0], [cx + x, cy + y, z1]], color),
+        lineA(o, [[cx - x, cy + y, z0], [cx - x, cy + y, z1]], color),
+    ];
+}
+// 上面の稜線を描かない箱（柱専用）。
+// 柱は上の横桟と同じ高さで終わるため、上端の四角は横桟の上面と重なって
+// 二重の線になる。面ONでも面OFFでも見え方は変わらないので描かない。
+function wireBoxNoTopA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
+    const x = w / 2,
+        y = d / 2;
+    return [
+        polyA(
+            o,
+            [
+                [cx - x, cy - y, z0],
+                [cx + x, cy - y, z0],
+                [cx + x, cy + y, z0],
+                [cx - x, cy + y, z0],
+            ],
+            color,
+        ),
+        lineA(o, [[cx - x, cy - y, z0], [cx - x, cy - y, z1]], color),
+        lineA(o, [[cx + x, cy - y, z0], [cx + x, cy - y, z1]], color),
+        lineA(o, [[cx + x, cy + y, z0], [cx + x, cy + y, z1]], color),
+        lineA(o, [[cx - x, cy + y, z0], [cx - x, cy + y, z1]], color),
+    ];
 }
 // ===== 5. パスパイプ用のベクトル計算 =====
 // パスパイプは制御点を丸めて中心線を作り、その周囲に円形断面を並べる。
@@ -15480,7 +15799,8 @@ function linesRailing(ctx) {
         footW = post * 1.5;
     // 1) 柱（床から手すりの上端まで）と、足元の少し広い板。
     posts.forEach(({ x, y }) => {
-        out.push(...wireBoxA(o, x, y, post, post, 0, h, c));
+        // 柱の上端は横桟の上面と同じ高さなので、上の四角は描かない（重なった線を減らす）。
+        out.push(...wireBoxNoTopA(o, x, y, post, post, 0, h, c));
         out.push(
             polyA(
                 o,
@@ -15513,8 +15833,9 @@ function linesRailing(ctx) {
         out.push(...wireBoxA(o, cx, cy, bw, bd, zTop0, h, c));
         out.push(...wireBoxA(o, cx, cy, bw, bd, bottom, zBot1, c));
         // 縦の棒は上下の横桟の間だけ（横桟を突き抜けない）。
+        // 縦の棒は上下の横桟に挟まれているので、上下の面は描かない（線画の本数を減らす）。
         if (zTop0 - zBot1 > 0.001)
-            r.bars.forEach(([bx, by]) => out.push(...wireBoxA(o, bx, by, barT, barT, zBot1, zTop0, c)));
+            r.bars.forEach(([bx, by]) => out.push(...wireBoxVA(o, bx, by, barT, barT, zBot1, zTop0, c)));
     });
 }
 
