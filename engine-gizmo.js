@@ -2444,6 +2444,8 @@ function specialGizmo(o) {
                         ? stallGizmo(o)
                       : o && o.type === "asset" && o.asset === "stool"
                         ? stoolGizmo(o)
+                      : o && o.type === "asset" && o.asset === "outdoorUnit"
+                        ? outdoorUnitGizmo(o)
                     : o && o.type === "asset" && o.asset === "sign"
                       ? signGizmo(o)
                       : o && o.type === "asset" && o.asset === "cone"
@@ -2455,6 +2457,49 @@ function specialGizmo(o) {
                             : null;
     return normalizeScreenHandles(sg);
 }
+// ===== 室外機（ASSET_KIT の outdoorUnit）=====
+// 形を決める値はここに1か所だけ置く。線画・面・ハンドルがすべてこの値を使うので、
+// 幅を変えたときに「円だけ違う位置」になることがない。
+function outdoorUnitGeometry(o) {
+    const num = (v, dflt) => (Number.isFinite(Number(v)) && Number(v) !== 0 ? Number(v) : dflt),
+        clampN = (v, lo, hi, dflt) => Math.max(lo, Math.min(hi, Number.isFinite(Number(v)) ? Number(v) : dflt)),
+        W = Math.max(0.3, Math.abs(2 * num(o?.ra, 0.43))),
+        D = Math.max(0.12, Math.abs(2 * num(o?.rb, 0.17))),
+        H = Math.max(0.25, Math.abs(num(o?.h, 0.66))),
+        legH = Math.max(0, Math.min(H * 0.45, clampN(o?.ouLegH, 0, H * 0.45, 0.12))),
+        bodyH = Math.max(0.1, H - legH),
+        bodyCz = legH + bodyH / 2,
+        fanRatio = clampN(o?.ouFanRatio, 0.2, 0.95, 0.78),
+        fanR = Math.max(0.04, (bodyH / 2) * fanRatio),
+        // ファンの左右位置は「実寸（m）」。幅を変えても円の位置は動かない。
+        // 動かせる範囲は、円が胴からはみ出さない所まで。
+        limit = Math.max(0, W / 2 - fanR),
+        fanX = Math.max(-limit, Math.min(limit, clampN(o?.ouFanX, -limit, limit, -0.1))),
+        corner = Math.max(0.005, Math.min(W, H) * 0.12);
+    return { W, D, H, legH, bodyH, bodyCz, fanR, fanX, limit, corner };
+}
+// 室外機の専用ハンドル：前面の丸いファンを左右にだけ動かす。
+function outdoorUnitGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "outdoorUnit") return null;
+    const g = outdoorUnitGeometry(o),
+        front = -g.D / 2 - 0.02,
+        // ハンドルは円のすぐ外（右）に置き、右へ引くと円が右へ動く（上下には動かない）。
+        fanHandle = screenHandle(
+            o,
+            "outdoor-fan-x",
+            [g.fanX, front, g.bodyCz],
+            [g.fanX + g.fanR + 0.05, front, g.bodyCz],
+            [g.fanX + g.fanR + 0.35, front, g.bodyCz],
+            g.fanX,
+            -g.limit,
+            g.limit,
+            "ファンの左右",
+            { x: 1, y: 0 },
+            "#7dd8ff",
+        );
+    return { o, C3: L2W(o, 0, 0, g.bodyCz), handles: { fanX: fanHandle } };
+}
+
 // ===== 画面上のラベル（白い用紙でも読める共通表示） =====
 // 以前はハンドルの名前と数値を、ハンドルと同じ明るい色（#fff0b0 / #ffd0a8 など）で
 // そのまま描いていた。背景が白い用紙になった今、その色はほぼ背景に溶けて読めない。
@@ -2863,6 +2908,36 @@ function drawSpecialGizmo(c, o) {
             c.setLineDash([]);
             sq(h.s, h.color || "#ff9f68");
             gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}`, h.s.x + 9 / Z, h.s.y - 8 / Z, h.color || "#ff9f68", 12);
+        }
+    } else if (sg.o.asset === "outdoorUnit") {
+        // ファンの左右位置ハンドル1本。左右の矢印で「横にだけ動く」ことを示す。
+        const h = sg.handles?.fanX;
+        if (h?.s?.ok) {
+            const col = h.color || "#7dd8ff";
+            c.strokeStyle = col;
+            c.lineWidth = 1.4 / Z;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.beginPath();
+            if (h.anchor?.ok) {
+                c.moveTo(h.anchor.x, h.anchor.y);
+                c.lineTo(h.s.x, h.s.y);
+            }
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, col, false);
+            // 左右の矢じり
+            c.beginPath();
+            c.moveTo(h.s.x - 13 / Z, h.s.y);
+            c.lineTo(h.s.x - 7 / Z, h.s.y - 4 / Z);
+            c.lineTo(h.s.x - 7 / Z, h.s.y + 4 / Z);
+            c.closePath();
+            c.moveTo(h.s.x + 13 / Z, h.s.y);
+            c.lineTo(h.s.x + 7 / Z, h.s.y - 4 / Z);
+            c.lineTo(h.s.x + 7 / Z, h.s.y + 4 / Z);
+            c.closePath();
+            c.fillStyle = col;
+            c.fill();
+            gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}m`, h.s.x + 16 / Z, h.s.y - 8 / Z, col, 12);
         }
     } else if (sg.o.asset === "stool") {
         // 半径（外向き）と高さ（上下）の6本を同じ見た目で描く。
@@ -3303,7 +3378,16 @@ function gizmo() {
     if (o.type === "compound") return compoundGizmo(o);
     // 積層建物も3Dの移動・回転ギズモは表示する。ただし、
     // ra/rb/hへ書き込む汎用の面ハンドルは使わず、寸法編集は階別ギズモへ渡す。
-    const stacked = isStackedBuildingAsset(o),
+    // ASSET_KIT で作ったアセットは、どれも「高さを持つ立体」として扱う。
+    // （以前は下の solid 一覧へ種類を書き足す必要があり、新しく足したアセット
+    //   ＝自販機・店先・電光看板などが上下の面ハンドルを出せず、3Dで高さを
+    //   編集できなかった。2026-11-03）
+    const kitAsset =
+            o.type === "asset" &&
+            typeof ASSET_KIT !== "undefined" &&
+            typeof ASSET_KIT.kinds === "function" &&
+            ASSET_KIT.kinds().includes(o.asset),
+        stacked = isStackedBuildingAsset(o),
         [iu, iv] = PL[o.k],
         cs = Math.cos(o.rot * DG),
         sn = Math.sin(o.rot * DG),
@@ -3343,6 +3427,7 @@ function gizmo() {
                     o.asset === "ramp" ||
                     o.asset === "windowGrid" ||
                     o.asset === "crosswalk" ||
+                    kitAsset ||
                     isStackedBuildingAsset(o))),
         [z0, z1] = outerZRange(o),
         zc = solid ? (z0 + z1) / 2 : 0;
@@ -3855,7 +3940,8 @@ function hitGizmo(p) {
             // 丸椅子の6つ（3つの半径と3つの高さ）も、同じ規則で掴めるようにする。
             active.asset === "stall" ||
             active.asset === "stool" ||
-            active.asset === "railing"
+            active.asset === "railing" ||
+            active.asset === "outdoorUnit"
         ) {
             const nearest = nearestHandleOf(Object.values(special.handles || {}), p, R),
                 hit = handleOrFace(nearest, (q) => ({
@@ -4442,6 +4528,7 @@ function beginGizmo(h, p) {
         h.t.startsWith("stall-") ||
         h.t.startsWith("stool-") ||
         h.t.startsWith("railing-") ||
+        h.t === "outdoor-fan-x" ||
         h.t === "circle-radius" ||
         h.t === "wallSideSign-beveled-offset" ||
         h.t === "wallSideSign-bracket-length" ||
@@ -4641,6 +4728,13 @@ function dragEdit(p, freeRotation = false) {
             // 本数は整数。ほかの2つは 0.001 刻みで扱う（数値欄と同じ桁）。
             num = h.integer ? Math.round(value) : Math.round(value * 1000) / 1000;
         if (key) patch = { [key]: num };
+    } else if (ed.t === "outdoor-fan-x") {
+        // 室外機のファンの左右位置。実寸（m）なので、幅を変えても円は動かない。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { ouFanX: Math.round(value * 1000) / 1000 };
     } else if (ed.t === "balcony-thickness" || ed.t === "uWall-thickness") {
         // ベランダ／コの字壁の厚さ。ドラッグ量は画面の向きに投影済み。
         const h = ed.sign,

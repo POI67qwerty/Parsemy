@@ -166,6 +166,12 @@ function exportSurfaceTriangles(o) {
         compoundPartsAt(o).forEach((part) => out.push(...exportSurfaceTriangles(part)));
         return out;
     }
+    // ASSET_KIT（asset-kit.js）で作ったアセットは、形の記述が1か所にある。
+    // 面はその記述から作られるので、ここの if 連鎖へ形を書き足す必要はない。
+    if (typeof assetKitTriangles === "function") {
+        const kit = assetKitTriangles(o);
+        if (kit && kit.length) return kit;
+    }
     const w = Math.abs(2 * Number(o.ra) || 1),
         d = Math.abs(2 * Number(o.rb) || 1),
         h = Math.max(0.01, Math.abs(Number(o.h) || 0.01));
@@ -524,34 +530,7 @@ function exportSurfaceTriangles(o) {
         });
         return out;
     }
-    if (kind === "wallSign" && typeof wallSignParams === "function") {
-        const params = wallSignParams(o),
-            face = wallSignFacePoints(params),
-            half = params.thickness * 0.5;
-        // 板の表裏は凹みの無い凸多角形なので耳切りで分割し、
-        // 側面は輪郭の辺を板厚方向へつないだ4角形にする。
-        polygonEarClip(face).forEach(([a, b, c]) => {
-            tri([a[0], -half, a[1]], [b[0], -half, b[1]], [c[0], -half, c[1]]);
-            tri([a[0], half, a[1]], [c[0], half, c[1]], [b[0], half, b[1]]);
-        });
-        for (let i = 0; i < face.length; i++) {
-            const a = face[i],
-                b = face[(i + 1) % face.length];
-            quad([a[0], -half, a[1]], [b[0], -half, b[1]], [b[0], half, b[1]], [a[0], half, a[1]]);
-        }
-        // 取付金具は板の左側面から横へ伸びる単純な直方体。
-        wallSignBrackets(params).forEach((bracket) => {
-            const z0 = bracket.z - bracket.h * 0.5,
-                z1 = bracket.z + bracket.h * 0.5;
-            quad([bracket.x0, bracket.y0, z0], [bracket.x1, bracket.y0, z0], [bracket.x1, bracket.y0, z1], [bracket.x0, bracket.y0, z1]);
-            quad([bracket.x0, bracket.y1, z1], [bracket.x1, bracket.y1, z1], [bracket.x1, bracket.y1, z0], [bracket.x0, bracket.y1, z0]);
-            quad([bracket.x0, bracket.y0, z1], [bracket.x1, bracket.y0, z1], [bracket.x1, bracket.y1, z1], [bracket.x0, bracket.y1, z1]);
-            quad([bracket.x0, bracket.y1, z0], [bracket.x1, bracket.y1, z0], [bracket.x1, bracket.y0, z0], [bracket.x0, bracket.y0, z0]);
-            quad([bracket.x0, bracket.y0, z0], [bracket.x0, bracket.y1, z0], [bracket.x0, bracket.y1, z1], [bracket.x0, bracket.y0, z1]);
-            quad([bracket.x1, bracket.y0, z1], [bracket.x1, bracket.y1, z1], [bracket.x1, bracket.y1, z0], [bracket.x1, bracket.y0, z0]);
-        });
-        return out;
-    }
+    // wallSign の面は ASSET_KIT（asset-kit-assets.js）の部品から作る。
     if (kind === "cornerCutBox" && typeof cornerCutFootprint === "function") {
         const opening = typeof cornerCutOpeningParams === "function" ? cornerCutOpeningParams(o) : null,
             z0 = 0,
@@ -638,96 +617,9 @@ function exportSurfaceTriangles(o) {
         });
         return out;
     }
-    if (kind === "balcony") {
-        const g = balconyGeometry(o);
-        // 床スラブと腰壁を別の箱として作る（厚さは共通）。
-        boxAt(0, 0, g.w, g.d, 0, g.thickness);
-        if (g.frontRail) boxAt(0, -g.d / 2 + g.thickness / 2, g.w, g.thickness, g.thickness, g.thickness + g.railH);
-        if (g.sideRail) {
-            // 左右の腰壁は前面の腰壁と角で重ならないよう、前面の後ろ側から詰める
-            //（重ねると半透明の塗りが二重になって濃くなる）。
-            const sideY0 = g.frontRail ? -g.d / 2 + g.thickness : -g.d / 2,
-                sideD = g.d / 2 - sideY0;
-            boxAt(-g.w / 2 + g.thickness / 2, (sideY0 + g.d / 2) / 2, g.thickness, sideD, g.thickness, g.thickness + g.railH);
-            boxAt(g.w / 2 - g.thickness / 2, (sideY0 + g.d / 2) / 2, g.thickness, sideD, g.thickness, g.thickness + g.railH);
-        }
-        return out;
-    }
-    if (kind === "uWall") {
-        const g = uWallGeometry(o);
-        // コの字（断面）を奥行きへ押し出した形＝屋根が上・左右が側壁。
-        // 面は重ならないように分ける（屋根は側壁の上に載せる）。
-        // 重ねると半透明の塗りが二重になって濃くなるため。
-        boxAt(0, 0, g.w, g.d, g.h - g.thickness, g.h);
-        boxAt(-g.w / 2 + g.thickness / 2, 0, g.thickness, g.d, 0, g.h - g.thickness);
-        boxAt(g.w / 2 - g.thickness / 2, 0, g.thickness, g.d, 0, g.h - g.thickness);
-        return out;
-    }
-    if (kind === "stall") {
-        const g = stallGeometry(o),
-            hd = g.d / 2,
-            // 奥の壁・左右の壁（奥の壁の手前まで）・カウンター・屋根。
-            // どの箱も重ならないので、半透明の塗りが二重になって濃くならない。
-            sideD = g.d - g.t,
-            sideY = (hd - g.t + -hd) / 2;
-        boxAt(0, hd - g.t / 2, g.w, g.t, 0, g.roofBottom);
-        boxAt(-g.w / 2 + g.t / 2, sideY, g.t, sideD, 0, g.roofBottom);
-        boxAt(g.w / 2 - g.t / 2, sideY, g.t, sideD, 0, g.roofBottom);
-        boxAt(0, -hd - g.cd / 2, g.w, g.cd, 0, g.ch);
-        // 屋根は前へ張り出すので、中心は奥行き方向に ro/2 だけ手前へずれる。
-        boxAt(0, -g.ro / 2, g.w, g.d + g.ro, g.roofBottom, g.h);
-        return out;
-    }
-    if (kind === "railing") {
-        const g = railingGeometry(o),
-            // 線画（linesRailing）と同じ部材を、同じ寸法で箱にする。
-            // 「包絡箱を1枚塗る」だけだと、実際の形の外側（棒と棒の間）まで
-            // 塗ってしまうので、部材ごとに分ける。
-            zTop0 = Math.max(0, g.h - g.t),
-            zBot1 = Math.min(g.h - g.t, g.bottom + g.t),
-            footH = Math.min(g.h, Math.min(0.03, Math.max(0.012, g.bottom * 0.35))),
-            footW = g.post * 1.5,
-            // 横桟は柱の間だけにする（柱と重ねると半透明の塗りが二重になって濃くなる）。
-            railLen = (r) => Math.max(0.001, r.len - g.post);
-        // 柱（足元の板の上から上端まで）と足元の板（床から足元の板の高さまで）。
-        g.posts.forEach(({ x, y }) => {
-            boxAt(x, y, g.post, g.post, Math.min(footH, g.h), g.h);
-            boxAt(x, y, footW, footW, 0, footH);
-        });
-        g.runs.forEach((r) => {
-            const cx = (r.a[0] + r.b[0]) / 2,
-                cy = (r.a[1] + r.b[1]) / 2,
-                len = railLen(r),
-                bw = r.alongX ? len : g.t,
-                bd = r.alongX ? g.t : len;
-            boxAt(cx, cy, bw, bd, zTop0, g.h);
-            if (zBot1 > g.bottom) boxAt(cx, cy, bw, bd, g.bottom, zBot1);
-            if (zTop0 - zBot1 > 0.001)
-                r.bars.forEach(([bx, by]) => boxAt(bx, by, g.barT, g.barT, zBot1, zTop0));
-        });
-        return out;
-    }
-    if (kind === "stool") {
-        const g = stoolGeometry(o),
-            // 円柱（座面・脚・台座）を輪で分割して塗る。
-            cylinder = (r, z0, z1, n = 20) => {
-                for (let i = 0; i < n; i++) {
-                    const a0 = (i / n) * Math.PI * 2,
-                        a1 = ((i + 1) / n) * Math.PI * 2,
-                        x0 = Math.cos(a0) * r,
-                        y0 = Math.sin(a0) * r,
-                        x1 = Math.cos(a1) * r,
-                        y1 = Math.sin(a1) * r;
-                    quad([x0, y0, z0], [x1, y1, z0], [x1, y1, z1], [x0, y0, z1]);
-                    tri([0, 0, z1], [x0, y0, z1], [x1, y1, z1]);
-                    tri([0, 0, z0], [x1, y1, z0], [x0, y0, z0]);
-                }
-            };
-        cylinder(g.seatR, g.seatBottom, g.h);
-        cylinder(g.legR, g.baseTop, g.poleTop, 12);
-        cylinder(g.baseR, 0, g.baseH, 16);
-        return out;
-    }
+    // balcony / uWall / stall の面は ASSET_KIT（asset-kit-assets.js）の部品から作る。
+    // railing（箱の集まり）の面は ASSET_KIT の K.box から作る。
+    // stool（円柱3本）の面は ASSET_KIT の K.cylinder から作る。
     if (kind === "awning") {
         const g = awningGeometry(o),
             x = g.w / 2,
@@ -916,23 +808,22 @@ function exportSurfaceTriangles(o) {
     if (kind === "stairs") {
         // 階段は段板・蹴上げ・左右側面・底面・最奥面で閉じた実形状にする。
         // 各段の側面を区間ごとの長方形に分けることで、重複面や斜めの包絡箱を作らない。
-        const n = Math.max(2, Math.min(24, Math.round(o.steps || 6))),
+        // 段の繰り返しは K.repeat に任せる（段数は線画と同じ K.count で決める）。
+        const n = ASSET_KIT.count(o.steps || 6, 6, 2, 24),
             sd = d / n,
             sh = h / n,
             x = w / 2;
-        for (let i = 0; i < n; i++) {
+        ASSET_KIT.repeat(n, (i) => {
             const y0 = -d / 2 + i * sd,
                 y1 = y0 + sd,
                 z = (i + 1) * sh,
                 z0 = i * sh;
-            // 段板（水平）
-            quad([-x, y0, z], [x, y0, z], [x, y1, z], [-x, y1, z]);
-            // 蹴上げ（垂直）
-            quad([-x, y0, z0], [x, y0, z0], [x, y0, z], [-x, y0, z]);
-            // 左右の側面。各区間の下面から段板までを一枚で閉じる。
-            quad([-x, y0, 0], [-x, y1, 0], [-x, y1, z], [-x, y0, z]);
-            quad([x, y1, 0], [x, y0, 0], [x, y0, z], [x, y1, z]);
-        }
+            quad([-x, y0, z], [x, y0, z], [x, y1, z], [-x, y1, z]); // 段板（水平）
+            quad([-x, y0, z0], [x, y0, z0], [x, y0, z], [-x, y0, z]); // 蹴上げ（垂直）
+            quad([-x, y0, 0], [-x, y1, 0], [-x, y1, z], [-x, y0, z]); // 左の側面
+            quad([x, y1, 0], [x, y0, 0], [x, y0, z], [x, y1, z]); // 右の側面
+            return null;
+        });
         // 底面と最奥の立ち上がり面。
         quad([-x, -d / 2, 0], [x, -d / 2, 0], [x, d / 2, 0], [-x, d / 2, 0]);
         quad([-x, d / 2, 0], [x, d / 2, 0], [x, d / 2, h], [-x, d / 2, h]);

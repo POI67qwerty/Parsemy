@@ -9,6 +9,9 @@
 - engine-input.js      : ポインター・ピンチ・消しゴム・モード切替
 - engine-io.js         : 画像書き出し・参考写真・保存/読み込み・起動
 - asset.js             : アセット形状・正規化
+- asset-kit.js         : アセットを1つの記述から作る道具箱（線と面を同時に）
+- asset-kit-parts.js    : 部品カタログ（窓・扉・室外機など、使い回す小物）
+- asset-kit-assets.js  : ASSET_KIT で作ったアセットの定義
 - asset-controller.js  : アセット配置・JSON・棚UI
 - studio-lib.js        : studio-ui.js と studio-floorplan.js が共有する小さな道具箱
 - studio-floorplan.js : 間取りモード（選択・移動・回転・寸法編集）
@@ -104,7 +107,13 @@ def main() -> None:
         read(name)
         for name in ("engine-gizmo.js", "engine-render.js", "engine-input.js", "engine-io.js")
     )
-    asset = read("asset.js")
+    # ASSET_KIT（アセットの道具箱）と、それで作ったアセットは asset.js の直後。
+    asset = (
+        read("asset.js")
+        + "\n" + read("asset-kit.js")
+        + "\n" + read("asset-kit-parts.js")
+        + "\n" + read("asset-kit-assets.js")
+    )
     controller = read("asset-controller.js")
     # 読み込み順は index.html と同じ（lib → ui → floorplan）。
     ui = read("studio-lib.js") + "\n" + read("studio-ui.js") + "\n" + read("studio-floorplan.js")

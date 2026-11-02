@@ -2026,7 +2026,6 @@ function assetLines(o) {
 const ASSET_LINE_BUILDERS = {
     custom: linesCustom,
     box: linesBox,
-    wallSign: linesWallSign,
     cornerCutBox: linesCornerCutBox,
     wallSideSign: linesWallSideSign,
     beveledBox: linesBeveledBox,
@@ -2035,7 +2034,6 @@ const ASSET_LINE_BUILDERS = {
     stackedBuilding: linesStackedBuilding,
     beveledStackedBuilding: linesStackedBuilding,
     balcony: linesBalcony,
-    uWall: linesUWall,
     railing: linesRailing,
     stall: linesStall,
     stool: linesStool,
@@ -2112,34 +2110,6 @@ function linesBox(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     out.push(...wireBoxA(o, 0, 0, w, d, 0, Math.max(0.01, h), c));
     appendFacadeWindows(o, out, w, d, Math.max(0.01, h), a);
-}
-
-// --- 壁付け看板（単体）---
-// 板の表裏の輪郭を同じ点列から作り、対応する頂点を結んで板厚を出す。
-// 取付金具は板の左側面から横へ伸びる直方体として並べる。
-function linesWallSign(ctx) {
-    const { o, w, d, h, c, a, out } = ctx;
-    const params = wallSignParams(o),
-        face = wallSignFacePoints(params),
-        half = params.thickness * 0.5,
-        front = face.map(([x, z]) => [x, -half, z]),
-        back = face.map(([x, z]) => [x, half, z]);
-    out.push(polyA(o, front, c), polyA(o, back, c));
-    face.forEach(([x, z]) => out.push(lineA(o, [[x, -half, z], [x, half, z]], c)));
-    wallSignBrackets(params).forEach((bracket) =>
-        out.push(
-            ...wireBoxA(
-                o,
-                (bracket.x0 + bracket.x1) * 0.5,
-                (bracket.y0 + bracket.y1) * 0.5,
-                bracket.x1 - bracket.x0,
-                bracket.y1 - bracket.y0,
-                bracket.z - bracket.h * 0.5,
-                bracket.z + bracket.h * 0.5,
-                c,
-            ),
-        ),
-    );
 }
 
 // --- 隅切り直方体 ---
@@ -2699,45 +2669,6 @@ function linesBalcony(ctx) {
         frontY = -d / 2 + t * 0.5;
     [-w * 0.34, w * 0.34].forEach((x) => out.push(lineA(o, [[x, wallY, bracketZ], [x, frontY, 0]], c)));
 }
-// --- コの字壁 ---
-// コの字（∩の断面）を奥行き方向（Y軸）へ押し出した1つの立体として描く。
-// 上＝屋根板、左右＝側壁が同じ厚さでつながり、正面・背面・下面は開いている。
-// 初期の向きは「壁が立ったコの字」をX軸まわりに時計回りへ90°回したもの。
-//
-// 【重要】箱を3つ重ねて描くと、屋根と側壁が重なる所（上端の角）に
-// ・同じ位置の線が二重に描かれる
-// ・側壁の上面の四角が屋根の表面を横切る
-// という余計な線が出る（2026-11-01 の指摘）。断面の輪郭を1本の閉じた線として
-// 押し出し、角を通る奥行き方向の稜線だけを足すことで、実際の立体の稜線だけになる。
-function linesUWall(ctx) {
-    const { o, c, out } = ctx,
-        { w, d, h, thickness: t } = uWallGeometry(o),
-        hw = w / 2,
-        hd = d / 2,
-        // 断面（XZ平面）の8点。左の脚の底 → 左外側 → 屋根の上 → 右外側 →
-        // 右の脚の底 → 右の内側 → 屋根の裏 → 左の内側 → 左の脚の底へ戻る。
-        profile = [
-            [-hw, 0],
-            [-hw, h],
-            [hw, h],
-            [hw, 0],
-            [hw - t, 0],
-            [hw - t, h - t],
-            [-hw + t, h - t],
-            [-hw + t, 0],
-        ];
-    // 前後の面：同じ断面を閉じた線で1本ずつ。
-    out.push(polyA(o, profile.map(([px, pz]) => [px, -hd, pz]), c));
-    out.push(polyA(o, profile.map(([px, pz]) => [px, hd, pz]), c));
-    // 断面の角8か所を通る、奥行き方向の稜線。
-    profile.forEach(([px, pz]) => out.push(lineA(o, [[px, -hd, pz], [px, hd, pz]], c)));
-}
-
-// --- 手すり ---
-// 柱・上の横桟・下の横桟・縦の棒を、すべて「細い直方体の線画」で組む。
-// 寸法の決定は railingGeometry()（engine-gizmo.js）に任せ、ここでは描くだけ。
-// 形（コの字・L字・直線）と本数の配分も railingGeometry() が計算済みなので、
-// 画面のハンドル・数値パネル・線画が同じ値を見ることになる。
 function linesRailing(ctx) {
     const { o, c, out } = ctx,
         g = railingGeometry(o),
@@ -2793,169 +2724,67 @@ function linesRailing(ctx) {
 // --- 階段 ---
 // stepsの数だけ段板と蹴上げを作り、必要なら手すりも追加する。
 function linesStairs(ctx) {
-    const { o, w, d, h, c, a, out } = ctx;
-    const n = Math.max(2, Math.min(24, Math.round(o.steps || 6))),
+    const { o, w, d, h, c, a, out } = ctx,
+        K = ASSET_KIT,
+        n = K.count(o.steps || 6, 6, 2, 24),
         sd = d / n,
-        sh = h / n;
+        sh = h / n,
+        hw = w / 2;
     // 段板・蹴上げ・左右側面の輪郭を、実際の階段断面に沿って描く。
-    for (let i = 0; i < n; i++) {
-        const y0 = -d / 2 + i * sd,
-            y1 = y0 + sd,
-            z = (i + 1) * sh,
-            z0 = i * sh;
-        out.push(
-            polyA(
-                o,
-                [
-                    [-w / 2, y0, z],
-                    [w / 2, y0, z],
-                    [w / 2, y1, z],
-                    [-w / 2, y1, z],
-                ],
-                c,
-            ),
-        );
-        out.push(
-            lineA(
-                o,
-                [
-                    [-w / 2, y0, z0],
-                    [-w / 2, y0, z],
-                    [w / 2, y0, z],
-                ],
-                a,
-                0.9,
-            ),
-        );
-        out.push(
-            lineA(
-                o,
-                [
-                    [w / 2, y0, z0],
-                    [w / 2, y0, z],
-                ],
-                a,
-                0.9,
-            ),
-        );
-        out.push(
-            lineA(
-                o,
-                [
-                    [-w / 2, y0, z],
-                    [-w / 2, y1, z],
-                ],
-                a,
-                0.9,
-            ),
-        );
-        out.push(
-            lineA(
-                o,
-                [
-                    [w / 2, y0, z],
-                    [w / 2, y1, z],
-                ],
-                a,
-                0.9,
-            ),
-        );
-    }
+    // 段の繰り返しは K.repeat に任せ、1段ぶんの線だけを書く。
     out.push(
-        polyA(
-            o,
-            [
-                [-w / 2, -d / 2, 0],
-                [w / 2, -d / 2, 0],
-                [w / 2, d / 2, 0],
-                [-w / 2, d / 2, 0],
-            ],
-            a,
-            0.9,
-        ),
+        ...K.repeat(n, (i) => {
+            const y0 = -d / 2 + i * sd,
+                y1 = y0 + sd,
+                z = (i + 1) * sh,
+                z0 = i * sh;
+            return [
+                polyA(o, [[-hw, y0, z], [hw, y0, z], [hw, y1, z], [-hw, y1, z]], c),
+                lineA(o, [[-hw, y0, z0], [-hw, y0, z], [hw, y0, z]], a, 0.9),
+                lineA(o, [[hw, y0, z0], [hw, y0, z]], a, 0.9),
+                lineA(o, [[-hw, y0, z], [-hw, y1, z]], a, 0.9),
+                lineA(o, [[hw, y0, z], [hw, y1, z]], a, 0.9),
+            ];
+        }),
     );
-    out.push(
-        lineA(
-            o,
-            [
-                [-w / 2, d / 2, 0],
-                [w / 2, d / 2, 0],
-                [w / 2, d / 2, h],
-                [-w / 2, d / 2, h],
-                [-w / 2, d / 2, 0],
-            ],
-            a,
-            1.1,
-        ),
-    );
-    // Rail posts and handrail. The quick setting can hide the whole rail.
-    if (o.handrail === true)
-        [-w / 2, w / 2].forEach((x) => {
-            const p1 = [x, -d / 2, 0.48 * h],
-                p2 = [x, d / 2, h + 0.35];
-            out.push(lineA(o, [p1, p2], a, 1.1));
-            for (let i = 0; i <= 3; i++) {
-                const t = i / 3;
-                out.push(
-                    lineA(
-                        o,
-                        [
-                            [x, -d / 2 + d * t, 0.48 * h + (h + 0.35 - 0.48 * h) * t],
-                            [x, -d / 2 + d * t, 0.48 * h + (h + 0.35 - 0.48 * h) * t + 0.22],
-                        ],
-                        a,
-                        0.8,
-                    ),
-                );
-            }
+    // 底面と最奥の立ち上がり。
+    out.push(polyA(o, [[-hw, -d / 2, 0], [hw, -d / 2, 0], [hw, d / 2, 0], [-hw, d / 2, 0]], a, 0.9));
+    out.push(lineA(o, [[-hw, d / 2, 0], [hw, d / 2, 0], [hw, d / 2, h], [-hw, d / 2, h], [-hw, d / 2, 0]], a, 1.1));
+    // 手すり。左右の手すり線と、等間隔の支柱。
+    if (o.handrail === true) {
+        const z0 = 0.48 * h,
+            z1 = h + 0.35;
+        [-hw, hw].forEach((x) => {
+            out.push(lineA(o, [[x, -d / 2, z0], [x, d / 2, z1]], a, 1.1));
+            out.push(
+                ...K.repeat(4, (i, t) => {
+                    const z = z0 + (z1 - z0) * t;
+                    return lineA(o, [[x, -d / 2 + d * t, z], [x, -d / 2 + d * t, z + 0.22]], a, 0.8);
+                }),
+            );
         });
+    }
+    return out;
 }
 
 // --- 横断歩道 ---
 // 道路の面へ白いストライプを並べる。
 function linesCrosswalk(ctx) {
-    const { o, w, d, h, c, a, out } = ctx;
-    const n = Math.max(3, Math.min(16, Math.round(o.stripes || 7))),
+    const { o, w, d, c, a, out } = ctx,
+        K = ASSET_KIT,
+        n = K.count(o.stripes || 7, 7, 3, 16),
         gap = d / (n + 1),
         stripeD = gap * 0.6;
-    for (let i = 0; i < n; i++) {
-        const y = -d / 2 + gap * (i + 1);
-        out.push(
-            polyA(
-                o,
-                [
-                    [-w / 2, y - stripeD / 2, 0.012],
-                    [w / 2, y - stripeD / 2, 0.012],
-                    [w / 2, y + stripeD / 2, 0.012],
-                    [-w / 2, y + stripeD / 2, 0.012],
-                ],
-                c,
-                1.1,
-            ),
-        );
-    }
+    // 縞は等間隔なので K.repeat で並べる。
     out.push(
-        lineA(
-            o,
-            [
-                [-w / 2, -d / 2, 0.014],
-                [w / 2, -d / 2, 0.014],
-            ],
-            a,
-            0.9,
-        ),
+        ...K.repeat(n, (i) => {
+            const y = -d / 2 + gap * (i + 1);
+            return polyA(o, [[-w / 2, y - stripeD / 2, 0.012], [w / 2, y - stripeD / 2, 0.012], [w / 2, y + stripeD / 2, 0.012], [-w / 2, y + stripeD / 2, 0.012]], c, 1.1);
+        }),
+        lineA(o, [[-w / 2, -d / 2, 0.014], [w / 2, -d / 2, 0.014]], a, 0.9),
+        lineA(o, [[-w / 2, d / 2, 0.014], [w / 2, d / 2, 0.014]], a, 0.9),
     );
-    out.push(
-        lineA(
-            o,
-            [
-                [-w / 2, d / 2, 0.014],
-                [w / 2, d / 2, 0.014],
-            ],
-            a,
-            0.9,
-        ),
-    );
+    return out;
 }
 
 // --- 円柱・円錐・球 ---

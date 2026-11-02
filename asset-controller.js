@@ -994,13 +994,9 @@ window.cityGridInstallAssetUI = function (bridge) {
         {
             key: "building",
             label: "建物",
-            // 建物そのもの（本体と、本体に付く屋根・窓・棟の構成）だけを残す。
-            // 単体で置くパーツ（店舗テント・壁付けベランダ・壁付け看板・窓グリッド）は
-            // 「街・パーツ」へ移した（建物の付属品ではなく、街に置く部品のため）。
+            // 建物そのもの（本体と、階を持つ建物）だけ。
             kinds: [
                 "building",
-                "buildingAwning",
-                "buildingSign",
                 "stackedBuilding",
                 "recessedStackedBuilding",
                 "beveledStackedBuilding",
@@ -1008,27 +1004,37 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "stall",
             ],
         },
-        { key: "roof", label: "屋根", kinds: ["gableRoof", "shedRoof"] },
+        {
+            key: "buildingParts",
+            label: "建物パーツ",
+            // 建物に付ける部材・設備。屋根・テント・ベランダ・コの字壁・手すり・室外機。
+            kinds: [
+                "buildingAwning",
+                "buildingSign",
+                "gableRoof",
+                "shedRoof",
+                "awning",
+                "balcony",
+                "uWall",
+                "railing",
+                "outdoorUnit",
+            ],
+        },
         // 街並みの小物。新しいアセットを足して下の一覧へ書き忘れた場合も、
         // ここへ自動で入れて「棚から消える」事故を防ぐ（unassignedKinds）。
         {
             key: "street",
-            label: "街・パーツ",
+            label: "街パーツ",
             kinds: [
-            "stairs",
-            "crosswalk",
-            "ramp",
-            "pathPipe",
-            "awning",
-            "balcony",
-            "uWall",
-            // 手すりも街・パーツ（建物まわりの部材）へ。
-            "railing",
-            // 丸椅子は街の小物として「街・パーツ」へ。
-            "stool",
-            "wallSign",
-            "windowGrid",
-        ],
+                "stairs",
+                "crosswalk",
+                "ramp",
+                "pathPipe",
+                // 丸椅子は街の小物として「街パーツ」へ。
+                "stool",
+                "wallSign",
+                "windowGrid",
+            ],
         },
         { key: "person", label: "人間", kinds: ["person"] },
     ];

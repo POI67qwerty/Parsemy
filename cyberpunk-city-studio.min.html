@@ -5820,6 +5820,8 @@ function specialGizmo(o) {
                         ? stallGizmo(o)
                       : o && o.type === "asset" && o.asset === "stool"
                         ? stoolGizmo(o)
+                      : o && o.type === "asset" && o.asset === "outdoorUnit"
+                        ? outdoorUnitGizmo(o)
                     : o && o.type === "asset" && o.asset === "sign"
                       ? signGizmo(o)
                       : o && o.type === "asset" && o.asset === "cone"
@@ -5830,6 +5832,41 @@ function specialGizmo(o) {
                             ? personGizmo(o)
                             : null;
     return normalizeScreenHandles(sg);
+}
+function outdoorUnitGeometry(o) {
+    const num = (v, dflt) => (Number.isFinite(Number(v)) && Number(v) !== 0 ? Number(v) : dflt),
+        clampN = (v, lo, hi, dflt) => Math.max(lo, Math.min(hi, Number.isFinite(Number(v)) ? Number(v) : dflt)),
+        W = Math.max(0.3, Math.abs(2 * num(o?.ra, 0.43))),
+        D = Math.max(0.12, Math.abs(2 * num(o?.rb, 0.17))),
+        H = Math.max(0.25, Math.abs(num(o?.h, 0.66))),
+        legH = Math.max(0, Math.min(H * 0.45, clampN(o?.ouLegH, 0, H * 0.45, 0.12))),
+        bodyH = Math.max(0.1, H - legH),
+        bodyCz = legH + bodyH / 2,
+        fanRatio = clampN(o?.ouFanRatio, 0.2, 0.95, 0.78),
+        fanR = Math.max(0.04, (bodyH / 2) * fanRatio),
+        limit = Math.max(0, W / 2 - fanR),
+        fanX = Math.max(-limit, Math.min(limit, clampN(o?.ouFanX, -limit, limit, -0.1))),
+        corner = Math.max(0.005, Math.min(W, H) * 0.12);
+    return { W, D, H, legH, bodyH, bodyCz, fanR, fanX, limit, corner };
+}
+function outdoorUnitGizmo(o) {
+    if (!o || o.type !== "asset" || o.asset !== "outdoorUnit") return null;
+    const g = outdoorUnitGeometry(o),
+        front = -g.D / 2 - 0.02,
+        fanHandle = screenHandle(
+            o,
+            "outdoor-fan-x",
+            [g.fanX, front, g.bodyCz],
+            [g.fanX + g.fanR + 0.05, front, g.bodyCz],
+            [g.fanX + g.fanR + 0.35, front, g.bodyCz],
+            g.fanX,
+            -g.limit,
+            g.limit,
+            "ファンの左右",
+            { x: 1, y: 0 },
+            "#7dd8ff",
+        );
+    return { o, C3: L2W(o, 0, 0, g.bodyCz), handles: { fanX: fanHandle } };
 }
 let gzLabelRects = [];
 const GZ_LABEL_INK = "#1f2933";
@@ -6210,6 +6247,34 @@ function drawSpecialGizmo(c, o) {
             c.setLineDash([]);
             sq(h.s, h.color || "#ff9f68");
             gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}`, h.s.x + 9 / Z, h.s.y - 8 / Z, h.color || "#ff9f68", 12);
+        }
+    } else if (sg.o.asset === "outdoorUnit") {
+        const h = sg.handles?.fanX;
+        if (h?.s?.ok) {
+            const col = h.color || "#7dd8ff";
+            c.strokeStyle = col;
+            c.lineWidth = 1.4 / Z;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.beginPath();
+            if (h.anchor?.ok) {
+                c.moveTo(h.anchor.x, h.anchor.y);
+                c.lineTo(h.s.x, h.s.y);
+            }
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, col, false);
+            c.beginPath();
+            c.moveTo(h.s.x - 13 / Z, h.s.y);
+            c.lineTo(h.s.x - 7 / Z, h.s.y - 4 / Z);
+            c.lineTo(h.s.x - 7 / Z, h.s.y + 4 / Z);
+            c.closePath();
+            c.moveTo(h.s.x + 13 / Z, h.s.y);
+            c.lineTo(h.s.x + 7 / Z, h.s.y - 4 / Z);
+            c.lineTo(h.s.x + 7 / Z, h.s.y + 4 / Z);
+            c.closePath();
+            c.fillStyle = col;
+            c.fill();
+            gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}m`, h.s.x + 16 / Z, h.s.y - 8 / Z, col, 12);
         }
     } else if (sg.o.asset === "stool") {
         Object.values(sg.handles).forEach((h) => {
@@ -6608,7 +6673,12 @@ function gizmo() {
     const o = sel && obOf(sel);
     if (!o) return null;
     if (o.type === "compound") return compoundGizmo(o);
-    const stacked = isStackedBuildingAsset(o),
+    const kitAsset =
+            o.type === "asset" &&
+            typeof ASSET_KIT !== "undefined" &&
+            typeof ASSET_KIT.kinds === "function" &&
+            ASSET_KIT.kinds().includes(o.asset),
+        stacked = isStackedBuildingAsset(o),
         [iu, iv] = PL[o.k],
         cs = Math.cos(o.rot * DG),
         sn = Math.sin(o.rot * DG),
@@ -6643,6 +6713,7 @@ function gizmo() {
                     o.asset === "ramp" ||
                     o.asset === "windowGrid" ||
                     o.asset === "crosswalk" ||
+                    kitAsset ||
                     isStackedBuildingAsset(o))),
         [z0, z1] = outerZRange(o),
         zc = solid ? (z0 + z1) / 2 : 0;
@@ -7090,7 +7161,8 @@ function hitGizmo(p) {
             active.asset === "uWall" ||
             active.asset === "stall" ||
             active.asset === "stool" ||
-            active.asset === "railing"
+            active.asset === "railing" ||
+            active.asset === "outdoorUnit"
         ) {
             const nearest = nearestHandleOf(Object.values(special.handles || {}), p, R),
                 hit = handleOrFace(nearest, (q) => ({
@@ -7623,6 +7695,7 @@ function beginGizmo(h, p) {
         h.t.startsWith("stall-") ||
         h.t.startsWith("stool-") ||
         h.t.startsWith("railing-") ||
+        h.t === "outdoor-fan-x" ||
         h.t === "circle-radius" ||
         h.t === "wallSideSign-beveled-offset" ||
         h.t === "wallSideSign-bracket-length" ||
@@ -7806,6 +7879,12 @@ function dragEdit(p, freeRotation = false) {
             key = KEY[ed.t],
             num = h.integer ? Math.round(value) : Math.round(value * 1000) / 1000;
         if (key) patch = { [key]: num };
+    } else if (ed.t === "outdoor-fan-x") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { ouFanX: Math.round(value * 1000) / 1000 };
     } else if (ed.t === "balcony-thickness" || ed.t === "uWall-thickness") {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -8274,6 +8353,10 @@ function exportSurfaceTriangles(o) {
         compoundPartsAt(o).forEach((part) => out.push(...exportSurfaceTriangles(part)));
         return out;
     }
+    if (typeof assetKitTriangles === "function") {
+        const kit = assetKitTriangles(o);
+        if (kit && kit.length) return kit;
+    }
     const w = Math.abs(2 * Number(o.ra) || 1),
         d = Math.abs(2 * Number(o.rb) || 1),
         h = Math.max(0.01, Math.abs(Number(o.h) || 0.01));
@@ -8614,31 +8697,6 @@ function exportSurfaceTriangles(o) {
         });
         return out;
     }
-    if (kind === "wallSign" && typeof wallSignParams === "function") {
-        const params = wallSignParams(o),
-            face = wallSignFacePoints(params),
-            half = params.thickness * 0.5;
-        polygonEarClip(face).forEach(([a, b, c]) => {
-            tri([a[0], -half, a[1]], [b[0], -half, b[1]], [c[0], -half, c[1]]);
-            tri([a[0], half, a[1]], [c[0], half, c[1]], [b[0], half, b[1]]);
-        });
-        for (let i = 0; i < face.length; i++) {
-            const a = face[i],
-                b = face[(i + 1) % face.length];
-            quad([a[0], -half, a[1]], [b[0], -half, b[1]], [b[0], half, b[1]], [a[0], half, a[1]]);
-        }
-        wallSignBrackets(params).forEach((bracket) => {
-            const z0 = bracket.z - bracket.h * 0.5,
-                z1 = bracket.z + bracket.h * 0.5;
-            quad([bracket.x0, bracket.y0, z0], [bracket.x1, bracket.y0, z0], [bracket.x1, bracket.y0, z1], [bracket.x0, bracket.y0, z1]);
-            quad([bracket.x0, bracket.y1, z1], [bracket.x1, bracket.y1, z1], [bracket.x1, bracket.y1, z0], [bracket.x0, bracket.y1, z0]);
-            quad([bracket.x0, bracket.y0, z1], [bracket.x1, bracket.y0, z1], [bracket.x1, bracket.y1, z1], [bracket.x0, bracket.y1, z1]);
-            quad([bracket.x0, bracket.y1, z0], [bracket.x1, bracket.y1, z0], [bracket.x1, bracket.y0, z0], [bracket.x0, bracket.y0, z0]);
-            quad([bracket.x0, bracket.y0, z0], [bracket.x0, bracket.y1, z0], [bracket.x0, bracket.y1, z1], [bracket.x0, bracket.y0, z1]);
-            quad([bracket.x1, bracket.y0, z1], [bracket.x1, bracket.y1, z1], [bracket.x1, bracket.y1, z0], [bracket.x1, bracket.y0, z0]);
-        });
-        return out;
-    }
     if (kind === "cornerCutBox" && typeof cornerCutFootprint === "function") {
         const opening = typeof cornerCutOpeningParams === "function" ? cornerCutOpeningParams(o) : null,
             z0 = 0,
@@ -8719,81 +8777,6 @@ function exportSurfaceTriangles(o) {
                 boxAt(fx, fy, fw + ro * 2, fd + ro * 2, fz + fh - rh, fz + fh);
             }
         });
-        return out;
-    }
-    if (kind === "balcony") {
-        const g = balconyGeometry(o);
-        boxAt(0, 0, g.w, g.d, 0, g.thickness);
-        if (g.frontRail) boxAt(0, -g.d / 2 + g.thickness / 2, g.w, g.thickness, g.thickness, g.thickness + g.railH);
-        if (g.sideRail) {
-            const sideY0 = g.frontRail ? -g.d / 2 + g.thickness : -g.d / 2,
-                sideD = g.d / 2 - sideY0;
-            boxAt(-g.w / 2 + g.thickness / 2, (sideY0 + g.d / 2) / 2, g.thickness, sideD, g.thickness, g.thickness + g.railH);
-            boxAt(g.w / 2 - g.thickness / 2, (sideY0 + g.d / 2) / 2, g.thickness, sideD, g.thickness, g.thickness + g.railH);
-        }
-        return out;
-    }
-    if (kind === "uWall") {
-        const g = uWallGeometry(o);
-        boxAt(0, 0, g.w, g.d, g.h - g.thickness, g.h);
-        boxAt(-g.w / 2 + g.thickness / 2, 0, g.thickness, g.d, 0, g.h - g.thickness);
-        boxAt(g.w / 2 - g.thickness / 2, 0, g.thickness, g.d, 0, g.h - g.thickness);
-        return out;
-    }
-    if (kind === "stall") {
-        const g = stallGeometry(o),
-            hd = g.d / 2,
-            sideD = g.d - g.t,
-            sideY = (hd - g.t + -hd) / 2;
-        boxAt(0, hd - g.t / 2, g.w, g.t, 0, g.roofBottom);
-        boxAt(-g.w / 2 + g.t / 2, sideY, g.t, sideD, 0, g.roofBottom);
-        boxAt(g.w / 2 - g.t / 2, sideY, g.t, sideD, 0, g.roofBottom);
-        boxAt(0, -hd - g.cd / 2, g.w, g.cd, 0, g.ch);
-        boxAt(0, -g.ro / 2, g.w, g.d + g.ro, g.roofBottom, g.h);
-        return out;
-    }
-    if (kind === "railing") {
-        const g = railingGeometry(o),
-            zTop0 = Math.max(0, g.h - g.t),
-            zBot1 = Math.min(g.h - g.t, g.bottom + g.t),
-            footH = Math.min(g.h, Math.min(0.03, Math.max(0.012, g.bottom * 0.35))),
-            footW = g.post * 1.5,
-            railLen = (r) => Math.max(0.001, r.len - g.post);
-        g.posts.forEach(({ x, y }) => {
-            boxAt(x, y, g.post, g.post, Math.min(footH, g.h), g.h);
-            boxAt(x, y, footW, footW, 0, footH);
-        });
-        g.runs.forEach((r) => {
-            const cx = (r.a[0] + r.b[0]) / 2,
-                cy = (r.a[1] + r.b[1]) / 2,
-                len = railLen(r),
-                bw = r.alongX ? len : g.t,
-                bd = r.alongX ? g.t : len;
-            boxAt(cx, cy, bw, bd, zTop0, g.h);
-            if (zBot1 > g.bottom) boxAt(cx, cy, bw, bd, g.bottom, zBot1);
-            if (zTop0 - zBot1 > 0.001)
-                r.bars.forEach(([bx, by]) => boxAt(bx, by, g.barT, g.barT, zBot1, zTop0));
-        });
-        return out;
-    }
-    if (kind === "stool") {
-        const g = stoolGeometry(o),
-            cylinder = (r, z0, z1, n = 20) => {
-                for (let i = 0; i < n; i++) {
-                    const a0 = (i / n) * Math.PI * 2,
-                        a1 = ((i + 1) / n) * Math.PI * 2,
-                        x0 = Math.cos(a0) * r,
-                        y0 = Math.sin(a0) * r,
-                        x1 = Math.cos(a1) * r,
-                        y1 = Math.sin(a1) * r;
-                    quad([x0, y0, z0], [x1, y1, z0], [x1, y1, z1], [x0, y0, z1]);
-                    tri([0, 0, z1], [x0, y0, z1], [x1, y1, z1]);
-                    tri([0, 0, z0], [x1, y1, z0], [x0, y0, z0]);
-                }
-            };
-        cylinder(g.seatR, g.seatBottom, g.h);
-        cylinder(g.legR, g.baseTop, g.poleTop, 12);
-        cylinder(g.baseR, 0, g.baseH, 16);
         return out;
     }
     if (kind === "awning") {
@@ -8970,11 +8953,11 @@ function exportSurfaceTriangles(o) {
         return out;
     }
     if (kind === "stairs") {
-        const n = Math.max(2, Math.min(24, Math.round(o.steps || 6))),
+        const n = ASSET_KIT.count(o.steps || 6, 6, 2, 24),
             sd = d / n,
             sh = h / n,
             x = w / 2;
-        for (let i = 0; i < n; i++) {
+        ASSET_KIT.repeat(n, (i) => {
             const y0 = -d / 2 + i * sd,
                 y1 = y0 + sd,
                 z = (i + 1) * sh,
@@ -8983,7 +8966,8 @@ function exportSurfaceTriangles(o) {
             quad([-x, y0, z0], [x, y0, z0], [x, y0, z], [-x, y0, z]);
             quad([-x, y0, 0], [-x, y1, 0], [-x, y1, z], [-x, y0, z]);
             quad([x, y1, 0], [x, y0, 0], [x, y0, z], [x, y1, z]);
-        }
+            return null;
+        });
         quad([-x, -d / 2, 0], [x, -d / 2, 0], [x, d / 2, 0], [-x, d / 2, 0]);
         quad([-x, d / 2, 0], [x, d / 2, 0], [x, d / 2, h], [-x, d / 2, h]);
         return out;
@@ -13916,7 +13900,6 @@ function assetLines(o) {
 const ASSET_LINE_BUILDERS = {
     custom: linesCustom,
     box: linesBox,
-    wallSign: linesWallSign,
     cornerCutBox: linesCornerCutBox,
     wallSideSign: linesWallSideSign,
     beveledBox: linesBeveledBox,
@@ -13925,7 +13908,6 @@ const ASSET_LINE_BUILDERS = {
     stackedBuilding: linesStackedBuilding,
     beveledStackedBuilding: linesStackedBuilding,
     balcony: linesBalcony,
-    uWall: linesUWall,
     railing: linesRailing,
     stall: linesStall,
     stool: linesStool,
@@ -13994,30 +13976,6 @@ function linesBox(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     out.push(...wireBoxA(o, 0, 0, w, d, 0, Math.max(0.01, h), c));
     appendFacadeWindows(o, out, w, d, Math.max(0.01, h), a);
-}
-function linesWallSign(ctx) {
-    const { o, w, d, h, c, a, out } = ctx;
-    const params = wallSignParams(o),
-        face = wallSignFacePoints(params),
-        half = params.thickness * 0.5,
-        front = face.map(([x, z]) => [x, -half, z]),
-        back = face.map(([x, z]) => [x, half, z]);
-    out.push(polyA(o, front, c), polyA(o, back, c));
-    face.forEach(([x, z]) => out.push(lineA(o, [[x, -half, z], [x, half, z]], c)));
-    wallSignBrackets(params).forEach((bracket) =>
-        out.push(
-            ...wireBoxA(
-                o,
-                (bracket.x0 + bracket.x1) * 0.5,
-                (bracket.y0 + bracket.y1) * 0.5,
-                bracket.x1 - bracket.x0,
-                bracket.y1 - bracket.y0,
-                bracket.z - bracket.h * 0.5,
-                bracket.z + bracket.h * 0.5,
-                c,
-            ),
-        ),
-    );
 }
 function linesCornerCutBox(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
@@ -14490,25 +14448,6 @@ function linesBalcony(ctx) {
         frontY = -d / 2 + t * 0.5;
     [-w * 0.34, w * 0.34].forEach((x) => out.push(lineA(o, [[x, wallY, bracketZ], [x, frontY, 0]], c)));
 }
-function linesUWall(ctx) {
-    const { o, c, out } = ctx,
-        { w, d, h, thickness: t } = uWallGeometry(o),
-        hw = w / 2,
-        hd = d / 2,
-        profile = [
-            [-hw, 0],
-            [-hw, h],
-            [hw, h],
-            [hw, 0],
-            [hw - t, 0],
-            [hw - t, h - t],
-            [-hw + t, h - t],
-            [-hw + t, 0],
-        ];
-    out.push(polyA(o, profile.map(([px, pz]) => [px, -hd, pz]), c));
-    out.push(polyA(o, profile.map(([px, pz]) => [px, hd, pz]), c));
-    profile.forEach(([px, pz]) => out.push(lineA(o, [[px, -hd, pz], [px, hd, pz]], c)));
-}
 function linesRailing(ctx) {
     const { o, c, out } = ctx,
         g = railingGeometry(o),
@@ -14554,164 +14493,59 @@ function linesRailing(ctx) {
     });
 }
 function linesStairs(ctx) {
-    const { o, w, d, h, c, a, out } = ctx;
-    const n = Math.max(2, Math.min(24, Math.round(o.steps || 6))),
+    const { o, w, d, h, c, a, out } = ctx,
+        K = ASSET_KIT,
+        n = K.count(o.steps || 6, 6, 2, 24),
         sd = d / n,
-        sh = h / n;
-    for (let i = 0; i < n; i++) {
-        const y0 = -d / 2 + i * sd,
-            y1 = y0 + sd,
-            z = (i + 1) * sh,
-            z0 = i * sh;
-        out.push(
-            polyA(
-                o,
-                [
-                    [-w / 2, y0, z],
-                    [w / 2, y0, z],
-                    [w / 2, y1, z],
-                    [-w / 2, y1, z],
-                ],
-                c,
-            ),
-        );
-        out.push(
-            lineA(
-                o,
-                [
-                    [-w / 2, y0, z0],
-                    [-w / 2, y0, z],
-                    [w / 2, y0, z],
-                ],
-                a,
-                0.9,
-            ),
-        );
-        out.push(
-            lineA(
-                o,
-                [
-                    [w / 2, y0, z0],
-                    [w / 2, y0, z],
-                ],
-                a,
-                0.9,
-            ),
-        );
-        out.push(
-            lineA(
-                o,
-                [
-                    [-w / 2, y0, z],
-                    [-w / 2, y1, z],
-                ],
-                a,
-                0.9,
-            ),
-        );
-        out.push(
-            lineA(
-                o,
-                [
-                    [w / 2, y0, z],
-                    [w / 2, y1, z],
-                ],
-                a,
-                0.9,
-            ),
-        );
-    }
+        sh = h / n,
+        hw = w / 2;
     out.push(
-        polyA(
-            o,
-            [
-                [-w / 2, -d / 2, 0],
-                [w / 2, -d / 2, 0],
-                [w / 2, d / 2, 0],
-                [-w / 2, d / 2, 0],
-            ],
-            a,
-            0.9,
-        ),
+        ...K.repeat(n, (i) => {
+            const y0 = -d / 2 + i * sd,
+                y1 = y0 + sd,
+                z = (i + 1) * sh,
+                z0 = i * sh;
+            return [
+                polyA(o, [[-hw, y0, z], [hw, y0, z], [hw, y1, z], [-hw, y1, z]], c),
+                lineA(o, [[-hw, y0, z0], [-hw, y0, z], [hw, y0, z]], a, 0.9),
+                lineA(o, [[hw, y0, z0], [hw, y0, z]], a, 0.9),
+                lineA(o, [[-hw, y0, z], [-hw, y1, z]], a, 0.9),
+                lineA(o, [[hw, y0, z], [hw, y1, z]], a, 0.9),
+            ];
+        }),
     );
-    out.push(
-        lineA(
-            o,
-            [
-                [-w / 2, d / 2, 0],
-                [w / 2, d / 2, 0],
-                [w / 2, d / 2, h],
-                [-w / 2, d / 2, h],
-                [-w / 2, d / 2, 0],
-            ],
-            a,
-            1.1,
-        ),
-    );
-    if (o.handrail === true)
-        [-w / 2, w / 2].forEach((x) => {
-            const p1 = [x, -d / 2, 0.48 * h],
-                p2 = [x, d / 2, h + 0.35];
-            out.push(lineA(o, [p1, p2], a, 1.1));
-            for (let i = 0; i <= 3; i++) {
-                const t = i / 3;
-                out.push(
-                    lineA(
-                        o,
-                        [
-                            [x, -d / 2 + d * t, 0.48 * h + (h + 0.35 - 0.48 * h) * t],
-                            [x, -d / 2 + d * t, 0.48 * h + (h + 0.35 - 0.48 * h) * t + 0.22],
-                        ],
-                        a,
-                        0.8,
-                    ),
-                );
-            }
+    out.push(polyA(o, [[-hw, -d / 2, 0], [hw, -d / 2, 0], [hw, d / 2, 0], [-hw, d / 2, 0]], a, 0.9));
+    out.push(lineA(o, [[-hw, d / 2, 0], [hw, d / 2, 0], [hw, d / 2, h], [-hw, d / 2, h], [-hw, d / 2, 0]], a, 1.1));
+    if (o.handrail === true) {
+        const z0 = 0.48 * h,
+            z1 = h + 0.35;
+        [-hw, hw].forEach((x) => {
+            out.push(lineA(o, [[x, -d / 2, z0], [x, d / 2, z1]], a, 1.1));
+            out.push(
+                ...K.repeat(4, (i, t) => {
+                    const z = z0 + (z1 - z0) * t;
+                    return lineA(o, [[x, -d / 2 + d * t, z], [x, -d / 2 + d * t, z + 0.22]], a, 0.8);
+                }),
+            );
         });
+    }
+    return out;
 }
 function linesCrosswalk(ctx) {
-    const { o, w, d, h, c, a, out } = ctx;
-    const n = Math.max(3, Math.min(16, Math.round(o.stripes || 7))),
+    const { o, w, d, c, a, out } = ctx,
+        K = ASSET_KIT,
+        n = K.count(o.stripes || 7, 7, 3, 16),
         gap = d / (n + 1),
         stripeD = gap * 0.6;
-    for (let i = 0; i < n; i++) {
-        const y = -d / 2 + gap * (i + 1);
-        out.push(
-            polyA(
-                o,
-                [
-                    [-w / 2, y - stripeD / 2, 0.012],
-                    [w / 2, y - stripeD / 2, 0.012],
-                    [w / 2, y + stripeD / 2, 0.012],
-                    [-w / 2, y + stripeD / 2, 0.012],
-                ],
-                c,
-                1.1,
-            ),
-        );
-    }
     out.push(
-        lineA(
-            o,
-            [
-                [-w / 2, -d / 2, 0.014],
-                [w / 2, -d / 2, 0.014],
-            ],
-            a,
-            0.9,
-        ),
+        ...K.repeat(n, (i) => {
+            const y = -d / 2 + gap * (i + 1);
+            return polyA(o, [[-w / 2, y - stripeD / 2, 0.012], [w / 2, y - stripeD / 2, 0.012], [w / 2, y + stripeD / 2, 0.012], [-w / 2, y + stripeD / 2, 0.012]], c, 1.1);
+        }),
+        lineA(o, [[-w / 2, -d / 2, 0.014], [w / 2, -d / 2, 0.014]], a, 0.9),
+        lineA(o, [[-w / 2, d / 2, 0.014], [w / 2, d / 2, 0.014]], a, 0.9),
     );
-    out.push(
-        lineA(
-            o,
-            [
-                [-w / 2, d / 2, 0.014],
-                [w / 2, d / 2, 0.014],
-            ],
-            a,
-            0.9,
-        ),
-    );
+    return out;
 }
 function linesCylinder(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
@@ -15731,6 +15565,1173 @@ obBounds = function (o) {
     return { lo, hi };
 };
 regenObjects();
+const ASSET_KIT = (function () {
+    const TAU = Math.PI * 2,
+        KIT_TRIS = Object.create(null);
+    const num = (v, f) => (Number.isFinite(Number(v)) ? Number(v) : f);
+    function param(o, key, fallback) {
+        const v = o ? o[key] : undefined;
+        if (Number.isFinite(Number(v))) return Number(v);
+        const d = o && o.asset ? ASSETS[o.asset] : null;
+        if (d && Number.isFinite(Number(d[key]))) return Number(d[key]);
+        return fallback;
+    }
+    function toP3(axis, u, v, w) {
+        if (axis === "y") return [u, w, v];
+        if (axis === "x") return [w, u, v];
+        return [u, v, w];
+    }
+    function rectPath(w, d, cx = 0, cy = 0) {
+        const x = Math.max(1e-4, Math.abs(w)) / 2,
+            y = Math.max(1e-4, Math.abs(d)) / 2;
+        return [
+            [cx - x, cy - y],
+            [cx + x, cy - y],
+            [cx + x, cy + y],
+            [cx - x, cy + y],
+        ];
+    }
+    function ringPath(w, d, r, steps = 2, cx = 0, cy = 0) {
+        const x = Math.max(1e-4, Math.abs(w)) / 2,
+            y = Math.max(1e-4, Math.abs(d)) / 2,
+            rr = Math.max(0, Math.min(Math.abs(r), Math.min(x, y) * 0.999)),
+            n = Math.max(1, Math.round(steps)),
+            out = [],
+            quads = [
+                [x - rr, -(y - rr), -Math.PI / 2],
+                [x - rr, y - rr, 0],
+                [-(x - rr), y - rr, Math.PI / 2],
+                [-(x - rr), -(y - rr), Math.PI],
+            ];
+        quads.forEach(([qx, qy, a0]) => {
+            for (let i = 0; i <= n; i++) {
+                const t = a0 + (i / n) * (Math.PI / 2);
+                out.push([cx + qx + Math.cos(t) * rr, cy + qy + Math.sin(t) * rr]);
+            }
+        });
+        return out;
+    }
+    function roundRectPath(w, d, r, seg = 2, cx = 0, cy = 0) {
+        const rr = Math.abs(Number(r) || 0);
+        if (rr < 1e-5) return rectPath(w, d, cx, cy);
+        return ringPath(w, d, rr, seg, cx, cy);
+    }
+    function circlePath(r, n = 20, cx = 0, cy = 0) {
+        const rr = Math.max(1e-4, Math.abs(r)),
+            cnt = Math.max(3, Math.round(n)),
+            out = [];
+        for (let i = 0; i < cnt; i++) {
+            const t = (i / cnt) * TAU;
+            out.push([cx + Math.cos(t) * rr, cy + Math.sin(t) * rr]);
+        }
+        return out;
+    }
+    function offsetPath(path, du = 0, dv = 0) {
+        return path.map(([u, v]) => [u + du, v + dv]);
+    }
+    function scalePath(path, su = 1, sv = 1, cu = 0, cv = 0) {
+        return path.map(([u, v]) => [cu + (u - cu) * su, cv + (v - cv) * sv]);
+    }
+    function rotatePath(path, deg, cu = 0, cv = 0) {
+        const t = (deg * Math.PI) / 180,
+            c = Math.cos(t),
+            s = Math.sin(t);
+        return path.map(([u, v]) => [cu + (u - cu) * c - (v - cv) * s, cv + (u - cu) * s + (v - cv) * c]);
+    }
+    function count(v, dflt = 1, min = 1, max = 999) {
+        const n = Math.round(Number(v));
+        return Math.max(min, Math.min(max, Number.isFinite(n) ? n : dflt));
+    }
+    function repeat(n, fn) {
+        const out = [],
+            cnt = Math.max(0, Math.round(Number(n) || 0));
+        for (let i = 0; i < cnt; i++) {
+            const r = fn(i, cnt > 1 ? i / (cnt - 1) : 0);
+            if (Array.isArray(r)) r.forEach((q) => q && out.push(q));
+            else if (r) out.push(r);
+        }
+        return out;
+    }
+    function grid(rows, cols, fn) {
+        return repeat(rows, (r, u) => repeat(cols, (c, v) => fn(r, c, u, v)));
+    }
+    function revolution(profile, opts = {}) {
+        const seg = Math.max(3, Math.round(opts.seg || 20)),
+            cx = opts.cx || 0,
+            cy = opts.cy || 0,
+            pts = (profile || []).map(([r, z]) => [Math.max(0, Math.abs(Number(r) || 0)), Number(z) || 0]),
+            rings = pts.map(([r, z]) => ({ path: circlePath(Math.max(r, 1e-4), seg, cx, cy), w: z })),
+            first = pts[0]?.[0] || 0,
+            last = pts[pts.length - 1]?.[0] || 0;
+        if (rings.length < 2) return loft([]);
+        return loft(rings, {
+            capStart: opts.capStart ?? first > 1e-4,
+            capEnd: opts.capEnd ?? last > 1e-4,
+            ringLines: (opts.rings || []).filter((k) => k > 0 && k < pts.length - 1),
+            verts: Math.max(0, Math.round(opts.verts || 0)),
+        });
+    }
+    function prism(path, z0, z1, extra = {}) {
+        return { path, z0: Math.min(z0, z1), z1: Math.max(z0, z1), ...extra };
+    }
+    const box = (path, z0, z1, extra = {}) => prism(path, z0, z1, extra);
+    const sheet = (path, z0, z1, extra = {}) => prism(path, z0, z1, { ...extra, sheet: true });
+    function cylinder(r, z0, z1, opts = {}) {
+        const seg = Math.max(3, Math.round(opts.seg || 20));
+        return prism(circlePath(r, seg, opts.cx || 0, opts.cy || 0), z0, z1, {
+            axis: opts.axis || "z",
+            centerCaps: opts.caps !== false,
+            noBottom: opts.caps === false,
+            noTop: opts.caps === false,
+            smooth: true,
+            verts: Math.max(0, Math.round(opts.verts || 0)),
+        });
+    }
+    function face3(poly, extra = {}) {
+        return {
+            poly: poly.map((q) => [Number(q[0]) || 0, Number(q[1]) || 0, Number(q[2]) || 0]),
+            ...extra,
+        };
+    }
+    function loft(rings, extra = {}) {
+        return { rings: rings.filter((r) => r && Array.isArray(r.path) && r.path.length >= 3), ...extra };
+    }
+    function area2(path) {
+        let s = 0;
+        for (let i = 0; i < path.length; i++) {
+            const a = path[i],
+                b = path[(i + 1) % path.length];
+            s += a[0] * b[1] - b[0] * a[1];
+        }
+        return s / 2;
+    }
+    const ccw = (path) => (area2(path) > 0 ? path.slice() : path.slice().reverse());
+    const cw = (path) => (area2(path) < 0 ? path.slice() : path.slice().reverse());
+    function isConvex(path) {
+        if (!path || path.length < 3) return false;
+        let sign = 0;
+        for (let i = 0; i < path.length; i++) {
+            const a = path[i],
+                b = path[(i + 1) % path.length],
+                c = path[(i + 2) % path.length],
+                cr = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+            if (Math.abs(cr) < 1e-9) continue;
+            const s = cr > 0 ? 1 : -1;
+            if (!sign) sign = s;
+            else if (s !== sign) return false;
+        }
+        return true;
+    }
+    function bridgeHoles(outer, holes) {
+        let poly = ccw(outer);
+        const list = holes
+            .filter((h) => Array.isArray(h) && h.length >= 3)
+            .map((h) => cw(h))
+            .sort((a, b) => Math.max(...b.map((p) => p[0])) - Math.max(...a.map((p) => p[0])));
+        for (const hole of list) {
+            let hi = 0;
+            for (let i = 1; i < hole.length; i++) if (hole[i][0] > hole[hi][0]) hi = i;
+            const P = hole[hi],
+                py = P[1],
+                px = P[0];
+            let best = null;
+            for (let i = 0; i < poly.length; i++) {
+                const a = poly[i],
+                    b = poly[(i + 1) % poly.length];
+                if (a[1] > py === b[1] > py) continue;
+                const t = (py - a[1]) / (b[1] - a[1]),
+                    x = a[0] + (b[0] - a[0]) * t;
+                if (x < px - 1e-9) continue;
+                if (!best || x < best.x) best = { x, i };
+            }
+            if (!best) continue;
+            const merged = [],
+                cut = [best.x, py];
+            for (let i = 0; i <= best.i; i++) merged.push(poly[i]);
+            merged.push(cut);
+            const rot = hole.slice(hi).concat(hole.slice(0, hi));
+            rot.forEach((p) => merged.push(p));
+            merged.push(P, cut);
+            for (let i = best.i + 1; i < poly.length; i++) merged.push(poly[i]);
+            poly = merged;
+        }
+        return poly;
+    }
+    function triangulate(path, holes) {
+        if (!path || path.length < 3) return [];
+        const hasHoles = Array.isArray(holes) && holes.some((h) => Array.isArray(h) && h.length >= 3),
+            poly = hasHoles ? bridgeHoles(path, holes) : path;
+        if (poly.length === 3) return [[poly[0], poly[1], poly[2]]];
+        if (!hasHoles && isConvex(poly)) {
+            const out = [];
+            for (let i = 1; i < poly.length - 1; i++) out.push([poly[0], poly[i], poly[i + 1]]);
+            return out;
+        }
+        if (typeof polygonEarClip === "function") {
+            const res = polygonEarClip(poly);
+            if (res && res.length >= poly.length - 2) return res;
+            if (res && res.length) return res;
+        }
+        const out = [];
+        for (let i = 1; i < poly.length - 1; i++) out.push([poly[0], poly[i], poly[i + 1]]);
+        return out;
+    }
+    const PARTS = Object.create(null);
+    function registerPart(name, build) {
+        if (!name || typeof build !== "function") return false;
+        PARTS[name] = build;
+        return true;
+    }
+    function partNames() {
+        return Object.keys(PARTS);
+    }
+    function shiftOf(axis, dx, dy, dz) {
+        if (axis === "y") return [dx, dz, dy];
+        if (axis === "x") return [dy, dz, dx];
+        return [dx, dy, dz];
+    }
+    function moveParts(parts, dx = 0, dy = 0, dz = 0) {
+        const list = Array.isArray(parts) ? parts : [parts];
+        return list.filter(Boolean).map((part) => {
+            if (Array.isArray(part.poly)) return { ...part, poly: part.poly.map(([x, y, z]) => [x + dx, y + dy, z + dz]) };
+            if (Array.isArray(part.rings)) {
+                const [du, dv, dw] = shiftOf(part.axis || "z", dx, dy, dz);
+                return {
+                    ...part,
+                    rings: part.rings.map((r) => ({ ...r, path: offsetPath(r.path, du, dv), w: r.w + dw })),
+                };
+            }
+            const [du, dv, dw] = shiftOf(part.axis || "z", dx, dy, dz);
+            return {
+                ...part,
+                path: offsetPath(part.path || [], du, dv),
+                z0: (part.z0 || 0) + dw,
+                z1: (part.z1 || 0) + dw,
+                holes: (part.holes || []).map((h) => offsetPath(h, du, dv)),
+            };
+        });
+    }
+    function part(name, opts = {}) {
+        const make = PARTS[name];
+        if (!make) return [];
+        const res = make(opts, API),
+            list = Array.isArray(res) ? res.filter(Boolean) : res ? [res] : [],
+            at = Array.isArray(opts.at) ? opts.at : [0, 0, 0];
+        return at[0] || at[1] || at[2] ? moveParts(list, at[0] || 0, at[1] || 0, at[2] || 0) : list;
+    }
+    const closedLoop = (path, axis, w) => [...path, path[0]].map(([u, v]) => toP3(axis, u, v, w));
+    function partEdges(part) {
+        if (Array.isArray(part.poly)) {
+            const poly = part.poly;
+            return poly.length < 3 ? [] : [[...poly, poly[0]]];
+        }
+        if (Array.isArray(part.rings)) {
+            const rings = part.rings,
+                axis = part.axis || "z",
+                out = [];
+            if (rings.length < 2) return out;
+            out.push(closedLoop(rings[0].path, axis, rings[0].w));
+            out.push(closedLoop(rings[rings.length - 1].path, axis, rings[rings.length - 1].w));
+            (part.ringLines || []).forEach((k) => {
+                if (rings[k]) out.push(closedLoop(rings[k].path, axis, rings[k].w));
+            });
+            const n = rings[0].path.length;
+            (part.verticals || []).forEach((k) => {
+                const idx = ((Math.round(k) % n) + n) % n;
+                for (let i = 0; i < rings.length - 1; i++) {
+                    const a = rings[i],
+                        b = rings[i + 1];
+                    out.push([
+                        toP3(axis, a.path[idx][0], a.path[idx][1], a.w),
+                        toP3(axis, b.path[idx][0], b.path[idx][1], b.w),
+                    ]);
+                }
+            });
+            return out;
+        }
+        const path = part.path || [],
+            axis = part.axis || "z",
+            out = [];
+        if (path.length < 3) return out;
+        if (!part.noBottom) out.push(closedLoop(path, axis, part.z0));
+        if (!part.noTop) out.push(closedLoop(path, axis, part.z1));
+        (part.holes || []).forEach((h) => {
+            if (!Array.isArray(h) || h.length < 3) return;
+            if (!part.noBottom) out.push(closedLoop(h, axis, part.z0));
+            if (!part.noTop) out.push(closedLoop(h, axis, part.z1));
+        });
+        if (part.sheet || part.noSides) return out;
+        if (part.smooth) {
+            const n = Math.max(0, Math.round(part.verts || 0));
+            for (let k = 0; k < n; k++) {
+                const [u, v] = path[Math.round((k * path.length) / n) % path.length];
+                out.push([toP3(axis, u, v, part.z0), toP3(axis, u, v, part.z1)]);
+            }
+            return out;
+        }
+        for (const [u, v] of path) out.push([toP3(axis, u, v, part.z0), toP3(axis, u, v, part.z1)]);
+        if (part.holeSides)
+            (part.holes || []).forEach((h) => {
+                if (!Array.isArray(h) || h.length < 3) return;
+                for (const [u, v] of h) out.push([toP3(axis, u, v, part.z0), toP3(axis, u, v, part.z1)]);
+            });
+        return out;
+    }
+    function partTris(part) {
+        const out = [];
+        if (Array.isArray(part.poly)) {
+            const poly = part.poly;
+            if (poly.length < 3) return out;
+            for (let i = 1; i < poly.length - 1; i++) out.push([poly[0], poly[i], poly[i + 1]]);
+            return out;
+        }
+        const axis = part.axis || "z";
+        if (Array.isArray(part.rings)) {
+            const rings = part.rings;
+            if (rings.length < 2) return out;
+            for (let i = 0; i < rings.length - 1; i++) {
+                const a = rings[i],
+                    b = rings[i + 1],
+                    n = Math.min(a.path.length, b.path.length);
+                for (let k = 0; k < n; k++) {
+                    const k2 = (k + 1) % n,
+                        A = toP3(axis, a.path[k][0], a.path[k][1], a.w),
+                        B = toP3(axis, a.path[k2][0], a.path[k2][1], a.w),
+                        C = toP3(axis, b.path[k2][0], b.path[k2][1], b.w),
+                        D = toP3(axis, b.path[k][0], b.path[k][1], b.w);
+                    out.push([A, B, C], [A, C, D]);
+                }
+            }
+            if (part.capEnd !== false) {
+                const last = rings[rings.length - 1];
+                triangulate(last.path).forEach(([x, y, z]) =>
+                    out.push([toP3(axis, x[0], x[1], last.w), toP3(axis, y[0], y[1], last.w), toP3(axis, z[0], z[1], last.w)]),
+                );
+            }
+            if (part.capStart !== false) {
+                const first = rings[0];
+                triangulate([...first.path].reverse()).forEach(([x, y, z]) =>
+                    out.push([toP3(axis, x[0], x[1], first.w), toP3(axis, y[0], y[1], first.w), toP3(axis, z[0], z[1], first.w)]),
+                );
+            }
+            return out;
+        }
+        const path = part.path || [],
+            holes = part.holes || [];
+        if (path.length < 3) return out;
+        if (part.centerCaps && !part.sheet) {
+            const n = path.length,
+                cu = path.reduce((a, p) => a + p[0], 0) / n,
+                cv = path.reduce((a, p) => a + p[1], 0) / n,
+                C0 = toP3(axis, cu, cv, part.z0),
+                C1 = toP3(axis, cu, cv, part.z1);
+            for (let i = 0; i < n; i++) {
+                const a = path[i],
+                    b = path[(i + 1) % n],
+                    A0 = toP3(axis, a[0], a[1], part.z0),
+                    B0 = toP3(axis, b[0], b[1], part.z0),
+                    A1 = toP3(axis, a[0], a[1], part.z1),
+                    B1 = toP3(axis, b[0], b[1], part.z1);
+                if (!part.noTop) out.push([C1, A1, B1]);
+                if (!part.noBottom) out.push([C0, B0, A0]);
+            }
+        } else {
+            if (!part.noBottom)
+                triangulate(path, holes).forEach(([a, b, c]) =>
+                    out.push([
+                        toP3(axis, a[0], a[1], part.z0),
+                        toP3(axis, b[0], b[1], part.z0),
+                        toP3(axis, c[0], c[1], part.z0),
+                    ]),
+                );
+            if (!part.noTop)
+                triangulate(path, holes).forEach(([a, b, c]) =>
+                    out.push([
+                        toP3(axis, a[0], a[1], part.z1),
+                        toP3(axis, b[0], b[1], part.z1),
+                        toP3(axis, c[0], c[1], part.z1),
+                    ]),
+                );
+        }
+        if (part.sheet || part.noSides) return out;
+        const wall = (p, flip) => {
+            for (let i = 0; i < p.length; i++) {
+                const a = p[i],
+                    b = p[(i + 1) % p.length],
+                    A = toP3(axis, a[0], a[1], part.z0),
+                    B = toP3(axis, b[0], b[1], part.z0),
+                    C = toP3(axis, b[0], b[1], part.z1),
+                    D = toP3(axis, a[0], a[1], part.z1);
+                if (flip) out.push([A, C, B], [A, D, C]);
+                else out.push([A, B, C], [A, C, D]);
+            }
+        };
+        wall(path, false);
+        if (part.holeSides) holes.forEach((h) => Array.isArray(h) && h.length >= 3 && wall(h, true));
+        return out;
+    }
+    function roundedBox(w, d, h, radius, opts = {}) {
+        const seg = Math.max(1, Math.round(opts.seg ?? 3)),
+            hseg = Math.max(1, Math.round(opts.cornerSeg ?? 2)),
+            cx = Number(opts.cx) || 0,
+            cy = Number(opts.cy) || 0,
+            z0 = Number(opts.z0) || 0,
+            W = Math.max(0.02, Math.abs(w)),
+            D = Math.max(0.02, Math.abs(d)),
+            H = Math.max(0.02, Math.abs(h)),
+            r = Math.max(0, Math.min(Number(radius) || 0, Math.min(W, D, H) / 2 - 1e-3)),
+            rc0 = Math.max(0, Math.min(Number(opts.cornerRadius ?? r) || 0, Math.min(W, D) / 2 - 1e-3)),
+            rings = [];
+        const push = (inset, z) =>
+            rings.push({
+                path: ringPath(Math.max(0.01, W - 2 * inset), Math.max(0.01, D - 2 * inset), Math.max(0, rc0 - inset), hseg, cx, cy),
+                w: z0 + z,
+            });
+        if (r > 1e-4) {
+            for (let i = 0; i <= seg; i++) {
+                const a = (i / seg) * (Math.PI / 2);
+                push(r * (1 - Math.sin(a)), r * (1 - Math.cos(a)));
+            }
+            for (let i = seg; i >= 0; i--) {
+                const a = (i / seg) * (Math.PI / 2);
+                push(r * (1 - Math.sin(a)), H - r * (1 - Math.cos(a)));
+            }
+        } else {
+            push(0, 0);
+            push(0, H);
+        }
+        const n = rings[0].path.length,
+            per = Math.max(1, hseg) + 1,
+            verticals = [];
+        for (let j = 0; j < 4; j++) {
+            verticals.push(j * per, j * per + (per - 1));
+        }
+        const ringLines = r > 1e-4 ? [...new Set([seg, rings.length - 1 - seg])] : [];
+        return loft(rings, {
+            verticals: [...new Set(verticals.map((k) => Math.min(n - 1, k)))],
+            ringLines,
+            ...(opts.extra || {}),
+        });
+    }
+    const GLYPHS = {
+        A: [[[0, 0], [0, 4], [2, 6], [4, 4], [4, 0]], [[0, 2.2], [4, 2.2]]],
+        B: [[[0, 0], [0, 6], [3, 6], [4, 5], [4, 4], [3, 3], [0, 3]], [[3, 3], [4, 2], [4, 1], [3, 0], [0, 0]]],
+        C: [[[4, 5], [3, 6], [1, 6], [0, 5], [0, 1], [1, 0], [3, 0], [4, 1]]],
+        D: [[[0, 0], [0, 6], [3, 6], [4, 5], [4, 1], [3, 0], [0, 0]]],
+        E: [[[4, 6], [0, 6], [0, 0], [4, 0]], [[0, 3.2], [3, 3.2]]],
+        F: [[[4, 6], [0, 6], [0, 0]], [[0, 3.2], [3, 3.2]]],
+        G: [[[4, 5], [3, 6], [1, 6], [0, 5], [0, 1], [1, 0], [3, 0], [4, 1], [4, 2.8], [2, 2.8]]],
+        H: [[[0, 0], [0, 6]], [[4, 0], [4, 6]], [[0, 3.2], [4, 3.2]]],
+        I: [[[2, 0], [2, 6]], [[0.6, 6], [3.4, 6]], [[0.6, 0], [3.4, 0]]],
+        J: [[[4, 6], [4, 1], [3, 0], [1, 0], [0, 1]]],
+        K: [[[0, 0], [0, 6]], [[4, 6], [0, 2.8]], [[1.4, 3.6], [4, 0]]],
+        L: [[[0, 6], [0, 0], [4, 0]]],
+        M: [[[0, 0], [0, 6], [2, 3.4], [4, 6], [4, 0]]],
+        N: [[[0, 0], [0, 6], [4, 0], [4, 6]]],
+        O: [[[1, 0], [3, 0], [4, 1], [4, 5], [3, 6], [1, 6], [0, 5], [0, 1], [1, 0]]],
+        P: [[[0, 0], [0, 6], [3, 6], [4, 5], [4, 3.4], [3, 2.4], [0, 2.4]]],
+        Q: [[[1, 0], [3, 0], [4, 1], [4, 5], [3, 6], [1, 6], [0, 5], [0, 1], [1, 0]], [[2.2, 1.4], [4, -0.6]]],
+        R: [[[0, 0], [0, 6], [3, 6], [4, 5], [4, 3.4], [3, 2.4], [0, 2.4]], [[2, 2.4], [4, 0]]],
+        S: [[[4, 5], [3, 6], [1, 6], [0, 5], [0, 3.8], [1, 3], [3, 3], [4, 2.2], [4, 1], [3, 0], [1, 0], [0, 1]]],
+        T: [[[0, 6], [4, 6]], [[2, 6], [2, 0]]],
+        U: [[[0, 6], [0, 1], [1, 0], [3, 0], [4, 1], [4, 6]]],
+        V: [[[0, 6], [2, 0], [4, 6]]],
+        W: [[[0, 6], [1, 0], [2, 3], [3, 0], [4, 6]]],
+        X: [[[0, 0], [4, 6]], [[0, 6], [4, 0]]],
+        Y: [[[0, 6], [2, 3.2], [4, 6]], [[2, 3.2], [2, 0]]],
+        Z: [[[0, 6], [4, 6], [0, 0], [4, 0]]],
+        0: [[[1, 0], [3, 0], [4, 1], [4, 5], [3, 6], [1, 6], [0, 5], [0, 1], [1, 0]], [[0.8, 1.2], [3.2, 4.8]]],
+        1: [[[0.8, 5], [2, 6], [2, 0]], [[0.6, 0], [3.4, 0]]],
+        2: [[[0, 5], [1, 6], [3, 6], [4, 5], [4, 3.8], [0, 0], [4, 0]]],
+        3: [[[0, 6], [4, 6], [2.2, 3.6], [3.4, 3.6], [4, 2.6], [4, 1], [3, 0], [1, 0], [0, 1]]],
+        4: [[[3, 0], [3, 6], [0, 2], [4, 2]]],
+        5: [[[4, 6], [0, 6], [0, 3.4], [3, 3.4], [4, 2.4], [4, 1], [3, 0], [1, 0], [0, 1]]],
+        6: [[[3.6, 6], [1, 6], [0, 5], [0, 1], [1, 0], [3, 0], [4, 1], [4, 2.4], [3, 3.4], [0, 3.4]]],
+        7: [[[0, 6], [4, 6], [1.4, 0]]],
+        8: [
+            [[1, 3.4], [3, 3.4], [4, 4.4], [4, 5], [3, 6], [1, 6], [0, 5], [0, 4.4], [1, 3.4]],
+            [[1, 3.4], [0, 2.4], [0, 1], [1, 0], [3, 0], [4, 1], [4, 2.4], [3, 3.4]],
+        ],
+        9: [[[0.4, 0], [3, 0], [4, 1], [4, 5], [3, 6], [1, 6], [0, 5], [0, 3.6], [1, 2.6], [4, 2.6]]],
+        "-": [[[1, 3], [3, 3]]],
+        ".": [[[1.8, 0], [2.2, 0], [2.2, 0.4], [1.8, 0.4], [1.8, 0]]],
+        ",": [[[2.2, 0.4], [2.2, 0], [1.6, -0.8]]],
+        ":": [[[2, 1.4], [2, 1.8]], [[2, 3.6], [2, 4]]],
+        "/": [[[3.4, 6], [0.6, 0]]],
+        "+": [[[2, 1.6], [2, 4.4]], [[0.8, 3], [3.2, 3]]],
+        "!": [[[2, 6], [2, 2]], [[2, 0.6], [2, 0.2]]],
+        "?": [[[0, 5], [1, 6], [3, 6], [4, 5], [4, 3.8], [2, 2.6], [2, 1.8]], [[2, 0.6], [2, 0.2]]],
+        "&": [[[4, 0], [1.2, 4.2], [1.2, 5.2], [2, 6], [3, 5.4], [3, 4.4], [0, 1.6], [0.8, 0], [2, 0.6], [4, 3]]],
+        "(": [[[3, 6], [1.4, 4], [1.4, 2], [3, 0]]],
+        ")": [[[1, 6], [2.6, 4], [2.6, 2], [1, 0]]],
+        "'": [[[2, 6], [2, 4.6]]],
+        "*": [[[2, 3], [2, 5.6]], [[0.8, 3.6], [3.2, 5]], [[3.2, 3.6], [0.8, 5]]],
+        " ": [],
+    };
+    function textStrokes(text, opts = {}) {
+        const src = String(text ?? "").toUpperCase(),
+            height = Math.max(0.005, Number(opts.height) || 0.1),
+            s = height / 6,
+            tracking = Number.isFinite(Number(opts.tracking)) ? Number(opts.tracking) : 1.4,
+            advance = (4 + tracking) * s,
+            align = opts.align || "center",
+            lines = src.split("\n"),
+            out = [];
+        const widths = lines.map((ln) => (ln.length ? ln.length * advance - tracking * s : 0)),
+            maxW = Math.max(...widths, 0);
+        lines.forEach((ln, li) => {
+            const baseU =
+                    align === "left" ? 0 : align === "right" ? -widths[li] : -widths[li] / 2,
+                baseV = -((lines.length - 1) / 2) * height * 1.3 + (lines.length - 1 - li) * height * 1.3;
+            for (let i = 0; i < ln.length; i++) {
+                const g = GLYPHS[ln[i]] || GLYPHS["?"] || [],
+                    ox = baseU + i * advance;
+                g.forEach((poly) => out.push(poly.map(([x, y]) => [ox + x * s, baseV + (y - 3) * s])));
+            }
+        });
+        out.maxWidth = maxW;
+        return out;
+    }
+    function textPart(text, opts = {}) {
+        const face = opts.face || "front",
+            plane = Number(opts.plane) || 0,
+            u0 = Number(opts.u) || 0,
+            v0 = Number(opts.v) || 0,
+            height = Math.max(0.005, Number(opts.height) || 0.1),
+            stroke = Math.max(0.003, Number(opts.stroke) || height * 0.14),
+            proud = Number.isFinite(Number(opts.proud)) ? Number(opts.proud) : 0.012,
+            strokes = textStrokes(text, {
+                height,
+                tracking: opts.tracking,
+                align: opts.align || "center",
+            }),
+            map = (u, v) => {
+                const uu = u + u0,
+                    vv = v + v0;
+                if (face === "back") return [-uu, plane + proud, vv];
+                if (face === "left") return [plane - proud, uu, vv];
+                if (face === "right") return [plane + proud, -uu, vv];
+                if (face === "top") return [uu, -vv, plane + proud];
+                if (face === "bottom") return [uu, vv, plane - proud];
+                return [uu, plane - proud, vv];
+            },
+            parts = [];
+        for (const poly of strokes) {
+            for (let i = 1; i < poly.length; i++) {
+                const a = poly[i - 1],
+                    b = poly[i],
+                    du = b[0] - a[0],
+                    dv = b[1] - a[1],
+                    len = Math.hypot(du, dv);
+                if (len < 1e-9) continue;
+                const nu = (-dv / len) * (stroke / 2),
+                    nv = (du / len) * (stroke / 2);
+                parts.push(
+                    face3(
+                        [map(a[0] + nu, a[1] + nv), map(b[0] + nu, b[1] + nv), map(b[0] - nu, b[1] - nv), map(a[0] - nu, a[1] - nv)],
+                        { color: opts.color },
+                    ),
+                );
+            }
+        }
+        parts.width = strokes.maxWidth;
+        return parts;
+    }
+    function define(kind, meta, build, opts = {}) {
+        if (!kind || typeof build !== "function" || typeof registerAsset !== "function") return false;
+        const exists = !!(ASSETS[kind] || ASSET_LINE_BUILDERS[kind]);
+        if (exists && !opts.replace) return false;
+        const lineBuilder = (ctx) => {
+            const parts = build(ctx.o, API) || [];
+            for (const part of parts) {
+                const color = part.color || ctx.c,
+                    width = part.width || ctx.o.w;
+                for (const seg of partEdges(part)) ctx.out.push(lineA(ctx.o, seg, color, width));
+            }
+        };
+        if (!exists) {
+            if (!registerAsset(kind, meta, lineBuilder)) return false;
+        } else {
+            ASSETS[kind] = { ...ASSETS[kind], ...meta };
+            if (opts.lines !== false) ASSET_LINE_BUILDERS[kind] = lineBuilder;
+        }
+        KIT_TRIS[kind] = (o) => {
+            const parts = build(o, API) || [],
+                tris = [];
+            for (const part of parts) for (const t of partTris(part)) tris.push([L2W(o, ...t[0]), L2W(o, ...t[1]), L2W(o, ...t[2])]);
+            return tris;
+        };
+        return true;
+    }
+    const API = {
+        define,
+        param,
+        num,
+        rectPath,
+        roundRectPath,
+        ringPath,
+        cylinder,
+        part,
+        partNames,
+        registerPart,
+        moveParts,
+        count,
+        repeat,
+        grid,
+        revolution,
+        circlePath,
+        offsetPath,
+        scalePath,
+        rotatePath,
+        prism,
+        box,
+        sheet,
+        face3,
+        loft,
+        roundedBox,
+        textStrokes,
+        textPart,
+        glyphs: () => Object.keys(GLYPHS),
+        toP3,
+        isConvex,
+        area2,
+        bridgeHoles,
+        triangulate,
+        partEdges,
+        partTris,
+        kinds: () => Object.keys(KIT_TRIS),
+    };
+    window.ASSET_KIT = API;
+    window.assetKitTriangles = (o) => {
+        const fn = o && o.asset ? KIT_TRIS[o.asset] : null;
+        return fn ? fn(o) : null;
+    };
+    return API;
+})();
+(function () {
+    const K = typeof ASSET_KIT === "undefined" ? null : ASSET_KIT;
+    if (!K || typeof K.registerPart !== "function") return;
+    const num = (v, dflt) => (Number.isFinite(Number(v)) && Number(v) !== 0 ? Number(v) : dflt);
+    K.registerPart("window", (o) => {
+        const w = num(o.w, 0.9),
+            h = num(o.h, 0.7),
+            t = num(o.frame, Math.min(w, h) * 0.07),
+            d = num(o.d, 0.08),
+            axis = o.axis || "y",
+            hole = K.rectPath(Math.max(0.02, w - 2 * t), Math.max(0.02, h - 2 * t)),
+            parts = [K.box(K.rectPath(w, h), -d / 2, d / 2, { axis, holes: [hole], holeSides: true })];
+        if (o.glass !== false) parts.push(K.sheet(hole, -0.006, 0.006, { axis, color: o.glassColor, width: o.width }));
+        if (o.mullion !== false && w - 2 * t > 0.45) parts.push(K.box(K.rectPath(0.03, h - 2 * t), -d / 4, d / 4, { axis }));
+        return parts;
+    });
+    K.registerPart("door", (o) => {
+        const w = num(o.w, 0.55),
+            h = num(o.h, 1.0),
+            t = num(o.frame, 0.05),
+            d = num(o.d, 0.08),
+            axis = o.axis || "y",
+            hole = K.rectPath(Math.max(0.02, w - 2 * t), Math.max(0.02, h - 2 * t)),
+            parts = [
+                K.box(K.rectPath(w, h), -d / 2, d / 2, { axis, holes: [hole], holeSides: true }),
+                K.box(hole, -d / 2 + 0.012, d / 2 - 0.012, { axis }),
+            ];
+        if (o.handle !== false) {
+            const hx = (w - 2 * t) * 0.34,
+                hz = o.handleZ === undefined ? 0 : Number(o.handleZ);
+            parts.push(...K.moveParts([K.cylinder(0.018, -d / 2 - 0.07, -d / 2 - 0.01, { axis: "y", seg: 10 })], hx, 0, hz));
+        }
+        return parts;
+    });
+    K.registerPart("acUnit", (o) => {
+        const w = num(o.w, 0.78),
+            h = num(o.h, 0.56),
+            d = num(o.d, 0.3),
+            fan = Math.min(w, h) * 0.3,
+            fy = -d / 2,
+            fx = -w * 0.16,
+            fz = h * 0.58,
+            parts = [K.box(K.rectPath(w, d), 0, h)];
+        parts.push(...K.moveParts([K.cylinder(fan, fy - 0.02, fy + 0.02, { axis: "y", seg: 18 })], fx, 0, fz));
+        parts.push(...K.moveParts([K.box(K.rectPath(0.04, fan * 1.7), fy - 0.03, fy - 0.02, { axis: "y" })], fx, 0, fz));
+        parts.push(...K.moveParts([K.box(K.rectPath(fan * 1.7, 0.04), fy - 0.03, fy - 0.02, { axis: "y" })], fx, 0, fz));
+        for (let i = 0; i < 3; i++)
+            parts.push(
+                ...K.moveParts(
+                    [K.box(K.rectPath(w * 0.3, 0.022), fy - 0.015, fy + 0.005, { axis: "y" })],
+                    w * 0.22,
+                    0,
+                    h * (0.74 - i * 0.16),
+                ),
+            );
+        [-w * 0.34, w * 0.34].forEach((x) => parts.push(...K.moveParts([K.box(K.rectPath(0.09, d * 0.85), -0.06, 0.005)], x, 0, 0)));
+        return parts;
+    });
+    K.registerPart("bench", (o) => {
+        const w = num(o.w, 1.6),
+            h = num(o.h, 0.45),
+            d = num(o.d, 0.42),
+            t = num(o.t, 0.05),
+            parts = [K.box(K.rectPath(w, d), h - t, h)];
+        [-w * 0.4, w * 0.4].forEach((x) =>
+            parts.push(...K.moveParts([K.box(K.rectPath(t * 1.4, d * 0.8), 0, h - t)], x, 0, 0)),
+        );
+        if (o.back !== false) {
+            const bh = num(o.backH, h * 1.1);
+            parts.push(...K.moveParts([K.box(K.rectPath(w, t), h, h + bh)], 0, d / 2 - t / 2, 0));
+        }
+        return parts;
+    });
+    K.registerPart("awning", (o) => {
+        const w = num(o.w, 2.2),
+            d = num(o.d, 0.7),
+            drop = num(o.drop, 0.28),
+            t = num(o.t, 0.04),
+            zBack = num(o.z, 0),
+            zFront = zBack - drop,
+            canopy = [
+                [-d / 2, zFront],
+                [d / 2, zBack],
+                [d / 2, zBack - t],
+                [-d / 2, zFront - t],
+            ],
+            parts = [K.box(canopy, -w / 2, w / 2, { axis: "x" })];
+        parts.push(K.box(K.offsetPath(K.rectPath(w, 0.14), 0, zFront - 0.07), -d / 2 - t, -d / 2, { axis: "y" }));
+        [-w * 0.42, w * 0.42].forEach((x) =>
+            parts.push(...K.moveParts([K.box(K.rectPath(t, d), zFront - 0.055, zFront + 0.01)], x, 0, 0)),
+        );
+        return parts;
+    });
+    K.registerPart("wheel", (o) => {
+        const r = num(o.r, 0.3),
+            t = num(o.t, 0.16),
+            hub = r * 0.3,
+            parts = [K.cylinder(r, -t / 2, t / 2, { axis: "y", seg: 20 })];
+        parts.push(K.cylinder(hub, -t / 2 - 0.02, t / 2 + 0.02, { axis: "y", seg: 10 }));
+        for (let i = 0; i < 3; i++) {
+            const a = (i / 3) * Math.PI,
+                c = Math.cos(a),
+                s = Math.sin(a),
+                w = 0.03;
+            parts.push(
+                K.box(
+                    [
+                        [c * hub, s * hub],
+                        [c * r * 0.9, s * r * 0.9],
+                        [c * r * 0.9 - s * w, s * r * 0.9 + c * w],
+                        [c * hub - s * w, s * hub + c * w],
+                    ],
+                    -t / 2 - 0.005,
+                    t / 2 + 0.005,
+                    { axis: "y" },
+                ),
+            );
+        }
+        return parts;
+    });
+    K.registerPart("pipeRun", (o) => {
+        const len = num(o.len, 1.2),
+            r = num(o.r, 0.05),
+            axis = o.axis || "x",
+            at = (s) => [axis === "x" ? s : 0, axis === "y" ? s : 0, axis === "z" ? s : 0],
+            parts = [K.cylinder(r, -len / 2, len / 2, { axis, seg: 14 })];
+        [-len * 0.42, len * 0.42].forEach((s) =>
+            parts.push(...K.moveParts([K.cylinder(r * 1.5, -0.02, 0.02, { axis, seg: 14 })], ...at(s))),
+        );
+        return parts;
+    });
+    K.registerPart("signBoard", (o) => {
+        const w = num(o.w, 1.2),
+            h = num(o.h, 0.35),
+            t = num(o.t, 0.06),
+            text = String(o.text || "SHOP"),
+            parts = [K.box(K.rectPath(w, h), -t / 2, t / 2, { axis: "y" })];
+        if (text.trim())
+            parts.push(...K.textPart(text, { face: "front", plane: -t / 2, height: h * num(o.textScale, 0.5), stroke: h * 0.07, proud: 0.012 }));
+        return parts;
+    });
+})();
+ASSET_KIT.define(
+    "lightboxSign",
+    {
+        label: "電光看板",
+        glyph: "▤",
+        w: 0.72,
+        d: 0.28,
+        h: 0.92,
+        accent: "#ff5a7a",
+        lightboxFrame: 0.042,
+        lightboxPanelThickness: 0.13,
+        lightboxPanelBottom: 0.26,
+        lightboxCorner: 0.038,
+        lightboxLegSize: 0.042,
+        lightboxFootHeight: 0.03,
+        lightboxFootLength: 0.16,
+        lightboxRing: true,
+    },
+    (o, K) => {
+        const W = Math.max(0.2, Math.abs(2 * o.ra)),
+            D = Math.max(0.06, Math.abs(2 * o.rb)),
+            H = Math.max(0.2, Math.abs(o.h)),
+            frame = Math.max(0.005, K.param(o, "lightboxFrame", 0.042)),
+            panelT = Math.max(0.02, K.param(o, "lightboxPanelThickness", 0.13)),
+            bottom = Math.max(0, Math.min(H - 0.1, K.param(o, "lightboxPanelBottom", 0.26))),
+            corner = Math.max(0, K.param(o, "lightboxCorner", 0.038)),
+            legS = Math.max(0.01, K.param(o, "lightboxLegSize", 0.042)),
+            footH = Math.max(0, K.param(o, "lightboxFootHeight", 0.03)),
+            footL = Math.max(0.02, K.param(o, "lightboxFootLength", 0.16)),
+            ring = K.param(o, "lightboxRing", 1) ? true : false,
+            parts = [];
+        parts.push(
+            K.box(K.roundRectPath(W, panelT, corner, 2), bottom, H),
+        );
+        const innerW = Math.max(0.05, W - frame * 2),
+            innerH0 = Math.min(H - 0.01, bottom + frame),
+            innerH1 = Math.max(innerH0 + 0.02, H - frame);
+        if (innerW > 0.06 && innerH1 - innerH0 > 0.02)
+            parts.push(
+                K.box(K.roundRectPath(innerW, panelT + 0.014, Math.max(0.005, corner - frame * 0.5), 2), innerH0, innerH1),
+            );
+        const legX = W / 2 + legS / 2 - Math.min(0.01, legS * 0.2);
+        for (const sx of [-1, 1])
+            parts.push(K.box(K.rectPath(legS, legS, sx * legX, 0), footH, H));
+        for (const sx of [-1, 1])
+            parts.push(K.box(K.rectPath(Math.max(legS * 1.6, 0.08), Math.min(footL, D), sx * legX, 0), 0, footH));
+        if (ring) parts.push(K.box(K.rectPath(Math.min(0.11, W * 0.12), Math.min(0.05, panelT), 0, 0), H, H + 0.06));
+        return parts;
+    },
+);
+ASSET_KIT.define(
+    "vendingMachine",
+    {
+        label: "自販機",
+        glyph: "▯",
+        w: 1.0,
+        d: 0.75,
+        h: 1.83,
+        accent: "#d94a4a",
+        vmWindowWRatio: 0.62,
+        vmWindowHRatio: 0.35,
+        vmWindowBottomRatio: 0.36,
+        vmBandHeightRatio: 0.11,
+        vmOutletWRatio: 0.46,
+        vmOutletHeightRatio: 0.11,
+        vmOutletBottomRatio: 0.04,
+        vmCoinWRatio: 0.18,
+        vmBodyRadius: 0.05,
+        vmCornerRadius: 0.08,
+        vmCornerSeg: 2,
+        vmVertSeg: 2,
+        vmPanelProud: 0.015,
+        vmPanelThickness: 0.05,
+    },
+    (o, K) => {
+        const W = Math.max(0.2, Math.abs(2 * o.ra)),
+            D = Math.max(0.2, Math.abs(2 * o.rb)),
+            H = Math.max(0.3, Math.abs(o.h)),
+            ratio = (key, dflt, lo, hi) => Math.max(lo, Math.min(hi, K.param(o, key, dflt))),
+            bodyR = K.param(o, "vmBodyRadius", 0.05),
+            cornerR = K.param(o, "vmCornerRadius", 0.08),
+            cSeg = Math.round(K.param(o, "vmCornerSeg", 2)),
+            vSeg = Math.round(K.param(o, "vmVertSeg", 2)),
+            winW = W * ratio("vmWindowWRatio", 0.62, 0.2, 0.94),
+            winH = H * ratio("vmWindowHRatio", 0.35, 0.08, 0.6),
+            winBottom = H * ratio("vmWindowBottomRatio", 0.36, 0.05, 0.7),
+            bandH = H * ratio("vmBandHeightRatio", 0.11, 0.03, 0.25),
+            proud = Math.max(0.002, K.param(o, "vmPanelProud", 0.015)),
+            panelT = Math.max(0.01, K.param(o, "vmPanelThickness", 0.05)),
+            outW = W * ratio("vmOutletWRatio", 0.46, 0.2, 0.86),
+            outH = H * ratio("vmOutletHeightRatio", 0.11, 0.04, 0.25),
+            outBottom = H * ratio("vmOutletBottomRatio", 0.04, 0.005, 0.2),
+            outCz = outBottom + outH / 2,
+            front = -D / 2,
+            parts = [],
+            frontPanel = (pw, ph, cz, holes, cx = 0) =>
+                K.box(K.rectPath(pw, ph, cx, cz), front - proud, front + panelT, { axis: "y", holes, holeSides: true });
+        parts.push(K.roundedBox(W, D, H, bodyR, { cornerRadius: cornerR, seg: vSeg, cornerSeg: cSeg, z0: 0 }));
+        const winCz = winBottom + winH / 2,
+            frameH = winH + Math.min(0.16, winH * 0.28);
+        parts.push(frontPanel(winW + Math.min(0.16, winW * 0.22), frameH, winCz, [K.rectPath(winW, winH, 0, 0).map(([u, v]) => [u, winCz + v])]));
+        const shelfY = front - proud + Math.min(0.012, proud * 0.8);
+        for (let i = 1; i <= 2; i++) {
+            const sz = winBottom + (winH * i) / 3;
+            parts.push(K.box(K.rectPath(winW * 0.94, 0.035, 0, sz), shelfY - 0.004, shelfY + 0.004, { axis: "y", sheet: true }));
+        }
+        parts.push(K.box(K.rectPath(winW * 0.94, 0.035, 0, winBottom + 0.02), shelfY - 0.004, shelfY + 0.004, { axis: "y", sheet: true }));
+        const bandBottom = winBottom + frameH + H * 0.02,
+            bandTop = Math.min(H - H * 0.04, bandBottom + bandH);
+        if (bandTop - bandBottom > 0.02)
+            parts.push(frontPanel(winW + Math.min(0.16, winW * 0.22), bandTop - bandBottom, (bandBottom + bandTop) / 2, []));
+        const frameW = winW + Math.min(0.16, winW * 0.22),
+            sideGap = W / 2 - frameW / 2 - W * 0.03,
+            coinW = Math.max(W * 0.08, Math.min(W * 0.24, W * ratio("vmCoinWRatio", 0.18, 0.08, 0.3))),
+            coinH = Math.min(H * 0.2, frameH * 0.62);
+        if (sideGap >= coinW + W * 0.02) {
+            const coinX = frameW / 2 + coinW / 2 + 0.02,
+                cz = winCz + frameH * 0.12,
+                slotH = Math.min(0.1, coinH * 0.4);
+            parts.push(frontPanel(coinW, coinH, cz, [K.rectPath(coinW * 0.28, slotH, 0, cz + coinH * 0.18)], coinX));
+            for (let i = 0; i < 3; i++)
+                parts.push(
+                    K.box(
+                        K.rectPath(coinW * 0.42, 0.045, coinX, cz - coinH * 0.1 - i * 0.075),
+                        front - proud - 0.025,
+                        front - proud,
+                        { axis: "y" },
+                    ),
+                );
+        } else {
+            const gapTop = winCz - frameH / 2,
+                gapBottom = outCz + outH / 2 + 0.05,
+                gap = gapTop - gapBottom;
+            if (gap > 0.14) {
+                const ph = Math.min(0.12, gap - 0.04),
+                    cz = (gapTop + gapBottom) / 2;
+                parts.push(frontPanel(Math.min(0.34, W * 0.34), ph, cz, [K.rectPath(0.06, Math.min(0.06, ph * 0.5), 0.06, cz)], 0.1));
+            }
+        }
+        parts.push(frontPanel(Math.min(W * 0.86, winW + 0.14), outH + 0.1, outCz, [K.rectPath(outW, outH, 0, outCz)]));
+        return parts;
+    },
+);
+ASSET_KIT.define(
+    "uWall",
+    { label: "コの字壁" },
+    (o, K) => {
+        const g = uWallGeometry(o),
+            t = g.thickness,
+            hw = g.w / 2,
+            hd = g.d / 2,
+            profile = [
+                [-hw, 0],
+                [-hw, g.h],
+                [hw, g.h],
+                [hw, 0],
+                [hw - t, 0],
+                [hw - t, g.h - t],
+                [-hw + t, g.h - t],
+                [-hw + t, 0],
+            ];
+        return [K.box(profile, -hd, hd, { axis: "y" })];
+    },
+    { replace: true },
+);
+ASSET_KIT.define(
+    "stall",
+    { label: "屋台" },
+    (o, K) => {
+        const g = stallGeometry(o),
+            hd = g.d / 2,
+            sideD = g.d - g.t,
+            sideY = (hd - g.t + -hd) / 2;
+        return [
+            K.box(K.rectPath(g.w, g.t, 0, hd - g.t / 2), 0, g.roofBottom),
+            K.box(K.rectPath(g.t, sideD, -g.w / 2 + g.t / 2, sideY), 0, g.roofBottom),
+            K.box(K.rectPath(g.t, sideD, g.w / 2 - g.t / 2, sideY), 0, g.roofBottom),
+            K.box(K.rectPath(g.w, g.cd, 0, -hd - g.cd / 2), 0, g.ch),
+            K.box(K.rectPath(g.w, g.d + g.ro, 0, -g.ro / 2), g.roofBottom, g.h),
+        ];
+    },
+    { replace: true, lines: false },
+);
+ASSET_KIT.define(
+    "balcony",
+    { label: "壁付けベランダ" },
+    (o, K) => {
+        const g = balconyGeometry(o),
+            t = g.thickness,
+            parts = [K.box(K.rectPath(g.w, g.d), 0, t)];
+        if (g.frontRail) parts.push(K.box(K.rectPath(g.w, t, 0, -g.d / 2 + t / 2), t, t + g.railH));
+        if (g.sideRail) {
+            const y0 = g.frontRail ? -g.d / 2 + t : -g.d / 2,
+                sideD = g.d / 2 - y0,
+                cy = (y0 + g.d / 2) / 2;
+            parts.push(K.box(K.rectPath(t, sideD, -g.w / 2 + t / 2, cy), t, t + g.railH));
+            parts.push(K.box(K.rectPath(t, sideD, g.w / 2 - t / 2, cy), t, t + g.railH));
+        }
+        return parts;
+    },
+    { replace: true, lines: false },
+);
+ASSET_KIT.define(
+    "wallSign",
+    { label: "壁付け看板" },
+    (o, K) => {
+        const p = wallSignParams(o),
+            half = p.thickness * 0.5,
+            parts = [K.box(wallSignFacePoints(p), -half, half, { axis: "y" })];
+        wallSignBrackets(p).forEach((b) =>
+            parts.push(
+                K.box(
+                    K.rectPath(b.x1 - b.x0, b.y1 - b.y0, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2),
+                    b.z - b.h * 0.5,
+                    b.z + b.h * 0.5,
+                ),
+            ),
+        );
+        return parts;
+    },
+    { replace: true },
+);
+ASSET_KIT.define(
+    "stool",
+    { label: "丸椅子" },
+    (o, K) => {
+        const g = stoolGeometry(o);
+        return [
+            K.cylinder(g.seatR, g.seatBottom, g.h, { seg: 20 }),
+            K.cylinder(g.legR, g.baseTop, g.poleTop, { seg: 12 }),
+            K.cylinder(g.baseR, 0, g.baseH, { seg: 16 }),
+        ];
+    },
+    { replace: true, lines: false },
+);
+ASSET_KIT.define(
+    "railing",
+    { label: "手すり" },
+    (o, K) => {
+        const g = railingGeometry(o),
+            zTop0 = Math.max(0, g.h - g.t),
+            zBot1 = Math.min(g.h - g.t, g.bottom + g.t),
+            footH = Math.min(g.h, Math.min(0.03, Math.max(0.012, g.bottom * 0.35))),
+            footW = g.post * 1.5,
+            railLen = (r) => Math.max(0.001, r.len - g.post),
+            parts = [];
+        g.posts.forEach(({ x, y }) => {
+            parts.push(K.box(K.rectPath(g.post, g.post, x, y), Math.min(footH, g.h), g.h));
+            parts.push(K.box(K.rectPath(footW, footW, x, y), 0, footH));
+        });
+        g.runs.forEach((r) => {
+            const cx = (r.a[0] + r.b[0]) / 2,
+                cy = (r.a[1] + r.b[1]) / 2,
+                len = railLen(r),
+                bw = r.alongX ? len : g.t,
+                bd = r.alongX ? g.t : len;
+            parts.push(K.box(K.rectPath(bw, bd, cx, cy), zTop0, g.h));
+            if (zBot1 > g.bottom) parts.push(K.box(K.rectPath(bw, bd, cx, cy), g.bottom, zBot1));
+            if (zTop0 - zBot1 > 0.001)
+                r.bars.forEach(([bx, by]) => parts.push(K.box(K.rectPath(g.barT, g.barT, bx, by), zBot1, zTop0)));
+        });
+        return parts;
+    },
+    { replace: true, lines: false },
+);
+ASSET_KIT.define(
+    "shopFront",
+    {
+        label: "店先",
+        glyph: "▥",
+        w: 3.2,
+        d: 1.6,
+        h: 2.4,
+        accent: "#e5c07b",
+        shopWallThickness: 0.12,
+        shopDoorWidth: 0.62,
+        shopDoorHeight: 1.05,
+        shopWindowWidth: 1.15,
+        shopWindowHeight: 0.6,
+    },
+    (o, K) => {
+        const W = Math.max(1.2, Math.abs(2 * o.ra)),
+            H = Math.max(0.8, Math.abs(o.h)),
+            T = Math.max(0.05, K.param(o, "shopWallThickness", 0.12)),
+            dw = Math.max(0.3, K.param(o, "shopDoorWidth", 0.62)),
+            dh = Math.min(H - 0.3, Math.max(0.5, K.param(o, "shopDoorHeight", 1.05))),
+            ww = Math.max(0.3, K.param(o, "shopWindowWidth", 1.15)),
+            wh = Math.max(0.25, K.param(o, "shopWindowHeight", 0.6)),
+            doorX = -W * 0.28,
+            winX = W * 0.2,
+            winZ = Math.min(H - wh / 2 - 0.1, dh * 0.95 + wh / 2);
+        return [
+            K.box(K.offsetPath(K.rectPath(W, H), 0, H / 2), -T / 2, T / 2, {
+                axis: "y",
+                holes: [K.offsetPath(K.rectPath(dw, dh), doorX, dh / 2), K.offsetPath(K.rectPath(ww, wh), winX, winZ)],
+                holeSides: true,
+            }),
+            ...K.part("door", { w: dw, h: dh, d: T * 1.2, at: [doorX, 0, dh / 2] }),
+            ...K.part("window", { w: ww, h: wh, d: T, at: [winX, 0, winZ] }),
+            ...K.part("awning", { w: dw + 0.7, d: 0.62, z: dh + 0.42, at: [doorX, -0.31, 0] }),
+            ...K.part("acUnit", { at: [W * 0.36, -T / 2 - 0.16, 0.06] }),
+            ...K.part("signBoard", { w: Math.min(W * 0.5, 1.5), h: 0.3, text: "", at: [winX, -T / 2 - 0.04, H - 0.28] }),
+        ];
+    },
+);
+ASSET_KIT.define(
+    "outdoorUnit",
+    {
+        label: "室外機",
+        glyph: "▤",
+        w: 0.86,
+        d: 0.34,
+        h: 0.66,
+        accent: "#b9c6cc",
+        ouCorner: 0.045,
+        ouFanRatio: 0.78,
+        ouFanX: -0.1,
+        ouBlades: 5,
+        ouRings: 3,
+        ouLouvers: 8,
+        ouLegH: 0.12,
+        ouPipes: true,
+    },
+    (o, K) => {
+        const g = outdoorUnitGeometry(o),
+            { W, D, H, legH, bodyH, bodyCz, fanR, fanX, corner } = g,
+            blades = Math.max(2, Math.min(9, Math.round(K.param(o, "ouBlades", 5)))),
+            rings = Math.max(0, Math.min(5, Math.round(K.param(o, "ouRings", 3)))),
+            louvers = Math.max(0, Math.min(16, Math.round(K.param(o, "ouLouvers", 8)))),
+            front = -D / 2,
+            body = K.offsetPath(K.roundRectPath(W, bodyH, corner, 2), 0, bodyCz),
+            holeC = [fanX, bodyCz],
+            parts = [
+                K.box(body, front, D / 2, {
+                    axis: "y",
+                    holes: [K.offsetPath(K.circlePath(fanR, 30), holeC[0], holeC[1])],
+                    holeSides: true,
+                }),
+                K.box(body, D / 2 - 0.014, D / 2, { axis: "y" }),
+            ];
+        for (let i = 0; i < blades; i++) {
+            const a = (i / blades) * 360,
+                bw = fanR * 0.42,
+                blade = K.rotatePath(
+                    [
+                        [fanR * 0.24, -bw * 0.3],
+                        [fanR * 0.84, -bw * 0.5],
+                        [fanR * 0.88, bw * 0.4],
+                        [fanR * 0.32, bw * 0.46],
+                    ],
+                    a,
+                );
+            parts.push(...K.moveParts([K.box(blade, front + 0.05, front + 0.068, { axis: "y" })], fanX, 0, bodyCz));
+        }
+        for (let i = 0; i < rings; i++) {
+            const r = fanR * (0.42 + (0.52 * i) / Math.max(1, rings - 1));
+            parts.push(...K.moveParts([K.cylinder(r, front - 0.006, front + 0.004, { axis: "y", seg: 30, caps: false })], fanX, 0, bodyCz));
+        }
+        parts.push(...K.moveParts([K.cylinder(fanR * 0.15, front - 0.02, front + 0.03, { axis: "y", seg: 16 })], fanX, 0, bodyCz));
+        if (louvers)
+            parts.push(
+                ...K.repeat(louvers, (i) => {
+                    const t = louvers > 1 ? i / (louvers - 1) : 0.5,
+                        z = legH + bodyH * (0.14 + 0.72 * t);
+                    return K.box(K.rectPath(D * 0.74, 0.02, 0, z), W / 2 - 0.004, W / 2 + 0.005, { axis: "x" });
+                }),
+            );
+        [-W * 0.34, W * 0.34].forEach((x) => parts.push(...K.moveParts([K.box(K.rectPath(W * 0.13, D * 0.84), 0, legH)], x, 0, 0)));
+        if (o.ouPipes !== false)
+            [0, 1].forEach((i) =>
+                parts.push(
+                    ...K.moveParts(
+                        [K.cylinder(0.014, 0.02, legH + bodyH * 0.6, { axis: "z", seg: 8 })],
+                        W / 2 - 0.07 - i * 0.045,
+                        D / 2 - 0.05,
+                        0,
+                    ),
+                ),
+            );
+        return parts;
+    },
+);
 "use strict";
 window.cityGridInstallAssetUI = function (bridge) {
     const {
@@ -16632,31 +17633,39 @@ window.cityGridInstallAssetUI = function (bridge) {
             label: "建物",
             kinds: [
                 "building",
-                "buildingAwning",
-                "buildingSign",
                 "stackedBuilding",
                 "recessedStackedBuilding",
                 "beveledStackedBuilding",
                 "stall",
             ],
         },
-        { key: "roof", label: "屋根", kinds: ["gableRoof", "shedRoof"] },
+        {
+            key: "buildingParts",
+            label: "建物パーツ",
+            kinds: [
+                "buildingAwning",
+                "buildingSign",
+                "gableRoof",
+                "shedRoof",
+                "awning",
+                "balcony",
+                "uWall",
+                "railing",
+                "outdoorUnit",
+            ],
+        },
         {
             key: "street",
-            label: "街・パーツ",
+            label: "街パーツ",
             kinds: [
-            "stairs",
-            "crosswalk",
-            "ramp",
-            "pathPipe",
-            "awning",
-            "balcony",
-            "uWall",
-            "railing",
-            "stool",
-            "wallSign",
-            "windowGrid",
-        ],
+                "stairs",
+                "crosswalk",
+                "ramp",
+                "pathPipe",
+                "stool",
+                "wallSign",
+                "windowGrid",
+            ],
         },
         { key: "person", label: "人間", kinds: ["person"] },
     ];

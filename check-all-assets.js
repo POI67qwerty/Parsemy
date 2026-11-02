@@ -107,6 +107,21 @@ const { chromium } = require("playwright");
     }
 
     // 手すり専用の点検：形3種・本数・角材の太さ・下の横桟の高さで線画が変わること。
+    // 手すりの点検は「シーンに手すり1台だけ」の状態で行う。
+    // 31個すべてを並べた状態のままだと、手すりが画面の外へ寄っていて
+    // 面ハンドル（top/base）が投影できず、形が悪くなくても NG になる。
+    await p.evaluate(() => {
+        S.length = 0;
+        const grp = document.querySelector('[data-asset-group="street"]');
+        if (grp) grp.click();
+    });
+    await p.waitForTimeout(60);
+    await p.evaluate(() => {
+        const card = document.querySelector('[data-asset="railing"]');
+        if (card) card.click();
+    });
+    await p.waitForTimeout(160);
+
     const railing = await p.evaluate(() => {
         const o = [...new Map(S.filter((s) => s.ob).map((s) => [s.ob.id, s.ob])).values()].find(
             (q) => q && q.asset === "railing",
