@@ -3247,7 +3247,25 @@ function wallSideSignGizmo(o) {
             s1 = scrW(V.add(C3, axis, 1, eps));
         if (!s1?.ok) return;
         const pu = Math.hypot(s1.x - sC.x, s1.y - sC.y) / eps;
-        if (pu < 1e-6) return;
+        // 画面で完全に潰れた軸（真横・真上から見た奥行き方向）は、3Dでは矢印を出さない。
+        // ただし正投影（正面・横・上）では、その軸へ動かす手段が無くなってしまうため、
+        // 通常の直方体と同じく決まった向きの短い矢印を置いて掴めるようにする。
+        // （以前はこの分岐が壁横看板だけ抜けていて、正面・上のビューで
+        //   壁から出る向き＝看板の厚み方向へ動かせなかった）
+        if (pu < 1e-6) {
+            if (!orthView) return;
+            const d = hiddenHandleDir(),
+                L = 120 / Math.max(0.05, Z);
+            g.axes.push({
+                a: axis,
+                col,
+                nm,
+                sT: { x: sC.x + d.x * L, y: sC.y + d.y * L, ok: true },
+                hiddenAxis: true,
+                wallSideSign: true,
+            });
+            return;
+        }
         const length = Math.min(90 / Z / pu, 3 * nC + 1),
             sT = scrW(V.add(C3, axis, 1, length));
         if (sT?.ok) g.axes.push({ a: axis, col, nm, sT, wallSideSign: true });
