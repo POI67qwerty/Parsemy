@@ -27,6 +27,12 @@ window.cityGridInstallAssetUI = function (bridge) {
     } = bridge;
     // ===== 1. 接地と配置位置 =====
     function groundAt(p) {
+        // 正投影（正面・横・上）は視線が平行なので、画面の位置から床の上の点を決める。
+        // 透視のときはカメラからの視線と床の交点。
+        if (orthView) {
+            const w = orthWorldAt(p);
+            return [w[0], -1, w[2]];
+        }
         const q = hit3(unscr(p), 1, -1, camPos());
         if (q && Number.isFinite(q[0]) && Number.isFinite(q[2])) return q;
         return [0, -1, 4];

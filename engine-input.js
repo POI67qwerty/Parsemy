@@ -10,8 +10,11 @@ const rawOf = (cx, cy) => {
     return { x: ((cx - r.left) * W) / r.width, y: ((cy - r.top) * H) / r.height };
 }; // 画面→キャンバス(ズーム前)
 const pos = (e) => {
-    const r = rawOf(e.clientX, e.clientY);
-    return { x: (r.x - ox) / Z, y: (r.y - oy) / Z };
+    const r = rawOf(e.clientX, e.clientY),
+        // 画面の拡大・移動の「移動ぶん」はビューによって違う（正投影は基準点を中心に拡大する）。
+        // 描画とまったく同じ値で戻さないと、クリックした場所と選ばれる場所がずれる。
+        vs = viewShift();
+    return { x: (r.x - vs[0]) / Z, y: (r.y - vs[1]) / Z };
 }; // ズーム・移動を戻した描画座標
 const TC = new Map(); // いま触れている指(touch)
 function clampView() {
@@ -592,7 +595,7 @@ cv.onpointerdown = (e) => {
                     o0: { ...o },
                     group,
                     p0: p,
-                    P0: hit3(unscr(p), o.k, o.d - o.d * o.lift, cloc(o)),
+                    P0: pickOnPlane(p, o.k, o.d - o.d * o.lift, cloc(o)),
                     started: false,
                     ...snapSetupGroup(group, objectAnchorWorld(o)),
                 };
@@ -694,7 +697,10 @@ cv.onpointermove = (e) => {
     if (cur.ax === -1 && Math.hypot(p.x - a.x, p.y - a.y) >= 6) cur.ax = pick(a, p);
     if (cur.ax === -2) {
         cur.p.push(p);
-        if (cur.P0) cur.pv.p.push(V.add(camPos(), unscr(p), 1, cur.D));
+        if (cur.P0)
+            // 正投影は平行投影なので、画面の点から直接ワールド座標を作る
+            // （カメラからの向き×奥行きでは、マウスを動かすたびに点が大きく飛ぶ）。
+            cur.pv.p.push(orthView ? orthWorldAt(p) : V.add(camPos(), unscr(p), 1, cur.D));
     } // フリーハンド
     else if (cur.ax >= 0) {
         if (cur.P0) {
@@ -708,8 +714,20 @@ cv.onpointermove = (e) => {
                     tt = (p.x - a.x) * u.x + (p.y - a.y) * u.y;
                 E = { x: a.x + u.x * tt, y: a.y + u.y * tt };
             }
-            const a3 = AXW[cur.ax],
-                t = lineParam(unscr(E), V.add(cur.P0, CO()), a3);
+            const a3 = AXW[cur.ax];
+            // 定規：画面上の軸の向きに投影して、軸に沿った長さ t を出す。
+            // 正投影では「カメラからの視線」が平行なので、線分との最近接では求まらない。
+            let t = null;
+            if (orthView) {
+                const s0 = scr(cur.P0),
+                    s1 = scr(V.add(cur.P0, a3, 1, 1));
+                if (s0.ok && s1.ok) {
+                    const dx = s1.x - s0.x,
+                        dy = s1.y - s0.y,
+                        l2 = dx * dx + dy * dy;
+                    if (l2 > 1e-6) t = ((E.x - s0.x) * dx + (E.y - s0.y) * dy) / l2;
+                }
+            } else t = lineParam(unscr(E), V.add(cur.P0, CO()), a3);
             if (t != null) cur.pv.p = dens3([cur.P0, V.add(cur.P0, a3, 1, t)]);
         } else if (T === "f")
             cur.p = curveF(a, p, cur.ax); // 魚眼：大円の曲線に投影

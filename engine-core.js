@@ -725,10 +725,17 @@ const ZERO2 = [0, 0];
 const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 // 間取りモードだけ、オブジェクト群を画面中央へ自動フィットする。
 // 通常の9=真上は従来どおり原点中心の正投影を維持する。
-const orthPlanCenter = () =>
-    window.cityFloorPlanActive && Array.isArray(window.cityFloorPlanCenter) ? window.cityFloorPlanCenter : [0, 0];
+// 正投影の「表示中心」と「倍率」。以前は間取りモードのときだけ自動フィットの値を使い、
+// それ以外（3Dから正面・横・上へ切り替えたとき）は原点＝カメラ位置を中心にしていた。
+// そのため、カメラから離れた所に置いたオブジェクトが画面の外へ出て、
+// 「正面・横・上が真っ白／別の絵」になっていた（実測：線の画素がシーンの1/50）。
+// いまは正面・横・上へ切り替えるたびにシーン全体が入るよう中心と倍率を作り直す。
+const orthPlanCenter = () => (Array.isArray(window.cityFloorPlanCenter) ? window.cityFloorPlanCenter : [0, 0]);
+// 正投影のときだけ自動フィットの倍率を使う。3D（透視）のときは今までどおりの値。
+// 透視の側でも orthScale() を参照している箇所があり、値を変えるとハンドルの間隔が
+// 変わって見た目が変わってしまうため、条件を明示しておく。
 const orthScale = () =>
-    window.cityFloorPlanActive && Number.isFinite(Number(window.cityFloorPlanScale))
+    orthView && Number.isFinite(Number(window.cityFloorPlanScale)) && Number(window.cityFloorPlanScale) > 0
         ? Number(window.cityFloorPlanScale)
         : Math.min(W, H) / 7.2;
 // 正面／横／上の間取りビュー専用の正投影。
@@ -742,8 +749,8 @@ let orthSetupKey = "",
     orthSetupVal = null;
 function orthSetup() {
     const sc = orthScale(),
-        active = !!window.cityFloorPlanActive,
-        pc = active ? orthPlanCenter() : ZERO2,
+        active = true, // 自動フィットの中心・倍率は間取りモード以外でも使う
+        pc = orthPlanCenter(),
         key =
             orthView + "|" + sc + "|" + W + "|" + H + "|" +
             (active ? 1 : 0) + "|" + pc[0] + "|" + pc[1] + "|" + P.cx + "|" + P.cz + "|" + P.ch;
@@ -797,34 +804,51 @@ function scr(v) {
 // 画面の点→ワールドの向き
 function unscr(p) {
     if (orthView) {
+        // 正投影の「画面の点 → 向き」。表示中心（自動フィット）を基準に戻す。
+        // 以前は画面中央 (W/2, H/2) 基準だったため、フィットで中心がずれると
+        // クリックした場所と実際に選ばれる場所が食い違っていた。
         const b = orthBasis(),
-            sc = orthScale(),
-            x = (p.x - W / 2) / sc,
-            y = -(p.y - H / 2) / sc,
-            pc =
-                window.cityFloorPlanActive && (orthView === "top" || orthView === "side" || orthView === "front")
-                    ? orthPlanCenter()
-                    : [0, 0],
-            q = [
-                b.right[0] * x + b.up[0] * y + b.depth[0],
-                b.right[1] * x + b.up[1] * y + b.depth[1],
-                b.right[2] * x + b.up[2] * y + b.depth[2],
-            ];
-        if (orthView === "top") {
-            q[0] += pc[0];
-            q[2] += pc[1];
-        } else if (window.cityFloorPlanActive && orthView === "side") {
-            q[2] += pc[0];
-            q[1] += pc[1];
-        } else if (window.cityFloorPlanActive && orthView === "front") {
-            q[0] += pc[0];
-            q[1] += pc[1];
-        }
-        return V.nrm(q);
+            st = orthSetup(),
+            sc = Math.max(1e-6, st.sc),
+            x = (p.x - st.ax) / sc,
+            y = -(p.y - st.ay) / sc;
+        return V.nrm([
+            b.right[0] * x + b.up[0] * y + b.depth[0],
+            b.right[1] * x + b.up[1] * y + b.depth[1],
+            b.right[2] * x + b.up[2] * y + b.depth[2],
+        ]);
     }
     if (T === "f") return wld(bf(p));
     const f = (W * P.lens) / 36;
     return wld(V.nrm([(p.x - W / 2) / f, -(p.y - (H * P.hz) / 100) / f, 1]));
+}
+// 正投影（正面・横・上）で、画面の点 p に対応するワールド座標。
+// 平行投影なので奥行き（視線方向）の座標は画面から決まらない。
+// base（省略時はカメラ位置）を通り、視線に垂直な面上の点を返す。
+// 透視の unscr()（カメラから出る向き）に相当するもので、
+// 「クリックした場所へアセットを置く」「ドラッグで面を動かす」に使う。
+function orthWorldAt(p, base) {
+    const st = orthSetup(),
+        b = orthBasis(),
+        sc = Math.max(1e-6, st.sc),
+        c = Array.isArray(base) && base.length === 3 ? base : camPos(),
+        rel = [c[0] - camPos()[0], c[1] - camPos()[1], c[2] - camPos()[2]],
+        u = (p.x - st.ax) / sc - dot3(rel, b.right),
+        v = -(p.y - st.ay) / sc - dot3(rel, b.up);
+    return [
+        c[0] + b.right[0] * u + b.up[0] * v,
+        c[1] + b.right[1] * u + b.up[1] * v,
+        c[2] + b.right[2] * u + b.up[2] * v,
+    ];
+}
+// 画面の点 p を、面（k座標=d）の上のワールド座標へ移す。
+// 透視はカメラからの視線と面の交点。正投影は画面の2軸だけで位置が決まるので、
+// 面の軸の値だけを d に置き換える（＝どのビューでも同じ場所を掴める）。
+function pickOnPlane(p, k, d, c) {
+    if (!orthView) return hit3(unscr(p), k, d, c || camPos());
+    const q = orthWorldAt(p, c);
+    q[k] = d;
+    return q.every(Number.isFinite) ? q : null;
 }
 // 保存済みの線を今の視点で描く（点の間は球面上で補間するので魚眼でも曲線になる）
 // d3=trueの線は3D座標の点（図形）、そうでなければ視線の向き（ペンで描いた線）
@@ -836,7 +860,8 @@ function strokeW(c, s) {
     // ベベルの縦線は線だけ表示では「角ごとに1本」だけ描く（全部描くと角が黒く潰れる）。
     if (s.seam !== undefined && s.seam !== null && !s.seamApex) return;
     c.strokeStyle = s.c;
-    c.lineWidth = effectiveLineWidth(s);
+    // 二値化する層では、線が最小限の太さを持つようにする（lineLayer が設定する）。
+    c.lineWidth = typeof layerLineWidth === "function" ? layerLineWidth(s) : effectiveLineWidth(s);
     c.lineCap = c.lineJoin = "round";
     c.beginPath();
     let on = false;

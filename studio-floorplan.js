@@ -184,7 +184,7 @@
     const angle360 = (a) => (((Number(a) || 0) % 360) + 360) % 360;
     const floorPlanObject = () => sel && obOf(sel);
     function floorPlanWorldAt(p) {
-        const q = hit3(unscr(p), 1, -1, [0, 0, 0]);
+        const q = pickOnPlane(p, 1, -1, [0, 0, 0]);
         return q && Number.isFinite(q[0]) && Number.isFinite(q[2]) ? { x: q[0], z: q[2] } : null;
     }
     // 真横ビューは画面の左右がZ、上下がYなので、床面との交差ではなく

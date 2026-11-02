@@ -2518,18 +2518,17 @@ function orthBasis() {
 }
 const ZERO2 = [0, 0];
 const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-const orthPlanCenter = () =>
-    window.cityFloorPlanActive && Array.isArray(window.cityFloorPlanCenter) ? window.cityFloorPlanCenter : [0, 0];
+const orthPlanCenter = () => (Array.isArray(window.cityFloorPlanCenter) ? window.cityFloorPlanCenter : [0, 0]);
 const orthScale = () =>
-    window.cityFloorPlanActive && Number.isFinite(Number(window.cityFloorPlanScale))
+    orthView && Number.isFinite(Number(window.cityFloorPlanScale)) && Number(window.cityFloorPlanScale) > 0
         ? Number(window.cityFloorPlanScale)
         : Math.min(W, H) / 7.2;
 let orthSetupKey = "",
     orthSetupVal = null;
 function orthSetup() {
     const sc = orthScale(),
-        active = !!window.cityFloorPlanActive,
-        pc = active ? orthPlanCenter() : ZERO2,
+        active = true,
+        pc = orthPlanCenter(),
         key =
             orthView + "|" + sc + "|" + W + "|" + H + "|" +
             (active ? 1 : 0) + "|" + pc[0] + "|" + pc[1] + "|" + P.cx + "|" + P.cz + "|" + P.ch;
@@ -2580,33 +2579,39 @@ function scr(v) {
 function unscr(p) {
     if (orthView) {
         const b = orthBasis(),
-            sc = orthScale(),
-            x = (p.x - W / 2) / sc,
-            y = -(p.y - H / 2) / sc,
-            pc =
-                window.cityFloorPlanActive && (orthView === "top" || orthView === "side" || orthView === "front")
-                    ? orthPlanCenter()
-                    : [0, 0],
-            q = [
-                b.right[0] * x + b.up[0] * y + b.depth[0],
-                b.right[1] * x + b.up[1] * y + b.depth[1],
-                b.right[2] * x + b.up[2] * y + b.depth[2],
-            ];
-        if (orthView === "top") {
-            q[0] += pc[0];
-            q[2] += pc[1];
-        } else if (window.cityFloorPlanActive && orthView === "side") {
-            q[2] += pc[0];
-            q[1] += pc[1];
-        } else if (window.cityFloorPlanActive && orthView === "front") {
-            q[0] += pc[0];
-            q[1] += pc[1];
-        }
-        return V.nrm(q);
+            st = orthSetup(),
+            sc = Math.max(1e-6, st.sc),
+            x = (p.x - st.ax) / sc,
+            y = -(p.y - st.ay) / sc;
+        return V.nrm([
+            b.right[0] * x + b.up[0] * y + b.depth[0],
+            b.right[1] * x + b.up[1] * y + b.depth[1],
+            b.right[2] * x + b.up[2] * y + b.depth[2],
+        ]);
     }
     if (T === "f") return wld(bf(p));
     const f = (W * P.lens) / 36;
     return wld(V.nrm([(p.x - W / 2) / f, -(p.y - (H * P.hz) / 100) / f, 1]));
+}
+function orthWorldAt(p, base) {
+    const st = orthSetup(),
+        b = orthBasis(),
+        sc = Math.max(1e-6, st.sc),
+        c = Array.isArray(base) && base.length === 3 ? base : camPos(),
+        rel = [c[0] - camPos()[0], c[1] - camPos()[1], c[2] - camPos()[2]],
+        u = (p.x - st.ax) / sc - dot3(rel, b.right),
+        v = -(p.y - st.ay) / sc - dot3(rel, b.up);
+    return [
+        c[0] + b.right[0] * u + b.up[0] * v,
+        c[1] + b.right[1] * u + b.up[1] * v,
+        c[2] + b.right[2] * u + b.up[2] * v,
+    ];
+}
+function pickOnPlane(p, k, d, c) {
+    if (!orthView) return hit3(unscr(p), k, d, c || camPos());
+    const q = orthWorldAt(p, c);
+    q[k] = d;
+    return q.every(Number.isFinite) ? q : null;
 }
 function effectiveLineWidth(s) {
     const base = Number(s && s.w);
@@ -2615,7 +2620,7 @@ function effectiveLineWidth(s) {
 function strokeW(c, s) {
     if (s.seam !== undefined && s.seam !== null && !s.seamApex) return;
     c.strokeStyle = s.c;
-    c.lineWidth = effectiveLineWidth(s);
+    c.lineWidth = typeof layerLineWidth === "function" ? layerLineWidth(s) : effectiveLineWidth(s);
     c.lineCap = c.lineJoin = "round";
     c.beginPath();
     let on = false;
@@ -6402,7 +6407,13 @@ function compoundGizmo(o) {
             s1 = scrW(V.add(C3, a, 1, eps));
         if (!s1.ok) return;
         const pu = Math.hypot(s1.x - sC.x, s1.y - sC.y) / eps;
-        if (pu < 1e-6) return;
+        if (pu < 1e-6) {
+            if (!orthView) return;
+            const d = hiddenHandleDir(),
+                L = 120 / Math.max(0.05, Z);
+            g.axes.push({ a, col, nm, sT: { x: sC.x + d.x * L, y: sC.y + d.y * L, ok: true }, hiddenAxis: true });
+            return;
+        }
         const L = Math.min(90 / Z / pu, 3 * nC + 1),
             sT = scrW(V.add(C3, a, 1, L));
         if (sT.ok) g.axes.push({ a, col, nm, sT });
@@ -6637,7 +6648,13 @@ function gizmo() {
             s1 = scrW(V.add(C3, a, 1, eps));
         if (!s1.ok) return;
         const pu = Math.hypot(s1.x - sC.x, s1.y - sC.y) / eps;
-        if (pu < 1e-6) return;
+        if (pu < 1e-6) {
+            if (!orthView) return;
+            const d = hiddenHandleDir(),
+                L = 120 / Math.max(0.05, Z);
+            g.axes.push({ a, col, nm, sT: { x: sC.x + d.x * L, y: sC.y + d.y * L, ok: true }, hiddenAxis: true });
+            return;
+        }
         const L = Math.min(90 / Z / pu, 3 * nC + 1),
             sT = scrW(V.add(C3, a, 1, L));
         if (sT.ok) g.axes.push({ a, col, nm, sT });
@@ -7991,7 +8008,11 @@ function dragEdit(p, freeRotation = false) {
         }
     } else if (ed.t === "axis") {
         let amount = null;
-        if (ed.axisGuide?.hidden) amount = 0;
+        if (ed.axisGuide?.hidden) {
+            const dx = p.x - ed.p0.x,
+                dy = p.y - ed.p0.y;
+            amount = (dx * ed.axisGuide.dir.x + dy * ed.axisGuide.dir.y) / (ed.axisGuide.scale || 1);
+        }
         else if (ed.axisGuide) {
             const dx = p.x - ed.p0.x,
                 dy = p.y - ed.p0.y;
@@ -9103,7 +9124,7 @@ function rasterizeDepthInto(buf, own, ownerMap, list, cw, ch, tf, used, face) {
         if (
             !p0 || !p1 || !p2 ||
             !Number.isFinite(p0.depth) || !Number.isFinite(p1.depth) || !Number.isFinite(p2.depth) ||
-            p0.depth < -0.001 || p1.depth < -0.001 || p2.depth < -0.001
+            (!orthView && (p0.depth < -0.001 || p1.depth < -0.001 || p2.depth < -0.001))
         )
             return;
         const area = (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x);
@@ -9145,6 +9166,10 @@ function rasterizeDepthInto(buf, own, ownerMap, list, cw, ch, tf, used, face) {
             ux1 = Math.min(cw - 1, Math.ceil(maxX));
         if (ux0 < used.x0) used.x0 = ux0;
         if (ux1 > used.x1) used.x1 = ux1;
+        const recip = !orthView && T !== "f" && p0.depth > 1e-6 && p1.depth > 1e-6 && p2.depth > 1e-6,
+            r0 = recip ? 1 / p0.depth : 0,
+            r1 = recip ? 1 / p1.depth : 0,
+            r2 = recip ? 1 / p2.depth : 0;
         const d0 = -(p1.y - p0.y) / area,
             d1 = -(p2.y - p1.y) / area,
             d2 = -(p0.y - p2.y) / area;
@@ -9179,7 +9204,9 @@ function rasterizeDepthInto(buf, own, ownerMap, list, cw, ch, tf, used, face) {
                 idx = y * cw + xa;
             for (let x = xa; x <= xb; x++, idx++, w0 += d0, w1 += d1, w2 += d2) {
                 if (w0 >= -1e-5 && w1 >= -1e-5 && w2 >= -1e-5) {
-                    const z = p0.depth * w1 + p1.depth * w2 + p2.depth * w0;
+                    const z = recip
+                        ? 1 / (r0 * w1 + r1 * w2 + r2 * w0)
+                        : p0.depth * w1 + p1.depth * w2 + p2.depth * w0;
                     if (z < buf[idx]) {
                         buf[idx] = z;
                         if (own) own[idx] = owner;
@@ -9209,7 +9236,9 @@ let depthMovingRect = null,
     depthMovingUsedY1 = -Infinity;
 function buildExportDepth(cw, ch, tf) {
     const need = cw * ch,
-        ctxKey = cw + "," + ch + "," + (tf ? tf.join(",") : "") + "," + sigNow() + "," + JSON.stringify(P),
+        ctxKey =
+            cw + "," + ch + "," + (tf ? tf.join(",") : "") + "," + orthoProjectionKey() + "," +
+            sigNow() + "," + JSON.stringify(P),
         objs = [],
         seen = new Set();
     S.forEach((s) => {
@@ -9379,6 +9408,43 @@ function silhouetteAt(depth, cw, ch, x, y, d) {
         b = side(3) - d;
     return (a > 0.5 && b < 0.05) || (b > 0.5 && a < 0.05);
 }
+function shapeEdgeAt(depth, cw, ch, x, y, d, owner) {
+    if (!depthOwner) return false;
+    const at = (dx, dy) => {
+        const xx = x + dx,
+            yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= cw || yy >= ch) return { self: false, z: Infinity };
+        const i = yy * cw + xx,
+            z = depth[i];
+        return { self: depthOwner[i] === owner, z: Number.isFinite(z) ? z : Infinity };
+    };
+    const pairs = [
+        [at(-3, 0), at(3, 0)],
+        [at(0, -3), at(0, 3)],
+    ];
+    for (const [p1, p2] of pairs) {
+        if (p1.self === p2.self) continue;
+        const far = p1.self ? p2 : p1;
+        if (far.z >= d - 0.05) return true;
+    }
+    return false;
+}
+const INTERIOR_RING = [
+    [-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1],
+];
+function interiorOfFace(cw, ch, x, y, r, owner) {
+    if (!depthFace || !depthOwner) return false;
+    const f0 = depthFace[y * cw + x];
+    if (!f0) return false;
+    for (let k = 0; k < INTERIOR_RING.length; k++) {
+        const xx = x + INTERIOR_RING[k][0] * r,
+            yy = y + INTERIOR_RING[k][1] * r;
+        if (xx < 0 || yy < 0 || xx >= cw || yy >= ch) return false;
+        const i = yy * cw + xx;
+        if (depthFace[i] !== f0 || depthOwner[i] !== owner) return false;
+    }
+    return true;
+}
 function movingRectOf(o, cw, ch, tf) {
     const tris = surfaceTriangles(o);
     let x0 = Infinity,
@@ -9409,7 +9475,64 @@ function faceIdAt(cw, ch, x, y) {
     if (x < 0 || x >= cw || y < 0 || y >= ch) return 0;
     return depthFace[y * cw + x];
 }
+const FACE_CULL_OFFSETS = window.__cullOffsets || [3];
+function depthAtPoint(depth, cw, ch, px, py) {
+    const gx = px - 0.5,
+        gy = py - 0.5,
+        x0 = Math.floor(gx),
+        y0 = Math.floor(gy),
+        tx = gx - x0,
+        ty = gy - y0;
+    let sum = 0,
+        wsum = 0;
+    for (let j = 0; j <= 1; j++) {
+        const yy = y0 + j;
+        if (yy < 0 || yy >= ch) continue;
+        const wy = j ? ty : 1 - ty;
+        if (!(wy > 0)) continue;
+        for (let i = 0; i <= 1; i++) {
+            const xx = x0 + i;
+            if (xx < 0 || xx >= cw) continue;
+            const wi = i ? tx : 1 - tx;
+            if (!(wi > 0)) continue;
+            const v = depth[yy * cw + xx];
+            if (!Number.isFinite(v)) continue;
+            const w = wi * wy;
+            sum += v * w;
+            wsum += w;
+        }
+    }
+    return wsum > 0 ? sum / wsum : Infinity;
+}
+function faceCullAround(cw, ch, x, y, f0, owner) {
+    for (let i = 0; i < FACE_CULL_OFFSETS.length; i++) {
+        const d = FACE_CULL_OFFSETS[i];
+        for (let k = 0; k < 4; k++) {
+            const nx = x + (k === 0 ? -d : k === 1 ? d : 0),
+                ny = y + (k === 2 ? -d : k === 3 ? d : 0);
+            if (faceIdAt(cw, ch, nx, ny) !== f0) return false;
+            if (depthOwner && depthOwner[ny * cw + nx] !== owner) return false;
+        }
+    }
+    return true;
+}
 const CONTACT_REACH = 0.05;
+const RANGE_WIN = 3;
+function silhouetteRange(depth, cw, ch, x, y, d) {
+    let zmax = -Infinity;
+    for (let dy = -RANGE_WIN; dy <= RANGE_WIN; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= ch) continue;
+        const row = yy * cw;
+        for (let dx = -RANGE_WIN; dx <= RANGE_WIN; dx++) {
+            const xx = x + dx;
+            if (xx < 0 || xx >= cw) continue;
+            const v = depth[row + xx];
+            if (v > zmax) zmax = v;
+        }
+    }
+    return Number.isFinite(zmax) ? zmax : Infinity;
+}
 function nearVisible(depth, cw, ch, x, y, d) {
     const eps = CG.depthEps(d);
     let zmin = Infinity,
@@ -9426,30 +9549,60 @@ function nearVisible(depth, cw, ch, x, y, d) {
             if (v > zmax) zmax = v;
         }
     }
+    if (!Number.isFinite(zmax)) return false;
     if (!(zmax >= d - eps)) return false;
+    if (!Number.isFinite(zmin)) return false;
     const tol = Math.min(0.25, Math.max(eps, (zmax - zmin) * 0.75));
     return d <= zmin + tol;
 }
 const SEAM_OFF = 5,
     SEAM_BG = 2;
 function seamEdgeScore(a, b, depth, cw, ch) {
-    const mx = (a.x + b.x) / 2,
-        my = (a.y + b.y) / 2,
-        mz = (a.depth + b.depth) / 2,
+    const mz = (a.depth + b.depth) / 2,
         cap = Math.abs(mz) * SEAM_BG + 1,
         dx = b.x - a.x,
         dy = b.y - a.y,
         len = Math.hypot(dx, dy) || 1,
         px = -dy / len,
         py = dx / len,
-        at = (k) => {
-            const x = Math.round(mx + px * k),
-                y = Math.round(my + py * k);
+        tol = Math.max(0.3, Math.abs(mz) * 0.03),
+        at = (x0, y0, k, dep) => {
+            const x = Math.round(x0 + px * k),
+                y = Math.round(y0 + py * k);
             if (x < 0 || y < 0 || x >= cw || y >= ch) return cap;
             const z = depth[y * cw + x];
             return Number.isFinite(z) ? Math.min(z, cap) : cap;
+        },
+        depthAbs = (x0, y0) => {
+            const x = Math.round(x0),
+                y = Math.round(y0);
+            if (x < 0 || y < 0 || x >= cw || y >= ch) return Infinity;
+            return depth[y * cw + x];
+        },
+        faceAt = (x0, y0, k) => {
+            const x = Math.round(x0 + px * k),
+                y = Math.round(y0 + py * k);
+            if (x < 0 || y < 0 || x >= cw || y >= ch) return 0;
+            return depthFace ? depthFace[y * cw + x] : 0;
         };
-    return Math.abs(at(SEAM_OFF) - at(-SEAM_OFF));
+    let edge = 0,
+        vis = 0;
+    const N = 9;
+    for (let i = 1; i <= N; i++) {
+        const t = i / (N + 1),
+            x0 = a.x + dx * t,
+            y0 = a.y + dy * t,
+            zLine = a.depth + (b.depth - a.depth) * t;
+        if (Math.abs(at(x0, y0, SEAM_OFF) - at(x0, y0, -SEAM_OFF)) >= Math.max(0.25, Math.abs(mz) * 0.04)) edge++;
+        else {
+            const f1 = faceAt(x0, y0, SEAM_OFF),
+                f2 = faceAt(x0, y0, -SEAM_OFF);
+            if (f1 && f2 && f1 !== f2) edge += 0.5;
+        }
+        const zBuf = depthAbs(x0, y0);
+        if (!Number.isFinite(zBuf) || zBuf >= zLine - tol) vis++;
+    }
+    return { edge: edge / N, vis: vis / N };
 }
 let seamPicks = null;
 function updateSeamPicks(depth, cw, ch, tf) {
@@ -9462,16 +9615,24 @@ function updateSeamPicks(depth, cw, ch, tf) {
         const a = exportPoint(s.p[0], tf),
             b = exportPoint(s.p[s.p.length - 1], tf);
         if (!a || !b) continue;
-        const score = seamEdgeScore(a, b, depth, cw, ch),
+        const sc = seamEdgeScore(a, b, depth, cw, ch),
+            score = sc.edge * 0.6 + sc.vis * 0.4,
             key = (s.ob.id || "") + ":" + s.seam,
             cur = best.get(key);
-        if (!cur || score > cur.score) best.set(key, { score, s, mz: (a.depth + b.depth) / 2 });
+        if (!cur || score > cur.score) best.set(key, { score, vis: sc.vis, s, mz: (a.depth + b.depth) / 2 });
     }
     const picks = new Set();
     best.forEach((v) => {
-        if (v.score > Math.abs(v.mz) * 0.12) picks.add(v.s);
+        if (v.vis > 0 && v.score >= (window.__seamTh === undefined ? 0.25 : Number(window.__seamTh))) picks.add(v.s);
     });
     seamPicks = picks;
+}
+let lineDevMin = 0,
+    lineDevMinScale = 1;
+function layerLineWidth(s) {
+    const base = effectiveLineWidth(s);
+    if (!(lineDevMin > 0)) return base;
+    return Math.max(base, lineDevMin / Math.max(0.05, lineDevMinScale));
 }
 function strokeWVisible(c, s, depth, cw, ch, tf) {
     const seamLine = s.seam !== undefined && s.seam !== null;
@@ -9481,11 +9642,28 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         return;
     }
     c.strokeStyle = s.c;
-    c.lineWidth = effectiveLineWidth(s);
+    c.lineWidth = layerLineWidth(s);
     c.lineCap = c.lineJoin = "round";
     c.beginPath();
     let on = false;
     const myOwner = depthOwnerMap.get(s.ob.id) || 0;
+    if (!window.__noInterior && depthFace) {
+        let ins = 0,
+            hit = 0;
+        for (let i = 1; i <= 4; i++) {
+            const p = exportPoint(s.p[Math.round(((s.p.length - 1) * i) / 5)], tf);
+            if (!p) continue;
+            const x = Math.round(p.x),
+                y = Math.round(p.y);
+            if (x < 0 || y < 0 || x >= cw || y >= ch) continue;
+            const z = depthAtPoint(depth, cw, ch, p.x, p.y);
+            if (!Number.isFinite(z)) continue;
+            hit++;
+            if (Math.abs(p.depth - z) <= Math.max(0.5, Math.abs(z) * 0.05) && interiorOfFace(cw, ch, x, y, 2, myOwner)) ins++;
+            else if (hit - ins >= 2) break;
+        }
+        if (hit >= 3 && ins >= hit - 1) return;
+    }
     const okx = tf[0] || 1,
         oky = tf[3] || 1;
     const accept = (e) => {
@@ -9493,45 +9671,117 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
             y = Math.round(e.y);
         if (x < 0 || x >= cw || y < 0 || y >= ch) return false;
         const i1 = y * cw + x,
-            z = depth[i1];
+            z = window.__noDepthInterp ? depth[i1] : depthAtPoint(depth, cw, ch, e.x, e.y);
+        const zNear = Math.max(0.03, Math.abs(z) * 0.005);
+        if (!window.__noInFront && e.depth < z - zNear) return true;
         if (!(e.depth > z + CG.depthEps(e.depth))) {
             if (!window.__noFaceCull) {
                 const ow = depthOwner && depthOwner[i1];
                 if (ow && ow === myOwner) {
                     const f0 = depthFace ? depthFace[i1] : 0;
-                    if (
-                        f0 &&
-                        faceIdAt(cw, ch, x - 3, y) === f0 &&
-                        faceIdAt(cw, ch, x + 3, y) === f0 &&
-                        faceIdAt(cw, ch, x, y - 3) === f0 &&
-                        faceIdAt(cw, ch, x, y + 3) === f0
-                    )
-                        return false;
+                    if (f0 && faceCullAround(cw, ch, x, y, f0, myOwner)) return false;
                 }
             }
             return true;
         }
         const own = depthOwner && depthOwner[i1];
         if (own && own === myOwner && e.depth <= z + SELF_EDGE_EPS) return true;
+        if (own && own === myOwner && depthFace && !window.__noOwnFace) {
+            const ownTol = Math.max(0.35, Math.abs(z) * 0.03);
+            if (e.depth <= z + ownTol) {
+                const f0 = depthFace[i1];
+                if (f0 && !faceCullAround(cw, ch, x, y, f0, myOwner)) return true;
+            }
+        }
+        const edgeTol = window.__edgeTol === undefined ? 0.025 : Number(window.__edgeTol);
+        if (edgeTol > 0 && e.depth <= z + Math.max(SELF_EDGE_EPS, Math.min(0.08, edgeTol))) return true;
         if (own && own === myOwner && silhouetteAt(depth, cw, ch, x, y, e.depth)) return true;
         if (seamLine && e.depth <= z + Math.max(0.12, Math.abs(z) * 0.02)) return true;
+        if (!window.__noRange && silhouetteRange(depth, cw, ch, x, y, e.depth) >= e.depth) return true;
+        if (!window.__noOwnEdge && own && own === myOwner && depthFace && e.depth <= z + Math.max(0.08, Math.abs(z) * 0.012)) {
+            const f1 = depthFace[i1];
+            if (f1 && !faceCullAround(cw, ch, x, y, f1, myOwner)) return true;
+        }
+        if (own && own === myOwner && !window.__noShapeEdge && shapeEdgeAt(depth, cw, ch, x, y, e.depth, myOwner)) return true;
         return nearVisible(depth, cw, ch, x, y, e.depth);
     };
+    const bridgePx = window.__noBridge ? 0 : (window.__bridgePx === undefined ? 9 : Number(window.__bridgePx)) * Math.max(1, Math.abs(tf[0] || 1));
+    let lastOk = null;
+    const minRun = window.__minRun === undefined ? 4 : Number(window.__minRun) * Math.max(1, Math.abs(tf[0] || 1)),
+        shortLine = 10 * Math.max(1, Math.abs(tf[0] || 1));
+    let run = [],
+        drew = 0,
+        lineLen = 0;
+    const flushRun = () => {
+        if (!run.length) return;
+        let len = 0;
+        for (let i = 2; i < run.length; i += 2) len += Math.hypot(run[i] - run[i - 2], run[i + 1] - run[i - 1]);
+        if (run.length > 2 && len < minRun && lineLen >= shortLine) {
+        } else {
+            c.moveTo(run[0], run[1]);
+            for (let i = 2; i < run.length; i += 2) c.lineTo(run[i], run[i + 1]);
+            drew++;
+        }
+        run = [];
+    };
+    let pend = [],
+        pendFrom = null;
+    const flushPend = () => {
+        pend = [];
+        pendFrom = null;
+    };
     const emit = (e) => {
-        if (!e.ok || !accept(e)) {
+        if (!e.ok) {
+            flushRun();
+            flushPend();
             on = false;
+            lastOk = null;
             return;
         }
-        on ? c.lineTo(e.sx, e.sy) : c.moveTo(e.sx, e.sy);
+        if (!accept(e)) {
+            if (on) {
+                if (!pend.length) pendFrom = { x: e.x, y: e.y };
+                pend.push(e.sx, e.sy);
+                if (pendFrom && Math.hypot(e.x - pendFrom.x, e.y - pendFrom.y) > bridgePx) {
+                    flushRun();
+                    flushPend();
+                    on = false;
+                    lastOk = null;
+                }
+            }
+            return;
+        }
+        if (on) {
+            if (pend.length) {
+                for (let i = 0; i < pend.length; i += 2) run.push(pend[i], pend[i + 1]);
+                flushPend();
+            }
+            run.push(e.sx, e.sy);
+        } else if (lastOk && bridgePx > 0 && Math.hypot(e.x - lastOk.x, e.y - lastOk.y) <= bridgePx) run.push(e.sx, e.sy);
+        else {
+            flushRun();
+            run.push(e.sx, e.sy);
+        }
         on = true;
+        lastOk = { x: e.x, y: e.y };
     };
     const put = (v) => emit(projPoint(v, tf));
     const lerpFlag = !orthView && T !== "f";
     const pj = projPtsFor(s, tf);
+    for (let i = 1; i < pj.length; i++) {
+        const a = pj[i - 1],
+            b = pj[i];
+        if (a.ok && b.ok) lineLen += Math.hypot(b.sx - a.sx, b.sy - a.sy);
+    }
     s.p.forEach((v, i) => {
         if (i) {
             const a = s.p[i - 1];
-            if (s.dup && s.dup[i - 1]) on = false;
+            if (s.dup && s.dup[i - 1]) {
+                flushRun();
+                flushPend();
+                on = false;
+                lastOk = null;
+            }
             else {
                 const ea = pj[i - 1],
                     eb = pj[i];
@@ -9571,6 +9821,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         }
         emit(pj[i]);
     });
+    flushRun();
     c.stroke();
 }
 let LC = null;
@@ -9608,10 +9859,23 @@ function strokeBox(cw, ch, tf) {
 let lineLayerKey = null;
 const projPtsCache = new WeakMap();
 let projKeyValue = null;
+function viewShift() {
+    if (!orthView) return [ox, oy];
+    const s = orthSetup();
+    return [ox + s.ax * (1 - Z), oy + s.ay * (1 - Z)];
+}
+function orthoProjectionKey() {
+    if (!orthView) return "-";
+    const s = orthSetup();
+    return (
+        orthView + ":" + s.sc + ":" + s.ax + ":" + s.ay + ":" +
+        s.right.join(",") + ":" + s.up.join(",") + ":" + s.depth.join(",")
+    );
+}
 function projCameraKey(tf) {
     return (
-        (tf ? tf.join(",") : Z + "," + ox + "," + oy) +
-        "|" + T + "|" + (orthView ? 1 : 0) + "|" + W + "," + H + "|" + JSON.stringify(P)
+        (tf ? tf.join(",") : Z + "," + viewShift().join(",")) +
+        "|" + T + "|" + orthoProjectionKey() + "|" + W + "," + H + "|" + JSON.stringify(P)
     );
 }
 function projPtsFor(s, tf) {
@@ -9665,20 +9929,25 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     const x = LC.getContext("2d", { willReadFrequently: true });
     x.setTransform(1, 0, 0, 1, 0, 0);
     x.clearRect(0, 0, cw, ch);
-    if (tf) x.setTransform(...tf);
-    else if (view) x.setTransform(Z, 0, 0, Z, ox, oy);
-    const hiddenDepth = hidden ? buildExportDepth(cw, ch, tf || [1, 0, 0, 1, 0, 0]) : null;
-    if (hiddenDepth) updateSeamPicks(hiddenDepth, cw, ch, tf || [1, 0, 0, 1, 0, 0]);
+    const vs = viewShift(),
+        tfEff = tf || [Z, 0, 0, Z, vs[0], vs[1]];
+    x.setTransform(...tfEff);
+    const hiddenDepth = hidden ? buildExportDepth(cw, ch, tfEff) : null;
+    if (hiddenDepth) updateSeamPicks(hiddenDepth, cw, ch, tfEff);
+    const binNow = $("bin").checked;
+    lineDevMin = binNow && !window.__noBinMinW ? (window.__minDevW === undefined ? 1.15 : Number(window.__minDevW)) : 0;
+    lineDevMinScale = tf ? Math.abs(tf[0] || 1) : view ? Z : 1;
     S.forEach((s) => {
         if (s.ob && !objectVisible(s.ob)) return;
-        hidden ? strokeWVisible(x, s, hiddenDepth, cw, ch, tf || [1, 0, 0, 1, 0, 0]) : strokeW(x, s);
+        hidden ? strokeWVisible(x, s, hiddenDepth, cw, ch, tfEff) : strokeW(x, s);
     });
     if (withCur) drawCur(x);
     if (withCur && prev) prev.forEach((s) => strokeW(x, s));
+    lineDevMin = 0;
     lineLayerKey = curEff ? null : key;
     if ($("bin").checked) {
         x.setTransform(1, 0, 0, 1, 0, 0);
-        const box = strokeBox(cw, ch, tf || [Z, 0, 0, Z, ox, oy]);
+        const box = strokeBox(cw, ch, tfEff);
         if (box) {
             const im = x.getImageData(box.x, box.y, box.w, box.h),
                 d = im.data,
@@ -9688,10 +9957,61 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
                 const v = u32[i];
                 u32[i] = (v >>> 24) < t ? 0 : v | 0xff000000;
             }
+            closeBinGaps(u32, box.w, box.h, window.__binBridge === undefined ? 2 : Number(window.__binBridge));
             x.putImageData(im, box.x, box.y);
         }
     }
     return LC;
+}
+function closeBinGaps(u32, w, h, strength) {
+    if (!(strength > 0) || w < 3 || h < 3) return;
+    const n = w * h;
+    let inkCount = 0;
+    for (let i = 0; i < n; i++) if (u32[i] !== 0) inkCount++;
+    if (!inkCount) return;
+    const ink = new Int32Array(inkCount);
+    for (let i = 0, k = 0; i < n; i++) if (u32[i] !== 0) ink[k++] = i;
+    const fill = [];
+    const near = strength >= 2 ? new Uint8Array(n) : null;
+    const dx8 = [1, 1, 0, -1, -1, -1, 0, 1],
+        dy8 = [0, 1, 1, 1, 0, -1, -1, -1];
+    for (let idx = 0; idx < ink.length; idx++) {
+        const i = ink[idx],
+            x = i % w,
+            y = (i / w) | 0;
+        for (let k = 0; k < 4; k++) {
+            const dx = dx8[k],
+                dy = dy8[k],
+                ax = x + dx,
+                ay = y + dy;
+            if (ax < 0 || ay < 0 || ax >= w || ay >= h) continue;
+            const ai = ay * w + ax;
+            if (u32[ai] !== 0) continue;
+            const bx = ax + dx,
+                by = ay + dy,
+                px = x - dx,
+                py = y - dy;
+            if (bx >= 0 && by >= 0 && bx < w && by < h && u32[by * w + bx] !== 0 && px >= 0 && py >= 0 && px < w && py < h && u32[py * w + px] !== 0) {
+                fill.push(ai);
+                continue;
+            }
+            if (!near) continue;
+            if (near[ai] !== 255) {
+                let cnt = 0;
+                for (let j = 0; j < 8; j++) {
+                    const nx = ax + dx8[j],
+                        ny = ay + dy8[j];
+                    if (nx >= 0 && ny >= 0 && nx < w && ny < h && u32[ny * w + nx] !== 0) cnt++;
+                }
+                near[ai] = cnt;
+            }
+            if (near[ai] >= 3) fill.push(ai);
+        }
+    }
+    for (let i = 0; i < fill.length; i++) {
+        const idx = fill[i];
+        if (u32[idx] === 0) u32[idx] = 0xff000000;
+    }
 }
 function floorGrid(c) {
     const n = Math.round(P.gn),
@@ -9742,6 +10062,9 @@ function floorGrid(c) {
 }
 function orthGuides(c) {
     const sc = orthScale(),
+        st = orthSetup(),
+        cx = st.ax,
+        cy = st.ay,
         col = ["#e8743d", "#2fb5a5", "#4a7be8"];
     c.save();
     c.globalAlpha = P.ga;
@@ -9754,19 +10077,25 @@ function orthGuides(c) {
         c.lineTo(x1, y1);
         c.stroke();
     };
-    const b = orthBasis();
+    const b = orthBasis(),
+        nx = Math.ceil(W / Math.max(1, sc)) + 1,
+        ny = Math.ceil(H / Math.max(1, sc)) + 1;
     if (orthView === "top") {
-        for (let i = -20; i <= 20; i++) {
-            const x = W / 2 + i * sc;
+        for (let i = -nx; i <= nx; i++) {
+            const x = cx + i * sc;
             draw(x, 0, x, H, col[0]);
-            const y = H / 2 + i * sc;
+        }
+        for (let i = -ny; i <= ny; i++) {
+            const y = cy + i * sc;
             draw(0, y, W, y, col[2]);
         }
     } else {
-        for (let i = -20; i <= 20; i++) {
-            const x = W / 2 + i * sc;
+        for (let i = -nx; i <= nx; i++) {
+            const x = cx + i * sc;
             draw(x, 0, x, H, col[orthView === "front" ? 0 : 1]);
-            const y = H / 2 + i * sc;
+        }
+        for (let i = -ny; i <= ny; i++) {
+            const y = cy + i * sc;
             draw(0, y, W, y, col[2]);
         }
     }
@@ -9993,7 +10322,7 @@ function drawObjectSurfaces(c) {
         objs.push(o);
     });
     if (!objs.length) return;
-    const cam = W + "," + H + "," + Z + "," + ox + "," + oy + "|" + JSON.stringify(P);
+    const cam = projCameraKey(null);
     const sigs = objs.map((o) => o.id + ":" + JSON.stringify(o));
     const ids = objs.map((o) => o.id).join(",");
     const key = "surf|" + cam + "|" + sigs.join(";");
@@ -10090,10 +10419,11 @@ function drawObjectSurfaces(c) {
     });
     const sortTris = (list) => list.sort((a, b) => b.depth - a.depth);
     const toScreen = (u0, v0, u1, v1, pad) => {
-        const dx0 = Math.max(0, Math.floor(u0 * Z + ox) - pad),
-            dy0 = Math.max(0, Math.floor(v0 * Z + oy) - pad),
-            dx1 = Math.min(W, Math.ceil(u1 * Z + ox) + pad),
-            dy1 = Math.min(H, Math.ceil(v1 * Z + oy) + pad);
+        const vs1 = viewShift(),
+            dx0 = Math.max(0, Math.floor(u0 * Z + vs1[0]) - pad),
+            dy0 = Math.max(0, Math.floor(v0 * Z + vs1[1]) - pad),
+            dx1 = Math.min(W, Math.ceil(u1 * Z + vs1[0]) + pad),
+            dy1 = Math.min(H, Math.ceil(v1 * Z + vs1[1]) + pad);
         return { dx0, dy0, dx1, dy1, dw: dx1 - dx0, dh: dy1 - dy0 };
     };
     const fullPaint = (unionBox) => {
@@ -10116,7 +10446,8 @@ function drawObjectSurfaces(c) {
         if (r.dw <= 0 || r.dh <= 0) return null;
         surfaceLayerCanvas = surfaceLayerNew(r.dw, r.dh);
         const lc = surfaceLayerCanvas.getContext("2d");
-        lc.setTransform(Z, 0, 0, Z, ox - r.dx0, oy - r.dy0);
+        const vs2 = viewShift();
+        lc.setTransform(Z, 0, 0, Z, vs2[0] - r.dx0, vs2[1] - r.dy0);
         paintSurfaceTris(lc, all, null);
         const box = { alpha: alphaOne, dx0: r.dx0, dy0: r.dy0, dw: r.dw, dh: r.dh };
         next.box = { x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, ...box };
@@ -10199,7 +10530,8 @@ function drawObjectSurfaces(c) {
         }
     });
     sortTris(near);
-    lc.setTransform(Z, 0, 0, Z, ox - cur.dx0, oy - cur.dy0);
+    const vs3 = viewShift();
+    lc.setTransform(Z, 0, 0, Z, vs3[0] - cur.dx0, vs3[1] - cur.dy0);
     paintSurfaceTris(lc, near, clipU);
     const box = { alpha: cur.alpha, dx0: cur.dx0, dy0: cur.dy0, dw: cur.dw, dh: cur.dh };
     blitSurfaceLayer(c, box);
@@ -10229,6 +10561,7 @@ function backgroundLayer() {
         $("gg").checked,
         $("floorTint")?.checked ? 1 : 0,
         window.cityFloorTint ? 1 : 0,
+        orthoProjectionKey(),
         JSON.stringify(P),
     ].join("|");
     if (!window.__noBgCache && BG && BGKey === key && BG.width === W && BG.height === H) return BG;
@@ -10243,7 +10576,8 @@ function backgroundLayer() {
     g.fillStyle = $("bgw").checked ? "#fff" : "#23251f";
     g.fillRect(0, 0, W, H);
     g.save();
-    g.setTransform(Z, 0, 0, Z, ox, oy);
+    const vsBg = viewShift();
+    g.setTransform(Z, 0, 0, Z, vsBg[0], vsBg[1]);
     if (IMG) {
         const s = Math.min(W / IMG.width, H / IMG.height),
             w = IMG.width * s,
@@ -10283,7 +10617,8 @@ function render() {
     if (typeof gzLabelReset === "function") gzLabelReset();
     c.drawImage(backgroundLayer(), 0, 0);
     c.save();
-    c.setTransform(Z, 0, 0, Z, ox, oy);
+    const vsMain = viewShift();
+    c.setTransform(Z, 0, 0, Z, vsMain[0], vsMain[1]);
     drawObjectSurfaces(c);
     if ($("gon").checked) {
         if (orthView) orthGuides(c);
@@ -10348,7 +10683,7 @@ function render() {
         c.restore();
         return;
     }
-    ["VP1", "VP2", "VP3"].forEach((nm, i) => {
+    (orthView ? [] : ["VP1", "VP2", "VP3"]).forEach((nm, i) => {
         const A = AX[i];
         if (!A.vp || !show[i]) return;
         let dx = A.vp.x - W / 2,
@@ -10378,8 +10713,9 @@ const rawOf = (cx, cy) => {
     return { x: ((cx - r.left) * W) / r.width, y: ((cy - r.top) * H) / r.height };
 };
 const pos = (e) => {
-    const r = rawOf(e.clientX, e.clientY);
-    return { x: (r.x - ox) / Z, y: (r.y - oy) / Z };
+    const r = rawOf(e.clientX, e.clientY),
+        vs = viewShift();
+    return { x: (r.x - vs[0]) / Z, y: (r.y - vs[1]) / Z };
 };
 const TC = new Map();
 function clampView() {
@@ -10922,7 +11258,7 @@ cv.onpointerdown = (e) => {
                     o0: { ...o },
                     group,
                     p0: p,
-                    P0: hit3(unscr(p), o.k, o.d - o.d * o.lift, cloc(o)),
+                    P0: pickOnPlane(p, o.k, o.d - o.d * o.lift, cloc(o)),
                     started: false,
                     ...snapSetupGroup(group, objectAnchorWorld(o)),
                 };
@@ -11023,7 +11359,8 @@ cv.onpointermove = (e) => {
     if (cur.ax === -1 && Math.hypot(p.x - a.x, p.y - a.y) >= 6) cur.ax = pick(a, p);
     if (cur.ax === -2) {
         cur.p.push(p);
-        if (cur.P0) cur.pv.p.push(V.add(camPos(), unscr(p), 1, cur.D));
+        if (cur.P0)
+            cur.pv.p.push(orthView ? orthWorldAt(p) : V.add(camPos(), unscr(p), 1, cur.D));
     }
     else if (cur.ax >= 0) {
         if (cur.P0) {
@@ -11036,8 +11373,18 @@ cv.onpointermove = (e) => {
                     tt = (p.x - a.x) * u.x + (p.y - a.y) * u.y;
                 E = { x: a.x + u.x * tt, y: a.y + u.y * tt };
             }
-            const a3 = AXW[cur.ax],
-                t = lineParam(unscr(E), V.add(cur.P0, CO()), a3);
+            const a3 = AXW[cur.ax];
+            let t = null;
+            if (orthView) {
+                const s0 = scr(cur.P0),
+                    s1 = scr(V.add(cur.P0, a3, 1, 1));
+                if (s0.ok && s1.ok) {
+                    const dx = s1.x - s0.x,
+                        dy = s1.y - s0.y,
+                        l2 = dx * dx + dy * dy;
+                    if (l2 > 1e-6) t = ((E.x - s0.x) * dx + (E.y - s0.y) * dy) / l2;
+                }
+            } else t = lineParam(unscr(E), V.add(cur.P0, CO()), a3);
             if (t != null) cur.pv.p = dens3([cur.P0, V.add(cur.P0, a3, 1, t)]);
         } else if (T === "f")
             cur.p = curveF(a, p, cur.ax);
@@ -15384,6 +15731,10 @@ window.cityGridInstallAssetUI = function (bridge) {
         sceneObjects,
     } = bridge;
     function groundAt(p) {
+        if (orthView) {
+            const w = orthWorldAt(p);
+            return [w[0], -1, w[2]];
+        }
         const q = hit3(unscr(p), 1, -1, camPos());
         if (q && Number.isFinite(q[0]) && Number.isFinite(q[2])) return q;
         return [0, -1, 4];
@@ -16914,7 +17265,12 @@ window.cityGridInstallAssetUI = function (bridge) {
     assetAxisInput.onchange = () => setAssetAxis(assetAxisInput.value);
     syncAssetAxis();
     window.cityFloorTint = function (c) {
-        const horizon = T === "f" ? H * 0.5 : clamp(AX.hy, 0, H);
+        let horizon;
+        if (orthView) {
+            if (orthView === "top") return;
+            const g = projPoint([0, -1, 0], [1, 0, 0, 1, 0, 0]);
+            horizon = g && g.ok ? clamp(g.y, 0, H) : H;
+        } else horizon = T === "f" ? H * 0.5 : clamp(AX.hy, 0, H);
         c.save();
         c.globalAlpha = Math.max(0, Math.min(0.8, Number(P.floorAlpha) || 0));
         c.fillStyle = P.floorColor || "#7fa8d8";
@@ -19142,7 +19498,12 @@ window.cityGridInstallAssetUI = function (bridge) {
     function applyStandardView(kind) {
         standardApplying = true;
         orthView = kind === "front" || kind === "side" || kind === "top" ? kind : null;
-        if (orthView) focusLinkedBuildingParentForOrtho();
+        if (orthView) {
+            focusLinkedBuildingParentForOrtho();
+            try {
+                fitFloorPlan();
+            } catch (e) {}
+        }
         standardApplying = false;
         sync();
         setMode(tool === "edit" ? "draw" : "view");
@@ -19182,6 +19543,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         setMode(tool === "edit" ? "draw" : "view");
         render();
     }
+    const planMinScale = () => (window.cityFloorPlanActive ? 24 : 2);
     function fitFloorPlan() {
         const objects = sceneObjects().filter(objectVisible),
             bounds = [];
@@ -19202,7 +19564,11 @@ window.cityGridInstallAssetUI = function (bridge) {
                     bounds.push(b);
             } catch (e) {}
         });
-        const fyaw = Number(P.yaw || 0) * DG,
+        const withCam = !!window.cityFloorPlanActive,
+            camX = withCam ? [P.cx] : [],
+            camZ = withCam ? [P.cz] : [],
+            camY = withCam ? [P.ch - 1] : [],
+            fyaw = Number(P.yaw || 0) * DG,
             fpitch = Number(P.pitch || 0) * DG,
             fhoriz = Math.cos(fpitch),
             tx = P.cx - Math.sin(fyaw) * SH.FLOOR_CAMERA_RAY * fhoriz,
@@ -19214,16 +19580,16 @@ window.cityGridInstallAssetUI = function (bridge) {
                 window.cityFloorPlanScale = Math.min(W, H) / 7.2;
                 return;
             }
-            const minZ = Math.min(P.cz, tz, ...bounds.map((b) => b.lo[2])),
-                maxZ = Math.max(P.cz, tz, ...bounds.map((b) => b.hi[2]));
-            const minY = Math.min(P.ch - 1, ty, ...bounds.map((b) => b.lo[1])),
-                maxY = Math.max(P.ch - 1, ty, ...bounds.map((b) => b.hi[1]));
+            const minZ = Math.min(...camZ, ...(withCam ? [tz] : []), ...bounds.map((b) => b.lo[2])),
+                maxZ = Math.max(...camZ, ...(withCam ? [tz] : []), ...bounds.map((b) => b.hi[2]));
+            const minY = Math.min(...camY, ...(withCam ? [ty] : []), ...bounds.map((b) => b.lo[1])),
+                maxY = Math.max(...camY, ...(withCam ? [ty] : []), ...bounds.map((b) => b.hi[1]));
             const spanZ = Math.max(0.1, maxZ - minZ),
                 spanY = Math.max(0.1, maxY - minY),
                 pad = Math.max(1, Math.max(spanZ, spanY) * 0.16);
             const fitScale = Math.min((W * 0.82) / (spanZ + pad * 2), (H * 0.82) / (spanY + pad * 2));
             window.cityFloorPlanCenter = [(minZ + maxZ) / 2, (minY + maxY) / 2];
-            window.cityFloorPlanScale = Math.max(24, Math.min(220, fitScale));
+            window.cityFloorPlanScale = Math.max(planMinScale(), Math.min(220, fitScale));
             return;
         }
         if (orthView === "front") {
@@ -19232,16 +19598,16 @@ window.cityGridInstallAssetUI = function (bridge) {
                 window.cityFloorPlanScale = Math.min(W, H) / 7.2;
                 return;
             }
-            const minX = Math.min(P.cx, tx, ...bounds.map((b) => b.lo[0])),
-                maxX = Math.max(P.cx, tx, ...bounds.map((b) => b.hi[0]));
-            const minY = Math.min(P.ch - 1, ty, ...bounds.map((b) => b.lo[1])),
-                maxY = Math.max(P.ch - 1, ty, ...bounds.map((b) => b.hi[1]));
+            const minX = Math.min(...camX, ...(withCam ? [tx] : []), ...bounds.map((b) => b.lo[0])),
+                maxX = Math.max(...camX, ...(withCam ? [tx] : []), ...bounds.map((b) => b.hi[0]));
+            const minY = Math.min(...camY, ...(withCam ? [ty] : []), ...bounds.map((b) => b.lo[1])),
+                maxY = Math.max(...camY, ...(withCam ? [ty] : []), ...bounds.map((b) => b.hi[1]));
             const spanX = Math.max(0.1, maxX - minX),
                 spanY = Math.max(0.1, maxY - minY),
                 pad = Math.max(1, Math.max(spanX, spanY) * 0.16);
             const fitScale = Math.min((W * 0.82) / (spanX + pad * 2), (H * 0.82) / (spanY + pad * 2));
             window.cityFloorPlanCenter = [(minX + maxX) / 2, (minY + maxY) / 2];
-            window.cityFloorPlanScale = Math.max(24, Math.min(220, fitScale));
+            window.cityFloorPlanScale = Math.max(planMinScale(), Math.min(220, fitScale));
             return;
         }
         if (!bounds.length) {
@@ -19249,16 +19615,16 @@ window.cityGridInstallAssetUI = function (bridge) {
             window.cityFloorPlanScale = Math.min(W, H) / 7.2;
             return;
         }
-        const minX = Math.min(P.cx, tx, ...bounds.map((b) => b.lo[0])),
-            maxX = Math.max(P.cx, tx, ...bounds.map((b) => b.hi[0])),
-            minZ = Math.min(P.cz, tz, ...bounds.map((b) => b.lo[2])),
-            maxZ = Math.max(P.cz, tz, ...bounds.map((b) => b.hi[2]));
+        const minX = Math.min(...camX, ...(withCam ? [tx] : []), ...bounds.map((b) => b.lo[0])),
+            maxX = Math.max(...camX, ...(withCam ? [tx] : []), ...bounds.map((b) => b.hi[0])),
+            minZ = Math.min(...camZ, ...(withCam ? [tz] : []), ...bounds.map((b) => b.lo[2])),
+            maxZ = Math.max(...camZ, ...(withCam ? [tz] : []), ...bounds.map((b) => b.hi[2]));
         const spanX = Math.max(0.1, maxX - minX),
             spanZ = Math.max(0.1, maxZ - minZ),
             pad = Math.max(1, Math.max(spanX, spanZ) * 0.16);
         const fitScale = Math.min((W * 0.82) / (spanX + pad * 2), (H * 0.82) / (spanZ + pad * 2));
         window.cityFloorPlanCenter = [(minX + maxX) / 2, (minZ + maxZ) / 2];
-        window.cityFloorPlanScale = Math.max(24, Math.min(220, fitScale));
+        window.cityFloorPlanScale = Math.max(planMinScale(), Math.min(220, fitScale));
     }
     function enterFloorPlan(kind = "top") {
         if (!window.cityFloorPlanActive) {
@@ -19900,7 +20266,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     const angle360 = (a) => (((Number(a) || 0) % 360) + 360) % 360;
     const floorPlanObject = () => sel && obOf(sel);
     function floorPlanWorldAt(p) {
-        const q = hit3(unscr(p), 1, -1, [0, 0, 0]);
+        const q = pickOnPlane(p, 1, -1, [0, 0, 0]);
         return q && Number.isFinite(q[0]) && Number.isFinite(q[2]) ? { x: q[0], z: q[2] } : null;
     }
     function floorPlanSideWorldAt(p) {

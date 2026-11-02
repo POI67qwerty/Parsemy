@@ -368,7 +368,15 @@
     window.cityFloorTint = function (c) {
         // 床はカメラから見える地平線より下を、透明な平面色として塗る。
         // 画角や魚眼でも必ず見えるよう、投影前の巨大四角ではなく画面上の台形で描く。
-        const horizon = T === "f" ? H * 0.5 : clamp(AX.hy, 0, H);
+        // 正面・横・上（正投影）は消失点も地平線も無い。
+        // 真上は地面の塗り分け自体が意味を持たないので塗らない。
+        // 正面・横は「地面の高さ」より下を塗る（実際の床の見え方に合わせる）。
+        let horizon;
+        if (orthView) {
+            if (orthView === "top") return;
+            const g = projPoint([0, -1, 0], [1, 0, 0, 1, 0, 0]);
+            horizon = g && g.ok ? clamp(g.y, 0, H) : H;
+        } else horizon = T === "f" ? H * 0.5 : clamp(AX.hy, 0, H);
         c.save();
         c.globalAlpha = Math.max(0, Math.min(0.8, Number(P.floorAlpha) || 0));
         c.fillStyle = P.floorColor || "#7fa8d8";
@@ -2720,7 +2728,14 @@
         // 正面・横・上は表示用の正投影だけを切り替える。
         // yaw／pitch／高さ／位置／レンズ／魚眼画角／ロールは一切変更しない。
         orthView = kind === "front" || kind === "side" || kind === "top" ? kind : null;
-        if (orthView) focusLinkedBuildingParentForOrtho();
+        if (orthView) {
+            // 切り替えた向きに合わせてシーン全体が入る倍率・中心を作り直す
+            // （間取りモードと同じ計算を使う。オブジェクトの位置・寸法は変えない）。
+            focusLinkedBuildingParentForOrtho();
+            try {
+                fitFloorPlan();
+            } catch (e) {}
+        }
         standardApplying = false;
         sync();
         // 0=3Dは視点プリセットだけを切り替える。編集ツールを選択中なら、
@@ -2775,6 +2790,9 @@
     }
     // シーン・カメラを含む外接範囲から、間取りの表示中心と倍率を決める。
     // 表示をフィットするだけで、オブジェクトの位置や寸法は変更しない。
+    // 自動フィットの倍率の下限。間取りモードではハンドルが潰れないよう 24px/単位 を保つ。
+    // 3Dから正面・横・上へ切り替えたときは、広いシーンでも全部入るよう小さくできるようにする。
+    const planMinScale = () => (window.cityFloorPlanActive ? 24 : 2);
     function fitFloorPlan() {
         const objects = sceneObjects().filter(objectVisible),
             bounds = [];
@@ -2795,7 +2813,14 @@
                     bounds.push(b);
             } catch (e) {}
         });
-        const fyaw = Number(P.yaw || 0) * DG,
+        // 3Dから正面・横・上へ切り替えたときは、カメラ位置も枠に入れると
+        // オブジェクトの塊から大きく外れた所まで入ってしまい、絵が小さく／端が切れる。
+        // 間取りモードのときだけ、これまで通りカメラも含めてフィットする。
+        const withCam = !!window.cityFloorPlanActive,
+            camX = withCam ? [P.cx] : [],
+            camZ = withCam ? [P.cz] : [],
+            camY = withCam ? [P.ch - 1] : [],
+            fyaw = Number(P.yaw || 0) * DG,
             fpitch = Number(P.pitch || 0) * DG,
             fhoriz = Math.cos(fpitch),
             tx = P.cx - Math.sin(fyaw) * SH.FLOOR_CAMERA_RAY * fhoriz,
@@ -2808,16 +2833,16 @@
                 window.cityFloorPlanScale = Math.min(W, H) / 7.2;
                 return;
             }
-            const minZ = Math.min(P.cz, tz, ...bounds.map((b) => b.lo[2])),
-                maxZ = Math.max(P.cz, tz, ...bounds.map((b) => b.hi[2]));
-            const minY = Math.min(P.ch - 1, ty, ...bounds.map((b) => b.lo[1])),
-                maxY = Math.max(P.ch - 1, ty, ...bounds.map((b) => b.hi[1]));
+            const minZ = Math.min(...camZ, ...(withCam ? [tz] : []), ...bounds.map((b) => b.lo[2])),
+                maxZ = Math.max(...camZ, ...(withCam ? [tz] : []), ...bounds.map((b) => b.hi[2]));
+            const minY = Math.min(...camY, ...(withCam ? [ty] : []), ...bounds.map((b) => b.lo[1])),
+                maxY = Math.max(...camY, ...(withCam ? [ty] : []), ...bounds.map((b) => b.hi[1]));
             const spanZ = Math.max(0.1, maxZ - minZ),
                 spanY = Math.max(0.1, maxY - minY),
                 pad = Math.max(1, Math.max(spanZ, spanY) * 0.16);
             const fitScale = Math.min((W * 0.82) / (spanZ + pad * 2), (H * 0.82) / (spanY + pad * 2));
             window.cityFloorPlanCenter = [(minZ + maxZ) / 2, (minY + maxY) / 2];
-            window.cityFloorPlanScale = Math.max(24, Math.min(220, fitScale));
+            window.cityFloorPlanScale = Math.max(planMinScale(), Math.min(220, fitScale));
             return;
         }
         if (orthView === "front") {
@@ -2827,16 +2852,16 @@
                 window.cityFloorPlanScale = Math.min(W, H) / 7.2;
                 return;
             }
-            const minX = Math.min(P.cx, tx, ...bounds.map((b) => b.lo[0])),
-                maxX = Math.max(P.cx, tx, ...bounds.map((b) => b.hi[0]));
-            const minY = Math.min(P.ch - 1, ty, ...bounds.map((b) => b.lo[1])),
-                maxY = Math.max(P.ch - 1, ty, ...bounds.map((b) => b.hi[1]));
+            const minX = Math.min(...camX, ...(withCam ? [tx] : []), ...bounds.map((b) => b.lo[0])),
+                maxX = Math.max(...camX, ...(withCam ? [tx] : []), ...bounds.map((b) => b.hi[0]));
+            const minY = Math.min(...camY, ...(withCam ? [ty] : []), ...bounds.map((b) => b.lo[1])),
+                maxY = Math.max(...camY, ...(withCam ? [ty] : []), ...bounds.map((b) => b.hi[1]));
             const spanX = Math.max(0.1, maxX - minX),
                 spanY = Math.max(0.1, maxY - minY),
                 pad = Math.max(1, Math.max(spanX, spanY) * 0.16);
             const fitScale = Math.min((W * 0.82) / (spanX + pad * 2), (H * 0.82) / (spanY + pad * 2));
             window.cityFloorPlanCenter = [(minX + maxX) / 2, (minY + maxY) / 2];
-            window.cityFloorPlanScale = Math.max(24, Math.min(220, fitScale));
+            window.cityFloorPlanScale = Math.max(planMinScale(), Math.min(220, fitScale));
             return;
         }
         if (!bounds.length) {
@@ -2844,16 +2869,16 @@
             window.cityFloorPlanScale = Math.min(W, H) / 7.2;
             return;
         }
-        const minX = Math.min(P.cx, tx, ...bounds.map((b) => b.lo[0])),
-            maxX = Math.max(P.cx, tx, ...bounds.map((b) => b.hi[0])),
-            minZ = Math.min(P.cz, tz, ...bounds.map((b) => b.lo[2])),
-            maxZ = Math.max(P.cz, tz, ...bounds.map((b) => b.hi[2]));
+        const minX = Math.min(...camX, ...(withCam ? [tx] : []), ...bounds.map((b) => b.lo[0])),
+            maxX = Math.max(...camX, ...(withCam ? [tx] : []), ...bounds.map((b) => b.hi[0])),
+            minZ = Math.min(...camZ, ...(withCam ? [tz] : []), ...bounds.map((b) => b.lo[2])),
+            maxZ = Math.max(...camZ, ...(withCam ? [tz] : []), ...bounds.map((b) => b.hi[2]));
         const spanX = Math.max(0.1, maxX - minX),
             spanZ = Math.max(0.1, maxZ - minZ),
             pad = Math.max(1, Math.max(spanX, spanZ) * 0.16);
         const fitScale = Math.min((W * 0.82) / (spanX + pad * 2), (H * 0.82) / (spanZ + pad * 2));
         window.cityFloorPlanCenter = [(minX + maxX) / 2, (minZ + maxZ) / 2];
-        window.cityFloorPlanScale = Math.max(24, Math.min(220, fitScale));
+        window.cityFloorPlanScale = Math.max(planMinScale(), Math.min(220, fitScale));
     }
     // 間取りモードへ入り、正投影・編集ツール・専用ドックを有効にする。
     function enterFloorPlan(kind = "top") {

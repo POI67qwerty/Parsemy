@@ -1127,10 +1127,12 @@ function rasterizeDepthInto(buf, own, ownerMap, list, cw, ch, tf, used, face) {
         const p0 = exportPoint(tr[0], tf),
             p1 = exportPoint(tr[1], tf),
             p2 = exportPoint(tr[2], tf);
+        // 透視投影では「カメラの後ろ（奥行きが負）」の三角形を捨てる。
+        // 正投影では奥行きが負になるのが普通（正面ビューでは手前ほど負）なので捨てない。
         if (
             !p0 || !p1 || !p2 ||
             !Number.isFinite(p0.depth) || !Number.isFinite(p1.depth) || !Number.isFinite(p2.depth) ||
-            p0.depth < -0.001 || p1.depth < -0.001 || p2.depth < -0.001
+            (!orthView && (p0.depth < -0.001 || p1.depth < -0.001 || p2.depth < -0.001))
         )
             return;
         const area = (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x);
@@ -1177,6 +1179,16 @@ function rasterizeDepthInto(buf, own, ownerMap, list, cw, ch, tf, used, face) {
             ux1 = Math.min(cw - 1, Math.ceil(maxX));
         if (ux0 < used.x0) used.x0 = ux0;
         if (ux1 > used.x1) used.x1 = ux1;
+        // 奥行きの補間。
+        // 透視投影では画面座標に対する「奥行きそのもの」は1次にならない（1次なのは 1/奥行き）。
+        // 以前は奥行きをそのまま画面内で線形補間していたため、視線に近い角度で見える
+        // 大きな面（壁・屋根）で奥行きが実際より数十cmずれることがあった。すると
+        // 面の上を通る線が「面より奥」と判定されて所々消え、線画が途切れ途切れになる。
+        // 正投影では奥行きは画面座標の1次式なので、そのまま補間してよい。
+        const recip = !orthView && T !== "f" && p0.depth > 1e-6 && p1.depth > 1e-6 && p2.depth > 1e-6,
+            r0 = recip ? 1 / p0.depth : 0,
+            r1 = recip ? 1 / p1.depth : 0,
+            r2 = recip ? 1 / p2.depth : 0;
         const d0 = -(p1.y - p0.y) / area, // 重心座標の x 方向の増分
             d1 = -(p2.y - p1.y) / area,
             d2 = -(p0.y - p2.y) / area;
@@ -1214,7 +1226,9 @@ function rasterizeDepthInto(buf, own, ownerMap, list, cw, ch, tf, used, face) {
             for (let x = xa; x <= xb; x++, idx++, w0 += d0, w1 += d1, w2 += d2) {
                 // 重心座標は和が必ず1なので「全部が -1e-5 未満」になることはない（＝内側の判定はこれだけで足りる）
                 if (w0 >= -1e-5 && w1 >= -1e-5 && w2 >= -1e-5) {
-                    const z = p0.depth * w1 + p1.depth * w2 + p2.depth * w0;
+                    const z = recip
+                        ? 1 / (r0 * w1 + r1 * w2 + r2 * w0)
+                        : p0.depth * w1 + p1.depth * w2 + p2.depth * w0;
                     if (z < buf[idx]) {
                         buf[idx] = z;
                         if (own) own[idx] = owner;
@@ -1252,7 +1266,12 @@ function buildExportDepth(cw, ch, tf) {
     const need = cw * ch,
         // カメラ・用紙・書き出し変換・設定（P）が同じなら、オブジェクトの
         // 中身が変わったかどうかだけを見ればよい。
-        ctxKey = cw + "," + ch + "," + (tf ? tf.join(",") : "") + "," + sigNow() + "," + JSON.stringify(P),
+        // 正投影（正面・横・上）の向きもキーに入れる。
+        // 入れないと、3Dで作った奥行きをそのまま使ってしまい、正面・横・上では
+        // 「奥の建物が手前の面に隠れて」線がほぼ全部消える（実測：面ONの線が 1/50 になった）。
+        ctxKey =
+            cw + "," + ch + "," + (tf ? tf.join(",") : "") + "," + orthoProjectionKey() + "," +
+            sigNow() + "," + JSON.stringify(P),
         objs = [],
         seen = new Set();
     S.forEach((s) => {
@@ -1447,6 +1466,55 @@ function silhouetteAt(depth, cw, ch, x, y, d) {
         b = side(3) - d;
     return (a > 0.5 && b < 0.05) || (b > 0.5 && a < 0.05);
 }
+// 線が「自分の形の端（外形）」の上にあるか。
+// ベベルの縦線のように、奥行きバッファでは判定できない輪郭がある
+// （丸めた面が輪郭の所で急に手前に出るため、線より面のほうが手前になる）。
+// そこで奥行きではなく「その画素を塗っているのが自分かどうか」で見る。
+// 左右（または上下）±3px の片側だけが自分の面なら、線は形の端にある。
+// 反対側が「自分より手前の別の物」なら隠れるので描かない（隠線の正しさは保つ）。
+function shapeEdgeAt(depth, cw, ch, x, y, d, owner) {
+    if (!depthOwner) return false;
+    const at = (dx, dy) => {
+        const xx = x + dx,
+            yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= cw || yy >= ch) return { self: false, z: Infinity };
+        const i = yy * cw + xx,
+            z = depth[i];
+        return { self: depthOwner[i] === owner, z: Number.isFinite(z) ? z : Infinity };
+    };
+    const pairs = [
+        [at(-3, 0), at(3, 0)],
+        [at(0, -3), at(0, 3)],
+    ];
+    for (const [p1, p2] of pairs) {
+        if (p1.self === p2.self) continue;
+        const far = p1.self ? p2 : p1;
+        // 反対側が背景（何も無い）か、線より奥なら、その端は見えている。
+        if (far.z >= d - 0.05) return true;
+    }
+    return false;
+}
+// 線が「1枚の平らな面の内側」にあるか（＝面ONでは描かなくてよい線）。
+// ±r の範囲がすべて同じ面ID・同じ持ち主なら、その線は面の内側を通っている。
+// 面の端（縁）では必ず別の面か背景が混ざるので、輪郭の線は消えない。
+// 厚みが1画素未満の細い部材（笠木・スラブ）も、まわりに別の面が出るので残る。
+// 速さのため、まわりの画素は「環」の8点だけ見る（25点は不要。実測で差なし）。
+const INTERIOR_RING = [
+    [-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1],
+];
+function interiorOfFace(cw, ch, x, y, r, owner) {
+    if (!depthFace || !depthOwner) return false;
+    const f0 = depthFace[y * cw + x];
+    if (!f0) return false;
+    for (let k = 0; k < INTERIOR_RING.length; k++) {
+        const xx = x + INTERIOR_RING[k][0] * r,
+            yy = y + INTERIOR_RING[k][1] * r;
+        if (xx < 0 || yy < 0 || xx >= cw || yy >= ch) return false;
+        const i = yy * cw + xx;
+        if (depthFace[i] !== f0 || depthOwner[i] !== owner) return false;
+    }
+    return true;
+}
 // 動いている1台の画面矩形（デバイスpx）。奥行きバッファの塗り直し範囲を決める。
 // 三角形の投影だけを見るので、ラスタライズよりずっと安い。
 function movingRectOf(o, cw, ch, tf) {
@@ -1481,11 +1549,91 @@ function faceIdAt(cw, ch, x, y) {
     if (x < 0 || x >= cw || y < 0 || y >= ch) return 0;
     return depthFace[y * cw + x];
 }
+// 「線が面の内側にある」かの判定に使う、線から横へはなれた距離（px）。
+// 3px だけだと、線が面の端に近いときに「今回は内側・次は外側」と判定が揺れて
+// 線が破線状に途切れる（実測：1場面で42か所）。少し広い距離も一緒に見て、
+// すべてが同じ面のときだけ「面の内側」と判断する（判定が線に沿って安定する）。
+const FACE_CULL_OFFSETS = window.__cullOffsets || [3];
+// 「線が自分の面の内側にある」かの判定。
+// 面IDは平面の式から作るので、**別々のオブジェクトが同じ平面上に並んでいると同じIDになる**
+// （例：隣り合う建物の正面が同じ z にある）。オブジェクトの区別を入れないと、
+// その境目の縦線を「平面の内側の線」と誤って消してしまい、線が点線状に途切れる
+// （実測：2棟の正面が同じ平面のとき、境目の縦線が 6px おきの点線になった）。
+// そこで「同じオブジェクトの、同じ面」だけを内側とみなす。
+// 【重要】奥行きバッファを「線の正確な画面位置」で読む（双一次補間）。
+// 画素に丸めて読むと、ほぼ真横を向いた面（画面上で 1px 進むあいだに奥行きが
+// 数十cm変わる面）では、丸めの分だけで線が「面より奥」に見えてしまう。
+// その結果、面の上を走る稜線が 1〜2px おきに消え、**点線状**になっていた
+// （実測：屋台まわりの縦稜線。奥行きの食い違い 0.013m／画素あたりの変化 0.19m）。
+// 線の位置（小数のまま）で面の奥行きを補間して比べれば、面の上の線は
+// 面と同じ奥行きになるので、丸めに左右されない。
+function depthAtPoint(depth, cw, ch, px, py) {
+    // 画素の中心は (整数+0.5)。px,py もその座標系。
+    const gx = px - 0.5,
+        gy = py - 0.5,
+        x0 = Math.floor(gx),
+        y0 = Math.floor(gy),
+        tx = gx - x0,
+        ty = gy - y0;
+    let sum = 0,
+        wsum = 0;
+    for (let j = 0; j <= 1; j++) {
+        const yy = y0 + j;
+        if (yy < 0 || yy >= ch) continue;
+        const wy = j ? ty : 1 - ty;
+        if (!(wy > 0)) continue;
+        for (let i = 0; i <= 1; i++) {
+            const xx = x0 + i;
+            if (xx < 0 || xx >= cw) continue;
+            const wi = i ? tx : 1 - tx;
+            if (!(wi > 0)) continue;
+            const v = depth[yy * cw + xx];
+            if (!Number.isFinite(v)) continue;
+            const w = wi * wy;
+            sum += v * w;
+            wsum += w;
+        }
+    }
+    // まわりに面が1つも無ければ「奥」＝手前扱い（線は見える）。
+    return wsum > 0 ? sum / wsum : Infinity;
+}
+function faceCullAround(cw, ch, x, y, f0, owner) {
+    for (let i = 0; i < FACE_CULL_OFFSETS.length; i++) {
+        const d = FACE_CULL_OFFSETS[i];
+        for (let k = 0; k < 4; k++) {
+            const nx = x + (k === 0 ? -d : k === 1 ? d : 0),
+                ny = y + (k === 2 ? -d : k === 3 ? d : 0);
+            if (faceIdAt(cw, ch, nx, ny) !== f0) return false;
+            if (depthOwner && depthOwner[ny * cw + nx] !== owner) return false;
+        }
+    }
+    return true;
+}
 // 面と面が接していると見なす距離（m）。これより奥の線は近くの画素を見ずに隠す。
 const CONTACT_REACH = 0.05;
 // 面と面が接している線（壁の下端と台の上面など）は、面をほぼ真横から見ているため
 // 1画素の中でも奥行きが大きく変わる。中心の画素だけで判定すると点線状に欠けるので、
 // 近くの画素の奥行きの「ばらつき」も見て判定する（真横に近い面ほど許容を広げる）。
+// まわり（±3px）の画素にある面の奥行きの「いちばん奥」を返す。
+// 線の奥行きがこれ以下なら、線はその範囲の中（＝面の輪郭の上）にある。
+// 面を真横から見ているときの「1画素で数m変わる」食い違いを、丸めに左右されずに扱うため。
+const RANGE_WIN = 3;
+function silhouetteRange(depth, cw, ch, x, y, d) {
+    let zmax = -Infinity;
+    for (let dy = -RANGE_WIN; dy <= RANGE_WIN; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= ch) continue;
+        const row = yy * cw;
+        for (let dx = -RANGE_WIN; dx <= RANGE_WIN; dx++) {
+            const xx = x + dx;
+            if (xx < 0 || xx >= cw) continue;
+            const v = depth[row + xx];
+            if (v > zmax) zmax = v;
+        }
+    }
+    // 範囲内に面がまったく無ければ Infinity（線は背景にある＝描く）。
+    return Number.isFinite(zmax) ? zmax : Infinity;
+}
 function nearVisible(depth, cw, ch, x, y, d) {
     const eps = CG.depthEps(d);
     let zmin = Infinity,
@@ -1503,9 +1651,11 @@ function nearVisible(depth, cw, ch, x, y, d) {
         }
     }
     // 近くに「線より奥」の面が無ければ、その線は面の外（背景）にある＝描く。
+    if (!Number.isFinite(zmax)) return false; // まわりに面がまったく無い
     if (!(zmax >= d - eps)) return false;
     // 面を真横から見ている（近くの画素で奥行きが大きく違う）ときは、
     // ばらつきの 3/4 までを「面の上に乗っている」と見なす。上限 25cm。
+    if (!Number.isFinite(zmin)) return false;
     const tol = Math.min(0.25, Math.max(eps, (zmax - zmin) * 0.75));
     return d <= zmin + tol;
 }
@@ -1517,10 +1667,12 @@ function nearVisible(depth, cw, ch, x, y, d) {
 // 片側だけ何も無い（またはずっと奥）なら輪郭、両側とも面なら面の中、と判断する。
 const SEAM_OFF = 5,
     SEAM_BG = 2; // 背景（面が無い）を表すための倍率
+// 【重要】以前は線の「中点」だけで比べていた。長い縦線では中点が面の真ん中に
+// 来ることが多く、上端・下端が輪郭になっていても「面の中」と判定されていた
+// （実測：丸めた角から屋根の面まで下りる縦線が丸ごと消えた）。
+// そこで線に沿って7点を調べ、「何割の点で左右の奥行きが大きく違うか（＝輪郭か）」を返す。
 function seamEdgeScore(a, b, depth, cw, ch) {
-    const mx = (a.x + b.x) / 2,
-        my = (a.y + b.y) / 2,
-        mz = (a.depth + b.depth) / 2,
+    const mz = (a.depth + b.depth) / 2,
         cap = Math.abs(mz) * SEAM_BG + 1,
         dx = b.x - a.x,
         dy = b.y - a.y,
@@ -1528,14 +1680,48 @@ function seamEdgeScore(a, b, depth, cw, ch) {
         // 線に直角の向き（画面座標）。縦線ならほぼ水平。
         px = -dy / len,
         py = dx / len,
-        at = (k) => {
-            const x = Math.round(mx + px * k),
-                y = Math.round(my + py * k);
+        // 線の奥行きの許容（m）。
+        tol = Math.max(0.3, Math.abs(mz) * 0.03),
+        at = (x0, y0, k, dep) => {
+            const x = Math.round(x0 + px * k),
+                y = Math.round(y0 + py * k);
             if (x < 0 || y < 0 || x >= cw || y >= ch) return cap;
             const z = depth[y * cw + x];
             return Number.isFinite(z) ? Math.min(z, cap) : cap;
+        },
+        depthAbs = (x0, y0) => {
+            const x = Math.round(x0),
+                y = Math.round(y0);
+            if (x < 0 || y < 0 || x >= cw || y >= ch) return Infinity;
+            return depth[y * cw + x];
+        },
+        faceAt = (x0, y0, k) => {
+            const x = Math.round(x0 + px * k),
+                y = Math.round(y0 + py * k);
+            if (x < 0 || y < 0 || x >= cw || y >= ch) return 0;
+            return depthFace ? depthFace[y * cw + x] : 0;
         };
-    return Math.abs(at(SEAM_OFF) - at(-SEAM_OFF));
+    let edge = 0,
+        vis = 0;
+    const N = 9;
+    for (let i = 1; i <= N; i++) {
+        const t = i / (N + 1),
+            x0 = a.x + dx * t,
+            y0 = a.y + dy * t,
+            zLine = a.depth + (b.depth - a.depth) * t;
+        // (1) 左右で奥行きが大きく違う＝輪郭。
+        if (Math.abs(at(x0, y0, SEAM_OFF) - at(x0, y0, -SEAM_OFF)) >= Math.max(0.25, Math.abs(mz) * 0.04)) edge++;
+        // (2) 左右で面の番号が違う＝面と面の折れ目（丸めた角の縦線はこちら）。
+        else {
+            const f1 = faceAt(x0, y0, SEAM_OFF),
+                f2 = faceAt(x0, y0, -SEAM_OFF);
+            if (f1 && f2 && f1 !== f2) edge += 0.5;
+        }
+        // この点が隠れていないか。背景（面が無い）か、線とほぼ同じ奥行きなら見えている。
+        const zBuf = depthAbs(x0, y0);
+        if (!Number.isFinite(zBuf) || zBuf >= zLine - tol) vis++;
+    }
+    return { edge: edge / N, vis: vis / N };
 }
 let seamPicks = null;
 function updateSeamPicks(depth, cw, ch, tf) {
@@ -1549,21 +1735,40 @@ function updateSeamPicks(depth, cw, ch, tf) {
             b = exportPoint(s.p[s.p.length - 1], tf);
         if (!a || !b) continue;
         // 背景は cap で頭打ちにしているので、輪郭では mz(以上) の差が出る。
-        const score = seamEdgeScore(a, b, depth, cw, ch),
+        // 角1つにつき1本だけ選ぶ。選ぶ基準は
+        // ・輪郭／折れ目の割合（edge）
+        // ・その線が実際に見えている割合（vis）
+        // の両方。以前は中点の奥行き差だけで選んでいたため、**隠れている線**が
+        // 選ばれて描かれず、見えている縦線が捨てられていた（実測：屋根の張り出しの
+        // 左右の角で、前側の縦線が丸ごと欠けた）。
+        const sc = seamEdgeScore(a, b, depth, cw, ch),
+            score = sc.edge * 0.6 + sc.vis * 0.4,
             key = (s.ob.id || "") + ":" + s.seam,
             cur = best.get(key);
-        if (!cur || score > cur.score) best.set(key, { score, s, mz: (a.depth + b.depth) / 2 });
+        if (!cur || score > cur.score) best.set(key, { score, vis: sc.vis, s, mz: (a.depth + b.depth) / 2 });
     }
     const picks = new Set();
     best.forEach((v) => {
         // 差が小さい＝両側とも面＝面の中なので描かない。
-        if (v.score > Math.abs(v.mz) * 0.12) picks.add(v.s);
+        // 見えている部分がある線だけを描く（隠れている線を選んでしまうのを防ぐ）。
+        if (v.vis > 0 && v.score >= (window.__seamTh === undefined ? 0.25 : Number(window.__seamTh))) picks.add(v.s);
     });
     seamPicks = picks;
 }
 // ===== 線を「色×太さ」ごとにまとめて引く =====
 // 線を1本ずつ描く（まとめて stroke する方式は実測で高速化にならず、
 // 交差部の濃さが変わるため採用しなかった。ドキュメント §5Z-5）。
+// 二値化するときの「線の最小の太さ（デバイスpx）」と、そのときの拡大率。
+// 二値化はアルファを 0/255 に落とすので、1px 前後の細い線はしきい値の上下で
+// 破線状に欠ける（実測：拡大1.0で 357か所の欠け）。二値化する層だけ、
+// 線が最低 1.15px の芯を持つように太らせて描く（画面の見た目はほぼ変わらない）。
+let lineDevMin = 0,
+    lineDevMinScale = 1;
+function layerLineWidth(s) {
+    const base = effectiveLineWidth(s);
+    if (!(lineDevMin > 0)) return base;
+    return Math.max(base, lineDevMin / Math.max(0.05, lineDevMinScale));
+}
 function strokeWVisible(c, s, depth, cw, ch, tf) {
     // ベベルの縦線は、選ばれた「輪郭の1本」だけを描く。
     const seamLine = s.seam !== undefined && s.seam !== null;
@@ -1573,11 +1778,35 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         return;
     }
     c.strokeStyle = s.c;
-    c.lineWidth = effectiveLineWidth(s);
+    c.lineWidth = layerLineWidth(s);
     c.lineCap = c.lineJoin = "round";
     c.beginPath();
     let on = false;
     const myOwner = depthOwnerMap.get(s.ob.id) || 0;
+    // 【重要】面ONでは「1枚の面の内側を通る線」を線ごと描かない
+    // （ユーザー指定：描写しなくてよい線＝重なった線・本来見えない線は描かない）。
+    // 押し出した板（庇・屋根）の裏面の稜線が、面の上に薄く残っていた。
+    // 点ごとに判定すると、同じ線の途中だけ消えて**点線**になるので、
+    // 線に沿った9点を調べ、ほとんど（8/9以上）が面の内側ならその線を丸ごと省く。
+    // 面の縁を通る線は、必ずどこかで別の面か背景に当たるので残る。
+    if (!window.__noInterior && depthFace) {
+        let ins = 0,
+            hit = 0;
+        for (let i = 1; i <= 4; i++) {
+            const p = exportPoint(s.p[Math.round(((s.p.length - 1) * i) / 5)], tf);
+            if (!p) continue;
+            const x = Math.round(p.x),
+                y = Math.round(p.y);
+            if (x < 0 || y < 0 || x >= cw || y >= ch) continue;
+            const z = depthAtPoint(depth, cw, ch, p.x, p.y);
+            if (!Number.isFinite(z)) continue;
+            hit++;
+            if (Math.abs(p.depth - z) <= Math.max(0.5, Math.abs(z) * 0.05) && interiorOfFace(cw, ch, x, y, 2, myOwner)) ins++;
+            // 2点以上が「面の内側でない」なら、この線は面の縁を通っている＝描く（早めに切り上げる）。
+            else if (hit - ins >= 2) break;
+        }
+        if (hit >= 3 && ins >= hit - 1) return;
+    }
     const okx = tf[0] || 1,
         oky = tf[3] || 1;
     // 画面座標・奥行き・（必要なら近くの画素）から、この点を描いてよいか決める。
@@ -1585,8 +1814,18 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         const x = Math.round(e.x),
             y = Math.round(e.y);
         if (x < 0 || x >= cw || y < 0 || y >= ch) return false;
+        // 画素の奥行きは、線の正確な位置で補間して読む（丸めで点線にならないように）。
+        // 面の持ち主・面IDは一番近い画素のものを使う（面の内外の判定用）。
         const i1 = y * cw + x,
-            z = depth[i1];
+            z = window.__noDepthInterp ? depth[i1] : depthAtPoint(depth, cw, ch, e.x, e.y);
+        // 線がその面より「はっきり手前」なら、面の内側の線ではない（見える線）。
+        // 奥行きバッファは 1画素より細い部材（手すり・スラブ・笠木）を
+        // 持たないことがあり、その稜線は面より 10〜30cm 手前になる。
+        // これを「面の上にある線」と同じ扱いにすると、線が丸ごと消える／
+        // 画素の丸めで 1点おきに消えて**点線**になる（実測：建物の縦の稜線が
+        // 30px おきに欠けた。線 8.87m に対し面 9.08m）。
+        const zNear = Math.max(0.03, Math.abs(z) * 0.005);
+        if (!window.__noInFront && e.depth < z - zNear) return true;
         if (!(e.depth > z + CG.depthEps(e.depth))) {
             // 面ID照合による「平面の内側の線」の除去（既定オン・__noFaceCull で無効）。
             if (!window.__noFaceCull) {
@@ -1596,14 +1835,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
                     // 左右だけだと、板の厚みが1画素未満の細い部材（手すり・スラブ）で
                     // 縁の線まで消えて破線状になる（実測で確認済み）。
                     const f0 = depthFace ? depthFace[i1] : 0;
-                    if (
-                        f0 &&
-                        faceIdAt(cw, ch, x - 3, y) === f0 &&
-                        faceIdAt(cw, ch, x + 3, y) === f0 &&
-                        faceIdAt(cw, ch, x, y - 3) === f0 &&
-                        faceIdAt(cw, ch, x, y + 3) === f0
-                    )
-                        return false;
+                    if (f0 && faceCullAround(cw, ch, x, y, f0, myOwner)) return false;
                 }
             }
             return true;
@@ -1612,6 +1844,32 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         // その線は自分の面の稜線（面と面の取り合い）なので描く。
         const own = depthOwner && depthOwner[i1];
         if (own && own === myOwner && e.depth <= z + SELF_EDGE_EPS) return true;
+        // 【重要】自分の面に「少しだけ隠れる」線の扱い。
+        // 角を丸めた所や細い板（笠木・スラブ）の稜線は、奥行きバッファより
+        // 数十cm 奥になることがある。奥行きの差だけで隠すと、
+        // ・縁（面と面の境目）に乗っている稜線 → 1px ごとに消えて点線
+        // ・平らな面の裏側を通る線 → 本来見えないのに残る
+        // の両方が起きる（実測：角の縦線が欠け、板の裏の斜線が残った）。
+        // そこで奥行きではなく「その線が面の境目に乗っているか」で決める。
+        // まわり±3px に別の面が混じっていれば境目＝見える稜線、1枚の面だけなら隠す。
+        if (own && own === myOwner && depthFace && !window.__noOwnFace) {
+            const ownTol = Math.max(0.35, Math.abs(z) * 0.03);
+            if (e.depth <= z + ownTol) {
+                const f0 = depthFace[i1];
+                if (f0 && !faceCullAround(cw, ch, x, y, f0, myOwner)) return true;
+            }
+        }
+        // 【重要】自分の面の「縁」に重なる線は、面をほぼ真横から見ているために
+        // 画素の丸め（1px）だけで面の奥行きが線より大きく手前に出る。
+        // 透視では奥行きが1pxあたり数十cm変わることもあり、固定の許容（25cm）では
+        // 届かず、稜線が点線状に欠けていた（実測：線の点の 4割がこの理由で落ちていた）。
+        // 奥行きではなく「面の境界かどうか」で判断する。面IDが隣の画素で変わるなら縁＝描く。
+        // 面の内側（同じ面IDに囲まれている）ときは従来どおり隠す。
+        // 面と面が接している場所では、線の奥行きと面の奥行きが数mm〜数cmずれる。
+        // （壁に付いたベランダ・看板、隣り合う箱の取り合い、面の上を通る稜線など）
+        // その差だけで隠すと、線が破線状に途切れる。ごく近いときは描く。
+        const edgeTol = window.__edgeTol === undefined ? 0.025 : Number(window.__edgeTol);
+        if (edgeTol > 0 && e.depth <= z + Math.max(SELF_EDGE_EPS, Math.min(0.08, edgeTol))) return true;
         // 面のすぐ外側を通る「形の輪郭」も描く（自分の面が少し手前でも輪郭なら見える）。
         // 左右数画素の奥行きを見て、片側だけ背景（何も無い／ずっと奥）なら輪郭と判断する。
         if (own && own === myOwner && silhouetteAt(depth, cw, ch, x, y, e.depth)) return true;
@@ -1619,15 +1877,106 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         if (seamLine && e.depth <= z + Math.max(0.12, Math.abs(z) * 0.02)) return true;
         // 面と面が接している線は、面をほぼ真横から見ているため1画素でも奥行きが
         // 大きく変わる。近くの画素に「線より奥」の面があれば描く。
+        // 【重要】「面をほぼ真横から見ている」場所では、1画素のあいだに奥行きが数m変わる。
+        // そういう面の輪郭に重なる線は、画素の丸めだけで「面より奥」になったり手前になったりし、
+        // **1px おきの点線**になる（実測：建物の縦の稜線が 7〜11px おきに欠けた）。
+        // 線の奥行きが「まわりの画素の奥行きの範囲」に入っていれば、
+        // その線は面の輪郭の上にあると判断して描く（範囲より奥なら隠す）。
+        if (!window.__noRange && silhouetteRange(depth, cw, ch, x, y, e.depth) >= e.depth) return true;
+        // 自分の面の「縁」に重なる線：隣の面（別ID）がほんの少しだけ手前なら、
+        // その線は面と面の取り合い＝見える線として描く。差が大きい（本当に隠れている）
+        // ときは描かないので、隠線の正しさは保たれる。
+        // 画素の丸めで 1px おきに判定が入れ替わり、稜線が点線になるのを防ぐ。
+        if (!window.__noOwnEdge && own && own === myOwner && depthFace && e.depth <= z + Math.max(0.08, Math.abs(z) * 0.012)) {
+            const f1 = depthFace[i1];
+            if (f1 && !faceCullAround(cw, ch, x, y, f1, myOwner)) return true;
+        }
+        // 【重要】自分の形の「端」の線は必ず描く（ユーザー指定：「外形になる縦辺は必ず描く」）。
+        // ベベルの縦線・角から下りる稜線は、奥行きバッファでは面のほうが手前に出るため
+        // 上のどの条件でも落ちていた（実測：丸めた角の下の縦線が丸ごと欠けた）。
+        if (own && own === myOwner && !window.__noShapeEdge && shapeEdgeAt(depth, cw, ch, x, y, e.depth, myOwner)) return true;
         return nearVisible(depth, cw, ch, x, y, e.depth);
     };
+    // 小さな切れ目（1〜3px）は線を切らずにつなぐ。
+    // 隠線の判定は点ごとに「面の手前か」を見ているので、面の端や輪郭の上では
+    // 1点だけ判定が揺れることがある。そのまま点を捨てると、線に1〜2px の切れ目
+    // （破線状の穴）が残る。直前に描いた点からごく近ければ「見えている」とみなす。
+    // 本当に隠れている区間は数pxより長いので、隠線の正しさは変わらない。
+    const bridgePx = window.__noBridge ? 0 : (window.__bridgePx === undefined ? 9 : Number(window.__bridgePx)) * Math.max(1, Math.abs(tf[0] || 1));
+    let lastOk = null;
+    // 「見えている区間」をいったん溜めてから描く。
+    // 隠線の判定は点ごとなので、面のすぐ後ろを通る線では判定が数点だけ表に出ることがあり、
+    // それが「点線状の切れ端」として残る（実測：建物の稜線が 6px おきの点線に見えた）。
+    // 短すぎる区間（--minRun px 未満）は、まわりが隠れているなら捨てる。
+    // 線そのものが短いとき（--shortLine px 未満）は捨てない（小物の線が消えないように）。
+    const minRun = window.__minRun === undefined ? 4 : Number(window.__minRun) * Math.max(1, Math.abs(tf[0] || 1)),
+        shortLine = 10 * Math.max(1, Math.abs(tf[0] || 1));
+    let run = [],
+        drew = 0,
+        lineLen = 0;
+    const flushRun = () => {
+        if (!run.length) return;
+        let len = 0;
+        for (let i = 2; i < run.length; i += 2) len += Math.hypot(run[i] - run[i - 2], run[i + 1] - run[i - 1]);
+        // 1点だけの区間（点）は、線全体が長いときは捨てる（点線の粒を残さない）。
+        // 2点以上の区間は、短くても描く（捨てると線が欠けて見えるため）。
+        if (run.length > 2 && len < minRun && lineLen >= shortLine) {
+            // 捨てる
+        } else {
+            c.moveTo(run[0], run[1]);
+            for (let i = 2; i < run.length; i += 2) c.lineTo(run[i], run[i + 1]);
+            drew++;
+        }
+        run = [];
+    };
+    // 見えている点を溜める。短い「隠れ」は、そのまま線を続けて埋める。
+    // 以前は隠れた時点で線を切っていたため、面をほぼ真横から見ている場所
+    // （1画素で奥行きが数m変わる）では、判定が1点ごとに揺れて
+    // **1〜6px おきの点線**になっていた。数px の切れ目は「線の途切れ」ではなく
+    // 判定の揺れなので、前後の点が近ければ（bridge px 以内）線としてつなぐ。
+    // 本当に隠れている区間は数十px 以上あるので、隠線の正しさは変わらない。
+    let pend = [], // いま隠れている途中の点（つながれば描く）
+        pendFrom = null; // 隠れ始めた点（つながったときに埋める始点）
+    const flushPend = () => {
+        pend = [];
+        pendFrom = null;
+    };
     const emit = (e) => {
-        if (!e.ok || !accept(e)) {
+        if (!e.ok) {
+            flushRun();
+            flushPend();
             on = false;
+            lastOk = null;
             return;
         }
-        on ? c.lineTo(e.sx, e.sy) : c.moveTo(e.sx, e.sy);
+        if (!accept(e)) {
+            if (on) {
+                if (!pend.length) pendFrom = { x: e.x, y: e.y };
+                pend.push(e.sx, e.sy);
+                // 切れ目が長すぎたら、そこで線を切る（本当に隠れている）。
+                if (pendFrom && Math.hypot(e.x - pendFrom.x, e.y - pendFrom.y) > bridgePx) {
+                    flushRun();
+                    flushPend();
+                    on = false;
+                    lastOk = null;
+                }
+            }
+            return;
+        }
+        if (on) {
+            if (pend.length) {
+                // 短い切れ目だったので、いま溜めていた点ごと線をつなぐ。
+                for (let i = 0; i < pend.length; i += 2) run.push(pend[i], pend[i + 1]);
+                flushPend();
+            }
+            run.push(e.sx, e.sy);
+        } else if (lastOk && bridgePx > 0 && Math.hypot(e.x - lastOk.x, e.y - lastOk.y) <= bridgePx) run.push(e.sx, e.sy);
+        else {
+            flushRun();
+            run.push(e.sx, e.sy);
+        }
         on = true;
+        lastOk = { x: e.x, y: e.y };
     };
     const put = (v) => emit(projPoint(v, tf));
     // 直線は透視投影でも画面上では直線になるので、区間の内部は
@@ -1637,11 +1986,21 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     // 投影は点ごとに1回だけ（以前は区間の両端でもう一度投影していた）。
     // カメラが同じ間は、前回の投影結果をそのまま使う。
     const pj = projPtsFor(s, tf);
+    for (let i = 1; i < pj.length; i++) {
+        const a = pj[i - 1],
+            b = pj[i];
+        if (a.ok && b.ok) lineLen += Math.hypot(b.sx - a.sx, b.sy - a.sy);
+    }
     s.p.forEach((v, i) => {
         if (i) {
             const a = s.p[i - 1];
             // 同じ線分を2回描かない（印は genShape が付けている）。
-            if (s.dup && s.dup[i - 1]) on = false;
+            if (s.dup && s.dup[i - 1]) {
+                flushRun();
+                flushPend();
+                on = false;
+                lastOk = null; // 重複線は橋渡ししない（2本描きになるため）
+            }
             else {
                 const ea = pj[i - 1],
                     eb = pj[i];
@@ -1687,6 +2046,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         }
         emit(pj[i]);
     });
+    flushRun();
     c.stroke();
 }
 
@@ -1738,10 +2098,31 @@ let lineLayerKey = null;
 // 値は入力だけで決まるので、使い回しても結果は1画素も変わらない。
 const projPtsCache = new WeakMap();
 let projKeyValue = null;
+// 画面への変換（拡大率と移動）の「移動ぶん」。
+// 透視投影は原点(0,0)を中心に拡大するので ox, oy そのもの。
+// 一方、正投影（正面・横・上）は投影結果がすでに画面座標（基準点 ax, ay）なので、
+// 同じ ox, oy を使うと**拡大が基準点からずれて絵が画面外へ飛ぶ**（実測：拡大0.5で線が1本も出ない）。
+// 基準点を中心に拡大するよう、移動ぶんを補正する。
+function viewShift() {
+    if (!orthView) return [ox, oy];
+    const s = orthSetup();
+    return [ox + s.ax * (1 - Z), oy + s.ay * (1 - Z)];
+}
+// 正投影（正面・横・上）の「どの向きを・どの倍率で・どこを中心に」を見分ける文字列。
+// 以前はキャッシュの条件が「正投影かどうか（0/1）」だけだったため、正面→横→上と
+// 切り替えても同じ絵（正面のまま）が返っていた。面の層と線の層の両方が同じ条件を使う。
+function orthoProjectionKey() {
+    if (!orthView) return "-";
+    const s = orthSetup();
+    return (
+        orthView + ":" + s.sc + ":" + s.ax + ":" + s.ay + ":" +
+        s.right.join(",") + ":" + s.up.join(",") + ":" + s.depth.join(",")
+    );
+}
 function projCameraKey(tf) {
     return (
-        (tf ? tf.join(",") : Z + "," + ox + "," + oy) +
-        "|" + T + "|" + (orthView ? 1 : 0) + "|" + W + "," + H + "|" + JSON.stringify(P)
+        (tf ? tf.join(",") : Z + "," + viewShift().join(",")) +
+        "|" + T + "|" + orthoProjectionKey() + "|" + W + "," + H + "|" + JSON.stringify(P)
     );
 }
 // 線1本ぶんの投影結果。同じ条件（カメラ・用紙・ズーム）なら前回の配列を使い回す。
@@ -1808,17 +2189,27 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     const x = LC.getContext("2d", { willReadFrequently: true });
     x.setTransform(1, 0, 0, 1, 0, 0);
     x.clearRect(0, 0, cw, ch);
-    if (tf) x.setTransform(...tf);
-    else if (view) x.setTransform(Z, 0, 0, Z, ox, oy); // 画面表示用はズーム・移動つき
-    const hiddenDepth = hidden ? buildExportDepth(cw, ch, tf || [1, 0, 0, 1, 0, 0]) : null;
+    // 線を引くときの変換（画面表示ならズーム・移動つき）。
+    // 奥行きバッファも**同じ変換**で作る。以前はここが [1,0,0,1,0,0] 固定だったため、
+    // 拡大・移動していると奥行きの画素位置と線の画素位置がずれて
+    // 「隠れていない線まで隠れる」＝正投影で線がほぼ出ない状態になっていた（実測 ink 0）。
+    const vs = viewShift(),
+        tfEff = tf || [Z, 0, 0, Z, vs[0], vs[1]];
+    x.setTransform(...tfEff);
+    const hiddenDepth = hidden ? buildExportDepth(cw, ch, tfEff) : null;
     // ベベルの縦線は「角ごとに輪郭の1本」だけ描く（面ONのとき）。
-    if (hiddenDepth) updateSeamPicks(hiddenDepth, cw, ch, tf || [1, 0, 0, 1, 0, 0]);
+    if (hiddenDepth) updateSeamPicks(hiddenDepth, cw, ch, tfEff);
+    // 二値化する層だけ、細い線が欠けないよう最小の太さを確保する。
+    const binNow = $("bin").checked;
+    lineDevMin = binNow && !window.__noBinMinW ? (window.__minDevW === undefined ? 1.15 : Number(window.__minDevW)) : 0;
+    lineDevMinScale = tf ? Math.abs(tf[0] || 1) : view ? Z : 1;
     S.forEach((s) => {
         if (s.ob && !objectVisible(s.ob)) return;
-        hidden ? strokeWVisible(x, s, hiddenDepth, cw, ch, tf || [1, 0, 0, 1, 0, 0]) : strokeW(x, s);
+        hidden ? strokeWVisible(x, s, hiddenDepth, cw, ch, tfEff) : strokeW(x, s);
     });
     if (withCur) drawCur(x);
     if (withCur && prev) prev.forEach((s) => strokeW(x, s));
+    lineDevMin = 0;
     lineLayerKey = curEff ? null : key;
     if ($("bin").checked) {
         // 二値化：しきい値以上の画素だけ完全に不透明にする。
@@ -1826,7 +2217,7 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
         // ※「変わった範囲だけ二値化する」案（層を2枚に分ける）も試したが、
         //   層をもう1枚経由すると GPU からの読み戻しが増えて、かえって遅かった。
         x.setTransform(1, 0, 0, 1, 0, 0);
-        const box = strokeBox(cw, ch, tf || [Z, 0, 0, Z, ox, oy]);
+        const box = strokeBox(cw, ch, tfEff);
         if (box) {
             const im = x.getImageData(box.x, box.y, box.w, box.h),
                 d = im.data,
@@ -1837,12 +2228,79 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
                 const v = u32[i];
                 u32[i] = (v >>> 24) < t ? 0 : v | 0xff000000;
             }
+            // 1〜3px の切れ目を埋める。
+            // 細い線（拡大が小さいときの1px 前後の線）はアンチエイリアスで1画素ごとの
+            // アルファがしきい値の上下を行き来するため、二値化すると破線状に欠ける
+            // （実測：拡大1.0で 357か所・2,435px の欠け）。線の両側が繋がっている
+            // 短い切れ目だけを埋めれば、線の太さは変えずに連続した線に戻せる。
+            closeBinGaps(u32, box.w, box.h, window.__binBridge === undefined ? 2 : Number(window.__binBridge));
             x.putImageData(im, box.x, box.y);
         }
     }
     return LC;
 }
 
+// 二値化した線の 1px の切れ目・欠けを埋める。
+// 二値化はアルファを 0/255 に落とすので、細い線はアンチエイリアスの当たり方で
+// 1px 単位に欠ける（実測：拡大1.0で 357か所）。「線の外側を太らせる」のではなく
+// 「線に囲まれた穴だけを埋める」ので、線の太さはほとんど変わらない。
+//   1. 反対側どうしが線で、あいだが1px → その1px を埋める（8方向の直線の切れ目）
+//   2. まわりに線が3つ以上ある → 角の欠けなので埋める（階段状の切れ目）
+function closeBinGaps(u32, w, h, strength) {
+    if (!(strength > 0) || w < 3 || h < 3) return;
+    const n = w * h;
+    // 1) 線の画素を集める（1画素1回の読み出しで済む）。
+    let inkCount = 0;
+    for (let i = 0; i < n; i++) if (u32[i] !== 0) inkCount++;
+    if (!inkCount) return;
+    const ink = new Int32Array(inkCount);
+    for (let i = 0, k = 0; i < n; i++) if (u32[i] !== 0) ink[k++] = i;
+    // 2) 線の画素のまわりだけを見る（全画素を見ると 1回 20ms かかっていた）。
+    const fill = [];
+    const near = strength >= 2 ? new Uint8Array(n) : null;
+    const dx8 = [1, 1, 0, -1, -1, -1, 0, 1],
+        dy8 = [0, 1, 1, 1, 0, -1, -1, -1];
+    for (let idx = 0; idx < ink.length; idx++) {
+        const i = ink[idx],
+            x = i % w,
+            y = (i / w) | 0;
+        // 右・下・右下・左下の4方向だけ見る（逆向きは相手側で調べる）。
+        for (let k = 0; k < 4; k++) {
+            const dx = dx8[k],
+                dy = dy8[k],
+                ax = x + dx,
+                ay = y + dy;
+            if (ax < 0 || ay < 0 || ax >= w || ay >= h) continue;
+            const ai = ay * w + ax;
+            if (u32[ai] !== 0) continue; // 線なら切れ目ではない
+            // 1px の切れ目：その先が線で、反対側（手前）も線。
+            const bx = ax + dx,
+                by = ay + dy,
+                px = x - dx,
+                py = y - dy;
+            if (bx >= 0 && by >= 0 && bx < w && by < h && u32[by * w + bx] !== 0 && px >= 0 && py >= 0 && px < w && py < h && u32[py * w + px] !== 0) {
+                fill.push(ai);
+                continue;
+            }
+            if (!near) continue;
+            // 角の欠け：まわりの線の数が3つ以上なら埋める。
+            if (near[ai] !== 255) {
+                let cnt = 0;
+                for (let j = 0; j < 8; j++) {
+                    const nx = ax + dx8[j],
+                        ny = ay + dy8[j];
+                    if (nx >= 0 && ny >= 0 && nx < w && ny < h && u32[ny * w + nx] !== 0) cnt++;
+                }
+                near[ai] = cnt;
+            }
+            if (near[ai] >= 3) fill.push(ai);
+        }
+    }
+    for (let i = 0; i < fill.length; i++) {
+        const idx = fill[i];
+        if (u32[idx] === 0) u32[idx] = 0xff000000;
+    }
+}
 // ===== 6. 地面のグリッド：床(y=-1)の格子。カメラの高さ・位置・向きを変えるとちゃんと見え方が変わる =====
 function floorGrid(c) {
     const n = Math.round(P.gn),
@@ -1895,6 +2353,12 @@ function floorGrid(c) {
 // 正投影ビューの補助線。消失点はなく、軸に沿った水平・垂直線として表示する。
 function orthGuides(c) {
     const sc = orthScale(),
+        st = orthSetup(),
+        // 補助線は「表示中心（自動フィットの中心）」に合わせて引く。
+        // 以前は画面中央 (W/2, H/2) 固定だったため、フィットで中心がずれると
+        // 補助線とオブジェクトの位置関係が食い違っていた。
+        cx = st.ax,
+        cy = st.ay,
         col = ["#e8743d", "#2fb5a5", "#4a7be8"];
     c.save();
     c.globalAlpha = P.ga;
@@ -1907,19 +2371,26 @@ function orthGuides(c) {
         c.lineTo(x1, y1);
         c.stroke();
     };
-    const b = orthBasis();
+    const b = orthBasis(),
+        // 画面に入る本数だけ引く（中心から ±20本では、拡大したときに足りなくなる）。
+        nx = Math.ceil(W / Math.max(1, sc)) + 1,
+        ny = Math.ceil(H / Math.max(1, sc)) + 1;
     if (orthView === "top") {
-        for (let i = -20; i <= 20; i++) {
-            const x = W / 2 + i * sc;
+        for (let i = -nx; i <= nx; i++) {
+            const x = cx + i * sc;
             draw(x, 0, x, H, col[0]);
-            const y = H / 2 + i * sc;
+        }
+        for (let i = -ny; i <= ny; i++) {
+            const y = cy + i * sc;
             draw(0, y, W, y, col[2]);
         }
     } else {
-        for (let i = -20; i <= 20; i++) {
-            const x = W / 2 + i * sc;
+        for (let i = -nx; i <= nx; i++) {
+            const x = cx + i * sc;
             draw(x, 0, x, H, col[orthView === "front" ? 0 : 1]);
-            const y = H / 2 + i * sc;
+        }
+        for (let i = -ny; i <= ny; i++) {
+            const y = cy + i * sc;
             draw(0, y, W, y, col[2]);
         }
     }
@@ -2192,7 +2663,9 @@ function drawObjectSurfaces(c) {
     });
     if (!objs.length) return;
     // カメラ（と用紙の設定）が同じで、台も同じなら「動いた台」だけ塗り直せる。
-    const cam = W + "," + H + "," + Z + "," + ox + "," + oy + "|" + JSON.stringify(P);
+    // 面の層も、線の層と同じ「カメラ＋正投影の向き」で見分ける
+    // （正投影の向きを入れないと、正面→横→上で前の面が貼られたままになる）。
+    const cam = projCameraKey(null);
     const sigs = objs.map((o) => o.id + ":" + JSON.stringify(o));
     const ids = objs.map((o) => o.id).join(",");
     const key = "surf|" + cam + "|" + sigs.join(";");
@@ -2293,10 +2766,11 @@ function drawObjectSurfaces(c) {
     // 奥から手前へ（半透明でもオブジェクト同士の重なりが自然になる）。
     const sortTris = (list) => list.sort((a, b) => b.depth - a.depth);
     const toScreen = (u0, v0, u1, v1, pad) => {
-        const dx0 = Math.max(0, Math.floor(u0 * Z + ox) - pad),
-            dy0 = Math.max(0, Math.floor(v0 * Z + oy) - pad),
-            dx1 = Math.min(W, Math.ceil(u1 * Z + ox) + pad),
-            dy1 = Math.min(H, Math.ceil(v1 * Z + oy) + pad);
+        const vs1 = viewShift(),
+            dx0 = Math.max(0, Math.floor(u0 * Z + vs1[0]) - pad),
+            dy0 = Math.max(0, Math.floor(v0 * Z + vs1[1]) - pad),
+            dx1 = Math.min(W, Math.ceil(u1 * Z + vs1[0]) + pad),
+            dy1 = Math.min(H, Math.ceil(v1 * Z + vs1[1]) + pad);
         return { dx0, dy0, dx1, dy1, dw: dx1 - dx0, dh: dy1 - dy0 };
     };
     // 3. 全部作り直す（カメラが動いた／最初の1回／不透明度が混在）。
@@ -2321,7 +2795,8 @@ function drawObjectSurfaces(c) {
         // 層は作り直す（中身が残っていると前の絵が透ける）。
         surfaceLayerCanvas = surfaceLayerNew(r.dw, r.dh);
         const lc = surfaceLayerCanvas.getContext("2d");
-        lc.setTransform(Z, 0, 0, Z, ox - r.dx0, oy - r.dy0);
+        const vs2 = viewShift();
+        lc.setTransform(Z, 0, 0, Z, vs2[0] - r.dx0, vs2[1] - r.dy0);
         paintSurfaceTris(lc, all, null);
         const box = { alpha: alphaOne, dx0: r.dx0, dy0: r.dy0, dw: r.dw, dh: r.dh };
         next.box = { x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, ...box };
@@ -2412,7 +2887,8 @@ function drawObjectSurfaces(c) {
         }
     });
     sortTris(near);
-    lc.setTransform(Z, 0, 0, Z, ox - cur.dx0, oy - cur.dy0);
+    const vs3 = viewShift();
+    lc.setTransform(Z, 0, 0, Z, vs3[0] - cur.dx0, vs3[1] - cur.dy0);
     paintSurfaceTris(lc, near, clipU);
     const box = { alpha: cur.alpha, dx0: cur.dx0, dy0: cur.dy0, dw: cur.dw, dh: cur.dh };
     blitSurfaceLayer(c, box);
@@ -2453,6 +2929,10 @@ function backgroundLayer() {
         $("gg").checked,
         $("floorTint")?.checked ? 1 : 0,
         window.cityFloorTint ? 1 : 0,
+        // 正投影（正面・横・上）の向き・倍率・中心も入れる。
+        // 入れないと、3Dから正面へ切り替えても**前の透視の背景（床グリッド）がそのまま残る**
+        // （実測：正面ビューに消失点へ向かうグリッドが描かれていた）。
+        orthoProjectionKey(),
         JSON.stringify(P),
     ].join("|");
     if (!window.__noBgCache && BG && BGKey === key && BG.width === W && BG.height === H) return BG;
@@ -2467,7 +2947,8 @@ function backgroundLayer() {
     g.fillStyle = $("bgw").checked ? "#fff" : "#23251f";
     g.fillRect(0, 0, W, H);
     g.save();
-    g.setTransform(Z, 0, 0, Z, ox, oy);
+    const vsBg = viewShift();
+    g.setTransform(Z, 0, 0, Z, vsBg[0], vsBg[1]);
     if (IMG) {
         const s = Math.min(W / IMG.width, H / IMG.height),
             w = IMG.width * s,
@@ -2517,7 +2998,8 @@ function render() {
     // 背景はキャッシュを貼るだけ（中身は backgroundLayer()）
     c.drawImage(backgroundLayer(), 0, 0);
     c.save();
-    c.setTransform(Z, 0, 0, Z, ox, oy); // 以降はズーム/移動つき
+    const vsMain = viewShift();
+    c.setTransform(Z, 0, 0, Z, vsMain[0], vsMain[1]); // 以降はズーム/移動つき
     drawObjectSurfaces(c);
     if ($("gon").checked) {
         if (orthView) orthGuides(c);
@@ -2584,8 +3066,8 @@ function render() {
         c.restore();
         return;
     }
-    // VPの目印（画面外なら端に寄せて表示）
-    ["VP1", "VP2", "VP3"].forEach((nm, i) => {
+    // VPの目印（画面外なら端に寄せて表示）。正投影には消失点が無いので出さない。
+    (orthView ? [] : ["VP1", "VP2", "VP3"]).forEach((nm, i) => {
         const A = AX[i];
         if (!A.vp || !show[i]) return;
         let dx = A.vp.x - W / 2,

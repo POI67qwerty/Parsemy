@@ -3079,7 +3079,16 @@ function compoundGizmo(o) {
             s1 = scrW(V.add(C3, a, 1, eps));
         if (!s1.ok) return;
         const pu = Math.hypot(s1.x - sC.x, s1.y - sC.y) / eps;
-        if (pu < 1e-6) return;
+        // 画面で完全に潰れた軸（真横・真上から見た奥行き方向）は、3Dでは矢印を出さない。
+        // ただし正投影（正面・横・上）では、その軸へ動かす手段が無くなってしまうため、
+        // 決まった向きの短い矢印を置いて掴めるようにする（3Dの見た目は変えない）。
+        if (pu < 1e-6) {
+            if (!orthView) return;
+            const d = hiddenHandleDir(),
+                L = 120 / Math.max(0.05, Z);
+            g.axes.push({ a, col, nm, sT: { x: sC.x + d.x * L, y: sC.y + d.y * L, ok: true }, hiddenAxis: true });
+            return;
+        }
         const L = Math.min(90 / Z / pu, 3 * nC + 1),
             sT = scrW(V.add(C3, a, 1, L));
         if (sT.ok) g.axes.push({ a, col, nm, sT });
@@ -3337,7 +3346,16 @@ function gizmo() {
             s1 = scrW(V.add(C3, a, 1, eps));
         if (!s1.ok) return;
         const pu = Math.hypot(s1.x - sC.x, s1.y - sC.y) / eps;
-        if (pu < 1e-6) return;
+        // 画面で完全に潰れた軸（真横・真上から見た奥行き方向）は、3Dでは矢印を出さない。
+        // ただし正投影（正面・横・上）では、その軸へ動かす手段が無くなってしまうため、
+        // 決まった向きの短い矢印を置いて掴めるようにする（3Dの見た目は変えない）。
+        if (pu < 1e-6) {
+            if (!orthView) return;
+            const d = hiddenHandleDir(),
+                L = 120 / Math.max(0.05, Z);
+            g.axes.push({ a, col, nm, sT: { x: sC.x + d.x * L, y: sC.y + d.y * L, ok: true }, hiddenAxis: true });
+            return;
+        }
         const L = Math.min(90 / Z / pu, 3 * nC + 1),
             sT = scrW(V.add(C3, a, 1, L));
         if (sT.ok) g.axes.push({ a, col, nm, sT });
@@ -4838,7 +4856,14 @@ function dragEdit(p, freeRotation = false) {
         }
     } else if (ed.t === "axis") {
         let amount = null;
-        if (ed.axisGuide?.hidden) amount = 0;
+        if (ed.axisGuide?.hidden) {
+            // 画面上で潰れている軸は、決まった向き（画面の左上）を動かした量で代用する。
+            // 以前は「このビューでは動かない」としていたが、それだと 3D でできる移動が
+            // 前・横・上ではできない、という差が出る（面ハンドルと同じ扱いに揃える）。
+            const dx = p.x - ed.p0.x,
+                dy = p.y - ed.p0.y;
+            amount = (dx * ed.axisGuide.dir.x + dy * ed.axisGuide.dir.y) / (ed.axisGuide.scale || 1);
+        }
         else if (ed.axisGuide) {
             const dx = p.x - ed.p0.x,
                 dy = p.y - ed.p0.y;
