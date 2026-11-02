@@ -467,3 +467,216 @@ ASSET_KIT.define(
     },
 );
 
+
+// ===== 信号機・標識（ポールもの）=====
+// 4種はどれも「台座＋ポール＋頭（信号機／標識板）」の同じ骨格で、違うのは頭の中身だけ。
+// 寸法は signalGeometry()（engine-gizmo.js）と共有する。画面の「ポール」ハンドルが動かすのは
+// アセットの高さ h そのものなので、ハンドルの値と描かれる形が食い違わない。
+function signalPoleParts(K, g) {
+    // 台座は「平たい底板＋すぼまる首」の2段。首を十分な高さにしないと、
+    // 線画ではポールの下に小さな三角が付いただけに見えて形が読めない。
+    const plateH = Math.max(0.02, g.baseH * 0.28),
+        collarH = Math.max(0.05, g.baseH * 0.62),
+        poleR = g.poleR,
+        collarTop = plateH + collarH;
+    return [
+        // 底板：平たい円盤。縦線を2本入れて厚みを見せる。
+        K.cylinder(g.baseR, 0, plateH, { seg: 14, verts: 2 }),
+        // 首：底板からポールへすぼまる円錐台。
+        // 回転体（loft）は verts を受け取らないので、縦線は verticals に
+        // 向かい合う2点（14角の 0 と 7）を指定して出す。これが無いと
+        // 「輪だけ」になって、線画では小さな椀にしか見えない。
+        Object.assign(
+            K.revolution(
+                [
+                    [g.baseR * 0.76, plateH],
+                    [Math.max(poleR * 1.6, g.baseR * 0.3), collarTop],
+                ],
+                { seg: 14 },
+            ),
+            { verticals: [0, 7] },
+        ),
+        // ポール：首の中から頭のすぐ下まで。縦線は左右2本（断面12角の 0 と 6）に置くと、
+        // どの向きから見ても「2本の輪郭線」になり、1本線の棒に見えない。
+        K.cylinder(poleR, collarTop - 0.01, g.headBottom + 0.02, { seg: 12, verts: 2 }),
+    ];
+}
+
+// 灯器の中の絵（止まれ／進め）。細い板を並べた人型で、灯（lamp）の大きさに対する割合で作る。
+// 小さく描かれるので、腕は省いて「頭＋胴＋脚」だけにし、灯の内側 6 割に収める。
+function signalWalkerParts(K, cx, cz, L, frontY, walking) {
+    // 先に中心へ置いてから回す（原点のまま回すと位置が飛ぶ）
+    const bar = (w, h, dx, dz, deg = 0) => {
+            const u = cx + dx,
+                v = cz + dz;
+            // 灯の板より確実に手前へ出す（板の中に埋めると隠れ線として消える）
+            return K.box(K.rotatePath(K.offsetPath(K.rectPath(w, h), u, v), deg, u, v), frontY, frontY + 0.01, { axis: "y" });
+        },
+        head = K.cylinder(L * 0.11, frontY, frontY + 0.01, { axis: "y", seg: 12, cx, cy: cz + L * 0.36 }),
+        torso = bar(L * 0.2, L * 0.28, 0, L * 0.14, 0),
+        legs = walking
+            ? [bar(L * 0.16, L * 0.32, -L * 0.075, -L * 0.13, 20), bar(L * 0.16, L * 0.32, L * 0.07, -L * 0.12, -16)]
+            : [bar(L * 0.15, L * 0.32, -L * 0.055, -L * 0.13, 0), bar(L * 0.15, L * 0.32, L * 0.055, -L * 0.13, 0)];
+    return [head, torso, ...legs];
+}
+
+// --- 1) 車両用信号機（横3灯）---
+ASSET_KIT.define(
+    "trafficSignal",
+    {
+        label: "信号機",
+        glyph: "◉",
+        w: 1.05,
+        d: 0.24,
+        h: 2.8,
+        accent: "#5c6b73",
+        spHeadH: 0.34, // 灯器（頭）の高さ
+        spPoleR: 0.042, // ポールの半径
+        spBaseR: 0.16, // 台座の半径
+        spBaseH: 0.16, // 台座の高さ（底板＋首）
+        tsLampR: 0.125, // 灯の半径
+        tsHood: 0.1, // ひさし（フード）の長さ
+    },
+    (o, K) => {
+        const g = signalGeometry(o),
+            front = -g.headD / 2,
+            lampR = Math.max(0.02, K.param(o, "tsLampR", 0.125)),
+            hood = Math.max(0, K.param(o, "tsHood", 0.1)),
+            parts = signalPoleParts(K, g);
+        // 灯器：角を丸めた横長の箱
+        parts.push(K.roundedBox(g.headW, g.headD, g.headH, Math.min(g.headH * 0.18, 0.055), { seg: 2, cornerSeg: 2, z0: g.headBottom }));
+        // 灯（青・黄・赤）と、灯のまわりのひさし
+        [-1, 0, 1].forEach((i) => {
+            const x = i * g.headW * 0.3;
+            parts.push(...K.moveParts([K.cylinder(lampR, front - 0.024, front - 0.008, { axis: "y", seg: 20 })], x, 0, g.headCz));
+            if (hood > 0.01)
+                parts.push(...K.moveParts([K.cylinder(lampR * 1.2, front - 0.01, front - 0.01 - hood, { axis: "y", seg: 16, caps: false })], x, 0, g.headCz));
+        });
+        return parts;
+    },
+);
+
+// --- 2) 歩行者用信号機（縦2灯）---
+ASSET_KIT.define(
+    "pedSignal",
+    {
+        label: "歩行者信号",
+        glyph: "◍",
+        w: 0.36,
+        d: 0.22,
+        h: 2.4,
+        accent: "#5c6b73",
+        spHeadH: 0.66,
+        spPoleR: 0.038,
+        spBaseR: 0.15,
+        spBaseH: 0.15,
+        psLamp: 0.25, // 灯（四角）の一辺
+    },
+    (o, K) => {
+        const g = signalGeometry(o),
+            front = -g.headD / 2,
+            lamp = Math.min(Math.max(0.1, K.param(o, "psLamp", 0.25)), Math.min(g.headW - 0.06, g.headH * 0.45)),
+            // 上=止まれ（赤）／下=進め（青）。灯の中心の高さ。
+            topCz = g.headBottom + g.headH * 0.72,
+            bottomCz = g.headBottom + g.headH * 0.27,
+            parts = signalPoleParts(K, g),
+            lens = (cz) => K.box(K.offsetPath(K.roundRectPath(lamp, lamp, Math.min(0.03, lamp * 0.16), 2), 0, cz), front - 0.022, front - 0.008, { axis: "y" });
+        parts.push(K.roundedBox(g.headW, g.headD, g.headH, Math.min(g.headW * 0.18, 0.05), { seg: 2, cornerSeg: 2, z0: g.headBottom }));
+        parts.push(lens(topCz), lens(bottomCz));
+        // 絵：上は「止まれ」の立ち姿、下は「進め」の歩く姿
+        parts.push(...signalWalkerParts(K, 0, topCz, lamp, front - 0.045, false));
+        parts.push(...signalWalkerParts(K, 0, bottomCz, lamp, front - 0.045, true));
+        return parts;
+    },
+);
+
+// --- 3) 丸標識（地下鉄の丸い看板）---
+ASSET_KIT.define(
+    "signPost",
+    {
+        label: "丸標識",
+        glyph: "◎",
+        w: 0.42,
+        d: 0.06,
+        h: 2.6,
+        accent: "#e2534b",
+        spHeadH: 0.42,
+        spPoleR: 0.042,
+        spBaseR: 0.16,
+        spBaseH: 0.16,
+        snRing: 0.72, // 内側の輪の半径（板の半径に対する割合）
+        snBand: true, // 横に通る帯を出す
+    },
+    (o, K) => {
+        const g = signalGeometry(o),
+            R = Math.min(g.headW, g.headH) / 2,
+            t = Math.max(0.02, g.headD),
+            y0 = -t / 2,
+            front = -t / 2,
+            ring = Math.min(0.95, Math.max(0.3, K.param(o, "snRing", 0.72))),
+            parts = signalPoleParts(K, g);
+        // 板（円盤）。奥行きは丸標識の薄い板なので、面ハンドルで厚みも変えられる。
+        parts.push(...K.moveParts([K.cylinder(R, y0, y0 + t, { axis: "y", seg: 28, verts: 2 })], 0, 0, g.headCz));
+        // 内側の輪：少しだけ前に出した薄い円盤（筒だと輪の線が描かれない）
+        parts.push(...K.moveParts([K.cylinder(R * ring, front - 0.02, front - 0.006, { axis: "y", seg: 24 })], 0, 0, g.headCz));
+        // 横に通る帯
+        if (o.snBand !== false)
+            parts.push(
+                K.box(K.offsetPath(K.rectPath(R * 1.72, Math.max(0.03, R * 0.3)), 0, g.headCz), front - 0.03, front - 0.014, { axis: "y" }),
+            );
+        return parts;
+    },
+);
+
+// --- 4) 踏切の標識（黄黒のX）---
+ASSET_KIT.define(
+    "crossingSign",
+    {
+        label: "踏切標識",
+        glyph: "✕",
+        w: 0.5,
+        d: 0.1,
+        h: 2.6,
+        accent: "#f0c419",
+        spHeadH: 0.46,
+        spPoleR: 0.042,
+        spBaseR: 0.16,
+        spBaseH: 0.16,
+        csBar: 0.13, // X の帯の太さ
+    },
+    (o, K) => {
+        const g = signalGeometry(o),
+            front = -g.headD / 2,
+            bar = Math.max(0.03, K.param(o, "csBar", 0.13)),
+            // 板の対角いっぱいにすると角から飛び出すので、少し短くする
+            len = Math.min(g.headW, g.headH) * 1.16,
+            plate = K.roundRectPath(g.headW, g.headH, Math.min(0.06, g.headH * 0.14), 2),
+            parts = signalPoleParts(K, g);
+        // 下地の板
+        parts.push(K.box(K.offsetPath(plate, 0, g.headCz), front + 0.005, front + g.headD, { axis: "y" }));
+        // X：細長い板を±45°に回して前に重ねる
+        [45, -45].forEach((deg) =>
+            parts.push(
+                K.box(
+                    // 先に標識の中心へ置いてから回す（原点のまま回すと位置が飛ぶ）
+                    K.rotatePath(K.offsetPath(K.rectPath(len, bar), 0, g.headCz), deg, 0, g.headCz),
+                    front - 0.022,
+                    front + 0.002,
+                    { axis: "y" },
+                ),
+            ),
+        );
+        // 下の2つの赤い灯（踏切の警報灯）
+        [-1, 1].forEach((i) =>
+            parts.push(
+                ...K.moveParts(
+                    [K.cylinder(bar * 0.34, front - 0.05, front - 0.02, { axis: "y", seg: 14 })],
+                    i * g.headW * 0.26,
+                    0,
+                    g.headBottom + g.headH * 0.16,
+                ),
+            ),
+        );
+        return parts;
+    },
+);

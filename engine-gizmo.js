@@ -2446,6 +2446,8 @@ function specialGizmo(o) {
                         ? stoolGizmo(o)
                       : o && o.type === "asset" && o.asset === "outdoorUnit"
                         ? outdoorUnitGizmo(o)
+                      : isSignalAsset(o)
+                        ? signalGizmo(o)
                     : o && o.type === "asset" && o.asset === "sign"
                       ? signGizmo(o)
                       : o && o.type === "asset" && o.asset === "cone"
@@ -2489,7 +2491,7 @@ function outdoorUnitGizmo(o) {
             "outdoor-fan-x",
             [g.fanX, front, g.bodyCz],
             [g.fanX + g.fanR + 0.05, front, g.bodyCz],
-            [g.fanX + g.fanR + 0.35, front, g.bodyCz],
+            [g.fanX + g.fanR + 1.05, front, g.bodyCz], // 1m ぶん離して、ドラッグ量を 1:1 にする
             g.fanX,
             -g.limit,
             g.limit,
@@ -2498,6 +2500,64 @@ function outdoorUnitGizmo(o) {
             "#7dd8ff",
         );
     return { o, C3: L2W(o, 0, 0, g.bodyCz), handles: { fanX: fanHandle } };
+}
+
+// ===== 信号機・標識（ポールもの）=====
+// 4種（車両用信号機・歩行者用信号機・丸標識・踏切標識）は、どれも
+// 「台座＋ポール＋頭（信号機／標識板）」という同じ骨格。違うのは頭の寸法だけ。
+// ポールの長さはアセットの高さ h そのもの（＝頭の上端）なので、
+// 画面の上下ハンドルでも、専用の「ポール」ハンドルでも同じ値が動く。
+const SIGNAL_HEADS = {
+    trafficSignal: { w: 1.05, h: 0.34, d: 0.24 }, // 車両用：横3灯
+    pedSignal: { w: 0.36, h: 0.66, d: 0.22 }, // 歩行者用：縦2灯
+    signPost: { w: 0.42, h: 0.42, d: 0.06 }, // 丸標識（地下鉄風）
+    crossingSign: { w: 0.5, h: 0.46, d: 0.1 }, // 踏切のX標識
+};
+const isSignalAsset = (o) => !!o && o.type === "asset" && Object.prototype.hasOwnProperty.call(SIGNAL_HEADS, o.asset);
+function signalGeometry(o) {
+    const dflt = SIGNAL_HEADS[o?.asset] || SIGNAL_HEADS.trafficSignal,
+        num = (v, f) => (Number.isFinite(Number(v)) && Number(v) !== 0 ? Math.abs(Number(v)) : f),
+        H = Math.max(0.8, num(o?.h, 2.6)),
+        // 頭の幅・奥行きは、ほかのアセットと同じく左右／前後の面ハンドルで変えられる。
+        headW = Math.max(0.12, num(o?.ra, dflt.w / 2) * 2),
+        headD = Math.max(0.03, num(o?.rb, dflt.d / 2) * 2),
+        headH = Math.max(0.12, Math.min(H - 0.25, num(o?.spHeadH, dflt.h))),
+        headBottom = H - headH,
+        poleR = Math.max(0.008, num(o?.spPoleR, 0.042)),
+        baseR = Math.max(poleR * 2, num(o?.spBaseR, 0.16)),
+        baseH = Math.min(headBottom * 0.5, num(o?.spBaseH, 0.16));
+    return {
+        H,
+        headW,
+        headH,
+        headD,
+        headBottom,
+        headCz: headBottom + headH / 2,
+        poleR,
+        baseR,
+        baseH,
+        // 「ポール」ハンドルは頭の横（頭の幅の外）に出す。ポールと重ならない位置。
+        knobX: Math.max(headW / 2, baseR) + 0.12,
+    };
+}
+// 信号機・標識の専用ハンドル：ポールの高さ（＝アセットの高さ）を上下に動かす。
+function signalGizmo(o) {
+    if (!isSignalAsset(o)) return null;
+    const g = signalGeometry(o),
+        poleHandle = screenHandle(
+            o,
+            "signal-pole-h",
+            [0, 0, g.headBottom], // 支点はポールの上端
+            [g.knobX, 0, g.headBottom], // ノブは頭の横
+            [g.knobX, 0, g.headBottom + 1], // 1m 上を向きの基準に（ドラッグ 1:1）
+            g.H,
+            0.9,
+            6,
+            "ポール",
+            { x: 0, y: -1 },
+            "#8ce6c2",
+        );
+    return { o, C3: L2W(o, 0, 0, g.H * 0.5), handles: { poleH: poleHandle } };
 }
 
 // ===== 画面上のラベル（白い用紙でも読める共通表示） =====
@@ -2908,6 +2968,35 @@ function drawSpecialGizmo(c, o) {
             c.setLineDash([]);
             sq(h.s, h.color || "#ff9f68");
             gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}`, h.s.x + 9 / Z, h.s.y - 8 / Z, h.color || "#ff9f68", 12);
+        }
+    } else if (isSignalAsset(sg.o)) {
+        // ポールの高さハンドル。上下の矢印で「縦に伸びる」ことを示す。
+        const h = sg.handles?.poleH;
+        if (h?.s?.ok) {
+            const col = h.color || "#8ce6c2";
+            c.strokeStyle = col;
+            c.lineWidth = 1.4 / Z;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.beginPath();
+            if (h.anchor?.ok) {
+                c.moveTo(h.anchor.x, h.anchor.y);
+                c.lineTo(h.s.x, h.s.y);
+            }
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, col, false);
+            c.beginPath();
+            c.moveTo(h.s.x, h.s.y - 13 / Z);
+            c.lineTo(h.s.x - 4 / Z, h.s.y - 7 / Z);
+            c.lineTo(h.s.x + 4 / Z, h.s.y - 7 / Z);
+            c.closePath();
+            c.moveTo(h.s.x, h.s.y + 13 / Z);
+            c.lineTo(h.s.x - 4 / Z, h.s.y + 7 / Z);
+            c.lineTo(h.s.x + 4 / Z, h.s.y + 7 / Z);
+            c.closePath();
+            c.fillStyle = col;
+            c.fill();
+            gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}m`, h.s.x + 16 / Z, h.s.y - 8 / Z, col, 12);
         }
     } else if (sg.o.asset === "outdoorUnit") {
         // ファンの左右位置ハンドル1本。左右の矢印で「横にだけ動く」ことを示す。
@@ -3941,7 +4030,8 @@ function hitGizmo(p) {
             active.asset === "stall" ||
             active.asset === "stool" ||
             active.asset === "railing" ||
-            active.asset === "outdoorUnit"
+            active.asset === "outdoorUnit" ||
+            isSignalAsset(active)
         ) {
             const nearest = nearestHandleOf(Object.values(special.handles || {}), p, R),
                 hit = handleOrFace(nearest, (q) => ({
@@ -4529,6 +4619,7 @@ function beginGizmo(h, p) {
         h.t.startsWith("stool-") ||
         h.t.startsWith("railing-") ||
         h.t === "outdoor-fan-x" ||
+        h.t === "signal-pole-h" ||
         h.t === "circle-radius" ||
         h.t === "wallSideSign-beveled-offset" ||
         h.t === "wallSideSign-bracket-length" ||
@@ -4728,6 +4819,14 @@ function dragEdit(p, freeRotation = false) {
             // 本数は整数。ほかの2つは 0.001 刻みで扱う（数値欄と同じ桁）。
             num = h.integer ? Math.round(value) : Math.round(value * 1000) / 1000;
         if (key) patch = { [key]: num };
+    } else if (ed.t === "signal-pole-h") {
+        // ポールの高さ（＝アセットの高さ）。頭はポールの上に載るので、
+        // 伸ばすと信号機・標識ごと上へ上がる。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { h: Math.round(value * 1000) / 1000 };
     } else if (ed.t === "outdoor-fan-x") {
         // 室外機のファンの左右位置。実寸（m）なので、幅を変えても円は動かない。
         const h = ed.sign,

@@ -5822,6 +5822,8 @@ function specialGizmo(o) {
                         ? stoolGizmo(o)
                       : o && o.type === "asset" && o.asset === "outdoorUnit"
                         ? outdoorUnitGizmo(o)
+                      : isSignalAsset(o)
+                        ? signalGizmo(o)
                     : o && o.type === "asset" && o.asset === "sign"
                       ? signGizmo(o)
                       : o && o.type === "asset" && o.asset === "cone"
@@ -5858,7 +5860,7 @@ function outdoorUnitGizmo(o) {
             "outdoor-fan-x",
             [g.fanX, front, g.bodyCz],
             [g.fanX + g.fanR + 0.05, front, g.bodyCz],
-            [g.fanX + g.fanR + 0.35, front, g.bodyCz],
+            [g.fanX + g.fanR + 1.05, front, g.bodyCz],
             g.fanX,
             -g.limit,
             g.limit,
@@ -5867,6 +5869,55 @@ function outdoorUnitGizmo(o) {
             "#7dd8ff",
         );
     return { o, C3: L2W(o, 0, 0, g.bodyCz), handles: { fanX: fanHandle } };
+}
+const SIGNAL_HEADS = {
+    trafficSignal: { w: 1.05, h: 0.34, d: 0.24 },
+    pedSignal: { w: 0.36, h: 0.66, d: 0.22 },
+    signPost: { w: 0.42, h: 0.42, d: 0.06 },
+    crossingSign: { w: 0.5, h: 0.46, d: 0.1 },
+};
+const isSignalAsset = (o) => !!o && o.type === "asset" && Object.prototype.hasOwnProperty.call(SIGNAL_HEADS, o.asset);
+function signalGeometry(o) {
+    const dflt = SIGNAL_HEADS[o?.asset] || SIGNAL_HEADS.trafficSignal,
+        num = (v, f) => (Number.isFinite(Number(v)) && Number(v) !== 0 ? Math.abs(Number(v)) : f),
+        H = Math.max(0.8, num(o?.h, 2.6)),
+        headW = Math.max(0.12, num(o?.ra, dflt.w / 2) * 2),
+        headD = Math.max(0.03, num(o?.rb, dflt.d / 2) * 2),
+        headH = Math.max(0.12, Math.min(H - 0.25, num(o?.spHeadH, dflt.h))),
+        headBottom = H - headH,
+        poleR = Math.max(0.008, num(o?.spPoleR, 0.042)),
+        baseR = Math.max(poleR * 2, num(o?.spBaseR, 0.16)),
+        baseH = Math.min(headBottom * 0.5, num(o?.spBaseH, 0.16));
+    return {
+        H,
+        headW,
+        headH,
+        headD,
+        headBottom,
+        headCz: headBottom + headH / 2,
+        poleR,
+        baseR,
+        baseH,
+        knobX: Math.max(headW / 2, baseR) + 0.12,
+    };
+}
+function signalGizmo(o) {
+    if (!isSignalAsset(o)) return null;
+    const g = signalGeometry(o),
+        poleHandle = screenHandle(
+            o,
+            "signal-pole-h",
+            [0, 0, g.headBottom],
+            [g.knobX, 0, g.headBottom],
+            [g.knobX, 0, g.headBottom + 1],
+            g.H,
+            0.9,
+            6,
+            "ポール",
+            { x: 0, y: -1 },
+            "#8ce6c2",
+        );
+    return { o, C3: L2W(o, 0, 0, g.H * 0.5), handles: { poleH: poleHandle } };
 }
 let gzLabelRects = [];
 const GZ_LABEL_INK = "#1f2933";
@@ -6247,6 +6298,34 @@ function drawSpecialGizmo(c, o) {
             c.setLineDash([]);
             sq(h.s, h.color || "#ff9f68");
             gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}`, h.s.x + 9 / Z, h.s.y - 8 / Z, h.color || "#ff9f68", 12);
+        }
+    } else if (isSignalAsset(sg.o)) {
+        const h = sg.handles?.poleH;
+        if (h?.s?.ok) {
+            const col = h.color || "#8ce6c2";
+            c.strokeStyle = col;
+            c.lineWidth = 1.4 / Z;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.beginPath();
+            if (h.anchor?.ok) {
+                c.moveTo(h.anchor.x, h.anchor.y);
+                c.lineTo(h.s.x, h.s.y);
+            }
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, col, false);
+            c.beginPath();
+            c.moveTo(h.s.x, h.s.y - 13 / Z);
+            c.lineTo(h.s.x - 4 / Z, h.s.y - 7 / Z);
+            c.lineTo(h.s.x + 4 / Z, h.s.y - 7 / Z);
+            c.closePath();
+            c.moveTo(h.s.x, h.s.y + 13 / Z);
+            c.lineTo(h.s.x - 4 / Z, h.s.y + 7 / Z);
+            c.lineTo(h.s.x + 4 / Z, h.s.y + 7 / Z);
+            c.closePath();
+            c.fillStyle = col;
+            c.fill();
+            gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}m`, h.s.x + 16 / Z, h.s.y - 8 / Z, col, 12);
         }
     } else if (sg.o.asset === "outdoorUnit") {
         const h = sg.handles?.fanX;
@@ -7162,7 +7241,8 @@ function hitGizmo(p) {
             active.asset === "stall" ||
             active.asset === "stool" ||
             active.asset === "railing" ||
-            active.asset === "outdoorUnit"
+            active.asset === "outdoorUnit" ||
+            isSignalAsset(active)
         ) {
             const nearest = nearestHandleOf(Object.values(special.handles || {}), p, R),
                 hit = handleOrFace(nearest, (q) => ({
@@ -7696,6 +7776,7 @@ function beginGizmo(h, p) {
         h.t.startsWith("stool-") ||
         h.t.startsWith("railing-") ||
         h.t === "outdoor-fan-x" ||
+        h.t === "signal-pole-h" ||
         h.t === "circle-radius" ||
         h.t === "wallSideSign-beveled-offset" ||
         h.t === "wallSideSign-bracket-length" ||
@@ -7879,6 +7960,12 @@ function dragEdit(p, freeRotation = false) {
             key = KEY[ed.t],
             num = h.integer ? Math.round(value) : Math.round(value * 1000) / 1000;
         if (key) patch = { [key]: num };
+    } else if (ed.t === "signal-pole-h") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { h: Math.round(value * 1000) / 1000 };
     } else if (ed.t === "outdoor-fan-x") {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -16732,6 +16819,180 @@ ASSET_KIT.define(
         return parts;
     },
 );
+function signalPoleParts(K, g) {
+    const plateH = Math.max(0.02, g.baseH * 0.28),
+        collarH = Math.max(0.05, g.baseH * 0.62),
+        poleR = g.poleR,
+        collarTop = plateH + collarH;
+    return [
+        K.cylinder(g.baseR, 0, plateH, { seg: 14, verts: 2 }),
+        Object.assign(
+            K.revolution(
+                [
+                    [g.baseR * 0.76, plateH],
+                    [Math.max(poleR * 1.6, g.baseR * 0.3), collarTop],
+                ],
+                { seg: 14 },
+            ),
+            { verticals: [0, 7] },
+        ),
+        K.cylinder(poleR, collarTop - 0.01, g.headBottom + 0.02, { seg: 12, verts: 2 }),
+    ];
+}
+function signalWalkerParts(K, cx, cz, L, frontY, walking) {
+    const bar = (w, h, dx, dz, deg = 0) => {
+            const u = cx + dx,
+                v = cz + dz;
+            return K.box(K.rotatePath(K.offsetPath(K.rectPath(w, h), u, v), deg, u, v), frontY, frontY + 0.01, { axis: "y" });
+        },
+        head = K.cylinder(L * 0.11, frontY, frontY + 0.01, { axis: "y", seg: 12, cx, cy: cz + L * 0.36 }),
+        torso = bar(L * 0.2, L * 0.28, 0, L * 0.14, 0),
+        legs = walking
+            ? [bar(L * 0.16, L * 0.32, -L * 0.075, -L * 0.13, 20), bar(L * 0.16, L * 0.32, L * 0.07, -L * 0.12, -16)]
+            : [bar(L * 0.15, L * 0.32, -L * 0.055, -L * 0.13, 0), bar(L * 0.15, L * 0.32, L * 0.055, -L * 0.13, 0)];
+    return [head, torso, ...legs];
+}
+ASSET_KIT.define(
+    "trafficSignal",
+    {
+        label: "信号機",
+        glyph: "◉",
+        w: 1.05,
+        d: 0.24,
+        h: 2.8,
+        accent: "#5c6b73",
+        spHeadH: 0.34,
+        spPoleR: 0.042,
+        spBaseR: 0.16,
+        spBaseH: 0.16,
+        tsLampR: 0.125,
+        tsHood: 0.1,
+    },
+    (o, K) => {
+        const g = signalGeometry(o),
+            front = -g.headD / 2,
+            lampR = Math.max(0.02, K.param(o, "tsLampR", 0.125)),
+            hood = Math.max(0, K.param(o, "tsHood", 0.1)),
+            parts = signalPoleParts(K, g);
+        parts.push(K.roundedBox(g.headW, g.headD, g.headH, Math.min(g.headH * 0.18, 0.055), { seg: 2, cornerSeg: 2, z0: g.headBottom }));
+        [-1, 0, 1].forEach((i) => {
+            const x = i * g.headW * 0.3;
+            parts.push(...K.moveParts([K.cylinder(lampR, front - 0.024, front - 0.008, { axis: "y", seg: 20 })], x, 0, g.headCz));
+            if (hood > 0.01)
+                parts.push(...K.moveParts([K.cylinder(lampR * 1.2, front - 0.01, front - 0.01 - hood, { axis: "y", seg: 16, caps: false })], x, 0, g.headCz));
+        });
+        return parts;
+    },
+);
+ASSET_KIT.define(
+    "pedSignal",
+    {
+        label: "歩行者信号",
+        glyph: "◍",
+        w: 0.36,
+        d: 0.22,
+        h: 2.4,
+        accent: "#5c6b73",
+        spHeadH: 0.66,
+        spPoleR: 0.038,
+        spBaseR: 0.15,
+        spBaseH: 0.15,
+        psLamp: 0.25,
+    },
+    (o, K) => {
+        const g = signalGeometry(o),
+            front = -g.headD / 2,
+            lamp = Math.min(Math.max(0.1, K.param(o, "psLamp", 0.25)), Math.min(g.headW - 0.06, g.headH * 0.45)),
+            topCz = g.headBottom + g.headH * 0.72,
+            bottomCz = g.headBottom + g.headH * 0.27,
+            parts = signalPoleParts(K, g),
+            lens = (cz) => K.box(K.offsetPath(K.roundRectPath(lamp, lamp, Math.min(0.03, lamp * 0.16), 2), 0, cz), front - 0.022, front - 0.008, { axis: "y" });
+        parts.push(K.roundedBox(g.headW, g.headD, g.headH, Math.min(g.headW * 0.18, 0.05), { seg: 2, cornerSeg: 2, z0: g.headBottom }));
+        parts.push(lens(topCz), lens(bottomCz));
+        parts.push(...signalWalkerParts(K, 0, topCz, lamp, front - 0.045, false));
+        parts.push(...signalWalkerParts(K, 0, bottomCz, lamp, front - 0.045, true));
+        return parts;
+    },
+);
+ASSET_KIT.define(
+    "signPost",
+    {
+        label: "丸標識",
+        glyph: "◎",
+        w: 0.42,
+        d: 0.06,
+        h: 2.6,
+        accent: "#e2534b",
+        spHeadH: 0.42,
+        spPoleR: 0.042,
+        spBaseR: 0.16,
+        spBaseH: 0.16,
+        snRing: 0.72,
+        snBand: true,
+    },
+    (o, K) => {
+        const g = signalGeometry(o),
+            R = Math.min(g.headW, g.headH) / 2,
+            t = Math.max(0.02, g.headD),
+            y0 = -t / 2,
+            front = -t / 2,
+            ring = Math.min(0.95, Math.max(0.3, K.param(o, "snRing", 0.72))),
+            parts = signalPoleParts(K, g);
+        parts.push(...K.moveParts([K.cylinder(R, y0, y0 + t, { axis: "y", seg: 28, verts: 2 })], 0, 0, g.headCz));
+        parts.push(...K.moveParts([K.cylinder(R * ring, front - 0.02, front - 0.006, { axis: "y", seg: 24 })], 0, 0, g.headCz));
+        if (o.snBand !== false)
+            parts.push(
+                K.box(K.offsetPath(K.rectPath(R * 1.72, Math.max(0.03, R * 0.3)), 0, g.headCz), front - 0.03, front - 0.014, { axis: "y" }),
+            );
+        return parts;
+    },
+);
+ASSET_KIT.define(
+    "crossingSign",
+    {
+        label: "踏切標識",
+        glyph: "✕",
+        w: 0.5,
+        d: 0.1,
+        h: 2.6,
+        accent: "#f0c419",
+        spHeadH: 0.46,
+        spPoleR: 0.042,
+        spBaseR: 0.16,
+        spBaseH: 0.16,
+        csBar: 0.13,
+    },
+    (o, K) => {
+        const g = signalGeometry(o),
+            front = -g.headD / 2,
+            bar = Math.max(0.03, K.param(o, "csBar", 0.13)),
+            len = Math.min(g.headW, g.headH) * 1.16,
+            plate = K.roundRectPath(g.headW, g.headH, Math.min(0.06, g.headH * 0.14), 2),
+            parts = signalPoleParts(K, g);
+        parts.push(K.box(K.offsetPath(plate, 0, g.headCz), front + 0.005, front + g.headD, { axis: "y" }));
+        [45, -45].forEach((deg) =>
+            parts.push(
+                K.box(
+                    K.rotatePath(K.offsetPath(K.rectPath(len, bar), 0, g.headCz), deg, 0, g.headCz),
+                    front - 0.022,
+                    front + 0.002,
+                    { axis: "y" },
+                ),
+            ),
+        );
+        [-1, 1].forEach((i) =>
+            parts.push(
+                ...K.moveParts(
+                    [K.cylinder(bar * 0.34, front - 0.05, front - 0.02, { axis: "y", seg: 14 })],
+                    i * g.headW * 0.26,
+                    0,
+                    g.headBottom + g.headH * 0.16,
+                ),
+            ),
+        );
+        return parts;
+    },
+);
 "use strict";
 window.cityGridInstallAssetUI = function (bridge) {
     const {
@@ -17665,6 +17926,10 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "stool",
                 "wallSign",
                 "windowGrid",
+                "trafficSignal",
+                "pedSignal",
+                "signPost",
+                "crossingSign",
             ],
         },
         { key: "person", label: "人間", kinds: ["person"] },

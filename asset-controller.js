@@ -1034,6 +1034,11 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "stool",
                 "wallSign",
                 "windowGrid",
+                // 信号機・標識（ポールもの）。ポールの高さは画面上の専用ハンドルで変える。
+                "trafficSignal",
+                "pedSignal",
+                "signPost",
+                "crossingSign",
             ],
         },
         { key: "person", label: "人間", kinds: ["person"] },
