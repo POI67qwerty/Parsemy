@@ -2190,6 +2190,7 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>ベベルセグメント数</span><input type=number class=nv id=beveledBoxSegments min=1 max=4 step=1 style="width:100px"><span class=un>分割</span></label>
 <div class="note">四つの縦角を面取りします。オフセットは面取り幅、セグメント数は角の丸みを分割する数です。1は一枚面、4は4分割です。オフセットはキャンバス上のオレンジのベベルハンドルからも変更できます。幅・奥行き・高さは共通の面ハンドルまたは上の数値欄で編集できます。初期状態は面で、上面を押し出すと高さができます。</div>
 </div>
+<div id=assetEditorP style="display:none"><h3>アセット設定</h3><div id=assetEditorFields></div></div>
 <div id=cornerCutP style="display:none"><h3>隅切り直方体</h3>
 <label><span>隅切りオフセット</span><input type=number class=nv id=cornerCutOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
 <label><input type=checkbox id=cornerFacadeEnabled> ファサード看板をつける</label>
@@ -2198,7 +2199,7 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>看板の色</span><input type=color id=cornerFacadeColor value="#2f73bc"></label>
 <label><span>看板の高さ</span><input type=number class=nv id=cornerFacadeHeight min=0.01 step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><span>看板の張り出し</span><input type=number class=nv id=cornerFacadeProjection min=0.02 max=2 step=0.01 style="width:100px"><span class=un>m</span></label>
-<div class="note">正面と隅切り面に沿う立体の看板です。文字・ロゴは含みません。</div></div>
+<div class="note">隅切り面に付く立体の看板です。両端の辺へ回すこともできます。文字・ロゴは含みません。</div></div>
 <label><input type=checkbox id=cornerCutOpeningEnabled> 赤い隅切り面に開口</label>
 <div id=cornerCutOpeningControls style="display:none">
 <label><span>開口の幅</span><input type=number class=nv id=cornerCutOpeningW min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
@@ -6464,7 +6465,7 @@ function normalizeScreenHandles(sg) {
     return sg;
 }
 function specialGizmo(o) {
-    const sg = o && o.type === "circ"
+    let sg = o && o.type === "circ"
         ? circleGizmo(o)
         : o && o.type === "asset" && o.asset === "wallSideSign" && o.attachment?.wallSideSign
         ? wallSideSignSpecialGizmo(o)
@@ -6513,6 +6514,24 @@ function specialGizmo(o) {
                           : o && o.type === "asset" && o.asset === "person"
                             ? personGizmo(o)
                             : null;
+    // 新アセットは controls の handle 定義から、表示・ヒット・編集を共通生成する。
+    // 既存の専用ギズモもそのまま共存し、互いのハンドルの重なりを同じ処理で避ける。
+    if (o?.type === "asset" && typeof assetEditorControls === "function") {
+        const registered=[];
+        for(const c of assetEditorControls(o)) {
+            if((c.type||"number")!=="number" || typeof c.handle!=="function")continue;
+            const value=assetControlValue(o,c), spec=c.handle(o,value);
+            if(!spec || ![spec.anchor,spec.sample,spec.probe].every(v=>Array.isArray(v)&&v.length===3&&v.every(Number.isFinite)))continue;
+            const h=screenHandle(o,"asset-param-"+c.key,spec.anchor,spec.sample,spec.probe,value,
+                assetControlLimit(c.min,o,-Infinity),assetControlLimit(c.max,o,Infinity),c.label||c.key,
+                spec.fallback||{x:1,y:0},spec.color||"#8ce6c2");
+            h.paramKey=c.key;h.unit=c.unit||"";registered.push(h);
+        }
+        if(registered.length){
+            if(!sg)sg={o,C3:L2W(o,0,0,Math.max(0,Number(o.h)||0)/2)};
+            sg.registeredHandles=registered;
+        }
+    }
     return normalizeScreenHandles(sg);
 }
 // ===== 室外機（ASSET_KIT の outdoorUnit）=====
@@ -7799,7 +7818,7 @@ function drawSpecialGizmo(c, o) {
         c.stroke();
         sq(sg.handle.s, "#ffb36f");
         gzLabel(c, "高さ", sg.handle.s.x + 9 / Z, sg.handle.s.y - 8 / Z, "#ffcf9f", 12);
-    } else {
+    } else if (sg.center && sg.handle) {
         c.strokeStyle = "rgba(173,156,255,.95)";
         c.lineWidth = 1.4 / Z;
         c.setLineDash([5 / Z, 4 / Z]);
@@ -7811,6 +7830,8 @@ function drawSpecialGizmo(c, o) {
         sq(sg.handle.s, "#ad9cff");
         gzLabel(c, "半径", sg.handle.s.x + 9 / Z, sg.handle.s.y - 8 / Z, "#d5ccff", 12);
     }
+    (sg.registeredHandles || []).forEach(h=>
+        valueHandle(h,{label:`${h.label} ${Number(h.start||0).toFixed(2)}${h.unit}`}));
     c.restore();
 }
 
@@ -8129,57 +8150,15 @@ function gizmo() {
     if (o.type === "compound") return compoundGizmo(o);
     // 積層建物も3Dの移動・回転ギズモは表示する。ただし、
     // ra/rb/hへ書き込む汎用の面ハンドルは使わず、寸法編集は階別ギズモへ渡す。
-    // ASSET_KIT で作ったアセットは、どれも「高さを持つ立体」として扱う。
-    // （以前は下の solid 一覧へ種類を書き足す必要があり、新しく足したアセット
-    //   ＝自販機・店先・電光看板などが上下の面ハンドルを出せず、3Dで高さを
-    //   編集できなかった。2026-11-03）
-    const kitAsset =
-            o.type === "asset" &&
-            typeof ASSET_KIT !== "undefined" &&
-            typeof ASSET_KIT.kinds === "function" &&
-            ASSET_KIT.kinds().includes(o.asset),
-        stacked = isStackedBuildingAsset(o),
+    // アセットは原則として高さを持つ。新しい種類を追加するたびに一覧へ追記しない。
+    // 専用高さ／半径ハンドルを使う種類だけ登録側で heightControl:"custom" とする。
+    const stacked = isStackedBuildingAsset(o),
         [iu, iv] = PL[o.k],
         cs = Math.cos(o.rot * DG),
         sn = Math.sin(o.rot * DG),
-        solid =
-            o.type === "box" ||
-            o.type === "cyl" ||
-            o.type === "rect" ||
-            o.type === "circ" ||
-            o.type === "triPrism" ||
-            o.type === "triPyramid" ||
-            (o.type === "asset" &&
-                (o.asset === "triPrism" ||
-                    o.asset === "triPyramid" ||
-                    o.asset === "sign" ||
-                    o.asset === "stairs" ||
-                    o.asset === "building" ||
-                    o.asset === "awning" ||
-                    o.asset === "balcony" ||
-                    // コの字壁は高さ方向の面（屋根・底面）を持つので、
-                    // 3Dでも上下の面ハンドルで高さを変えられるようにする。
-                    o.asset === "uWall" ||
-                    // 屋台・丸椅子も高さ方向の面を持つので、3Dで上下の面を掴める。
-                    o.asset === "stall" ||
-                    o.asset === "stool" ||
-                    // 手すりは柱と横桟を上下に持つ立体なので、3Dでも上下の面で
-                    // 高さを変えられるようにする（ビューごとの差を作らない）。
-                    o.asset === "railing" ||
-                    o.asset === "pathPipe" ||
-                    o.asset === "box" ||
-                    o.asset === "beveledBox" ||
-                    o.asset === "cornerCutBox" ||
-                    o.asset === "recessedStackedBuilding" ||
-                    o.asset === "wallSign" ||
-                    o.asset === "person" ||
-                    o.asset === "gableRoof" ||
-                    o.asset === "shedRoof" ||
-                    o.asset === "ramp" ||
-                    o.asset === "windowGrid" ||
-                    o.asset === "crosswalk" ||
-                    kitAsset ||
-                    isStackedBuildingAsset(o))),
+        solid = o.type === "box" || o.type === "cyl" || o.type === "rect" || o.type === "circ" ||
+            o.type === "triPrism" || o.type === "triPyramid" ||
+            (o.type === "asset" && ASSETS[o.asset]?.heightControl !== "custom"),
         [z0, z1] = outerZRange(o),
         zc = solid ? (z0 + z1) / 2 : 0;
     const C3 = L2W(o, 0, 0, zc),
@@ -8611,6 +8590,9 @@ function hitGizmo(p) {
         return { t: "face", f: face.f, g: face.g };
     };
     if (special) {
+        const registered=nearestHandleOf(special.registeredHandles,p,R),
+            registeredHit=handleOrFace(registered,q=>({t:q.handle.kind,sign:q.handle,g:{o:active,C3:special.C3}}));
+        if(registeredHit)return registeredHit;
         if (active.asset === "wallSideSign") {
             const handles = [
                     { t: "wallSideSign-bracket-length", h: special.bracketHandle },
@@ -9254,6 +9236,7 @@ function beginGizmo(h, p) {
         h.t === "cornerCut-offset" ||
         h.t.startsWith("cornerCut-opening-") ||
         h.t.startsWith("cornerCut-facade-") ||
+        h.t.startsWith("asset-param-") ||
         h.t.startsWith("recessed-window-") ||
         h.t === "recessed-corner-bevel" ||
         h.t === "recessed-first-floor-height" ||
@@ -9362,6 +9345,11 @@ function beginGizmo(h, p) {
         }
     }
 }
+// 専用ハンドル共通：ドラッグ量をハンドルの向きへ投影し、許容範囲に収める。
+function screenHandleDragValue(h,p,startPoint) {
+    const dx=p.x-startPoint.x,dy=p.y-startPoint.y;
+    return clamp(h.start+(dx*h.dir.x+dy*h.dir.y)/(h.scale||1),h.min,h.max);
+}
 // キャンバス上のドラッグで編集（ed=いまの編集操作）。磁石スナップがONなら他の図形・地面にくっつく
 function dragEdit(p, freeRotation = false) {
     const o = ed.o0,
@@ -9376,22 +9364,16 @@ function dragEdit(p, freeRotation = false) {
         if (q.hit.size) snapHit = q.hit;
         return q.d;
     };
-    if (ed.t === "cornerCut-offset") {
-        const h = ed.sign,
-            deltaX = p.x - ed.p0.x,
-            deltaY = p.y - ed.p0.y,
-            offset = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
-        patch = { cornerOffset: offset };
+    if (ed.t.startsWith("asset-param-")) {
+        const h=ed.sign, control=assetEditorControls(o).find(c=>c.key===h.paramKey);
+        if(control) patch={[h.paramKey]:screenHandleDragValue(h,p,ed.p0)};
+    } else if (ed.t === "cornerCut-offset") {
+        patch = { cornerOffset: screenHandleDragValue(ed.sign,p,ed.p0) };
     } else if (ed.t.startsWith("cornerCut-facade-")) {
-        const h=ed.sign, dx=p.x-ed.p0.x, dy=p.y-ed.p0.y,
-            value=clamp(h.start+(dx*h.dir.x+dy*h.dir.y)/(h.scale||1),h.min,h.max);
+        const value=screenHandleDragValue(ed.sign,p,ed.p0);
         patch=ed.t.endsWith("height") ? {facadeHeight:value} : {facadeProjection:value};
     } else if (ed.t.startsWith("cornerCut-opening-")) {
-        const h = ed.sign,
-            deltaX = p.x - ed.p0.x,
-            deltaY = p.y - ed.p0.y,
-            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1),
-            value = clamp(h.start + amount, h.min, h.max);
+        const value=screenHandleDragValue(ed.sign,p,ed.p0);
         if (o.asset === "cornerCutStackedBuilding") {
             if (ed.t.includes("width")) patch = { openingW: value };
             else if (ed.t.includes("height")) patch = { openingH: value };
@@ -9406,11 +9388,7 @@ function dragEdit(p, freeRotation = false) {
         ed.t === "recessed-floor-height" ||
         ed.t === "recessed-floor-gap"
     ) {
-        const h = ed.sign,
-            deltaX = p.x - ed.p0.x,
-            deltaY = p.y - ed.p0.y,
-            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1),
-            value = clamp(h.start + amount, h.min, h.max);
+        const value=screenHandleDragValue(ed.sign,p,ed.p0);
         patch = recessedHandlePatch(o, ed.t, value);
     } else if (ed.t.startsWith("path-point-")) {
         const h = ed.sign,
@@ -10512,23 +10490,11 @@ function exportSurfaceTriangles(o) {
                 ? o.floors
                 : [{ x: 0, y: 0, z: 0, w, d, h, rimHeight: 0.16, rimOverhang: 0.18 }];
         floors.forEach((f, i) => {
-            const fw = Math.max(0.05, Math.abs(Number(f.w) || w)),
-                fd = Math.max(0.05, Math.abs(Number(f.d) || d)),
-                fh = Math.max(0.05, Math.abs(Number(f.h) || h)),
-                fz = Number(f.z) || 0,
-                fx = Number(f.x) || 0,
-                fy = Number(f.y) || 0,
-                rh = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, fh),
-                ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18)),
-                bevelOffset = Number.isFinite(Number(f.bevelOffset))
-                    ? Number(f.bevelOffset)
-                    : Number(o.bevelOffset) || 0.28,
-                bevelSegments = beveledBoxSegments(
-                    f.bevelSegments,
-                    f.bevelEdges,
-                    beveledBoxSegments(o.bevelSegments, o.bevelEdges),
-                ),
-                opening = i === 0 && stackedOpeningEnabled(o) ? stackedOpeningParams(o, f) : null;
+            const floor=stackedFloorGeometry(o,f,i,{w,d,h}),
+                fw=floor.w,fd=floor.d,fh=floor.h,
+                fz=Number(f.z)||0,fx=Number(f.x)||0,fy=Number(f.y)||0,
+                rh=floor.rimHeight,ro=floor.rimOverhang,
+                bevelOffset=floor.bevelOffset,bevelSegments=floor.bevelSegments,opening=floor.opening;
             if (kind === "cornerCutStackedBuilding") {
                 // 階ごとの隅切り面は既存の隅切り直方体を共用し、親の回転を保って位置をずらす。
                 const base=customPt(o,0,0,0), dest=customPt(o,fx,fy,fz), shift=dest.map((v,j)=>v-base[j]),
@@ -11607,6 +11573,9 @@ function layerLineWidth(s) {
     return Math.max(base, lineDevMin / Math.max(0.05, lineDevMinScale));
 }
 function strokeWVisible(c, s, depth, cw, ch, tf) {
+    // 壁付けベランダの補助線は、穴のない床スラブの内部に全区間が埋まる。
+    // 隠線表示では見えない線なので、厚みが1〜2画素以下でも漏らさない。
+    if (s.balconyEmbeddedSupport === true && s.ob?.asset === "balcony" && !window.__showBalconyEmbedded) return;
     // ベベルの縦線は、選ばれた「輪郭の1本」だけを描く。
     const seamLine = s.seam !== undefined && s.seam !== null;
     if (seamLine && !(seamPicks && seamPicks.has(s))) return;
@@ -11956,7 +11925,7 @@ function strokeBox(cw, ch, tf) {
     return { x: bx, y: by, w: bx1 - bx, h: by1 - by };
 }
 // 前回と同じ絵なら線の層を作り直さない（層の描き直しは実測30ms）。
-// カメラ・用紙・設定・オブジェクト・選択のどれかが変われば必ず作り直す。
+// カメラ・用紙・設定・オブジェクトが変われば必ず作り直す（選択だけなら再利用）。
 // 編集中の線（withCur）が乗るときは、内容が毎フレーム変わるので使わない。
 let lineLayerKey = null;
 // 線の点の投影結果（画面座標・奥行き）を線ごとに覚えておく。
@@ -12040,7 +12009,10 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     // 層の中身は withCur=false のときと同じになる。呼び出し側は面ONのとき常に withCur=true を
     // 渡してくるため、この区別をしないと**面ONでは層のキャッシュが一切効かなくなる**（実測 -19ms/フレーム）。
     const curEff = !!withCur && !!(cur || prev);
-    const camKey = projKeyValue + "|" + (hidden ? 1 : 0) + "|" + cw + "," + ch + "|" + (view ? 1 : 0) + "|" + (sel ?? "");
+    // 選択色は線層へ描かずギズモだけに表示するため、選択変更だけでは線層を再生成しない。
+    // 比較用フラグは旧方式（選択ごとに作り直し）へ切り替えて画素一致を検査できる。
+    const selectionKey=window.__lineCacheBySelection ? (sel ?? "") : "";
+    const camKey = projKeyValue + "|" + (hidden ? 1 : 0) + "|" + cw + "," + ch + "|" + (view ? 1 : 0) + "|" + selectionKey;
     const key =
         camKey + "|" + (curEff ? 1 : 0) + "|" + (binOn ? 1 : 0) + "|" + freeLineSig() + "|" +
         [...sigs].map(([id, sg]) => id + ":" + sg).join(";");
@@ -14566,8 +14538,8 @@ const ASSETS = {
         accent: "#8ed7e8",
     },
     circle: { label: "円", glyph: "○", w: 1.25, d: 1.25, h: 0, accent: "#ad9cff" },
-    cone: { label: "円錐", glyph: "△", w: 1.25, d: 1.25, h: 1.45, accent: "#ffb36f" },
-    sphere: { label: "球体", glyph: "●", w: 1.3, d: 1.3, h: 1.3, accent: "#ad9cff" },
+    cone: { label: "円錐", glyph: "△", w: 1.25, d: 1.25, h: 1.45, heightControl: "custom", accent: "#ffb36f" },
+    sphere: { label: "球体", glyph: "●", w: 1.3, d: 1.3, h: 1.3, heightControl: "custom", accent: "#ad9cff" },
     triPrism: { label: "三角柱", glyph: "△", w: 1.4, d: 1.8, h: 1.25, accent: "#ffb36f" },
     triPyramid: { label: "三角錐", glyph: "▲", w: 1.5, d: 1.5, h: 1.45, accent: "#ff79ba" },
     sign: { label: "看板", glyph: "▤", w: 1.0, d: 0.2, h: 2.15, accent: "#76d9ff" },
@@ -15187,6 +15159,19 @@ function stackedOpeningParams(o, f = o?.floors?.[0]) {
         );
     return { w, d, h, rimHeight, openingW, openingH, openingBack };
 }
+// 階層建物の各階に共通する寸法。線画と面は同じ階・開口・縁の定義を使う。
+// 欠落した旧データの代替値は呼び出し元の従来値を受け取り、既存形状を変えない。
+function stackedFloorGeometry(o,f,index,defaults) {
+    const w=Math.max(.05,Math.abs(Number(f.w)||defaults.w)),
+        d=Math.max(.05,Math.abs(Number(f.d)||defaults.d)),
+        h=Math.max(.05,Math.abs(Number(f.h)||defaults.h)),
+        rimHeight=clamp(Math.abs(Number(f.rimHeight)||Number(o.rimHeight)||.16),.01,h),
+        rimOverhang=Math.max(0,Math.abs(Number(f.rimOverhang)||Number(o.rimOverhang)||.18)),
+        bevelOffset=Number.isFinite(Number(f.bevelOffset))?Number(f.bevelOffset):Number(o.bevelOffset)||.28,
+        bevelSegments=beveledBoxSegments(f.bevelSegments,f.bevelEdges,beveledBoxSegments(o.bevelSegments,o.bevelEdges)),
+        opening=index===0 && stackedOpeningEnabled(o)?stackedOpeningParams(o,f):null;
+    return {w,d,h,rimHeight,rimOverhang,bevelOffset,bevelSegments,opening};
+}
 // 凹窓階層建物の共通パラメータ。各階へ同じ窓帯を反復し、
 // 正面からベベルを経て右側面へ連続する凹みとして扱う。
 // 凹窓階層建物で共通に使う上限値。ベベル・窓の凹み奥行きは
@@ -15476,6 +15461,7 @@ function recessedStackedBuildingLines(o) {
             recessedStackedBuildingWindowMullionPoints(q).forEach(({ inner: back }) => {
                 const mullion = customLineA(o, [to3(back, zA), to3(back, zB)], dark, detailWidth);
                 mullion.onFace = true;
+                mullion.recessedWindowMullion = true;
                 // 凹みの奥面にある線。近い同一オブジェクトの面との食い違いは許すが、
                 // 建物の反対側など明らかに遠い線は隠す。許容は窓の凹み寸法に追従。
                 mullion.occludeSelf = true;
@@ -15490,8 +15476,18 @@ function recessedStackedBuildingLines(o) {
             // 窓帯が床面をまたぐときは、スラブの輪郭を切り欠いて窓を塞がない。
             lowerCap = band && band.bottom < z + 0.0001 && band.top > z + 0.0001,
             upperCap = band && band.bottom < z1 - 0.0001 && band.top > z1 - 0.0001;
-        closed(recessedStackedBuildingCapPath(q, lowerCap).map(([px, py]) => [px, py, z]));
-        closed(recessedStackedBuildingCapPath(q, upperCap).map(([px, py]) => [px, py, z1]));
+        // 階の境界は同一平面の壁の上にあっても表示する意図的な線。
+        // 深度による自分自身・他物体の遮蔽は有効のままにする。
+        const capLine = (height, cut) => {
+            const points = recessedStackedBuildingCapPath(q, cut).map(([px, py]) => [px, py, height]),
+                s = customLineA(o, [...points, points[0]], c);
+            s.onFace = !window.__legacyRecessedCaps; // テスト時のみ従来方式と比較
+            s.occludeSelf = true;
+            s.recessedFloorBoundary = true;
+            out.push(s);
+        };
+        capLine(z, lowerCap);
+        capLine(z1, upperCap);
         footprint.forEach(([px, py], index) => {
             const inBevelArc = q.cornerBevel > 0.0001 && index >= 1 && index <= q.cornerBevelSegments + 1;
             if (!inBevelArc) line([[px, py, z], [px, py, z1]]);
@@ -16473,6 +16469,29 @@ function latticePanelA(o, opt = {}) {
 }
 
 // --- F. 登録と確認 ---------------------------------------------------------
+// アセット登録時の編集項目。既存の専用UIはそのまま残し、宣言したものだけ共通UIへ。
+// type は number / boolean。数値制約は数値または (o)=>数値で指定できる。
+function assetEditorControls(o) {
+    const list = ASSETS[o?.asset]?.controls;
+    return Array.isArray(list) ? list.filter(c => c && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(c.key || "") && ["number","boolean"].includes(c.type || "number")) : [];
+}
+function assetControlLimit(value, o, fallback) {
+    const raw = typeof value === "function" ? value(o) : value;
+    return Number.isFinite(Number(raw)) && raw !== null && raw !== undefined ? Number(raw) : fallback;
+}
+function assetControlValue(o, control) {
+    const raw = o?.[control.key] ?? control.default;
+    if (control.type === "boolean") return !!raw;
+    const n=Number(raw), min=assetControlLimit(control.min,o,-Infinity), max=assetControlLimit(control.max,o,Infinity);
+    return clamp(Number.isFinite(n)?n:0,min,max);
+}
+function assetControlDefaults(info) {
+    const out={};
+    for(const c of Array.isArray(info?.controls)?info.controls:[])
+        if(c && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(c.key||"") && ["number","boolean"].includes(c.type||"number") && c.default!==undefined)
+            out[c.key]=c.default;
+    return out;
+}
 // 新しいアセットを「カタログ（ASSETS）」と「線画の表（ASSET_LINE_BUILDERS）」へ
 // 同時に登録する。両方に書くのを忘れて「棚に出るのに形が出ない」事故を防ぐ。
 //   registerAsset("fence", { label: "フェンス", glyph: "‖", w: 2, d: 0.1, h: 1.2 }, linesFence)
@@ -16827,8 +16846,6 @@ function linesStackedBuilding(ctx) {
             out.push(line);
         });
     };
-    // 開口ON/OFFの判定はここで一度だけ行う。OFFなら通常の閉じた建物になる。
-    const openingEnabled = stackedOpeningEnabled(o);
     const addOpeningWire = (f, w, d, h, opening) => {
         const ox = Number(f.x || 0),
             oy = Number(f.y || 0),
@@ -16920,20 +16937,9 @@ function linesStackedBuilding(ctx) {
         );
     };
     floors.forEach((f, i) => {
-        const w = Math.max(0.05, Math.abs(Number(f.w) || Number(o.ra || 2) * 2)),
-            d = Math.max(0.05, Math.abs(Number(f.d) || Number(o.rb || 1.5) * 2)),
-            h = Math.max(0.05, Math.abs(Number(f.h) || 2.2)),
-            opening = i === 0 && openingEnabled ? stackedOpeningParams(o, f) : null,
-            rh = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, h),
-            ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18)),
-            bevelOffset = Number.isFinite(Number(f.bevelOffset))
-                ? Number(f.bevelOffset)
-                : Number(o.bevelOffset) || 0.28,
-            bevelSegments = beveledBoxSegments(
-                f.bevelSegments,
-                f.bevelEdges,
-                beveledBoxSegments(o.bevelSegments, o.bevelEdges),
-            );
+        const g=stackedFloorGeometry(o,f,i,{w:Number(o.ra||2)*2,d:Number(o.rb||1.5)*2,h:2.2}),
+            {w,d,h,opening,bevelOffset,bevelSegments}=g,
+            rh=g.rimHeight,ro=g.rimOverhang;
         // 本体の上辺は上側の縁に隠れるため描かず、下側の縁は全階で作らない。
         // 開口をONにした場合だけ、1F本体へ開口枠・内側面を追加する。
         if (kind === "cornerCutStackedBuilding") {
@@ -17179,7 +17185,13 @@ function linesBalcony(ctx) {
     const bracketZ = Math.max(0.02, t * 0.18),
         wallY = d / 2 - t * 0.5,
         frontY = -d / 2 + t * 0.5;
-    [-w * 0.34, w * 0.34].forEach((x) => out.push(lineA(o, [[x, wallY, bracketZ], [x, frontY, 0]], c)));
+    [-w * 0.34, w * 0.34].forEach((x) => {
+        const support = lineA(o, [[x, wallY, bracketZ], [x, frontY, 0]], c);
+        // この線の全区間は穴のない床スラブ内（0 <= z <= t）に収まる。
+        // 線画のみの表示では従来どおり残し、面による隠線処理時だけ除く。
+        support.balconyEmbeddedSupport = true;
+        out.push(support);
+    });
 }
 function linesRailing(ctx) {
     const { o, c, out } = ctx,
@@ -18351,6 +18363,10 @@ obBounds = function (o) {
             if (Array.isArray(v) && v.length >= 3)
                 pts.push(customPt(q, Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0));
         });
+    } else if (ASSETS[q.asset]?.geometryBounds === true && typeof assetKitBoundsPoints === "function") {
+        const vertices=assetKitBoundsPoints(q);
+        if(vertices?.length) vertices.forEach(v=>pts.push(v));
+        else [0,q.h].forEach(z=>[-q.ra,q.ra].forEach(x=>[-q.rb,q.rb].forEach(y=>pts.push(pt(q,x,y,z)))));
     } else if (q.asset === "building" && buildingFasciaGeometry(q).enabled) {
         const g=buildingFasciaGeometry(q);
         [-g.w/2-(g.side?g.projection:0),g.w/2+(g.side?g.projection:0)].forEach(x => [-g.d/2-g.projection,g.d/2].forEach(y => [0,g.h].forEach(z => pts.push(customPt(q,x,y,z)))));
@@ -18506,7 +18522,8 @@ regenObjects();
  */
 const ASSET_KIT = (function () {
     const TAU = Math.PI * 2,
-        KIT_TRIS = Object.create(null); // kind -> (o) => ワールド座標の三角形
+        KIT_TRIS = Object.create(null), // kind -> (o) => ワールド座標の三角形
+        KIT_POINTS = Object.create(null); // 線・面の頂点（登録型アセットの選択範囲）
 
     const num = (v, f) => (Number.isFinite(Number(v)) ? Number(v) : f);
     // 画面から編集できる値（o[key]）→ ASSETS の初期値 → 最後の決め打ち、の順に見る。
@@ -18516,6 +18533,8 @@ const ASSET_KIT = (function () {
         if (Number.isFinite(Number(v))) return Number(v);
         const d = o && o.asset ? ASSETS[o.asset] : null;
         if (d && Number.isFinite(Number(d[key]))) return Number(d[key]);
+        const field=Array.isArray(d?.controls)?d.controls.find(c=>c.key===key):null;
+        if(field && field.default !== undefined && Number.isFinite(Number(field.default))) return Number(field.default);
         return fallback;
     }
 
@@ -19187,6 +19206,9 @@ const ASSET_KIT = (function () {
     //                 面だけをキットの部品から作る（線を手で選んでいる既存アセット向け）。
     function define(kind, meta, build, opts = {}) {
         if (!kind || typeof build !== "function" || typeof registerAsset !== "function") return false;
+        // 共通編集項目を持つ新方式では実際の部品から範囲を算出する。
+        // 従来の定義は選択枠を変えない（移行は個別検証後）。
+        if(Array.isArray(meta?.controls) && meta.geometryBounds===undefined)meta={...meta,geometryBounds:true};
         const exists = !!(ASSETS[kind] || ASSET_LINE_BUILDERS[kind]);
         if (exists && !opts.replace) return false; // 既存は勝手に触らない
         const lineBuilder = (ctx) => {
@@ -19203,6 +19225,14 @@ const ASSET_KIT = (function () {
             ASSETS[kind] = { ...ASSETS[kind], ...meta };
             if (opts.lines !== false) ASSET_LINE_BUILDERS[kind] = lineBuilder;
         }
+        KIT_POINTS[kind] = (o) => {
+            const points=[];
+            for(const part of build(o,API)||[]) {
+                for(const seg of partEdges(part))for(const v of seg)points.push(L2W(o,...v));
+                for(const tri of partTris(part))for(const v of tri)points.push(L2W(o,...v));
+            }
+            return points;
+        };
         KIT_TRIS[kind] = (o) => {
             const parts = build(o, API) || [],
                 tris = [];
@@ -19212,6 +19242,15 @@ const ASSET_KIT = (function () {
         return true;
     }
 
+    // 登録型ハンドルの定番形。anchorを基準に、axis方向へvalueだけ離れた点を掴む。
+    // 引数に負の方向を渡せば、逆方向へ増える寸法にも利用できる。
+    function axisHandle(axis, anchor, value, sign=1) {
+        const index={x:0,y:1,z:2}[axis];
+        if(index===undefined || !Array.isArray(anchor) || anchor.length!==3)return null;
+        const sample=anchor.slice(),probe=anchor.slice();
+        sample[index]+=sign*value;probe[index]+=sign*(value+1);
+        return {anchor:anchor.slice(),sample,probe,fallback:axis==="z"?{x:0,y:-sign}:{x:sign,y:0}};
+    }
     const API = {
         // 登録
         define,
@@ -19248,6 +19287,7 @@ const ASSET_KIT = (function () {
         textStrokes,
         textPart,
         glyphs: () => Object.keys(GLYPHS),
+        axisHandle,
         // 検査用
         toP3,
         isConvex,
@@ -19260,6 +19300,10 @@ const ASSET_KIT = (function () {
     };
     window.ASSET_KIT = API;
     // engine-render.js の exportSurfaceTriangles() から呼ぶ入口。
+    window.assetKitBoundsPoints = (o) => {
+        const fn=o && o.asset?KIT_POINTS[o.asset]:null;
+        return fn?fn(o):null;
+    };
     window.assetKitTriangles = (o) => {
         const fn = o && o.asset ? KIT_TRIS[o.asset] : null;
         return fn ? fn(o) : null;
@@ -20872,6 +20916,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             };
         return {
             ...base,
+            ...assetControlDefaults(info),
             type: "asset",
             asset: kind,
             ra: info.w / 2,
@@ -21652,7 +21697,10 @@ window.cityGridInstallAssetUI = function (bridge) {
     const unassignedKinds = trayKinds.filter((k) => !assignedKinds.has(k));
     if (unassignedKinds.length) {
         const street = ASSET_GROUPS.find((g) => g.key === "street") || ASSET_GROUPS[ASSET_GROUPS.length - 1];
-        street.kinds = [...street.kinds, ...unassignedKinds];
+        unassignedKinds.forEach((kind) => {
+            const target=ASSET_GROUPS.find(g=>g.key===ASSETS[kind]?.group) || street;
+            target.kinds.push(kind);
+        });
     }
     // カードは全グループぶんを最初に1回だけ作り、切り替えは hidden の付け替えだけで行う。
     // こうすると DOM を作り直さないので、[data-asset="..."] での参照やクリック委譲が
@@ -24687,6 +24735,52 @@ window.cityGridInstallAssetUI = function (bridge) {
             cornerCutEditSession = false;
         };
     });
+    // 登録の controls から数値欄を自動生成。特別なUIを持つ旧アセットには手を加えない。
+    let genericAssetPanelKind=null, genericAssetPanelId=null, genericAssetEditSession=false;
+    function syncGenericAssetEditor() {
+        const panel=el("assetEditorP"), fields=el("assetEditorFields"), o=sel && obOf(sel),
+            controls=o?.type==="asset"?assetEditorControls(o):[];
+        if(!panel || !fields)return;
+        panel.style.display=controls.length?"":"none";
+        if(!controls.length){genericAssetPanelKind=null;genericAssetPanelId=null;genericAssetEditSession=false;return;}
+        if(genericAssetPanelKind!==o.asset || genericAssetPanelId!==o.id){
+            genericAssetPanelKind=o.asset;genericAssetPanelId=o.id;genericAssetEditSession=false;fields.replaceChildren();
+            controls.forEach(c=>{
+                const label=document.createElement("label"),input=document.createElement("input"),name=document.createElement("span");
+                name.textContent=c.label||c.key;input.type=c.type==="boolean"?"checkbox":"number";input.dataset.assetControl=c.key;
+                if(input.type==="number") {input.step=String(c.step ?? .05);input.style.width="100px";}
+                label.append(name,input);
+                if(c.unit){const unit=document.createElement("span");unit.className="un";unit.textContent=c.unit;label.append(unit);}
+                fields.append(label);
+            });
+        }
+        controls.forEach(c=>{
+            const input=fields.querySelector(`[data-asset-control="${c.key}"]`);if(!input)return;
+            const value=assetControlValue(o,c);
+            if(input.type==="checkbox") input.checked=value;
+            else {
+                const min=assetControlLimit(c.min,o,-Infinity),max=assetControlLimit(c.max,o,Infinity);
+                if(Number.isFinite(min))input.min=String(min);else input.removeAttribute("min");
+                if(Number.isFinite(max))input.max=String(max);else input.removeAttribute("max");
+                if(document.activeElement!==input)input.value=String(+value.toFixed(4));
+            }
+        });
+    }
+    function applyGenericAssetEditor(e) {
+        const input=e.target, key=input?.dataset?.assetControl, o=sel && obOf(sel),
+            control=o && assetEditorControls(o).find(c=>c.key===key);
+        if(!control)return;
+        let value;
+        if(control.type==="boolean") value=!!input.checked;
+        else {if(input.value.trim()===""||!Number.isFinite(Number(input.value)))return;
+            value=assetControlValue({...o,[key]:Number(input.value)},control);}
+        if(!genericAssetEditSession){HU.push(S);RD=[];genericAssetEditSession=true;}
+        setOb(o.id,{[key]:value});render();
+    }
+    if(el("assetEditorFields")){
+        el("assetEditorFields").addEventListener("input",applyGenericAssetEditor);
+        el("assetEditorFields").addEventListener("change",()=>{genericAssetEditSession=false;});
+    }
     function syncAssetControls() {
         const o = sel && obOf(sel);
         if (o && o.type === "asset" && o.asset === "stairs") {
@@ -24703,6 +24797,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         baseRender();
         updateOutliner();
         syncAssetControls();
+        syncGenericAssetEditor();
         syncSignPanel();
         syncBuildingPanel();
         syncWallSideSignPanel();

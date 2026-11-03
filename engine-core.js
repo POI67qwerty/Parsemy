@@ -263,6 +263,7 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>ベベルセグメント数</span><input type=number class=nv id=beveledBoxSegments min=1 max=4 step=1 style="width:100px"><span class=un>分割</span></label>
 <div class="note">四つの縦角を面取りします。オフセットは面取り幅、セグメント数は角の丸みを分割する数です。1は一枚面、4は4分割です。オフセットはキャンバス上のオレンジのベベルハンドルからも変更できます。幅・奥行き・高さは共通の面ハンドルまたは上の数値欄で編集できます。初期状態は面で、上面を押し出すと高さができます。</div>
 </div>
+<div id=assetEditorP style="display:none"><h3>アセット設定</h3><div id=assetEditorFields></div></div>
 <div id=cornerCutP style="display:none"><h3>隅切り直方体</h3>
 <label><span>隅切りオフセット</span><input type=number class=nv id=cornerCutOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
 <label><input type=checkbox id=cornerFacadeEnabled> ファサード看板をつける</label>
@@ -271,7 +272,7 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>看板の色</span><input type=color id=cornerFacadeColor value="#2f73bc"></label>
 <label><span>看板の高さ</span><input type=number class=nv id=cornerFacadeHeight min=0.01 step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><span>看板の張り出し</span><input type=number class=nv id=cornerFacadeProjection min=0.02 max=2 step=0.01 style="width:100px"><span class=un>m</span></label>
-<div class="note">正面と隅切り面に沿う立体の看板です。文字・ロゴは含みません。</div></div>
+<div class="note">隅切り面に付く立体の看板です。両端の辺へ回すこともできます。文字・ロゴは含みません。</div></div>
 <label><input type=checkbox id=cornerCutOpeningEnabled> 赤い隅切り面に開口</label>
 <div id=cornerCutOpeningControls style="display:none">
 <label><span>開口の幅</span><input type=number class=nv id=cornerCutOpeningW min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>

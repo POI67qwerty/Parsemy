@@ -2449,7 +2449,7 @@ function normalizeScreenHandles(sg) {
     return sg;
 }
 function specialGizmo(o) {
-    const sg = o && o.type === "circ"
+    let sg = o && o.type === "circ"
         ? circleGizmo(o)
         : o && o.type === "asset" && o.asset === "wallSideSign" && o.attachment?.wallSideSign
         ? wallSideSignSpecialGizmo(o)
@@ -2498,6 +2498,24 @@ function specialGizmo(o) {
                           : o && o.type === "asset" && o.asset === "person"
                             ? personGizmo(o)
                             : null;
+    // 新アセットは controls の handle 定義から、表示・ヒット・編集を共通生成する。
+    // 既存の専用ギズモもそのまま共存し、互いのハンドルの重なりを同じ処理で避ける。
+    if (o?.type === "asset" && typeof assetEditorControls === "function") {
+        const registered=[];
+        for(const c of assetEditorControls(o)) {
+            if((c.type||"number")!=="number" || typeof c.handle!=="function")continue;
+            const value=assetControlValue(o,c), spec=c.handle(o,value);
+            if(!spec || ![spec.anchor,spec.sample,spec.probe].every(v=>Array.isArray(v)&&v.length===3&&v.every(Number.isFinite)))continue;
+            const h=screenHandle(o,"asset-param-"+c.key,spec.anchor,spec.sample,spec.probe,value,
+                assetControlLimit(c.min,o,-Infinity),assetControlLimit(c.max,o,Infinity),c.label||c.key,
+                spec.fallback||{x:1,y:0},spec.color||"#8ce6c2");
+            h.paramKey=c.key;h.unit=c.unit||"";registered.push(h);
+        }
+        if(registered.length){
+            if(!sg)sg={o,C3:L2W(o,0,0,Math.max(0,Number(o.h)||0)/2)};
+            sg.registeredHandles=registered;
+        }
+    }
     return normalizeScreenHandles(sg);
 }
 // ===== 室外機（ASSET_KIT の outdoorUnit）=====
@@ -3784,7 +3802,7 @@ function drawSpecialGizmo(c, o) {
         c.stroke();
         sq(sg.handle.s, "#ffb36f");
         gzLabel(c, "高さ", sg.handle.s.x + 9 / Z, sg.handle.s.y - 8 / Z, "#ffcf9f", 12);
-    } else {
+    } else if (sg.center && sg.handle) {
         c.strokeStyle = "rgba(173,156,255,.95)";
         c.lineWidth = 1.4 / Z;
         c.setLineDash([5 / Z, 4 / Z]);
@@ -3796,6 +3814,8 @@ function drawSpecialGizmo(c, o) {
         sq(sg.handle.s, "#ad9cff");
         gzLabel(c, "半径", sg.handle.s.x + 9 / Z, sg.handle.s.y - 8 / Z, "#d5ccff", 12);
     }
+    (sg.registeredHandles || []).forEach(h=>
+        valueHandle(h,{label:`${h.label} ${Number(h.start||0).toFixed(2)}${h.unit}`}));
     c.restore();
 }
 
@@ -4114,57 +4134,15 @@ function gizmo() {
     if (o.type === "compound") return compoundGizmo(o);
     // 積層建物も3Dの移動・回転ギズモは表示する。ただし、
     // ra/rb/hへ書き込む汎用の面ハンドルは使わず、寸法編集は階別ギズモへ渡す。
-    // ASSET_KIT で作ったアセットは、どれも「高さを持つ立体」として扱う。
-    // （以前は下の solid 一覧へ種類を書き足す必要があり、新しく足したアセット
-    //   ＝自販機・店先・電光看板などが上下の面ハンドルを出せず、3Dで高さを
-    //   編集できなかった。2026-11-03）
-    const kitAsset =
-            o.type === "asset" &&
-            typeof ASSET_KIT !== "undefined" &&
-            typeof ASSET_KIT.kinds === "function" &&
-            ASSET_KIT.kinds().includes(o.asset),
-        stacked = isStackedBuildingAsset(o),
+    // アセットは原則として高さを持つ。新しい種類を追加するたびに一覧へ追記しない。
+    // 専用高さ／半径ハンドルを使う種類だけ登録側で heightControl:"custom" とする。
+    const stacked = isStackedBuildingAsset(o),
         [iu, iv] = PL[o.k],
         cs = Math.cos(o.rot * DG),
         sn = Math.sin(o.rot * DG),
-        solid =
-            o.type === "box" ||
-            o.type === "cyl" ||
-            o.type === "rect" ||
-            o.type === "circ" ||
-            o.type === "triPrism" ||
-            o.type === "triPyramid" ||
-            (o.type === "asset" &&
-                (o.asset === "triPrism" ||
-                    o.asset === "triPyramid" ||
-                    o.asset === "sign" ||
-                    o.asset === "stairs" ||
-                    o.asset === "building" ||
-                    o.asset === "awning" ||
-                    o.asset === "balcony" ||
-                    // コの字壁は高さ方向の面（屋根・底面）を持つので、
-                    // 3Dでも上下の面ハンドルで高さを変えられるようにする。
-                    o.asset === "uWall" ||
-                    // 屋台・丸椅子も高さ方向の面を持つので、3Dで上下の面を掴める。
-                    o.asset === "stall" ||
-                    o.asset === "stool" ||
-                    // 手すりは柱と横桟を上下に持つ立体なので、3Dでも上下の面で
-                    // 高さを変えられるようにする（ビューごとの差を作らない）。
-                    o.asset === "railing" ||
-                    o.asset === "pathPipe" ||
-                    o.asset === "box" ||
-                    o.asset === "beveledBox" ||
-                    o.asset === "cornerCutBox" ||
-                    o.asset === "recessedStackedBuilding" ||
-                    o.asset === "wallSign" ||
-                    o.asset === "person" ||
-                    o.asset === "gableRoof" ||
-                    o.asset === "shedRoof" ||
-                    o.asset === "ramp" ||
-                    o.asset === "windowGrid" ||
-                    o.asset === "crosswalk" ||
-                    kitAsset ||
-                    isStackedBuildingAsset(o))),
+        solid = o.type === "box" || o.type === "cyl" || o.type === "rect" || o.type === "circ" ||
+            o.type === "triPrism" || o.type === "triPyramid" ||
+            (o.type === "asset" && ASSETS[o.asset]?.heightControl !== "custom"),
         [z0, z1] = outerZRange(o),
         zc = solid ? (z0 + z1) / 2 : 0;
     const C3 = L2W(o, 0, 0, zc),
@@ -4596,6 +4574,9 @@ function hitGizmo(p) {
         return { t: "face", f: face.f, g: face.g };
     };
     if (special) {
+        const registered=nearestHandleOf(special.registeredHandles,p,R),
+            registeredHit=handleOrFace(registered,q=>({t:q.handle.kind,sign:q.handle,g:{o:active,C3:special.C3}}));
+        if(registeredHit)return registeredHit;
         if (active.asset === "wallSideSign") {
             const handles = [
                     { t: "wallSideSign-bracket-length", h: special.bracketHandle },
@@ -5239,6 +5220,7 @@ function beginGizmo(h, p) {
         h.t === "cornerCut-offset" ||
         h.t.startsWith("cornerCut-opening-") ||
         h.t.startsWith("cornerCut-facade-") ||
+        h.t.startsWith("asset-param-") ||
         h.t.startsWith("recessed-window-") ||
         h.t === "recessed-corner-bevel" ||
         h.t === "recessed-first-floor-height" ||
@@ -5347,6 +5329,11 @@ function beginGizmo(h, p) {
         }
     }
 }
+// 専用ハンドル共通：ドラッグ量をハンドルの向きへ投影し、許容範囲に収める。
+function screenHandleDragValue(h,p,startPoint) {
+    const dx=p.x-startPoint.x,dy=p.y-startPoint.y;
+    return clamp(h.start+(dx*h.dir.x+dy*h.dir.y)/(h.scale||1),h.min,h.max);
+}
 // キャンバス上のドラッグで編集（ed=いまの編集操作）。磁石スナップがONなら他の図形・地面にくっつく
 function dragEdit(p, freeRotation = false) {
     const o = ed.o0,
@@ -5361,22 +5348,16 @@ function dragEdit(p, freeRotation = false) {
         if (q.hit.size) snapHit = q.hit;
         return q.d;
     };
-    if (ed.t === "cornerCut-offset") {
-        const h = ed.sign,
-            deltaX = p.x - ed.p0.x,
-            deltaY = p.y - ed.p0.y,
-            offset = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
-        patch = { cornerOffset: offset };
+    if (ed.t.startsWith("asset-param-")) {
+        const h=ed.sign, control=assetEditorControls(o).find(c=>c.key===h.paramKey);
+        if(control) patch={[h.paramKey]:screenHandleDragValue(h,p,ed.p0)};
+    } else if (ed.t === "cornerCut-offset") {
+        patch = { cornerOffset: screenHandleDragValue(ed.sign,p,ed.p0) };
     } else if (ed.t.startsWith("cornerCut-facade-")) {
-        const h=ed.sign, dx=p.x-ed.p0.x, dy=p.y-ed.p0.y,
-            value=clamp(h.start+(dx*h.dir.x+dy*h.dir.y)/(h.scale||1),h.min,h.max);
+        const value=screenHandleDragValue(ed.sign,p,ed.p0);
         patch=ed.t.endsWith("height") ? {facadeHeight:value} : {facadeProjection:value};
     } else if (ed.t.startsWith("cornerCut-opening-")) {
-        const h = ed.sign,
-            deltaX = p.x - ed.p0.x,
-            deltaY = p.y - ed.p0.y,
-            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1),
-            value = clamp(h.start + amount, h.min, h.max);
+        const value=screenHandleDragValue(ed.sign,p,ed.p0);
         if (o.asset === "cornerCutStackedBuilding") {
             if (ed.t.includes("width")) patch = { openingW: value };
             else if (ed.t.includes("height")) patch = { openingH: value };
@@ -5391,11 +5372,7 @@ function dragEdit(p, freeRotation = false) {
         ed.t === "recessed-floor-height" ||
         ed.t === "recessed-floor-gap"
     ) {
-        const h = ed.sign,
-            deltaX = p.x - ed.p0.x,
-            deltaY = p.y - ed.p0.y,
-            amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1),
-            value = clamp(h.start + amount, h.min, h.max);
+        const value=screenHandleDragValue(ed.sign,p,ed.p0);
         patch = recessedHandlePatch(o, ed.t, value);
     } else if (ed.t.startsWith("path-point-")) {
         const h = ed.sign,

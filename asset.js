@@ -49,8 +49,8 @@ const ASSETS = {
         accent: "#8ed7e8",
     },
     circle: { label: "円", glyph: "○", w: 1.25, d: 1.25, h: 0, accent: "#ad9cff" },
-    cone: { label: "円錐", glyph: "△", w: 1.25, d: 1.25, h: 1.45, accent: "#ffb36f" },
-    sphere: { label: "球体", glyph: "●", w: 1.3, d: 1.3, h: 1.3, accent: "#ad9cff" },
+    cone: { label: "円錐", glyph: "△", w: 1.25, d: 1.25, h: 1.45, heightControl: "custom", accent: "#ffb36f" },
+    sphere: { label: "球体", glyph: "●", w: 1.3, d: 1.3, h: 1.3, heightControl: "custom", accent: "#ad9cff" },
     triPrism: { label: "三角柱", glyph: "△", w: 1.4, d: 1.8, h: 1.25, accent: "#ffb36f" },
     triPyramid: { label: "三角錐", glyph: "▲", w: 1.5, d: 1.5, h: 1.45, accent: "#ff79ba" },
     sign: { label: "看板", glyph: "▤", w: 1.0, d: 0.2, h: 2.15, accent: "#76d9ff" },
@@ -670,6 +670,19 @@ function stackedOpeningParams(o, f = o?.floors?.[0]) {
         );
     return { w, d, h, rimHeight, openingW, openingH, openingBack };
 }
+// 階層建物の各階に共通する寸法。線画と面は同じ階・開口・縁の定義を使う。
+// 欠落した旧データの代替値は呼び出し元の従来値を受け取り、既存形状を変えない。
+function stackedFloorGeometry(o,f,index,defaults) {
+    const w=Math.max(.05,Math.abs(Number(f.w)||defaults.w)),
+        d=Math.max(.05,Math.abs(Number(f.d)||defaults.d)),
+        h=Math.max(.05,Math.abs(Number(f.h)||defaults.h)),
+        rimHeight=clamp(Math.abs(Number(f.rimHeight)||Number(o.rimHeight)||.16),.01,h),
+        rimOverhang=Math.max(0,Math.abs(Number(f.rimOverhang)||Number(o.rimOverhang)||.18)),
+        bevelOffset=Number.isFinite(Number(f.bevelOffset))?Number(f.bevelOffset):Number(o.bevelOffset)||.28,
+        bevelSegments=beveledBoxSegments(f.bevelSegments,f.bevelEdges,beveledBoxSegments(o.bevelSegments,o.bevelEdges)),
+        opening=index===0 && stackedOpeningEnabled(o)?stackedOpeningParams(o,f):null;
+    return {w,d,h,rimHeight,rimOverhang,bevelOffset,bevelSegments,opening};
+}
 // 凹窓階層建物の共通パラメータ。各階へ同じ窓帯を反復し、
 // 正面からベベルを経て右側面へ連続する凹みとして扱う。
 // 凹窓階層建物で共通に使う上限値。ベベル・窓の凹み奥行きは
@@ -959,6 +972,7 @@ function recessedStackedBuildingLines(o) {
             recessedStackedBuildingWindowMullionPoints(q).forEach(({ inner: back }) => {
                 const mullion = customLineA(o, [to3(back, zA), to3(back, zB)], dark, detailWidth);
                 mullion.onFace = true;
+                mullion.recessedWindowMullion = true;
                 // 凹みの奥面にある線。近い同一オブジェクトの面との食い違いは許すが、
                 // 建物の反対側など明らかに遠い線は隠す。許容は窓の凹み寸法に追従。
                 mullion.occludeSelf = true;
@@ -973,8 +987,18 @@ function recessedStackedBuildingLines(o) {
             // 窓帯が床面をまたぐときは、スラブの輪郭を切り欠いて窓を塞がない。
             lowerCap = band && band.bottom < z + 0.0001 && band.top > z + 0.0001,
             upperCap = band && band.bottom < z1 - 0.0001 && band.top > z1 - 0.0001;
-        closed(recessedStackedBuildingCapPath(q, lowerCap).map(([px, py]) => [px, py, z]));
-        closed(recessedStackedBuildingCapPath(q, upperCap).map(([px, py]) => [px, py, z1]));
+        // 階の境界は同一平面の壁の上にあっても表示する意図的な線。
+        // 深度による自分自身・他物体の遮蔽は有効のままにする。
+        const capLine = (height, cut) => {
+            const points = recessedStackedBuildingCapPath(q, cut).map(([px, py]) => [px, py, height]),
+                s = customLineA(o, [...points, points[0]], c);
+            s.onFace = !window.__legacyRecessedCaps; // テスト時のみ従来方式と比較
+            s.occludeSelf = true;
+            s.recessedFloorBoundary = true;
+            out.push(s);
+        };
+        capLine(z, lowerCap);
+        capLine(z1, upperCap);
         footprint.forEach(([px, py], index) => {
             const inBevelArc = q.cornerBevel > 0.0001 && index >= 1 && index <= q.cornerBevelSegments + 1;
             if (!inBevelArc) line([[px, py, z], [px, py, z1]]);
@@ -1956,6 +1980,29 @@ function latticePanelA(o, opt = {}) {
 }
 
 // --- F. 登録と確認 ---------------------------------------------------------
+// アセット登録時の編集項目。既存の専用UIはそのまま残し、宣言したものだけ共通UIへ。
+// type は number / boolean。数値制約は数値または (o)=>数値で指定できる。
+function assetEditorControls(o) {
+    const list = ASSETS[o?.asset]?.controls;
+    return Array.isArray(list) ? list.filter(c => c && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(c.key || "") && ["number","boolean"].includes(c.type || "number")) : [];
+}
+function assetControlLimit(value, o, fallback) {
+    const raw = typeof value === "function" ? value(o) : value;
+    return Number.isFinite(Number(raw)) && raw !== null && raw !== undefined ? Number(raw) : fallback;
+}
+function assetControlValue(o, control) {
+    const raw = o?.[control.key] ?? control.default;
+    if (control.type === "boolean") return !!raw;
+    const n=Number(raw), min=assetControlLimit(control.min,o,-Infinity), max=assetControlLimit(control.max,o,Infinity);
+    return clamp(Number.isFinite(n)?n:0,min,max);
+}
+function assetControlDefaults(info) {
+    const out={};
+    for(const c of Array.isArray(info?.controls)?info.controls:[])
+        if(c && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(c.key||"") && ["number","boolean"].includes(c.type||"number") && c.default!==undefined)
+            out[c.key]=c.default;
+    return out;
+}
 // 新しいアセットを「カタログ（ASSETS）」と「線画の表（ASSET_LINE_BUILDERS）」へ
 // 同時に登録する。両方に書くのを忘れて「棚に出るのに形が出ない」事故を防ぐ。
 //   registerAsset("fence", { label: "フェンス", glyph: "‖", w: 2, d: 0.1, h: 1.2 }, linesFence)
@@ -2310,8 +2357,6 @@ function linesStackedBuilding(ctx) {
             out.push(line);
         });
     };
-    // 開口ON/OFFの判定はここで一度だけ行う。OFFなら通常の閉じた建物になる。
-    const openingEnabled = stackedOpeningEnabled(o);
     const addOpeningWire = (f, w, d, h, opening) => {
         const ox = Number(f.x || 0),
             oy = Number(f.y || 0),
@@ -2403,20 +2448,9 @@ function linesStackedBuilding(ctx) {
         );
     };
     floors.forEach((f, i) => {
-        const w = Math.max(0.05, Math.abs(Number(f.w) || Number(o.ra || 2) * 2)),
-            d = Math.max(0.05, Math.abs(Number(f.d) || Number(o.rb || 1.5) * 2)),
-            h = Math.max(0.05, Math.abs(Number(f.h) || 2.2)),
-            opening = i === 0 && openingEnabled ? stackedOpeningParams(o, f) : null,
-            rh = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, h),
-            ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18)),
-            bevelOffset = Number.isFinite(Number(f.bevelOffset))
-                ? Number(f.bevelOffset)
-                : Number(o.bevelOffset) || 0.28,
-            bevelSegments = beveledBoxSegments(
-                f.bevelSegments,
-                f.bevelEdges,
-                beveledBoxSegments(o.bevelSegments, o.bevelEdges),
-            );
+        const g=stackedFloorGeometry(o,f,i,{w:Number(o.ra||2)*2,d:Number(o.rb||1.5)*2,h:2.2}),
+            {w,d,h,opening,bevelOffset,bevelSegments}=g,
+            rh=g.rimHeight,ro=g.rimOverhang;
         // 本体の上辺は上側の縁に隠れるため描かず、下側の縁は全階で作らない。
         // 開口をONにした場合だけ、1F本体へ開口枠・内側面を追加する。
         if (kind === "cornerCutStackedBuilding") {
@@ -2662,7 +2696,13 @@ function linesBalcony(ctx) {
     const bracketZ = Math.max(0.02, t * 0.18),
         wallY = d / 2 - t * 0.5,
         frontY = -d / 2 + t * 0.5;
-    [-w * 0.34, w * 0.34].forEach((x) => out.push(lineA(o, [[x, wallY, bracketZ], [x, frontY, 0]], c)));
+    [-w * 0.34, w * 0.34].forEach((x) => {
+        const support = lineA(o, [[x, wallY, bracketZ], [x, frontY, 0]], c);
+        // この線の全区間は穴のない床スラブ内（0 <= z <= t）に収まる。
+        // 線画のみの表示では従来どおり残し、面による隠線処理時だけ除く。
+        support.balconyEmbeddedSupport = true;
+        out.push(support);
+    });
 }
 function linesRailing(ctx) {
     const { o, c, out } = ctx,
@@ -3834,6 +3874,10 @@ obBounds = function (o) {
             if (Array.isArray(v) && v.length >= 3)
                 pts.push(customPt(q, Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0));
         });
+    } else if (ASSETS[q.asset]?.geometryBounds === true && typeof assetKitBoundsPoints === "function") {
+        const vertices=assetKitBoundsPoints(q);
+        if(vertices?.length) vertices.forEach(v=>pts.push(v));
+        else [0,q.h].forEach(z=>[-q.ra,q.ra].forEach(x=>[-q.rb,q.rb].forEach(y=>pts.push(pt(q,x,y,z)))));
     } else if (q.asset === "building" && buildingFasciaGeometry(q).enabled) {
         const g=buildingFasciaGeometry(q);
         [-g.w/2-(g.side?g.projection:0),g.w/2+(g.side?g.projection:0)].forEach(x => [-g.d/2-g.projection,g.d/2].forEach(y => [0,g.h].forEach(z => pts.push(customPt(q,x,y,z)))));

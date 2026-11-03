@@ -579,23 +579,11 @@ function exportSurfaceTriangles(o) {
                 ? o.floors
                 : [{ x: 0, y: 0, z: 0, w, d, h, rimHeight: 0.16, rimOverhang: 0.18 }];
         floors.forEach((f, i) => {
-            const fw = Math.max(0.05, Math.abs(Number(f.w) || w)),
-                fd = Math.max(0.05, Math.abs(Number(f.d) || d)),
-                fh = Math.max(0.05, Math.abs(Number(f.h) || h)),
-                fz = Number(f.z) || 0,
-                fx = Number(f.x) || 0,
-                fy = Number(f.y) || 0,
-                rh = clamp(Math.abs(Number(f.rimHeight) || Number(o.rimHeight) || 0.16), 0.01, fh),
-                ro = Math.max(0, Math.abs(Number(f.rimOverhang) || Number(o.rimOverhang) || 0.18)),
-                bevelOffset = Number.isFinite(Number(f.bevelOffset))
-                    ? Number(f.bevelOffset)
-                    : Number(o.bevelOffset) || 0.28,
-                bevelSegments = beveledBoxSegments(
-                    f.bevelSegments,
-                    f.bevelEdges,
-                    beveledBoxSegments(o.bevelSegments, o.bevelEdges),
-                ),
-                opening = i === 0 && stackedOpeningEnabled(o) ? stackedOpeningParams(o, f) : null;
+            const floor=stackedFloorGeometry(o,f,i,{w,d,h}),
+                fw=floor.w,fd=floor.d,fh=floor.h,
+                fz=Number(f.z)||0,fx=Number(f.x)||0,fy=Number(f.y)||0,
+                rh=floor.rimHeight,ro=floor.rimOverhang,
+                bevelOffset=floor.bevelOffset,bevelSegments=floor.bevelSegments,opening=floor.opening;
             if (kind === "cornerCutStackedBuilding") {
                 // 階ごとの隅切り面は既存の隅切り直方体を共用し、親の回転を保って位置をずらす。
                 const base=customPt(o,0,0,0), dest=customPt(o,fx,fy,fz), shift=dest.map((v,j)=>v-base[j]),
@@ -1674,6 +1662,9 @@ function layerLineWidth(s) {
     return Math.max(base, lineDevMin / Math.max(0.05, lineDevMinScale));
 }
 function strokeWVisible(c, s, depth, cw, ch, tf) {
+    // 壁付けベランダの補助線は、穴のない床スラブの内部に全区間が埋まる。
+    // 隠線表示では見えない線なので、厚みが1〜2画素以下でも漏らさない。
+    if (s.balconyEmbeddedSupport === true && s.ob?.asset === "balcony" && !window.__showBalconyEmbedded) return;
     // ベベルの縦線は、選ばれた「輪郭の1本」だけを描く。
     const seamLine = s.seam !== undefined && s.seam !== null;
     if (seamLine && !(seamPicks && seamPicks.has(s))) return;
@@ -2023,7 +2014,7 @@ function strokeBox(cw, ch, tf) {
     return { x: bx, y: by, w: bx1 - bx, h: by1 - by };
 }
 // 前回と同じ絵なら線の層を作り直さない（層の描き直しは実測30ms）。
-// カメラ・用紙・設定・オブジェクト・選択のどれかが変われば必ず作り直す。
+// カメラ・用紙・設定・オブジェクトが変われば必ず作り直す（選択だけなら再利用）。
 // 編集中の線（withCur）が乗るときは、内容が毎フレーム変わるので使わない。
 let lineLayerKey = null;
 // 線の点の投影結果（画面座標・奥行き）を線ごとに覚えておく。
@@ -2107,7 +2098,10 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     // 層の中身は withCur=false のときと同じになる。呼び出し側は面ONのとき常に withCur=true を
     // 渡してくるため、この区別をしないと**面ONでは層のキャッシュが一切効かなくなる**（実測 -19ms/フレーム）。
     const curEff = !!withCur && !!(cur || prev);
-    const camKey = projKeyValue + "|" + (hidden ? 1 : 0) + "|" + cw + "," + ch + "|" + (view ? 1 : 0) + "|" + (sel ?? "");
+    // 選択色は線層へ描かずギズモだけに表示するため、選択変更だけでは線層を再生成しない。
+    // 比較用フラグは旧方式（選択ごとに作り直し）へ切り替えて画素一致を検査できる。
+    const selectionKey=window.__lineCacheBySelection ? (sel ?? "") : "";
+    const camKey = projKeyValue + "|" + (hidden ? 1 : 0) + "|" + cw + "," + ch + "|" + (view ? 1 : 0) + "|" + selectionKey;
     const key =
         camKey + "|" + (curEff ? 1 : 0) + "|" + (binOn ? 1 : 0) + "|" + freeLineSig() + "|" +
         [...sigs].map(([id, sg]) => id + ":" + sg).join(";");

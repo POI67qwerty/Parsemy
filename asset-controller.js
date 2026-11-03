@@ -330,6 +330,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             };
         return {
             ...base,
+            ...assetControlDefaults(info),
             type: "asset",
             asset: kind,
             ra: info.w / 2,
@@ -1110,7 +1111,10 @@ window.cityGridInstallAssetUI = function (bridge) {
     const unassignedKinds = trayKinds.filter((k) => !assignedKinds.has(k));
     if (unassignedKinds.length) {
         const street = ASSET_GROUPS.find((g) => g.key === "street") || ASSET_GROUPS[ASSET_GROUPS.length - 1];
-        street.kinds = [...street.kinds, ...unassignedKinds];
+        unassignedKinds.forEach((kind) => {
+            const target=ASSET_GROUPS.find(g=>g.key===ASSETS[kind]?.group) || street;
+            target.kinds.push(kind);
+        });
     }
     // カードは全グループぶんを最初に1回だけ作り、切り替えは hidden の付け替えだけで行う。
     // こうすると DOM を作り直さないので、[data-asset="..."] での参照やクリック委譲が

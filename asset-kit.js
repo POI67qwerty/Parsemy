@@ -40,7 +40,8 @@
  */
 const ASSET_KIT = (function () {
     const TAU = Math.PI * 2,
-        KIT_TRIS = Object.create(null); // kind -> (o) => ワールド座標の三角形
+        KIT_TRIS = Object.create(null), // kind -> (o) => ワールド座標の三角形
+        KIT_POINTS = Object.create(null); // 線・面の頂点（登録型アセットの選択範囲）
 
     const num = (v, f) => (Number.isFinite(Number(v)) ? Number(v) : f);
     // 画面から編集できる値（o[key]）→ ASSETS の初期値 → 最後の決め打ち、の順に見る。
@@ -50,6 +51,8 @@ const ASSET_KIT = (function () {
         if (Number.isFinite(Number(v))) return Number(v);
         const d = o && o.asset ? ASSETS[o.asset] : null;
         if (d && Number.isFinite(Number(d[key]))) return Number(d[key]);
+        const field=Array.isArray(d?.controls)?d.controls.find(c=>c.key===key):null;
+        if(field && field.default !== undefined && Number.isFinite(Number(field.default))) return Number(field.default);
         return fallback;
     }
 
@@ -721,6 +724,9 @@ const ASSET_KIT = (function () {
     //                 面だけをキットの部品から作る（線を手で選んでいる既存アセット向け）。
     function define(kind, meta, build, opts = {}) {
         if (!kind || typeof build !== "function" || typeof registerAsset !== "function") return false;
+        // 共通編集項目を持つ新方式では実際の部品から範囲を算出する。
+        // 従来の定義は選択枠を変えない（移行は個別検証後）。
+        if(Array.isArray(meta?.controls) && meta.geometryBounds===undefined)meta={...meta,geometryBounds:true};
         const exists = !!(ASSETS[kind] || ASSET_LINE_BUILDERS[kind]);
         if (exists && !opts.replace) return false; // 既存は勝手に触らない
         const lineBuilder = (ctx) => {
@@ -737,6 +743,14 @@ const ASSET_KIT = (function () {
             ASSETS[kind] = { ...ASSETS[kind], ...meta };
             if (opts.lines !== false) ASSET_LINE_BUILDERS[kind] = lineBuilder;
         }
+        KIT_POINTS[kind] = (o) => {
+            const points=[];
+            for(const part of build(o,API)||[]) {
+                for(const seg of partEdges(part))for(const v of seg)points.push(L2W(o,...v));
+                for(const tri of partTris(part))for(const v of tri)points.push(L2W(o,...v));
+            }
+            return points;
+        };
         KIT_TRIS[kind] = (o) => {
             const parts = build(o, API) || [],
                 tris = [];
@@ -746,6 +760,15 @@ const ASSET_KIT = (function () {
         return true;
     }
 
+    // 登録型ハンドルの定番形。anchorを基準に、axis方向へvalueだけ離れた点を掴む。
+    // 引数に負の方向を渡せば、逆方向へ増える寸法にも利用できる。
+    function axisHandle(axis, anchor, value, sign=1) {
+        const index={x:0,y:1,z:2}[axis];
+        if(index===undefined || !Array.isArray(anchor) || anchor.length!==3)return null;
+        const sample=anchor.slice(),probe=anchor.slice();
+        sample[index]+=sign*value;probe[index]+=sign*(value+1);
+        return {anchor:anchor.slice(),sample,probe,fallback:axis==="z"?{x:0,y:-sign}:{x:sign,y:0}};
+    }
     const API = {
         // 登録
         define,
@@ -782,6 +805,7 @@ const ASSET_KIT = (function () {
         textStrokes,
         textPart,
         glyphs: () => Object.keys(GLYPHS),
+        axisHandle,
         // 検査用
         toP3,
         isConvex,
@@ -794,6 +818,10 @@ const ASSET_KIT = (function () {
     };
     window.ASSET_KIT = API;
     // engine-render.js の exportSurfaceTriangles() から呼ぶ入口。
+    window.assetKitBoundsPoints = (o) => {
+        const fn=o && o.asset?KIT_POINTS[o.asset]:null;
+        return fn?fn(o):null;
+    };
     window.assetKitTriangles = (o) => {
         const fn = o && o.asset ? KIT_TRIS[o.asset] : null;
         return fn ? fn(o) : null;

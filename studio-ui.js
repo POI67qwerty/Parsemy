@@ -2721,6 +2721,52 @@
             cornerCutEditSession = false;
         };
     });
+    // 登録の controls から数値欄を自動生成。特別なUIを持つ旧アセットには手を加えない。
+    let genericAssetPanelKind=null, genericAssetPanelId=null, genericAssetEditSession=false;
+    function syncGenericAssetEditor() {
+        const panel=el("assetEditorP"), fields=el("assetEditorFields"), o=sel && obOf(sel),
+            controls=o?.type==="asset"?assetEditorControls(o):[];
+        if(!panel || !fields)return;
+        panel.style.display=controls.length?"":"none";
+        if(!controls.length){genericAssetPanelKind=null;genericAssetPanelId=null;genericAssetEditSession=false;return;}
+        if(genericAssetPanelKind!==o.asset || genericAssetPanelId!==o.id){
+            genericAssetPanelKind=o.asset;genericAssetPanelId=o.id;genericAssetEditSession=false;fields.replaceChildren();
+            controls.forEach(c=>{
+                const label=document.createElement("label"),input=document.createElement("input"),name=document.createElement("span");
+                name.textContent=c.label||c.key;input.type=c.type==="boolean"?"checkbox":"number";input.dataset.assetControl=c.key;
+                if(input.type==="number") {input.step=String(c.step ?? .05);input.style.width="100px";}
+                label.append(name,input);
+                if(c.unit){const unit=document.createElement("span");unit.className="un";unit.textContent=c.unit;label.append(unit);}
+                fields.append(label);
+            });
+        }
+        controls.forEach(c=>{
+            const input=fields.querySelector(`[data-asset-control="${c.key}"]`);if(!input)return;
+            const value=assetControlValue(o,c);
+            if(input.type==="checkbox") input.checked=value;
+            else {
+                const min=assetControlLimit(c.min,o,-Infinity),max=assetControlLimit(c.max,o,Infinity);
+                if(Number.isFinite(min))input.min=String(min);else input.removeAttribute("min");
+                if(Number.isFinite(max))input.max=String(max);else input.removeAttribute("max");
+                if(document.activeElement!==input)input.value=String(+value.toFixed(4));
+            }
+        });
+    }
+    function applyGenericAssetEditor(e) {
+        const input=e.target, key=input?.dataset?.assetControl, o=sel && obOf(sel),
+            control=o && assetEditorControls(o).find(c=>c.key===key);
+        if(!control)return;
+        let value;
+        if(control.type==="boolean") value=!!input.checked;
+        else {if(input.value.trim()===""||!Number.isFinite(Number(input.value)))return;
+            value=assetControlValue({...o,[key]:Number(input.value)},control);}
+        if(!genericAssetEditSession){HU.push(S);RD=[];genericAssetEditSession=true;}
+        setOb(o.id,{[key]:value});render();
+    }
+    if(el("assetEditorFields")){
+        el("assetEditorFields").addEventListener("input",applyGenericAssetEditor);
+        el("assetEditorFields").addEventListener("change",()=>{genericAssetEditSession=false;});
+    }
     function syncAssetControls() {
         const o = sel && obOf(sel);
         if (o && o.type === "asset" && o.asset === "stairs") {
@@ -2737,6 +2783,7 @@
         baseRender();
         updateOutliner();
         syncAssetControls();
+        syncGenericAssetEditor();
         syncSignPanel();
         syncBuildingPanel();
         syncWallSideSignPanel();
