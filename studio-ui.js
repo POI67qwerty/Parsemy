@@ -2691,6 +2691,7 @@
         syncCornerCutPanel();
         syncRecessedStackedPanel();
         syncStackedPanel();
+        syncSignShapePanel();
         syncFloorControls();
         syncAssetDepth();
         syncAssetAxis();
@@ -3362,12 +3363,62 @@
     document.addEventListener("pointerdown", (e) => {
         if (!e.target.closest("#exportMenu") && !e.target.closest("#exportToggle")) setExportOpen(false);
     });
+    // ===== 標識の形・枚数（丸／逆三角形／四角／ひし形 × 1枚・2枚）=====
+    // 標識は「板の形」と「枚数」で見た目が決まるので、選択中にパネルから切り替えられる。
+    // 値は o.signShape / o.signCount / o.signShape2 に持ち、形の組み立て（asset-kit-assets.js）が読む。
+    const SIGN_KINDS = ["signPost", "signPost2", "signTriangle", "signDiamond", "signCombo"];
+    function syncSignShapePanel() {
+        const panel = el("signShapeP"),
+            o = sel && obOf(sel),
+            on = !!(o && o.type === "asset" && SIGN_KINDS.includes(o.asset));
+        if (!panel) return;
+        panel.style.display = on ? "" : "none";
+        if (!on) return;
+        const count = String(clamp(Math.round(Number(o.signCount ?? ASSETS[o.asset]?.signCount ?? 1)), 1, 2)),
+            shape = String(o.signShape ?? ASSETS[o.asset]?.signShape ?? "circle"),
+            shape2 = String(o.signShape2 ?? ASSETS[o.asset]?.signShape2 ?? shape),
+            countSel = el("signCountSel"),
+            shapeSel = el("signShapeSel"),
+            shape2Sel = el("signShape2Sel"),
+            row2 = el("signShape2Row");
+        if (countSel && document.activeElement !== countSel) countSel.value = count;
+        if (shapeSel && document.activeElement !== shapeSel) shapeSel.value = shape;
+        if (shape2Sel && document.activeElement !== shape2Sel) shape2Sel.value = shape2;
+        if (row2) row2.style.display = count === "2" ? "" : "none";
+    }
+    function applySignShapeControl(name, value) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || !SIGN_KINDS.includes(o.asset)) return;
+        const patch = {};
+        if (name === "signCount") {
+            patch.signCount = clamp(Math.round(Number(value) || 1), 1, 2);
+            // 2枚にしたときは、板が潰れない高さまで頭を広げる（1枚の高さはそのまま）。
+            if (patch.signCount === 2) {
+                const g = signalGeometry(o);
+                if (g.headH < 0.4) patch.spHeadH = Math.min(Math.max(0.3, o.h - 0.3), 0.4);
+            }
+        } else if (name === "signShape") patch.signShape = String(value);
+        else if (name === "signShape2") patch.signShape2 = String(value);
+        else return;
+        HU.push(S);
+        RD = [];
+        setOb(sel, patch);
+        render();
+        syncSignShapePanel();
+    }
+    [["signCountSel", "signCount"], ["signShapeSel", "signShape"], ["signShape2Sel", "signShape2"]].forEach(([id, name]) => {
+        const n = el(id);
+        if (!n) return;
+        n.onchange = () => applySignShapeControl(name, n.value);
+    });
+    window.cityGridSyncSignShapePanel = syncSignShapePanel;
+
     // ===== 6. ヘルプ・キーボード・初期表示 =====
     // 最後にヘルプ表示、初期設定、localStorage移行を登録してUIを完成させる。
     const help = document.createElement("div");
     help.id = "helpPanel";
     help.innerHTML =
-        '<div class="helpTitle">操作のコツ</div><div><span class="helpKey">Pencil</span>線を引く　<span class="helpKey">指</span>視点・ピンチ</div><div><span class="helpKey">⌘ Z</span>元に戻す　<span class="helpKey">E</span>消しゴム</div><div><span class="helpKey">図形</span>ドラッグで床・壁に配置</div><div><span class="helpKey">編集</span>線を選択 → 矢印移動（X左右／Y手前奥／Z上下）／白い四角で拡縮／輪で回転</div><div><span class="helpKey">画面中央へ</span>選択中の建物（接着した看板・テントも一緒）を、いまの画面の中央へ移動</div><div><span class="helpKey">⌘ L</span>選択をロック／解除　<span class="helpKey">L</span>カメラ（視点）を固定</div><div><span class="helpKey">表示中央へ</span>前（7）・横（8）・上（9）の表示位置だけを選択中のオブジェクトへ寄せる（カメラは動かさない）</div><div style="margin-top:7px;color:#7f999c">アセットを追加したあと、編集モードでBlender風ギズモを使えます。人物は基準身長から作られます。<br>ロックしたオブジェクトは、ギズモ・数値パネル・整列・削除のどれでも変わりません（シーン一覧の鍵で解除）。カメラ固定中もオブジェクトの編集はできます。</div>';
+        '<div class="helpTitle">操作のコツ</div><div><span class="helpKey">Pencil</span>線を引く　<span class="helpKey">指</span>視点・ピンチ</div><div><span class="helpKey">⌘ Z</span>元に戻す　<span class="helpKey">E</span>消しゴム</div><div><span class="helpKey">図形</span>ドラッグで床・壁に配置</div><div><span class="helpKey">編集</span>線を選択 → 矢印移動（X左右／Y手前奥／Z上下）／白い四角で拡縮／輪で回転</div><div><span class="helpKey">画面中央へ</span>選択中の建物（接着した看板・テントも一緒）を、いまの画面の中央へ移動</div><div><span class="helpKey">⌘ L</span>選択をロック／解除　<span class="helpKey">L</span>カメラ（視点）を固定</div><div><span class="helpKey">Shift D</span>選択中のオブジェクトをその場に複製（ずらさず重ねる。パネルの「複製」は横へずらす）</div><div><span class="helpKey">表示中央へ</span>前（7）・横（8）・上（9）の表示位置だけを選択中のオブジェクトへ寄せる（カメラは動かさない）</div><div style="margin-top:7px;color:#7f999c">アセットを追加したあと、編集モードでBlender風ギズモを使えます。人物は基準身長から作られます。<br>ロックしたオブジェクトは、ギズモ・数値パネル・整列・削除のどれでも変わりません（シーン一覧の鍵で解除）。カメラ固定中もオブジェクトの編集はできます。</div>';
     el("main").appendChild(help);
     el("helpToggle").onclick = () => {
         help.style.display = help.style.display === "block" ? "none" : "block";

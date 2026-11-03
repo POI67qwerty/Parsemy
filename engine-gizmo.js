@@ -2513,6 +2513,10 @@ const SIGNAL_HEADS = {
     trafficSignal: { w: 1.05, h: 0.34, d: 0.24 }, // 車両用：横3灯
     pedSignal: { w: 0.36, h: 0.66, d: 0.22 }, // 歩行者用：縦2灯
     signPost: { w: 0.42, h: 0.42, d: 0.06 }, // 丸標識（地下鉄風）
+    signPost2: { w: 0.42, h: 0.86, d: 0.06 }, // 標識2枚（丸＋四角）
+    signTriangle: { w: 0.46, h: 0.44, d: 0.05 }, // 逆三角形の標識
+    signDiamond: { w: 0.44, h: 0.44, d: 0.05 }, // ひし形の標識
+    signCombo: { w: 0.46, h: 0.9, d: 0.05 }, // 標識2枚（三角＋丸）
     crossingSign: { w: 0.5, h: 0.46, d: 0.1 }, // 踏切のX標識
 };
 const isSignalAsset = (o) => !!o && o.type === "asset" && Object.prototype.hasOwnProperty.call(SIGNAL_HEADS, o.asset);

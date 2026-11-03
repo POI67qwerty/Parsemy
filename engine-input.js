@@ -897,6 +897,18 @@ addEventListener("keydown", (e) => {
         redo();
         return;
     }
+    if (!m && e.shiftKey && e.key.toLowerCase() === "d" && !/INPUT|SELECT|TEXTAREA/.test(String(e.target?.tagName || ""))) {
+        // Shift+D = 選択中をその場に複製（ずらさない）。
+        // ずらしたいときはパネルの「複製」ボタン（従来どおり横へ）。
+        // 修飾キー付き（⌘/Ctrl+D）は使わない。ブラウザの「ブックマークに追加」と取り合わないため。
+        const dup = window.cityGridDuplicateSelected || (typeof duplicateSelected === "function" ? duplicateSelected : null);
+        const made = dup ? dup("inplace") : 0;
+        if (made) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        return;
+    }
     const key = String(e.key || "").toLowerCase(),
         tag = String(e.target?.tagName || "");
     if (key === "x" && !/INPUT|SELECT|TEXTAREA/.test(tag)) {

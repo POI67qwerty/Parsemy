@@ -1974,6 +1974,12 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>位置 X(赤)</span><input type=number class=nv id=ov_px step=0.05 style="width:100px"></label>
 <label><span>位置 Y(高さ)</span><input type=number class=nv id=ov_py step=0.05 style="width:100px"></label>
 <label><span>位置 Z(緑)</span><input type=number class=nv id=ov_pz step=0.05 style="width:100px"></label>
+<div id=signShapeP style="display:none"><h3>標識の形</h3>
+<label><span>板の枚数</span><select id=signCountSel><option value="1">1枚</option><option value="2">2枚</option></select></label>
+<label><span>板の形</span><select id=signShapeSel><option value="circle">丸</option><option value="triangle">逆三角形</option><option value="rect">四角</option><option value="diamond">ひし形</option></select></label>
+<label id=signShape2Row><span>2枚目の形</span><select id=signShape2Sel><option value="circle">丸</option><option value="triangle">逆三角形</option><option value="rect">四角</option><option value="diamond">ひし形</option></select></label>
+<div class="note">板の枚数と形は、丸標識・標識2枚・三角標識・ひし形標識・標識2枚（三角＋丸）で切り替えられます（下の板＝「板の形」、上の板＝「2枚目の形」）。踏切標識は専用の形です。</div>
+</div>
 <div id=signP style="display:none"><h3>看板の内側</h3>
 <label><span>絵枠の幅</span><input type=number class=nv id=ov_faceW step=0.01 style="width:100px"><span class=un>m</span></label>
 <label><span>絵枠の高さ</span><input type=number class=nv id=ov_faceH step=0.01 style="width:100px"><span class=un>m</span></label>
@@ -3600,12 +3606,12 @@ $("obGnd").onclick = () => {
     );
     render();
 };
-$("obDup").onclick = () => {
+function duplicateSelected(mode) {
     const objects = selectedObjects();
-    if (!objects.length) return;
+    if (!objects.length) return 0;
     const lead = objects.find((o) => o.id === sel) || objects[0],
         newGroup = objects.length > 1 && objects.some((o) => o.groupId) ? "group-" + uid() : null,
-        shift = Number(lead.ra || 0.5) * 2.4;
+        shift = mode === "inplace" ? 0 : Number(lead.ra || 0.5) * 2.4;
     const idMap = new Map(objects.map((o) => [o.id, uid()]));
     const clones = objects.map((o) => {
         let n = { ...o, id: idMap.get(o.id), off: [...(o.off || [0, 0, 0])] };
@@ -3623,8 +3629,13 @@ $("obDup").onclick = () => {
     clones.forEach((n) => selIds.add(n.id));
     sel = clones[0].id;
     normalizeSelection();
+    if (mode === "inplace" && typeof window.flashHint === "function")
+        window.flashHint(`複製しました（${clones.length}個・同じ位置。そのままドラッグで動かせます）`);
     render();
-};
+    return clones.length;
+}
+window.cityGridDuplicateSelected = duplicateSelected;
+$("obDup").onclick = () => duplicateSelected("shift");
 function deleteSelectedObjects() {
     const objects = selectedObjects(),
         ids = new Set(objects.map((o) => o.id));
@@ -5876,6 +5887,10 @@ const SIGNAL_HEADS = {
     trafficSignal: { w: 1.05, h: 0.34, d: 0.24 },
     pedSignal: { w: 0.36, h: 0.66, d: 0.22 },
     signPost: { w: 0.42, h: 0.42, d: 0.06 },
+    signPost2: { w: 0.42, h: 0.86, d: 0.06 },
+    signTriangle: { w: 0.46, h: 0.44, d: 0.05 },
+    signDiamond: { w: 0.44, h: 0.44, d: 0.05 },
+    signCombo: { w: 0.46, h: 0.9, d: 0.05 },
     crossingSign: { w: 0.5, h: 0.46, d: 0.1 },
 };
 const isSignalAsset = (o) => !!o && o.type === "asset" && Object.prototype.hasOwnProperty.call(SIGNAL_HEADS, o.asset);
@@ -11867,6 +11882,15 @@ addEventListener("keydown", (e) => {
         redo();
         return;
     }
+    if (!m && e.shiftKey && e.key.toLowerCase() === "d" && !/INPUT|SELECT|TEXTAREA/.test(String(e.target?.tagName || ""))) {
+        const dup = window.cityGridDuplicateSelected || (typeof duplicateSelected === "function" ? duplicateSelected : null);
+        const made = dup ? dup("inplace") : 0;
+        if (made) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        return;
+    }
     const key = String(e.key || "").toLowerCase(),
         tag = String(e.target?.tagName || "");
     if (key === "x" && !/INPUT|SELECT|TEXTAREA/.test(tag)) {
@@ -17134,7 +17158,9 @@ ASSET_KIT.define(
             const x = i * g.headW * 0.3;
             parts.push(...K.moveParts([K.cylinder(lampR, front - 0.024, front - 0.008, { axis: "y", seg: 20 })], x, 0, g.headCz));
             if (hood > 0.01)
-                parts.push(...K.moveParts([K.cylinder(lampR * 1.2, front - 0.01, front - 0.01 - hood, { axis: "y", seg: 16, caps: false })], x, 0, g.headCz));
+                parts.push(
+                    ...K.moveParts([K.cylinder(lampR * 1.26, front - 0.012 - hood, front + 0.004, { axis: "y", caps: false, seg: 22 })], x, 0, g.headCz),
+                );
         });
         return parts;
     },
@@ -17153,6 +17179,7 @@ ASSET_KIT.define(
         spBaseR: 0.15,
         spBaseH: 0.15,
         psLamp: 0.25,
+        psHood: 0.06,
     },
     (o, K) => {
         const g = signalGeometry(o),
@@ -17164,11 +17191,86 @@ ASSET_KIT.define(
             lens = (cz) => K.box(K.offsetPath(K.roundRectPath(lamp, lamp, Math.min(0.03, lamp * 0.16), 2), 0, cz), front - 0.022, front - 0.008, { axis: "y" });
         parts.push(K.roundedBox(g.headW, g.headD, g.headH, Math.min(g.headW * 0.18, 0.05), { seg: 2, cornerSeg: 2, z0: g.headBottom }));
         parts.push(lens(topCz), lens(bottomCz));
+        const hood = Math.max(0, K.param(o, "psHood", 0.06));
+        if (hood > 0.01)
+            [topCz, bottomCz].forEach((cz) =>
+                parts.push(
+                    K.box(
+                        K.offsetPath(K.roundRectPath(lamp * 1.2, lamp * 1.2, Math.min(0.03, lamp * 0.16), 2), 0, cz),
+                        front - 0.01 - hood,
+                        front + 0.004,
+                        {
+                            axis: "y",
+                            holes: [K.offsetPath(K.roundRectPath(lamp * 1.02, lamp * 1.02, Math.min(0.02, lamp * 0.1), 2), 0, cz)],
+                            holeSides: true,
+                        },
+                    ),
+                ),
+            );
         parts.push(...signalWalkerParts(K, 0, topCz, lamp, front - 0.045, false));
         parts.push(...signalWalkerParts(K, 0, bottomCz, lamp, front - 0.045, true));
         return parts;
     },
 );
+function signPlateParts(K, opts) {
+    const { cx, cz, w, h, shape, t, ring, band } = opts,
+        y0 = -t / 2,
+        y1 = t / 2,
+        front = -t / 2,
+        outline = (w2, h2) => {
+            if (shape === "triangle")
+                return [
+                    [-w2 / 2, cz + h2 / 2],
+                    [w2 / 2, cz + h2 / 2],
+                    [0, cz - h2 / 2],
+                ];
+            if (shape === "diamond")
+                return [
+                    [cx, cz + h2 / 2],
+                    [cx + w2 / 2, cz],
+                    [cx, cz - h2 / 2],
+                    [cx - w2 / 2, cz],
+                ];
+            if (shape === "rect") return K.offsetPath(K.roundRectPath(w2, h2, Math.min(w2, h2) * 0.12, 2), cx, cz);
+            return K.circlePath(Math.min(w2, h2) / 2, 26, cx, cz);
+        },
+        parts = [];
+    parts.push(K.box(outline(w, h), y0, y1, { axis: "y" }));
+    parts.push(K.box(outline(w * ring, h * ring), front - 0.02, front - 0.006, { axis: "y" }));
+    if (band && shape === "circle")
+        parts.push(
+            K.box(K.offsetPath(K.rectPath(w * 0.86, Math.max(0.03, h * 0.16)), cx, cz), front - 0.03, front - 0.016, { axis: "y" }),
+        );
+    return parts;
+}
+function signParts(o, K) {
+    const metaOf = (key, dflt) => {
+            const v = o?.[key];
+            if (v !== undefined && v !== null && v !== "") return v;
+            const m = ASSETS?.[o?.asset]?.[key];
+            return m !== undefined && m !== null ? m : dflt;
+        },
+        SHAPES = ["circle", "triangle", "rect", "diamond"],
+        shapeOf = (key, dflt) => {
+            const v = String(metaOf(key, dflt));
+            return SHAPES.includes(v) ? v : dflt;
+        },
+        g = signalGeometry(o),
+        t = Math.max(0.02, g.headD),
+        ring = Math.min(0.95, Math.max(0.3, K.param(o, "snRing", 0.72))),
+        band = metaOf("snBand", true) !== false,
+        count = Math.max(1, Math.min(2, Math.round(Number(metaOf("signCount", 1)) || 1))),
+        shape1 = shapeOf("signShape", "circle"),
+        shape2 = shapeOf("signShape2", shape1),
+        gap = count === 2 ? Math.max(0.02, g.headH * 0.06) : 0,
+        plateH = count === 2 ? Math.max(0.08, (g.headH - gap) / 2) : g.headH,
+        cz1 = g.headBottom + plateH / 2,
+        cz2 = g.headBottom + plateH + gap + plateH / 2,
+        parts = signalPoleParts(K, g);
+    parts.push(...signPlateParts(K, { cx: 0, cz: cz1, w: g.headW, h: plateH, shape: shape1, t, ring, band }));
+    if (count === 2) parts.push(...signPlateParts(K, { cx: 0, cz: cz2, w: g.headW, h: plateH, shape: shape2, t, ring, band }));
+    return parts;
+}
 ASSET_KIT.define(
     "signPost",
     {
@@ -17182,25 +17284,95 @@ ASSET_KIT.define(
         spPoleR: 0.042,
         spBaseR: 0.16,
         spBaseH: 0.16,
+        signShape: "circle",
+        signCount: 1,
+        signShape2: "circle",
         snRing: 0.72,
         snBand: true,
     },
-    (o, K) => {
-        const g = signalGeometry(o),
-            R = Math.min(g.headW, g.headH) / 2,
-            t = Math.max(0.02, g.headD),
-            y0 = -t / 2,
-            front = -t / 2,
-            ring = Math.min(0.95, Math.max(0.3, K.param(o, "snRing", 0.72))),
-            parts = signalPoleParts(K, g);
-        parts.push(...K.moveParts([K.cylinder(R, y0, y0 + t, { axis: "y", seg: 28, verts: 2 })], 0, 0, g.headCz));
-        parts.push(...K.moveParts([K.cylinder(R * ring, front - 0.02, front - 0.006, { axis: "y", seg: 24 })], 0, 0, g.headCz));
-        if (o.snBand !== false)
-            parts.push(
-                K.box(K.offsetPath(K.rectPath(R * 1.72, Math.max(0.03, R * 0.3)), 0, g.headCz), front - 0.03, front - 0.014, { axis: "y" }),
-            );
-        return parts;
+    signParts,
+);
+ASSET_KIT.define(
+    "signPost2",
+    {
+        label: "標識2枚",
+        glyph: "◉",
+        w: 0.42,
+        d: 0.06,
+        h: 2.8,
+        accent: "#e2534b",
+        spHeadH: 0.86,
+        spPoleR: 0.042,
+        spBaseR: 0.16,
+        spBaseH: 0.16,
+        signShape: "circle",
+        signCount: 2,
+        signShape2: "rect",
+        snRing: 0.7,
+        snBand: true,
     },
+    signParts,
+);
+ASSET_KIT.define(
+    "signTriangle",
+    {
+        label: "三角標識",
+        glyph: "▽",
+        w: 0.46,
+        d: 0.05,
+        h: 2.6,
+        accent: "#e2534b",
+        spHeadH: 0.44,
+        spPoleR: 0.042,
+        spBaseR: 0.16,
+        spBaseH: 0.16,
+        signShape: "triangle",
+        signCount: 1,
+        snRing: 0.58,
+        snBand: false,
+    },
+    signParts,
+);
+ASSET_KIT.define(
+    "signDiamond",
+    {
+        label: "ひし形標識",
+        glyph: "◇",
+        w: 0.44,
+        d: 0.05,
+        h: 2.6,
+        accent: "#f0c419",
+        spHeadH: 0.44,
+        spPoleR: 0.042,
+        spBaseR: 0.16,
+        spBaseH: 0.16,
+        signShape: "diamond",
+        signCount: 1,
+        snRing: 0.56,
+        snBand: false,
+    },
+    signParts,
+);
+ASSET_KIT.define(
+    "signCombo",
+    {
+        label: "標識2枚（三角＋丸）",
+        glyph: "▽",
+        w: 0.46,
+        d: 0.05,
+        h: 2.9,
+        accent: "#e2534b",
+        spHeadH: 0.9,
+        spPoleR: 0.042,
+        spBaseR: 0.16,
+        spBaseH: 0.16,
+        signShape: "circle",
+        signCount: 2,
+        signShape2: "triangle",
+        snRing: 0.6,
+        snBand: false,
+    },
+    signParts,
 );
 ASSET_KIT.define(
     "crossingSign",
@@ -18241,6 +18413,10 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "trafficSignal",
                 "pedSignal",
                 "signPost",
+                "signPost2",
+                "signTriangle",
+                "signDiamond",
+                "signCombo",
                 "crossingSign",
             ],
         },
@@ -21068,6 +21244,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         syncCornerCutPanel();
         syncRecessedStackedPanel();
         syncStackedPanel();
+        syncSignShapePanel();
         syncFloorControls();
         syncAssetDepth();
         syncAssetAxis();
@@ -21674,10 +21851,55 @@ window.cityGridInstallAssetUI = function (bridge) {
     document.addEventListener("pointerdown", (e) => {
         if (!e.target.closest("#exportMenu") && !e.target.closest("#exportToggle")) setExportOpen(false);
     });
+    const SIGN_KINDS = ["signPost", "signPost2", "signTriangle", "signDiamond", "signCombo"];
+    function syncSignShapePanel() {
+        const panel = el("signShapeP"),
+            o = sel && obOf(sel),
+            on = !!(o && o.type === "asset" && SIGN_KINDS.includes(o.asset));
+        if (!panel) return;
+        panel.style.display = on ? "" : "none";
+        if (!on) return;
+        const count = String(clamp(Math.round(Number(o.signCount ?? ASSETS[o.asset]?.signCount ?? 1)), 1, 2)),
+            shape = String(o.signShape ?? ASSETS[o.asset]?.signShape ?? "circle"),
+            shape2 = String(o.signShape2 ?? ASSETS[o.asset]?.signShape2 ?? shape),
+            countSel = el("signCountSel"),
+            shapeSel = el("signShapeSel"),
+            shape2Sel = el("signShape2Sel"),
+            row2 = el("signShape2Row");
+        if (countSel && document.activeElement !== countSel) countSel.value = count;
+        if (shapeSel && document.activeElement !== shapeSel) shapeSel.value = shape;
+        if (shape2Sel && document.activeElement !== shape2Sel) shape2Sel.value = shape2;
+        if (row2) row2.style.display = count === "2" ? "" : "none";
+    }
+    function applySignShapeControl(name, value) {
+        const o = sel && obOf(sel);
+        if (!o || o.type !== "asset" || !SIGN_KINDS.includes(o.asset)) return;
+        const patch = {};
+        if (name === "signCount") {
+            patch.signCount = clamp(Math.round(Number(value) || 1), 1, 2);
+            if (patch.signCount === 2) {
+                const g = signalGeometry(o);
+                if (g.headH < 0.4) patch.spHeadH = Math.min(Math.max(0.3, o.h - 0.3), 0.4);
+            }
+        } else if (name === "signShape") patch.signShape = String(value);
+        else if (name === "signShape2") patch.signShape2 = String(value);
+        else return;
+        HU.push(S);
+        RD = [];
+        setOb(sel, patch);
+        render();
+        syncSignShapePanel();
+    }
+    [["signCountSel", "signCount"], ["signShapeSel", "signShape"], ["signShape2Sel", "signShape2"]].forEach(([id, name]) => {
+        const n = el(id);
+        if (!n) return;
+        n.onchange = () => applySignShapeControl(name, n.value);
+    });
+    window.cityGridSyncSignShapePanel = syncSignShapePanel;
     const help = document.createElement("div");
     help.id = "helpPanel";
     help.innerHTML =
-        '<div class="helpTitle">操作のコツ</div><div><span class="helpKey">Pencil</span>線を引く　<span class="helpKey">指</span>視点・ピンチ</div><div><span class="helpKey">⌘ Z</span>元に戻す　<span class="helpKey">E</span>消しゴム</div><div><span class="helpKey">図形</span>ドラッグで床・壁に配置</div><div><span class="helpKey">編集</span>線を選択 → 矢印移動（X左右／Y手前奥／Z上下）／白い四角で拡縮／輪で回転</div><div><span class="helpKey">画面中央へ</span>選択中の建物（接着した看板・テントも一緒）を、いまの画面の中央へ移動</div><div><span class="helpKey">⌘ L</span>選択をロック／解除　<span class="helpKey">L</span>カメラ（視点）を固定</div><div><span class="helpKey">表示中央へ</span>前（7）・横（8）・上（9）の表示位置だけを選択中のオブジェクトへ寄せる（カメラは動かさない）</div><div style="margin-top:7px;color:#7f999c">アセットを追加したあと、編集モードでBlender風ギズモを使えます。人物は基準身長から作られます。<br>ロックしたオブジェクトは、ギズモ・数値パネル・整列・削除のどれでも変わりません（シーン一覧の鍵で解除）。カメラ固定中もオブジェクトの編集はできます。</div>';
+        '<div class="helpTitle">操作のコツ</div><div><span class="helpKey">Pencil</span>線を引く　<span class="helpKey">指</span>視点・ピンチ</div><div><span class="helpKey">⌘ Z</span>元に戻す　<span class="helpKey">E</span>消しゴム</div><div><span class="helpKey">図形</span>ドラッグで床・壁に配置</div><div><span class="helpKey">編集</span>線を選択 → 矢印移動（X左右／Y手前奥／Z上下）／白い四角で拡縮／輪で回転</div><div><span class="helpKey">画面中央へ</span>選択中の建物（接着した看板・テントも一緒）を、いまの画面の中央へ移動</div><div><span class="helpKey">⌘ L</span>選択をロック／解除　<span class="helpKey">L</span>カメラ（視点）を固定</div><div><span class="helpKey">Shift D</span>選択中のオブジェクトをその場に複製（ずらさず重ねる。パネルの「複製」は横へずらす）</div><div><span class="helpKey">表示中央へ</span>前（7）・横（8）・上（9）の表示位置だけを選択中のオブジェクトへ寄せる（カメラは動かさない）</div><div style="margin-top:7px;color:#7f999c">アセットを追加したあと、編集モードでBlender風ギズモを使えます。人物は基準身長から作られます。<br>ロックしたオブジェクトは、ギズモ・数値パネル・整列・削除のどれでも変わりません（シーン一覧の鍵で解除）。カメラ固定中もオブジェクトの編集はできます。</div>';
     el("main").appendChild(help);
     el("helpToggle").onclick = () => {
         help.style.display = help.style.display === "block" ? "none" : "block";

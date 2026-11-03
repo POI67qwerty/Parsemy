@@ -549,8 +549,12 @@ ASSET_KIT.define(
         [-1, 0, 1].forEach((i) => {
             const x = i * g.headW * 0.3;
             parts.push(...K.moveParts([K.cylinder(lampR, front - 0.024, front - 0.008, { axis: "y", seg: 20 })], x, 0, g.headCz));
+            // ひさし（フード）：灯のまわりの筒を手前へ張り出す（依頼50で輪の板に変えたが、
+            // 見た目が意図と違うため元の筒へ戻した）。
             if (hood > 0.01)
-                parts.push(...K.moveParts([K.cylinder(lampR * 1.2, front - 0.01, front - 0.01 - hood, { axis: "y", seg: 16, caps: false })], x, 0, g.headCz));
+                parts.push(
+                    ...K.moveParts([K.cylinder(lampR * 1.26, front - 0.012 - hood, front + 0.004, { axis: "y", caps: false, seg: 22 })], x, 0, g.headCz),
+                );
         });
         return parts;
     },
@@ -571,6 +575,7 @@ ASSET_KIT.define(
         spBaseR: 0.15,
         spBaseH: 0.15,
         psLamp: 0.25, // 灯（四角）の一辺
+        psHood: 0.06, // ひさし（四角い枠）の張り出し
     },
     (o, K) => {
         const g = signalGeometry(o),
@@ -583,6 +588,24 @@ ASSET_KIT.define(
             lens = (cz) => K.box(K.offsetPath(K.roundRectPath(lamp, lamp, Math.min(0.03, lamp * 0.16), 2), 0, cz), front - 0.022, front - 0.008, { axis: "y" });
         parts.push(K.roundedBox(g.headW, g.headD, g.headH, Math.min(g.headW * 0.18, 0.05), { seg: 2, cornerSeg: 2, z0: g.headBottom }));
         parts.push(lens(topCz), lens(bottomCz));
+        // ひさし（四角い枠）：灯のまわりの帯を手前へ張り出す。
+        // 車両用と同じく「外側の枠＋内側の穴」にして、線画でも枠として見えるようにする。
+        const hood = Math.max(0, K.param(o, "psHood", 0.06));
+        if (hood > 0.01)
+            [topCz, bottomCz].forEach((cz) =>
+                parts.push(
+                    K.box(
+                        K.offsetPath(K.roundRectPath(lamp * 1.2, lamp * 1.2, Math.min(0.03, lamp * 0.16), 2), 0, cz),
+                        front - 0.01 - hood,
+                        front + 0.004,
+                        {
+                            axis: "y",
+                            holes: [K.offsetPath(K.roundRectPath(lamp * 1.02, lamp * 1.02, Math.min(0.02, lamp * 0.1), 2), 0, cz)],
+                            holeSides: true,
+                        },
+                    ),
+                ),
+            );
         // 絵：上は「止まれ」の立ち姿、下は「進め」の歩く姿
         parts.push(...signalWalkerParts(K, 0, topCz, lamp, front - 0.045, false));
         parts.push(...signalWalkerParts(K, 0, bottomCz, lamp, front - 0.045, true));
@@ -590,7 +613,76 @@ ASSET_KIT.define(
     },
 );
 
-// --- 3) 丸標識（地下鉄の丸い看板）---
+// --- 3) 丸標識（地下鉄の丸い看板）＋ 形と枚数を選べる仲間 ---
+// 標識の板は「形（丸・逆三角形・四角・ひし形）」×「枚数（1枚・2枚）」で作れる。
+// 2枚のときは頭の高さを2枚で分け、上の板の形は signShape2 で別に選べる。
+function signPlateParts(K, opts) {
+    const { cx, cz, w, h, shape, t, ring, band } = opts,
+        y0 = -t / 2,
+        y1 = t / 2,
+        front = -t / 2,
+        // 板の輪郭（x, z）。中心は (cx, cz)。
+        outline = (w2, h2) => {
+            if (shape === "triangle")
+                return [
+                    [-w2 / 2, cz + h2 / 2],
+                    [w2 / 2, cz + h2 / 2],
+                    [0, cz - h2 / 2], // 逆三角形（下が頂点）
+                ];
+            if (shape === "diamond")
+                return [
+                    [cx, cz + h2 / 2],
+                    [cx + w2 / 2, cz],
+                    [cx, cz - h2 / 2],
+                    [cx - w2 / 2, cz],
+                ];
+            if (shape === "rect") return K.offsetPath(K.roundRectPath(w2, h2, Math.min(w2, h2) * 0.12, 2), cx, cz);
+            return K.circlePath(Math.min(w2, h2) / 2, 26, cx, cz);
+        },
+        parts = [];
+    // 1) 板本体（薄い板）
+    parts.push(K.box(outline(w, h), y0, y1, { axis: "y" }));
+    // 2) 内側の縁：少し小さくして手前へ出す（縁の線が面の内側の線として消えない）
+    parts.push(K.box(outline(w * ring, h * ring), front - 0.02, front - 0.006, { axis: "y" }));
+    // 3) 丸標識だけ、横に通る帯を付ける
+    if (band && shape === "circle")
+        parts.push(
+            K.box(K.offsetPath(K.rectPath(w * 0.86, Math.max(0.03, h * 0.16)), cx, cz), front - 0.03, front - 0.016, { axis: "y" }),
+        );
+    return parts;
+}
+// 標識の共通の作り。meta の signShape / signCount / signShape2 を初期値にして、
+// 画面から変えた値（o.signShape など）があればそちらを使う。
+function signParts(o, K) {
+    const metaOf = (key, dflt) => {
+            const v = o?.[key];
+            if (v !== undefined && v !== null && v !== "") return v;
+            const m = ASSETS?.[o?.asset]?.[key];
+            return m !== undefined && m !== null ? m : dflt;
+        },
+        SHAPES = ["circle", "triangle", "rect", "diamond"],
+        shapeOf = (key, dflt) => {
+            const v = String(metaOf(key, dflt));
+            return SHAPES.includes(v) ? v : dflt;
+        },
+        g = signalGeometry(o),
+        t = Math.max(0.02, g.headD),
+        ring = Math.min(0.95, Math.max(0.3, K.param(o, "snRing", 0.72))),
+        band = metaOf("snBand", true) !== false,
+        count = Math.max(1, Math.min(2, Math.round(Number(metaOf("signCount", 1)) || 1))),
+        shape1 = shapeOf("signShape", "circle"),
+        shape2 = shapeOf("signShape2", shape1),
+        gap = count === 2 ? Math.max(0.02, g.headH * 0.06) : 0,
+        plateH = count === 2 ? Math.max(0.08, (g.headH - gap) / 2) : g.headH,
+        cz1 = g.headBottom + plateH / 2,
+        cz2 = g.headBottom + plateH + gap + plateH / 2,
+        parts = signalPoleParts(K, g);
+    parts.push(...signPlateParts(K, { cx: 0, cz: cz1, w: g.headW, h: plateH, shape: shape1, t, ring, band }));
+    if (count === 2) parts.push(...signPlateParts(K, { cx: 0, cz: cz2, w: g.headW, h: plateH, shape: shape2, t, ring, band }));
+    return parts;
+}
+
+// 丸標識（1枚）
 ASSET_KIT.define(
     "signPost",
     {
@@ -604,28 +696,103 @@ ASSET_KIT.define(
         spPoleR: 0.042,
         spBaseR: 0.16,
         spBaseH: 0.16,
-        snRing: 0.72, // 内側の輪の半径（板の半径に対する割合）
-        snBand: true, // 横に通る帯を出す
+        signShape: "circle", // 板の形（circle / triangle / rect / diamond）
+        signCount: 1, // 板の枚数（1 か 2）
+        signShape2: "circle", // 2枚のときの上の板の形
+        snRing: 0.72, // 内側の縁の大きさ（板に対する割合）
+        snBand: true, // 丸のときに横へ通る帯を出す
     },
-    (o, K) => {
-        const g = signalGeometry(o),
-            R = Math.min(g.headW, g.headH) / 2,
-            t = Math.max(0.02, g.headD),
-            y0 = -t / 2,
-            front = -t / 2,
-            ring = Math.min(0.95, Math.max(0.3, K.param(o, "snRing", 0.72))),
-            parts = signalPoleParts(K, g);
-        // 板（円盤）。奥行きは丸標識の薄い板なので、面ハンドルで厚みも変えられる。
-        parts.push(...K.moveParts([K.cylinder(R, y0, y0 + t, { axis: "y", seg: 28, verts: 2 })], 0, 0, g.headCz));
-        // 内側の輪：少しだけ前に出した薄い円盤（筒だと輪の線が描かれない）
-        parts.push(...K.moveParts([K.cylinder(R * ring, front - 0.02, front - 0.006, { axis: "y", seg: 24 })], 0, 0, g.headCz));
-        // 横に通る帯
-        if (o.snBand !== false)
-            parts.push(
-                K.box(K.offsetPath(K.rectPath(R * 1.72, Math.max(0.03, R * 0.3)), 0, g.headCz), front - 0.03, front - 0.014, { axis: "y" }),
-            );
-        return parts;
+    signParts,
+);
+
+// 丸標識（2枚：丸＋四角）
+ASSET_KIT.define(
+    "signPost2",
+    {
+        label: "標識2枚",
+        glyph: "◉",
+        w: 0.42,
+        d: 0.06,
+        h: 2.8,
+        accent: "#e2534b",
+        spHeadH: 0.86,
+        spPoleR: 0.042,
+        spBaseR: 0.16,
+        spBaseH: 0.16,
+        signShape: "circle",
+        signCount: 2,
+        signShape2: "rect",
+        snRing: 0.7,
+        snBand: true,
     },
+    signParts,
+);
+
+// 逆三角形の標識
+ASSET_KIT.define(
+    "signTriangle",
+    {
+        label: "三角標識",
+        glyph: "▽",
+        w: 0.46,
+        d: 0.05,
+        h: 2.6,
+        accent: "#e2534b",
+        spHeadH: 0.44,
+        spPoleR: 0.042,
+        spBaseR: 0.16,
+        spBaseH: 0.16,
+        signShape: "triangle",
+        signCount: 1,
+        snRing: 0.58,
+        snBand: false,
+    },
+    signParts,
+);
+
+// ひし形の標識
+ASSET_KIT.define(
+    "signDiamond",
+    {
+        label: "ひし形標識",
+        glyph: "◇",
+        w: 0.44,
+        d: 0.05,
+        h: 2.6,
+        accent: "#f0c419",
+        spHeadH: 0.44,
+        spPoleR: 0.042,
+        spBaseR: 0.16,
+        spBaseH: 0.16,
+        signShape: "diamond",
+        signCount: 1,
+        snRing: 0.56,
+        snBand: false,
+    },
+    signParts,
+);
+
+// 逆三角形＋丸の2枚
+ASSET_KIT.define(
+    "signCombo",
+    {
+        label: "標識2枚（三角＋丸）",
+        glyph: "▽",
+        w: 0.46,
+        d: 0.05,
+        h: 2.9,
+        accent: "#e2534b",
+        spHeadH: 0.9,
+        spPoleR: 0.042,
+        spBaseR: 0.16,
+        spBaseH: 0.16,
+        signShape: "circle",
+        signCount: 2,
+        signShape2: "triangle",
+        snRing: 0.6,
+        snBand: false,
+    },
+    signParts,
 );
 
 // --- 4) 踏切の標識（黄黒のX）---

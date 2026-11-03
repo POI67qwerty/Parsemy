@@ -144,6 +144,12 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>位置 X(赤)</span><input type=number class=nv id=ov_px step=0.05 style="width:100px"></label>
 <label><span>位置 Y(高さ)</span><input type=number class=nv id=ov_py step=0.05 style="width:100px"></label>
 <label><span>位置 Z(緑)</span><input type=number class=nv id=ov_pz step=0.05 style="width:100px"></label>
+<div id=signShapeP style="display:none"><h3>標識の形</h3>
+<label><span>板の枚数</span><select id=signCountSel><option value="1">1枚</option><option value="2">2枚</option></select></label>
+<label><span>板の形</span><select id=signShapeSel><option value="circle">丸</option><option value="triangle">逆三角形</option><option value="rect">四角</option><option value="diamond">ひし形</option></select></label>
+<label id=signShape2Row><span>2枚目の形</span><select id=signShape2Sel><option value="circle">丸</option><option value="triangle">逆三角形</option><option value="rect">四角</option><option value="diamond">ひし形</option></select></label>
+<div class="note">板の枚数と形は、丸標識・標識2枚・三角標識・ひし形標識・標識2枚（三角＋丸）で切り替えられます（下の板＝「板の形」、上の板＝「2枚目の形」）。踏切標識は専用の形です。</div>
+</div>
 <div id=signP style="display:none"><h3>看板の内側</h3>
 <label><span>絵枠の幅</span><input type=number class=nv id=ov_faceW step=0.01 style="width:100px"><span class=un>m</span></label>
 <label><span>絵枠の高さ</span><input type=number class=nv id=ov_faceH step=0.01 style="width:100px"><span class=un>m</span></label>
@@ -1977,12 +1983,16 @@ $("obGnd").onclick = () => {
     );
     render();
 };
-$("obDup").onclick = () => {
+// 選択中のオブジェクトを複製する。
+//   mode = "inplace" … その場（同じ位置）に重ねて複製（Shift+D）。
+//   mode = "shift"   … 少し横へずらして複製（パネルの「複製」ボタン。従来の動き）。
+// ずらす量以外は共通で、ID・グループ・接続（看板などの親子）を付け替えて再生成する。
+function duplicateSelected(mode) {
     const objects = selectedObjects();
-    if (!objects.length) return;
+    if (!objects.length) return 0;
     const lead = objects.find((o) => o.id === sel) || objects[0],
         newGroup = objects.length > 1 && objects.some((o) => o.groupId) ? "group-" + uid() : null,
-        shift = Number(lead.ra || 0.5) * 2.4;
+        shift = mode === "inplace" ? 0 : Number(lead.ra || 0.5) * 2.4;
     const idMap = new Map(objects.map((o) => [o.id, uid()]));
     const clones = objects.map((o) => {
         let n = { ...o, id: idMap.get(o.id), off: [...(o.off || [0, 0, 0])] };
@@ -2000,8 +2010,14 @@ $("obDup").onclick = () => {
     clones.forEach((n) => selIds.add(n.id));
     sel = clones[0].id;
     normalizeSelection();
+    // その場に重ねたときは、見た目が変わらないので操作したことが分かるように知らせる。
+    if (mode === "inplace" && typeof window.flashHint === "function")
+        window.flashHint(`複製しました（${clones.length}個・同じ位置。そのままドラッグで動かせます）`);
     render();
-};
+    return clones.length;
+}
+window.cityGridDuplicateSelected = duplicateSelected;
+$("obDup").onclick = () => duplicateSelected("shift");
 function deleteSelectedObjects() {
     const objects = selectedObjects(),
         ids = new Set(objects.map((o) => o.id));
