@@ -1291,9 +1291,11 @@ function buildExportDepth(cw, ch, tf) {
                 }
             }
             if (hasStatic) {
-                const sy0 = Math.max(Math.max(0, Math.floor(depthStatic.y0)), ry0),
-                    sy1 = Math.min(Math.min(ch - 1, Math.ceil(depthStatic.y1)), ry1);
-                for (let y = sy0; y <= sy1; y++) {
+                // 静止面の範囲外も含めて矩形の全行を復元する。
+                // 静止バッファの範囲外は Infinity / 0 で初期化済み。
+                // 範囲内の行だけコピーすると、移動前の上部の深度が残り、
+                // 見上げたとき別のオブジェクトの線を誤って隠してしまう。
+                for (let y = ry0; y <= ry1; y++) {
                     const s0 = y * cw + rx0,
                         s1 = y * cw + rx1 + 1;
                     depth.set(depthStatic.buf.subarray(s0, s1), s0);
@@ -1661,7 +1663,152 @@ function layerLineWidth(s) {
     if (!(lineDevMin > 0)) return base;
     return Math.max(base, lineDevMin / Math.max(0.05, lineDevMinScale));
 }
+// 魚眼は平面の画面像が曲がるため、三角形頂点の直線補間だけでは
+// 面と線の奥行きがずれる。線の試験点に対して実際の三角面への光線を使う。
+let fishLineOccluders = null, fishBvhCache = null, fishBlockedPixels = null, fishBlockedWidth = 0, fishBlockedHeight = 0, fishOcclusionEpoch = 0, fishVisiblePixels = null, fishLineSerial = 0, fishCurrentLine = 0;
+function prepareFishLineOccluders() {
+    const seen = new Set(), objects = [];
+    S.forEach((s) => {
+        if (!s.ob || !objectVisible(s.ob) || seen.has(s.ob.id)) return;
+        seen.add(s.ob.id);
+        // syncAttachedPart は新しいオブジェクトを返す。親が非表示でも位置を同期し、
+        // 同期後の値をBVHのキーと三角面の両方に使う。
+        objects.push(s.ob.attachment && typeof syncAttachedPart === "function" ? syncAttachedPart(s.ob) : s.ob);
+    });
+    const key = objects.map((o) => o.id + ":" + JSON.stringify(o)).join("|"), cam = camPos();
+    if (!fishBvhCache || fishBvhCache.key !== key) {
+        const records = [];
+        for (const o of objects) for (const t of surfaceTriangles(o)) {
+            const a=t[0], e1=V.add(t[1],a,1,-1), e2=V.add(t[2],a,1,-1),
+                lo=[0,1,2].map(i=>Math.min(t[0][i],t[1][i],t[2][i])-1e-7),
+                hi=[0,1,2].map(i=>Math.max(t[0][i],t[1][i],t[2][i])+1e-7);
+            let normal = V.crs(e1, e2), length = Math.hypot(...normal);
+            if (length > 1e-9) normal = normal.map((v) => v / length);
+            if (Math.abs(normal[0]) >= Math.abs(normal[1]) && Math.abs(normal[0]) >= Math.abs(normal[2]) ? normal[0] < 0 : Math.abs(normal[1]) >= Math.abs(normal[2]) ? normal[1] < 0 : normal[2] < 0) normal = normal.map((v) => -v);
+            const plane = normal.map((v) => (Math.abs(v) < 0.0005 ? 0 : v).toFixed(3)).join(",") + "," +
+                (Math.abs(V.dot(normal, a)) < 0.005 ? 0 : V.dot(normal, a)).toFixed(2);
+            records.push({a,e1,e2,lo,hi,mid:lo.map((v,i)=>(v+hi[i])*0.5),owner:o.id,plane});
+        }
+        const makeNode = (items) => {
+            if (!items.length) return null;
+            const lo=[Infinity,Infinity,Infinity], hi=[-Infinity,-Infinity,-Infinity];
+            for(const r of items) for(let i=0;i<3;i++){lo[i]=Math.min(lo[i],r.lo[i]);hi[i]=Math.max(hi[i],r.hi[i]);}
+            if(items.length<=8) return {lo,hi,items};
+            const lengths=lo.map((v,i)=>hi[i]-v), axis=lengths[0]>=lengths[1]&&lengths[0]>=lengths[2]?0:lengths[1]>=lengths[2]?1:2;
+            items.sort((a,b)=>a.mid[axis]-b.mid[axis]);
+            const mid=items.length>>1;
+            return {lo,hi,left:makeNode(items.slice(0,mid)),right:makeNode(items.slice(mid))};
+        };
+        fishBvhCache = {key,records,root:makeNode(records.slice())};
+    }
+    for (const r of fishBvhCache.records) {
+        const v=V.add(cam,r.a,1,-1), e1=r.e1, e2=r.e2,
+            q=[v[1]*e1[2]-v[2]*e1[1],v[2]*e1[0]-v[0]*e1[2],v[0]*e1[1]-v[1]*e1[0]];
+        r.v=v;r.q=q;r.n=e2[0]*q[0]+e2[1]*q[1]+e2[2]*q[2];
+    }
+    fishLineOccluders={root:fishBvhCache.root,cam};
+    fishOcclusionEpoch++;
+}
+const fishBvhStack=[];
+function fishPointOccluded(e) {
+    if (e.fishEpoch === fishOcclusionEpoch) return e.fishBlocked;
+    e.fishEpoch = fishOcclusionEpoch;
+    const set=fishLineOccluders;
+    if (!set || !set.root) return (e.fishBlocked=false);
+    const dir=unscr({x:e.sx,y:e.sy}), dx=dir[0],dy=dir[1],dz=dir[2], limit=e.depth - Math.max(0.008, Math.abs(e.depth)*0.0002),
+        ds=[dx,dy,dz], inv=ds.map(v=>Math.abs(v)<1e-14?Infinity:1/v), cam=set.cam;
+    fishBvhStack.length=0;fishBvhStack.push(set.root);
+    while(fishBvhStack.length) {
+        const node=fishBvhStack.pop();let near=0,far=limit,hit=true;
+        for(let i=0;i<3;i++){
+            if(!Number.isFinite(inv[i])){if(cam[i]<node.lo[i]||cam[i]>node.hi[i]){hit=false;break;}continue;}
+            const a=(node.lo[i]-cam[i])*inv[i],b=(node.hi[i]-cam[i])*inv[i];
+            near=Math.max(near,Math.min(a,b));far=Math.min(far,Math.max(a,b));if(far<near){hit=false;break;}
+        }
+        if(!hit)continue;
+        if(!node.items){if(node.left)fishBvhStack.push(node.left);if(node.right)fishBvhStack.push(node.right);continue;}
+        for(const r of node.items) {
+            const h0=dy*r.e2[2]-dz*r.e2[1], h1=dz*r.e2[0]-dx*r.e2[2], h2=dx*r.e2[1]-dy*r.e2[0],
+                det=r.e1[0]*h0+r.e1[1]*h1+r.e1[2]*h2;
+            if(Math.abs(det)<1e-10) continue;
+            const k=1/det, u=(r.v[0]*h0+r.v[1]*h1+r.v[2]*h2)*k;
+            if(u < -1e-8 || u > 1+1e-8) continue;
+            const v=(dx*r.q[0]+dy*r.q[1]+dz*r.q[2])*k;
+            if(v < -1e-8 || u+v > 1+1e-8) continue;
+            const distance=r.n*k;
+            if(distance>0.0001 && distance<limit) {
+                if (fishBlockedPixels) {
+                    const x=Math.round(e.x),y=Math.round(e.y);
+                    for (let dy=-1;dy<=1;dy++) for (let dx=-1;dx<=1;dx++) {
+                        const xx=x+dx, yy=y+dy;
+                        if(xx>=0&&xx<fishBlockedWidth&&yy>=0&&yy<fishBlockedHeight) {
+                            const i=yy*fishBlockedWidth+xx;
+                            if (!fishBlockedPixels[i]) fishBlockedPixels[i]=fishCurrentLine;
+                        }
+                    }
+                }
+                return (e.fishBlocked=true);
+            }
+        }
+    }
+    return (e.fishBlocked=false);
+}
+// 面内線を消す場合だけ、線の周囲が本当に同じ平面なのか光線でも確かめる。
+// 魚眼の直線三角形ラスタでは、実際には角の外側にある点も面内に見えるため。
+function fishNearestSurface(x, y, tf) {
+    const det = tf[0] * tf[3] - tf[1] * tf[2];
+    if (Math.abs(det) < 1e-12 || !fishLineOccluders?.root) return null;
+    const px = x - tf[4], py = y - tf[5],
+        dir = wld(bf({x: (tf[3] * px - tf[2] * py) / det, y: (-tf[1] * px + tf[0] * py) / det})),
+        dx = dir[0], dy = dir[1], dz = dir[2], cam = fishLineOccluders.cam,
+        inv = dir.map((v) => Math.abs(v) < 1e-14 ? Infinity : 1 / v);
+    let distance = Infinity, found = null;
+    fishBvhStack.length = 0;
+    fishBvhStack.push(fishLineOccluders.root);
+    while (fishBvhStack.length) {
+        const node = fishBvhStack.pop();
+        let near = 0, far = distance, hit = true;
+        for (let i = 0; i < 3; i++) {
+            if (!Number.isFinite(inv[i])) {
+                if (cam[i] < node.lo[i] || cam[i] > node.hi[i]) { hit = false; break; }
+                continue;
+            }
+            const a = (node.lo[i] - cam[i]) * inv[i], b = (node.hi[i] - cam[i]) * inv[i];
+            near = Math.max(near, Math.min(a, b));
+            far = Math.min(far, Math.max(a, b));
+            if (far < near) { hit = false; break; }
+        }
+        if (!hit) continue;
+        if (!node.items) {
+            if (node.left) fishBvhStack.push(node.left);
+            if (node.right) fishBvhStack.push(node.right);
+            continue;
+        }
+        for (const r of node.items) {
+            const h0 = dy*r.e2[2] - dz*r.e2[1], h1 = dz*r.e2[0] - dx*r.e2[2], h2 = dx*r.e2[1] - dy*r.e2[0],
+                d = r.e1[0]*h0 + r.e1[1]*h1 + r.e1[2]*h2;
+            if (Math.abs(d) < 1e-10) continue;
+            const k = 1 / d, u = (r.v[0]*h0 + r.v[1]*h1 + r.v[2]*h2) * k;
+            if (u < -1e-8 || u > 1 + 1e-8) continue;
+            const v = (dx*r.q[0] + dy*r.q[1] + dz*r.q[2]) * k;
+            if (v < -1e-8 || u + v > 1 + 1e-8) continue;
+            const t = r.n * k;
+            if (t > 0.0001 && t < distance) { distance = t; found = r; }
+        }
+    }
+    return found ? {owner:found.owner, plane:found.plane, distance} : null;
+}
+function fishFaceInterior(e, owner, tf) {
+    const center = fishNearestSurface(e.x, e.y, tf);
+    if (!center || center.owner !== owner || Math.abs(e.depth - center.distance) > Math.max(0.03, e.depth * 0.002)) return false;
+    for (const d of FACE_CULL_OFFSETS) for (const [x,y] of [[-d,0],[d,0],[0,-d],[0,d]]) {
+        const neighbor = fishNearestSurface(e.x + x, e.y + y, tf);
+        if (!neighbor || neighbor.owner !== owner || neighbor.plane !== center.plane) return false;
+    }
+    return true;
+}
 function strokeWVisible(c, s, depth, cw, ch, tf) {
+    fishCurrentLine = ++fishLineSerial;
     // 壁付けベランダの補助線は、穴のない床スラブの内部に全区間が埋まる。
     // 隠線表示では見えない線なので、厚みが1〜2画素以下でも漏らさない。
     if (s.balconyEmbeddedSupport === true && s.ob?.asset === "balcony" && !window.__showBalconyEmbedded) return;
@@ -1694,6 +1841,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     const definitelyOccluded = (e) => {
         const x = Math.round(e.x), y = Math.round(e.y);
         if (x < 0 || x >= cw || y < 0 || y >= ch) return false;
+        if (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) return fishPointOccluded(e);
         // 【重要】「まわりの画素すべてが、この線よりはっきり手前の平らな面」なら、
         // その点は隠れる面の内側にある。同じオブジェクトの面かどうかに関係なく隠す。
         // これが無いと、階層建物の縁（張り出した帯）の奥にある壁の稜線が、
@@ -1743,6 +1891,12 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         // 面の持ち主・面IDは一番近い画素のものを使う（面の内外の判定用）。
         const i1 = y * cw + x,
             z = window.__noDepthInterp ? depth[i1] : depthAtPoint(depth, cw, ch, e.x, e.y);
+        if (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) {
+            if (fishPointOccluded(e)) return false;
+            if (!onFace && !window.__noFaceCull && depthOwner?.[i1] === myOwner && depthFace?.[i1] &&
+                faceCullAround(cw, ch, x, y, depthFace[i1], myOwner) && fishFaceInterior(e, s.ob.id, tf)) return false;
+            return true;
+        }
         // 線がその面より「はっきり手前」なら、面の内側の線ではない（見える線）。
         // 奥行きバッファは 1画素より細い部材（手すり・スラブ・笠木）を
         // 持たないことがあり、その稜線は面より 10〜30cm 手前になる。
@@ -1837,7 +1991,8 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     // それが「点線状の切れ端」として残る（実測：建物の稜線が 6px おきの点線に見えた）。
     // 短すぎる区間（--minRun px 未満）は、まわりが隠れているなら捨てる。
     // 線そのものが短いとき（--shortLine px 未満）は捨てない（小物の線が消えないように）。
-    const minRun = window.__minRun === undefined ? 4 : Number(window.__minRun) * Math.max(1, Math.abs(tf[0] || 1)),
+    const minRun = !orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines ? 0 :
+            window.__minRun === undefined ? 4 : Number(window.__minRun) * Math.max(1, Math.abs(tf[0] || 1)),
         shortLine = 10 * Math.max(1, Math.abs(tf[0] || 1));
     let run = [],
         drew = 0,
@@ -1853,6 +2008,21 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         } else {
             c.moveTo(run[0], run[1]);
             for (let i = 2; i < run.length; i += 2) c.lineTo(run[i], run[i + 1]);
+            // 遮蔽された別の線と手前の可視線が重なった場合、可視線の二値化補完は
+            // 禁止しない。描いた区間だけを線ID付きで記録する（同じ線の隠れは除外）。
+            if (fishVisiblePixels && run.length >= 4) {
+                for (let i = 0; i < run.length; i += 2) {
+                    const x = Math.round(tf[0]*run[i] + tf[2]*run[i+1] + tf[4]),
+                        y = Math.round(tf[1]*run[i] + tf[3]*run[i+1] + tf[5]);
+                    for (let dy=-2;dy<=2;dy++) for (let dx=-2;dx<=2;dx++) {
+                        const xx=x+dx, yy=y+dy;
+                        if(xx<0||xx>=cw||yy<0||yy>=ch) continue;
+                        const index=yy*cw+xx, previous=fishVisiblePixels[index];
+                        if (!previous) fishVisiblePixels[index]=fishCurrentLine;
+                        else if (previous!==fishCurrentLine) fishVisiblePixels[index]=-1;
+                    }
+                }
+            }
             drew++;
         }
         run = [];
@@ -1963,7 +2133,9 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
                     const n = Math.max(1, Math.ceil(len / 2));
                     for (let j = 1; j < n; j++) emit(at(j / n));
                 } else {
-                    const n = Math.max(1, Math.ceil(Math.hypot(v[0] - a[0], v[1] - a[1], v[2] - a[2]) * 10));
+                    const worldN = Math.ceil(Math.hypot(v[0] - a[0], v[1] - a[1], v[2] - a[2]) * 10),
+                        pixelN = !orthView && T === "f" && ea.ok && eb.ok ? Math.ceil(4 * Math.hypot(eb.x - ea.x, eb.y - ea.y)) : 0,
+                        n = Math.max(!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines ? 8 : 1, worldN, pixelN);
                     for (let j = 1; j < n; j++) put(V.add(a, v, 1 - j / n, j / n));
                 }
             }
@@ -2125,6 +2297,12 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
         tfEff = tf || [Z, 0, 0, Z, vs[0], vs[1]];
     x.setTransform(...tfEff);
     const hiddenDepth = hidden ? buildExportDepth(cw, ch, tfEff) : null;
+    if (hiddenDepth && !orthView && T === "f" && !window.__legacyFishLines) {
+        prepareFishLineOccluders();
+        fishBlockedWidth=cw; fishBlockedHeight=ch; fishLineSerial=0;
+        fishBlockedPixels=$("bin").checked ? new Int32Array(cw*ch) : null;
+        fishVisiblePixels=fishBlockedPixels ? new Int32Array(cw*ch) : null;
+    } else { fishLineOccluders = null; fishBlockedPixels = null; fishVisiblePixels = null; }
     // ベベルの縦線は「角ごとに輪郭の1本」だけ描く（面ONのとき）。
     if (hiddenDepth) updateSeamPicks(hiddenDepth, cw, ch, tfEff);
     // 二値化する層だけ、細い線が欠けないよう最小の太さを確保する。
@@ -2161,7 +2339,12 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
             // アルファがしきい値の上下を行き来するため、二値化すると破線状に欠ける
             // （実測：拡大1.0で 357か所・2,435px の欠け）。線の両側が繋がっている
             // 短い切れ目だけを埋めれば、線の太さは変えずに連続した線に戻せる。
-            closeBinGaps(u32, box.w, box.h, window.__binBridge === undefined ? 2 : Number(window.__binBridge));
+            const noFill = fishBlockedPixels ? (i) => {
+                const index=(box.y + Math.floor(i / box.w)) * cw + box.x + i % box.w,
+                    blocked=fishBlockedPixels[index], visible=fishVisiblePixels[index];
+                return !!blocked && !(visible && visible !== blocked);
+            } : null;
+            closeBinGaps(u32, box.w, box.h, window.__binBridge === undefined ? 2 : Number(window.__binBridge), noFill);
             x.putImageData(im, box.x, box.y);
         }
     }
@@ -2174,7 +2357,7 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
 // 「線に囲まれた穴だけを埋める」ので、線の太さはほとんど変わらない。
 //   1. 反対側どうしが線で、あいだが1px → その1px を埋める（8方向の直線の切れ目）
 //   2. まわりに線が3つ以上ある → 角の欠けなので埋める（階段状の切れ目）
-function closeBinGaps(u32, w, h, strength) {
+function closeBinGaps(u32, w, h, strength, noFill = null) {
     if (!(strength > 0) || w < 3 || h < 3) return;
     const n = w * h;
     // 1) 線の画素を集める（1画素1回の読み出しで済む）。
@@ -2226,7 +2409,7 @@ function closeBinGaps(u32, w, h, strength) {
     }
     for (let i = 0; i < fill.length; i++) {
         const idx = fill[i];
-        if (u32[idx] === 0) u32[idx] = 0xff000000;
+        if (u32[idx] === 0 && (!noFill || !noFill(idx))) u32[idx] = 0xff000000;
     }
 }
 // ===== 6. 地面のグリッド：床(y=-1)の格子。カメラの高さ・位置・向きを変えるとちゃんと見え方が変わる =====

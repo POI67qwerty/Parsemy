@@ -3247,20 +3247,35 @@ function buildingFasciaGeometry(o) {
         projection=clamp(Number.isFinite(Number(o.facadeProjection)) ? Number(o.facadeProjection) : .18, .02, 2);
     return {w,d,h,height,projection,z0:h-height,z1:h,enabled:o.facadeEnabled===true && buildingFacadeAllowed(o),side:!!o.facadeSides,color:/^#[0-9a-f]{6}$/i.test(o.facadeColor||"")?o.facadeColor:"#2f73bc"};
 }
-// 隅切り面に沿う帯。外周を面に直角な一定距離だけ広げ、角を留め継ぎにする。
+// 隅切り面に沿う帯。接続する角は留め継ぎ、帯の外端は面に直角に切る。
 // 側面ONなら切り口の両隣の辺だけへ回す（切り口の方向に応じて対象も変わる）。
 function cornerCutFasciaParts(o) {
     const q=cornerCutBoxParams(o),g=buildingFasciaGeometry(o), p=g.projection,
         inner=cornerCutFootprint(q.w,q.d,q.cornerOffset,q.cornerCutCorner),
         outsideOffset=q.cornerOffset>1e-6?q.cornerOffset+(2-Math.SQRT2)*p:0,
         outer=cornerCutFootprint(q.w+2*p,q.d+2*p,outsideOffset,q.cornerCutCorner),
-        parts=[];
+        parts=[], segments=[];
     for(let i=0;i<inner.length;i++) {
         const j=(i+1)%inner.length,a=inner[i],b=inner[j],
             isCut=i===inner.length-1,
-            adjacent=i===0 || i===inner.length-2;
-        if((isCut || (g.side && adjacent)) && Math.hypot(b[0]-a[0],b[1]-a[1])>1e-6)
-            parts.push([a,b,outer[j],outer[i]]);
+            adjacent=i===0 || i===inner.length-2,
+            length=Math.hypot(b[0]-a[0],b[1]-a[1]);
+        if((isCut || (g.side && adjacent)) && length>1e-6)
+            segments.push({i,j,a,b,length});
+    }
+    // 鏡映された隅も含め、輪郭の巻き方向から外向き法線を求める。
+    const area=inner.reduce((sum,a,i)=>{const b=inner[(i+1)%inner.length];return sum+a[0]*b[1]-b[0]*a[1];},0),
+        direction=area>=0?1:-1,
+        same=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1])<1e-8;
+    for(const s of segments) {
+        const {i,j,a,b,length}=s, nx=direction*(b[1]-a[1])/length, ny=-direction*(b[0]-a[0])/length,
+            connectedA=segments.some(t=>t!==s && (same(a,t.a)||same(a,t.b))),
+            connectedB=segments.some(t=>t!==s && (same(b,t.a)||same(b,t.b))),
+            squareA=[a[0]+nx*p,a[1]+ny*p], squareB=[b[0]+nx*p,b[1]+ny*p],
+            // 接続点の留め継ぎは保ち、自由端のみ法線方向へ押し出す。
+            endA=connectedA || window.__legacyCornerFascia ? outer[i] : squareA,
+            endB=connectedB || window.__legacyCornerFascia ? outer[j] : squareB;
+        parts.push([a,b,endB,endA]);
     }
     return {g,inner,outer,parts};
 }

@@ -10089,9 +10089,7 @@ function buildExportDepth(cw, ch, tf) {
                 }
             }
             if (hasStatic) {
-                const sy0 = Math.max(Math.max(0, Math.floor(depthStatic.y0)), ry0),
-                    sy1 = Math.min(Math.min(ch - 1, Math.ceil(depthStatic.y1)), ry1);
-                for (let y = sy0; y <= sy1; y++) {
+                for (let y = ry0; y <= ry1; y++) {
                     const s0 = y * cw + rx0,
                         s1 = y * cw + rx1 + 1;
                     depth.set(depthStatic.buf.subarray(s0, s1), s0);
@@ -10376,7 +10374,146 @@ function layerLineWidth(s) {
     if (!(lineDevMin > 0)) return base;
     return Math.max(base, lineDevMin / Math.max(0.05, lineDevMinScale));
 }
+let fishLineOccluders = null, fishBvhCache = null, fishBlockedPixels = null, fishBlockedWidth = 0, fishBlockedHeight = 0, fishOcclusionEpoch = 0, fishVisiblePixels = null, fishLineSerial = 0, fishCurrentLine = 0;
+function prepareFishLineOccluders() {
+    const seen = new Set(), objects = [];
+    S.forEach((s) => {
+        if (!s.ob || !objectVisible(s.ob) || seen.has(s.ob.id)) return;
+        seen.add(s.ob.id);
+        objects.push(s.ob.attachment && typeof syncAttachedPart === "function" ? syncAttachedPart(s.ob) : s.ob);
+    });
+    const key = objects.map((o) => o.id + ":" + JSON.stringify(o)).join("|"), cam = camPos();
+    if (!fishBvhCache || fishBvhCache.key !== key) {
+        const records = [];
+        for (const o of objects) for (const t of surfaceTriangles(o)) {
+            const a=t[0], e1=V.add(t[1],a,1,-1), e2=V.add(t[2],a,1,-1),
+                lo=[0,1,2].map(i=>Math.min(t[0][i],t[1][i],t[2][i])-1e-7),
+                hi=[0,1,2].map(i=>Math.max(t[0][i],t[1][i],t[2][i])+1e-7);
+            let normal = V.crs(e1, e2), length = Math.hypot(...normal);
+            if (length > 1e-9) normal = normal.map((v) => v / length);
+            if (Math.abs(normal[0]) >= Math.abs(normal[1]) && Math.abs(normal[0]) >= Math.abs(normal[2]) ? normal[0] < 0 : Math.abs(normal[1]) >= Math.abs(normal[2]) ? normal[1] < 0 : normal[2] < 0) normal = normal.map((v) => -v);
+            const plane = normal.map((v) => (Math.abs(v) < 0.0005 ? 0 : v).toFixed(3)).join(",") + "," +
+                (Math.abs(V.dot(normal, a)) < 0.005 ? 0 : V.dot(normal, a)).toFixed(2);
+            records.push({a,e1,e2,lo,hi,mid:lo.map((v,i)=>(v+hi[i])*0.5),owner:o.id,plane});
+        }
+        const makeNode = (items) => {
+            if (!items.length) return null;
+            const lo=[Infinity,Infinity,Infinity], hi=[-Infinity,-Infinity,-Infinity];
+            for(const r of items) for(let i=0;i<3;i++){lo[i]=Math.min(lo[i],r.lo[i]);hi[i]=Math.max(hi[i],r.hi[i]);}
+            if(items.length<=8) return {lo,hi,items};
+            const lengths=lo.map((v,i)=>hi[i]-v), axis=lengths[0]>=lengths[1]&&lengths[0]>=lengths[2]?0:lengths[1]>=lengths[2]?1:2;
+            items.sort((a,b)=>a.mid[axis]-b.mid[axis]);
+            const mid=items.length>>1;
+            return {lo,hi,left:makeNode(items.slice(0,mid)),right:makeNode(items.slice(mid))};
+        };
+        fishBvhCache = {key,records,root:makeNode(records.slice())};
+    }
+    for (const r of fishBvhCache.records) {
+        const v=V.add(cam,r.a,1,-1), e1=r.e1, e2=r.e2,
+            q=[v[1]*e1[2]-v[2]*e1[1],v[2]*e1[0]-v[0]*e1[2],v[0]*e1[1]-v[1]*e1[0]];
+        r.v=v;r.q=q;r.n=e2[0]*q[0]+e2[1]*q[1]+e2[2]*q[2];
+    }
+    fishLineOccluders={root:fishBvhCache.root,cam};
+    fishOcclusionEpoch++;
+}
+const fishBvhStack=[];
+function fishPointOccluded(e) {
+    if (e.fishEpoch === fishOcclusionEpoch) return e.fishBlocked;
+    e.fishEpoch = fishOcclusionEpoch;
+    const set=fishLineOccluders;
+    if (!set || !set.root) return (e.fishBlocked=false);
+    const dir=unscr({x:e.sx,y:e.sy}), dx=dir[0],dy=dir[1],dz=dir[2], limit=e.depth - Math.max(0.008, Math.abs(e.depth)*0.0002),
+        ds=[dx,dy,dz], inv=ds.map(v=>Math.abs(v)<1e-14?Infinity:1/v), cam=set.cam;
+    fishBvhStack.length=0;fishBvhStack.push(set.root);
+    while(fishBvhStack.length) {
+        const node=fishBvhStack.pop();let near=0,far=limit,hit=true;
+        for(let i=0;i<3;i++){
+            if(!Number.isFinite(inv[i])){if(cam[i]<node.lo[i]||cam[i]>node.hi[i]){hit=false;break;}continue;}
+            const a=(node.lo[i]-cam[i])*inv[i],b=(node.hi[i]-cam[i])*inv[i];
+            near=Math.max(near,Math.min(a,b));far=Math.min(far,Math.max(a,b));if(far<near){hit=false;break;}
+        }
+        if(!hit)continue;
+        if(!node.items){if(node.left)fishBvhStack.push(node.left);if(node.right)fishBvhStack.push(node.right);continue;}
+        for(const r of node.items) {
+            const h0=dy*r.e2[2]-dz*r.e2[1], h1=dz*r.e2[0]-dx*r.e2[2], h2=dx*r.e2[1]-dy*r.e2[0],
+                det=r.e1[0]*h0+r.e1[1]*h1+r.e1[2]*h2;
+            if(Math.abs(det)<1e-10) continue;
+            const k=1/det, u=(r.v[0]*h0+r.v[1]*h1+r.v[2]*h2)*k;
+            if(u < -1e-8 || u > 1+1e-8) continue;
+            const v=(dx*r.q[0]+dy*r.q[1]+dz*r.q[2])*k;
+            if(v < -1e-8 || u+v > 1+1e-8) continue;
+            const distance=r.n*k;
+            if(distance>0.0001 && distance<limit) {
+                if (fishBlockedPixels) {
+                    const x=Math.round(e.x),y=Math.round(e.y);
+                    for (let dy=-1;dy<=1;dy++) for (let dx=-1;dx<=1;dx++) {
+                        const xx=x+dx, yy=y+dy;
+                        if(xx>=0&&xx<fishBlockedWidth&&yy>=0&&yy<fishBlockedHeight) {
+                            const i=yy*fishBlockedWidth+xx;
+                            if (!fishBlockedPixels[i]) fishBlockedPixels[i]=fishCurrentLine;
+                        }
+                    }
+                }
+                return (e.fishBlocked=true);
+            }
+        }
+    }
+    return (e.fishBlocked=false);
+}
+function fishNearestSurface(x, y, tf) {
+    const det = tf[0] * tf[3] - tf[1] * tf[2];
+    if (Math.abs(det) < 1e-12 || !fishLineOccluders?.root) return null;
+    const px = x - tf[4], py = y - tf[5],
+        dir = wld(bf({x: (tf[3] * px - tf[2] * py) / det, y: (-tf[1] * px + tf[0] * py) / det})),
+        dx = dir[0], dy = dir[1], dz = dir[2], cam = fishLineOccluders.cam,
+        inv = dir.map((v) => Math.abs(v) < 1e-14 ? Infinity : 1 / v);
+    let distance = Infinity, found = null;
+    fishBvhStack.length = 0;
+    fishBvhStack.push(fishLineOccluders.root);
+    while (fishBvhStack.length) {
+        const node = fishBvhStack.pop();
+        let near = 0, far = distance, hit = true;
+        for (let i = 0; i < 3; i++) {
+            if (!Number.isFinite(inv[i])) {
+                if (cam[i] < node.lo[i] || cam[i] > node.hi[i]) { hit = false; break; }
+                continue;
+            }
+            const a = (node.lo[i] - cam[i]) * inv[i], b = (node.hi[i] - cam[i]) * inv[i];
+            near = Math.max(near, Math.min(a, b));
+            far = Math.min(far, Math.max(a, b));
+            if (far < near) { hit = false; break; }
+        }
+        if (!hit) continue;
+        if (!node.items) {
+            if (node.left) fishBvhStack.push(node.left);
+            if (node.right) fishBvhStack.push(node.right);
+            continue;
+        }
+        for (const r of node.items) {
+            const h0 = dy*r.e2[2] - dz*r.e2[1], h1 = dz*r.e2[0] - dx*r.e2[2], h2 = dx*r.e2[1] - dy*r.e2[0],
+                d = r.e1[0]*h0 + r.e1[1]*h1 + r.e1[2]*h2;
+            if (Math.abs(d) < 1e-10) continue;
+            const k = 1 / d, u = (r.v[0]*h0 + r.v[1]*h1 + r.v[2]*h2) * k;
+            if (u < -1e-8 || u > 1 + 1e-8) continue;
+            const v = (dx*r.q[0] + dy*r.q[1] + dz*r.q[2]) * k;
+            if (v < -1e-8 || u + v > 1 + 1e-8) continue;
+            const t = r.n * k;
+            if (t > 0.0001 && t < distance) { distance = t; found = r; }
+        }
+    }
+    return found ? {owner:found.owner, plane:found.plane, distance} : null;
+}
+function fishFaceInterior(e, owner, tf) {
+    const center = fishNearestSurface(e.x, e.y, tf);
+    if (!center || center.owner !== owner || Math.abs(e.depth - center.distance) > Math.max(0.03, e.depth * 0.002)) return false;
+    for (const d of FACE_CULL_OFFSETS) for (const [x,y] of [[-d,0],[d,0],[0,-d],[0,d]]) {
+        const neighbor = fishNearestSurface(e.x + x, e.y + y, tf);
+        if (!neighbor || neighbor.owner !== owner || neighbor.plane !== center.plane) return false;
+    }
+    return true;
+}
 function strokeWVisible(c, s, depth, cw, ch, tf) {
+    fishCurrentLine = ++fishLineSerial;
     if (s.balconyEmbeddedSupport === true && s.ob?.asset === "balcony" && !window.__showBalconyEmbedded) return;
     const seamLine = s.seam !== undefined && s.seam !== null;
     if (seamLine && !(seamPicks && seamPicks.has(s))) return;
@@ -10396,6 +10533,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     const definitelyOccluded = (e) => {
         const x = Math.round(e.x), y = Math.round(e.y);
         if (x < 0 || x >= cw || y < 0 || y >= ch) return false;
+        if (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) return fishPointOccluded(e);
         if (!window.__noOccl && (!onFace || s.occludeSelf || !depthOwner || depthOwner[y * cw + x] !== myOwner)) {
             const sameOwner = depthOwner && depthOwner[y * cw + x] === myOwner,
                 selfAllowance = onFace && sameOwner ? Math.max(0, Number(s.selfOcclusionAllowance) || 0) : 0,
@@ -10436,6 +10574,12 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         if (x < 0 || x >= cw || y < 0 || y >= ch) return false;
         const i1 = y * cw + x,
             z = window.__noDepthInterp ? depth[i1] : depthAtPoint(depth, cw, ch, e.x, e.y);
+        if (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) {
+            if (fishPointOccluded(e)) return false;
+            if (!onFace && !window.__noFaceCull && depthOwner?.[i1] === myOwner && depthFace?.[i1] &&
+                faceCullAround(cw, ch, x, y, depthFace[i1], myOwner) && fishFaceInterior(e, s.ob.id, tf)) return false;
+            return true;
+        }
         const zNear = Math.max(0.03, Math.abs(z) * 0.005);
         if (!window.__noInFront && e.depth < z - zNear) return true;
         if (!(e.depth > z + CG.depthEps(e.depth))) {
@@ -10472,7 +10616,8 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     };
     const bridgePx = window.__noBridge ? 0 : (window.__bridgePx === undefined ? 9 : Number(window.__bridgePx)) * Math.max(1, Math.abs(tf[0] || 1));
     let lastOk = null;
-    const minRun = window.__minRun === undefined ? 4 : Number(window.__minRun) * Math.max(1, Math.abs(tf[0] || 1)),
+    const minRun = !orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines ? 0 :
+            window.__minRun === undefined ? 4 : Number(window.__minRun) * Math.max(1, Math.abs(tf[0] || 1)),
         shortLine = 10 * Math.max(1, Math.abs(tf[0] || 1));
     let run = [],
         drew = 0,
@@ -10485,6 +10630,19 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         } else {
             c.moveTo(run[0], run[1]);
             for (let i = 2; i < run.length; i += 2) c.lineTo(run[i], run[i + 1]);
+            if (fishVisiblePixels && run.length >= 4) {
+                for (let i = 0; i < run.length; i += 2) {
+                    const x = Math.round(tf[0]*run[i] + tf[2]*run[i+1] + tf[4]),
+                        y = Math.round(tf[1]*run[i] + tf[3]*run[i+1] + tf[5]);
+                    for (let dy=-2;dy<=2;dy++) for (let dx=-2;dx<=2;dx++) {
+                        const xx=x+dx, yy=y+dy;
+                        if(xx<0||xx>=cw||yy<0||yy>=ch) continue;
+                        const index=yy*cw+xx, previous=fishVisiblePixels[index];
+                        if (!previous) fishVisiblePixels[index]=fishCurrentLine;
+                        else if (previous!==fishCurrentLine) fishVisiblePixels[index]=-1;
+                    }
+                }
+            }
             drew++;
         }
         run = [];
@@ -10576,7 +10734,9 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
                     const n = Math.max(1, Math.ceil(len / 2));
                     for (let j = 1; j < n; j++) emit(at(j / n));
                 } else {
-                    const n = Math.max(1, Math.ceil(Math.hypot(v[0] - a[0], v[1] - a[1], v[2] - a[2]) * 10));
+                    const worldN = Math.ceil(Math.hypot(v[0] - a[0], v[1] - a[1], v[2] - a[2]) * 10),
+                        pixelN = !orthView && T === "f" && ea.ok && eb.ok ? Math.ceil(4 * Math.hypot(eb.x - ea.x, eb.y - ea.y)) : 0,
+                        n = Math.max(!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines ? 8 : 1, worldN, pixelN);
                     for (let j = 1; j < n; j++) put(V.add(a, v, 1 - j / n, j / n));
                 }
             }
@@ -10696,6 +10856,12 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
         tfEff = tf || [Z, 0, 0, Z, vs[0], vs[1]];
     x.setTransform(...tfEff);
     const hiddenDepth = hidden ? buildExportDepth(cw, ch, tfEff) : null;
+    if (hiddenDepth && !orthView && T === "f" && !window.__legacyFishLines) {
+        prepareFishLineOccluders();
+        fishBlockedWidth=cw; fishBlockedHeight=ch; fishLineSerial=0;
+        fishBlockedPixels=$("bin").checked ? new Int32Array(cw*ch) : null;
+        fishVisiblePixels=fishBlockedPixels ? new Int32Array(cw*ch) : null;
+    } else { fishLineOccluders = null; fishBlockedPixels = null; fishVisiblePixels = null; }
     if (hiddenDepth) updateSeamPicks(hiddenDepth, cw, ch, tfEff);
     const binNow = $("bin").checked;
     lineDevMin = binNow && !window.__noBinMinW ? (window.__minDevW === undefined ? 1.15 : Number(window.__minDevW)) : 0;
@@ -10720,13 +10886,18 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
                 const v = u32[i];
                 u32[i] = (v >>> 24) < t ? 0 : v | 0xff000000;
             }
-            closeBinGaps(u32, box.w, box.h, window.__binBridge === undefined ? 2 : Number(window.__binBridge));
+            const noFill = fishBlockedPixels ? (i) => {
+                const index=(box.y + Math.floor(i / box.w)) * cw + box.x + i % box.w,
+                    blocked=fishBlockedPixels[index], visible=fishVisiblePixels[index];
+                return !!blocked && !(visible && visible !== blocked);
+            } : null;
+            closeBinGaps(u32, box.w, box.h, window.__binBridge === undefined ? 2 : Number(window.__binBridge), noFill);
             x.putImageData(im, box.x, box.y);
         }
     }
     return LC;
 }
-function closeBinGaps(u32, w, h, strength) {
+function closeBinGaps(u32, w, h, strength, noFill = null) {
     if (!(strength > 0) || w < 3 || h < 3) return;
     const n = w * h;
     let inkCount = 0;
@@ -10773,7 +10944,7 @@ function closeBinGaps(u32, w, h, strength) {
     }
     for (let i = 0; i < fill.length; i++) {
         const idx = fill[i];
-        if (u32[idx] === 0) u32[idx] = 0xff000000;
+        if (u32[idx] === 0 && (!noFill || !noFill(idx))) u32[idx] = 0xff000000;
     }
 }
 function floorGrid(c) {
@@ -15724,13 +15895,26 @@ function cornerCutFasciaParts(o) {
         inner=cornerCutFootprint(q.w,q.d,q.cornerOffset,q.cornerCutCorner),
         outsideOffset=q.cornerOffset>1e-6?q.cornerOffset+(2-Math.SQRT2)*p:0,
         outer=cornerCutFootprint(q.w+2*p,q.d+2*p,outsideOffset,q.cornerCutCorner),
-        parts=[];
+        parts=[], segments=[];
     for(let i=0;i<inner.length;i++) {
         const j=(i+1)%inner.length,a=inner[i],b=inner[j],
             isCut=i===inner.length-1,
-            adjacent=i===0 || i===inner.length-2;
-        if((isCut || (g.side && adjacent)) && Math.hypot(b[0]-a[0],b[1]-a[1])>1e-6)
-            parts.push([a,b,outer[j],outer[i]]);
+            adjacent=i===0 || i===inner.length-2,
+            length=Math.hypot(b[0]-a[0],b[1]-a[1]);
+        if((isCut || (g.side && adjacent)) && length>1e-6)
+            segments.push({i,j,a,b,length});
+    }
+    const area=inner.reduce((sum,a,i)=>{const b=inner[(i+1)%inner.length];return sum+a[0]*b[1]-b[0]*a[1];},0),
+        direction=area>=0?1:-1,
+        same=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1])<1e-8;
+    for(const s of segments) {
+        const {i,j,a,b,length}=s, nx=direction*(b[1]-a[1])/length, ny=-direction*(b[0]-a[0])/length,
+            connectedA=segments.some(t=>t!==s && (same(a,t.a)||same(a,t.b))),
+            connectedB=segments.some(t=>t!==s && (same(b,t.a)||same(b,t.b))),
+            squareA=[a[0]+nx*p,a[1]+ny*p], squareB=[b[0]+nx*p,b[1]+ny*p],
+            endA=connectedA || window.__legacyCornerFascia ? outer[i] : squareA,
+            endB=connectedB || window.__legacyCornerFascia ? outer[j] : squareB;
+        parts.push([a,b,endB,endA]);
     }
     return {g,inner,outer,parts};
 }
@@ -20061,7 +20245,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     }
     el("centerOnScreenSel").onclick = centerSelectionOnScreen;
     function centerFloorViewOnSelection() {
-        if (!window.cityFloorPlanActive || !orthView) {
+        if (!orthView) {
             flashHint("「表示中央へ」は前（7）・横（8）・上（9）のビューで使えます");
             return;
         }
@@ -20070,16 +20254,15 @@ window.cityGridInstallAssetUI = function (bridge) {
             flashHint("表示を寄せたいオブジェクトを選択してください");
             return;
         }
-        const body = objects.filter((o) => !o.attachment?.parentId),
-            b = groupBounds(body.length ? body : objects);
+        const b = groupBounds(objects);
         if (!b || !b.lo || !b.hi) return;
         const c = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2],
-            basis = orthBasis(),
-            sx = orthView === "side" ? Number(P.cz) || 0 : Number(P.cx) || 0,
-            sy = orthView === "top" ? Number(P.cz) || 0 : (Number(P.ch) || 1) - 1,
-            next = [dot3(c, basis.right) + sx, dot3(c, basis.up) + sy],
-            prev = Array.isArray(window.cityFloorPlanCenter) ? window.cityFloorPlanCenter : null;
-        if (prev && Math.hypot(prev[0] - next[0], prev[1] - next[1]) < 1e-3) {
+            tf = [Z, 0, 0, Z, ...viewShift()],
+            p = projPoint(c, tf),
+            sc = orthScale(),
+            prev = orthPlanCenter(),
+            next = [prev[0] + (p.x - W / 2) / sc, prev[1] + (H / 2 - p.y) / sc];
+        if (Math.hypot(p.x - W / 2, p.y - H / 2) < 0.01) {
             flashHint("選択中のオブジェクトはすでに表示の中央にあります");
             return;
         }

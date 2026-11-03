@@ -743,10 +743,10 @@
     //   ・カメラ（P.cx / P.cz / P.ch / yaw / pitch / lens …）も動かさない
     //   ・間取りキャンバスの表示中心（window.cityFloorPlanCenter）だけを寄せる
     // という操作。前／横／上は正投影なので、表示中心と倍率だけで見え方が決まる。
-    // 画面中央に来るワールド座標は「表示中心 − カメラ由来の基準点」なので、
-    // 選択中のオブジェクトの中心がその値になるよう表示中心を置き直す。
+    // 実際の投影位置から表示中心の移動量を求める。カメラ位置に加えて、
+    // キャンバスのズームやパンも考慮する。
     function centerFloorViewOnSelection() {
-        if (!window.cityFloorPlanActive || !orthView) {
+        if (!orthView) {
             flashHint("「表示中央へ」は前（7）・横（8）・上（9）のビューで使えます");
             return;
         }
@@ -755,19 +755,16 @@
             flashHint("表示を寄せたいオブジェクトを選択してください");
             return;
         }
-        // 付属パーツ（テント・看板）まで含めると建物本体がずれるので、
-        // 「画面中央へ」と同じく建物本体（接着していない側）を基準にする。
-        const body = objects.filter((o) => !o.attachment?.parentId),
-            b = groupBounds(body.length ? body : objects);
+        // 選択したものそのものを基準にする。付属パーツ単独の選択も親へすり替えない。
+        const b = groupBounds(objects);
         if (!b || !b.lo || !b.hi) return;
         const c = [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2],
-            basis = orthBasis(),
-            // orthSetup() が使う「カメラ由来の基準点」と同じ値。読むだけで書き換えない。
-            sx = orthView === "side" ? Number(P.cz) || 0 : Number(P.cx) || 0,
-            sy = orthView === "top" ? Number(P.cz) || 0 : (Number(P.ch) || 1) - 1,
-            next = [dot3(c, basis.right) + sx, dot3(c, basis.up) + sy],
-            prev = Array.isArray(window.cityFloorPlanCenter) ? window.cityFloorPlanCenter : null;
-        if (prev && Math.hypot(prev[0] - next[0], prev[1] - next[1]) < 1e-3) {
+            tf = [Z, 0, 0, Z, ...viewShift()],
+            p = projPoint(c, tf),
+            sc = orthScale(),
+            prev = orthPlanCenter(),
+            next = [prev[0] + (p.x - W / 2) / sc, prev[1] + (H / 2 - p.y) / sc];
+        if (Math.hypot(p.x - W / 2, p.y - H / 2) < 0.01) {
             flashHint("選択中のオブジェクトはすでに表示の中央にあります");
             return;
         }
