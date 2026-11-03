@@ -680,3 +680,72 @@ ASSET_KIT.define(
         return parts;
     },
 );
+
+// ===== カウンター（薄い天板＋どっしりした土台）=====
+// 参考写真の「上は薄い板、下は厚い箱」のカウンター。普通／L字／コの字の3種は
+// 足元の輪郭（footprint）だけが違うので、天板の多角形を作り、
+// 土台はその多角形を内側へ縮めて（K.insetPath）作る。
+// 天板の厚さ・土台の高さ・長さは、画面の専用ハンドルで変えられる。
+function counterParts(o, K) {
+    const g = counterFootprint(o),
+        foot = g.foot,
+        // 土台は天板より内側。張り出しの分だけ細くして、天板の縁が線として出るようにする。
+        base = K.insetPath(foot, g.overhang);
+    return [
+        // 1) 天板：薄い板（輪郭はそのまま）
+        K.box(foot, g.H - g.topT, g.H),
+        // 2) 土台：床から天板の裏まで、内側へ引いた箱
+        K.box(base, 0, g.H - g.topT),
+    ];
+}
+
+// --- 普通（まっすぐ）---
+ASSET_KIT.define(
+    "counter",
+    {
+        label: "カウンター",
+        glyph: "▭",
+        w: 2.0,
+        d: 0.6,
+        h: 1.0,
+        accent: "#c9a97a",
+        ctTopT: 0.06, // 天板の厚さ
+        ctArm: 0.55, // L字・コの字の腕の幅（普通は未使用）
+        ctOverhang: 0.06, // 天板の張り出し（土台を内側へ引く量）
+    },
+    counterParts,
+);
+
+// --- L字 ---
+ASSET_KIT.define(
+    "counterL",
+    {
+        label: "L字カウンター",
+        glyph: "└",
+        w: 1.8,
+        d: 1.8,
+        h: 1.0,
+        accent: "#c9a97a",
+        ctTopT: 0.06,
+        ctArm: 0.55,
+        ctOverhang: 0.06,
+    },
+    counterParts,
+);
+
+// --- コの字 ---
+ASSET_KIT.define(
+    "counterU",
+    {
+        label: "コの字カウンター",
+        glyph: "⊔",
+        w: 2.2,
+        d: 1.6,
+        h: 1.0,
+        accent: "#c9a97a",
+        ctTopT: 0.06,
+        ctArm: 0.55,
+        ctOverhang: 0.06,
+    },
+    counterParts,
+);

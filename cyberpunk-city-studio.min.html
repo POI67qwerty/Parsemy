@@ -5824,6 +5824,8 @@ function specialGizmo(o) {
                         ? outdoorUnitGizmo(o)
                       : isSignalAsset(o)
                         ? signalGizmo(o)
+                      : isCounterAsset(o)
+                        ? counterGizmo(o)
                     : o && o.type === "asset" && o.asset === "sign"
                       ? signGizmo(o)
                       : o && o.type === "asset" && o.asset === "cone"
@@ -5916,8 +5918,166 @@ function signalGizmo(o) {
             "ポール",
             { x: 0, y: -1 },
             "#8ce6c2",
+        ),
+        headW = screenHandle(
+            o,
+            "signal-head-w",
+            [g.headW / 2, 0, g.headCz],
+            [g.headW / 2, 0, g.headCz],
+            [g.headW / 2 + 1, 0, g.headCz],
+            g.headW,
+            0.15,
+            4,
+            "頭の幅",
+            { x: 1, y: 0 },
+            "#ffb36f",
+        ),
+        headD = screenHandle(
+            o,
+            "signal-head-d",
+            [0, -g.headD / 2, g.headCz],
+            [0, -g.headD / 2, g.headCz],
+            [0, -g.headD / 2 - 1, g.headCz],
+            g.headD,
+            0.03,
+            2,
+            "奥行き",
+            { x: 0, y: 1 },
+            "#ffd34d",
         );
-    return { o, C3: L2W(o, 0, 0, g.H * 0.5), handles: { poleH: poleHandle } };
+    return { o, C3: L2W(o, 0, 0, g.H * 0.5), handles: { poleH: poleHandle, headW, headD } };
+}
+const COUNTER_SHAPES = { counter: "straight", counterL: "l", counterU: "u" };
+const isCounterAsset = (o) => !!o && o.type === "asset" && Object.prototype.hasOwnProperty.call(COUNTER_SHAPES, o.asset);
+function counterGeometry(o) {
+    const meta = (key, dflt) => {
+            const v = Number(o?.[key]);
+            if (Number.isFinite(v) && v !== 0) return Math.abs(v);
+            const m = Number(ASSETS?.[o?.asset]?.[key]);
+            return Number.isFinite(m) && m !== 0 ? Math.abs(m) : dflt;
+        },
+        W = Math.max(0.3, Math.abs(2 * (Number(o?.ra) || 1))),
+        D = Math.max(0.16, Math.abs(2 * (Number(o?.rb) || 0.3))),
+        H = Math.max(0.3, Math.abs(Number(o?.h) || 1)),
+        topT = Math.max(0.008, Math.min(H * 0.4, meta("ctTopT", 0.06))),
+        baseH = Math.max(0.05, H - topT),
+        arm = Math.max(0.08, Math.min(Math.min(W, D) * 0.62, meta("ctArm", 0.55))),
+        overhang = Math.max(0, Math.min(arm * 0.3, meta("ctOverhang", 0.06)));
+    return { shape: COUNTER_SHAPES[o?.asset] || "straight", W, D, H, topT, baseH, arm, overhang };
+}
+function counterFootprint(o) {
+    const g = counterGeometry(o),
+        hw = g.W / 2,
+        hd = g.D / 2,
+        arm = g.arm,
+        foot =
+            g.shape === "l"
+                ? [
+                      [-hw, -hd],
+                      [hw, -hd],
+                      [hw, -hd + arm],
+                      [-hw + arm, -hd + arm],
+                      [-hw + arm, hd],
+                      [-hw, hd],
+                  ]
+                : g.shape === "u"
+                  ? [
+                        [-hw, -hd],
+                        [hw, -hd],
+                        [hw, hd],
+                        [hw - arm, hd],
+                        [hw - arm, -hd + arm],
+                        [-hw + arm, -hd + arm],
+                        [-hw + arm, hd],
+                        [-hw, hd],
+                    ]
+                  : [
+                        [-hw, -hd],
+                        [hw, -hd],
+                        [hw, hd],
+                        [-hw, hd],
+                    ];
+    return { ...g, foot };
+}
+function counterGizmo(o) {
+    if (!isCounterAsset(o)) return null;
+    const g = counterGeometry(o),
+        hw = g.W / 2,
+        hd = g.D / 2,
+        length = screenHandle(
+            o,
+            "counter-length",
+            [hw, 0, g.H],
+            [hw, 0, g.H],
+            [hw + 1, 0, g.H],
+            g.W,
+            0.4,
+            8,
+            "幅",
+            { x: 1, y: 0 },
+            "#ffb36f",
+        ),
+        topT = screenHandle(
+            o,
+            "counter-top-t",
+            [hw, -hd, g.H],
+            [hw, -hd, g.H],
+            [hw, -hd, g.H + 1],
+            g.topT,
+            0.012,
+            0.3,
+            "天板の厚さ",
+            { x: 0, y: -1 },
+            "#7dd8ff",
+        ),
+        depth = screenHandle(
+            o,
+            "counter-depth",
+            [0, -hd, g.H],
+            [0, -hd, g.H],
+            [0, -hd - 1, g.H],
+            g.D,
+            0.2,
+            6,
+            "奥行き",
+            { x: 0, y: 1 },
+            "#ffd34d",
+        ),
+        baseH = screenHandle(
+            o,
+            "counter-base-h",
+            [-hw, -hd, 0],
+            [-hw, -hd, 0],
+            [-hw, -hd, 1],
+            g.baseH,
+            0.3,
+            3,
+            "土台の高さ",
+            { x: 0, y: -1 },
+            "#8ce6c2",
+        );
+    const zScale = Math.max(60, topT.scale);
+    topT.scale = zScale * 3.5;
+    const handles = { length, depth, topT, baseH };
+    if (g.shape !== "straight") {
+        const ax = Math.min(hw * 0.5, Math.max(0, hw - g.arm - 0.05));
+        handles.arm = screenHandle(
+            o,
+            "counter-arm",
+            [ax, -hd, g.H],
+            [ax, -hd + g.arm, g.H],
+            [ax, -hd + g.arm + 1, g.H],
+            g.arm,
+            0.08,
+            Math.max(0.1, Math.min(g.W, g.D) * 0.62),
+            "腕の太さ",
+            { x: 0, y: -1 },
+            "#c9a97a",
+        );
+        handles.arm.dir = { x: 0, y: -1 };
+        handles.arm.scale = zScale * 2;
+    }
+    return { o, C3: L2W(o, 0, 0, g.H * 0.5), handles };
 }
 let gzLabelRects = [];
 const GZ_LABEL_INK = "#1f2933";
@@ -6299,10 +6459,11 @@ function drawSpecialGizmo(c, o) {
             sq(h.s, h.color || "#ff9f68");
             gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}`, h.s.x + 9 / Z, h.s.y - 8 / Z, h.color || "#ff9f68", 12);
         }
-    } else if (isSignalAsset(sg.o)) {
-        const h = sg.handles?.poleH;
-        if (h?.s?.ok) {
-            const col = h.color || "#8ce6c2";
+    } else if (isCounterAsset(sg.o)) {
+        Object.values(sg.handles || {}).forEach((h) => {
+            if (!h?.s?.ok) return;
+            const col = h.color || "#ffb36f",
+                d = h.dir || { x: 1, y: 0 };
             c.strokeStyle = col;
             c.lineWidth = 1.4 / Z;
             c.setLineDash([5 / Z, 4 / Z]);
@@ -6315,18 +6476,47 @@ function drawSpecialGizmo(c, o) {
             c.setLineDash([]);
             sq(h.s, col, false);
             c.beginPath();
-            c.moveTo(h.s.x, h.s.y - 13 / Z);
-            c.lineTo(h.s.x - 4 / Z, h.s.y - 7 / Z);
-            c.lineTo(h.s.x + 4 / Z, h.s.y - 7 / Z);
-            c.closePath();
-            c.moveTo(h.s.x, h.s.y + 13 / Z);
-            c.lineTo(h.s.x - 4 / Z, h.s.y + 7 / Z);
-            c.lineTo(h.s.x + 4 / Z, h.s.y + 7 / Z);
-            c.closePath();
+            [1, -1].forEach((sgn) => {
+                const ax = h.s.x + d.x * sgn * 13 / Z,
+                    ay = h.s.y + d.y * sgn * 13 / Z;
+                c.moveTo(ax, ay);
+                c.lineTo(ax - d.x * 6 / Z - d.y * 4 / Z, ay - d.y * 6 / Z + d.x * 4 / Z);
+                c.lineTo(ax - d.x * 6 / Z + d.y * 4 / Z, ay - d.y * 6 / Z - d.x * 4 / Z);
+                c.closePath();
+            });
             c.fillStyle = col;
             c.fill();
             gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}m`, h.s.x + 16 / Z, h.s.y - 8 / Z, col, 12);
-        }
+        });
+    } else if (isSignalAsset(sg.o)) {
+        Object.values(sg.handles || {}).forEach((h) => {
+            if (!h?.s?.ok) return;
+            const col = h.color || "#8ce6c2",
+                d = h.dir || { x: 0, y: -1 };
+            c.strokeStyle = col;
+            c.lineWidth = 1.4 / Z;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.beginPath();
+            if (h.anchor?.ok) {
+                c.moveTo(h.anchor.x, h.anchor.y);
+                c.lineTo(h.s.x, h.s.y);
+            }
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, col, false);
+            c.beginPath();
+            [1, -1].forEach((sgn) => {
+                const ax = h.s.x + d.x * sgn * 13 / Z,
+                    ay = h.s.y + d.y * sgn * 13 / Z;
+                c.moveTo(ax, ay);
+                c.lineTo(ax - d.x * 6 / Z - d.y * 4 / Z, ay - d.y * 6 / Z + d.x * 4 / Z);
+                c.lineTo(ax - d.x * 6 / Z + d.y * 4 / Z, ay - d.y * 6 / Z - d.x * 4 / Z);
+                c.closePath();
+            });
+            c.fillStyle = col;
+            c.fill();
+            gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}m`, h.s.x + 16 / Z, h.s.y - 8 / Z, col, 12);
+        });
     } else if (sg.o.asset === "outdoorUnit") {
         const h = sg.handles?.fanX;
         if (h?.s?.ok) {
@@ -7242,7 +7432,8 @@ function hitGizmo(p) {
             active.asset === "stool" ||
             active.asset === "railing" ||
             active.asset === "outdoorUnit" ||
-            isSignalAsset(active)
+            isSignalAsset(active) ||
+            isCounterAsset(active)
         ) {
             const nearest = nearestHandleOf(Object.values(special.handles || {}), p, R),
                 hit = handleOrFace(nearest, (q) => ({
@@ -7777,6 +7968,13 @@ function beginGizmo(h, p) {
         h.t.startsWith("railing-") ||
         h.t === "outdoor-fan-x" ||
         h.t === "signal-pole-h" ||
+        h.t === "signal-head-w" ||
+        h.t === "signal-head-d" ||
+        h.t === "counter-length" ||
+        h.t === "counter-depth" ||
+        h.t === "counter-arm" ||
+        h.t === "counter-top-t" ||
+        h.t === "counter-base-h" ||
         h.t === "circle-radius" ||
         h.t === "wallSideSign-beveled-offset" ||
         h.t === "wallSideSign-bracket-length" ||
@@ -7960,6 +8158,44 @@ function dragEdit(p, freeRotation = false) {
             key = KEY[ed.t],
             num = h.integer ? Math.round(value) : Math.round(value * 1000) / 1000;
         if (key) patch = { [key]: num };
+    } else if (ed.t === "counter-length") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { ra: Math.round(value * 500) / 1000 };
+    } else if (ed.t === "counter-arm") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { ctArm: Math.round(value * 1000) / 1000 };
+    } else if (ed.t === "counter-depth") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { rb: Math.round(value * 500) / 1000 };
+    } else if (ed.t === "counter-top-t") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { ctTopT: Math.round(value * 1000) / 1000 };
+    } else if (ed.t === "counter-base-h") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        const topT = counterGeometry(ed.o0).topT;
+        patch = { h: Math.round((value + topT) * 1000) / 1000 };
+    } else if (ed.t === "signal-head-w" || ed.t === "signal-head-d") {
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max),
+            half = Math.round(value * 500) / 1000;
+        patch = ed.t === "signal-head-w" ? { ra: half } : { rb: half };
     } else if (ed.t === "signal-pole-h") {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
@@ -15719,6 +15955,24 @@ const ASSET_KIT = (function () {
     function scalePath(path, su = 1, sv = 1, cu = 0, cv = 0) {
         return path.map(([u, v]) => [cu + (u - cu) * su, cv + (v - cv) * sv]);
     }
+    function insetPath(path, t) {
+        const n = (path || []).length,
+            off = Math.abs(Number(t) || 0);
+        if (n < 3 || off < 1e-9) return (path || []).map(([u, v]) => [u, v]);
+        const dir = (a, b) => {
+            const du = b[0] - a[0],
+                dv = b[1] - a[1],
+                len = Math.hypot(du, dv) || 1;
+            return [(-dv / len) * off, (du / len) * off];
+        };
+        return path.map((v, k) => {
+            const p = path[(k - 1 + n) % n],
+                q = path[(k + 1) % n],
+                a = dir(p, v),
+                b = dir(v, q);
+            return [v[0] + a[0] + b[0], v[1] + a[1] + b[1]];
+        });
+    }
     function rotatePath(path, deg, cu = 0, cv = 0) {
         const t = (deg * Math.PI) / 180,
             c = Math.cos(t),
@@ -16269,6 +16523,7 @@ const ASSET_KIT = (function () {
         circlePath,
         offsetPath,
         scalePath,
+        insetPath,
         rotatePath,
         prism,
         box,
@@ -16992,6 +17247,60 @@ ASSET_KIT.define(
         );
         return parts;
     },
+);
+function counterParts(o, K) {
+    const g = counterFootprint(o),
+        foot = g.foot,
+        base = K.insetPath(foot, g.overhang);
+    return [
+        K.box(foot, g.H - g.topT, g.H),
+        K.box(base, 0, g.H - g.topT),
+    ];
+}
+ASSET_KIT.define(
+    "counter",
+    {
+        label: "カウンター",
+        glyph: "▭",
+        w: 2.0,
+        d: 0.6,
+        h: 1.0,
+        accent: "#c9a97a",
+        ctTopT: 0.06,
+        ctArm: 0.55,
+        ctOverhang: 0.06,
+    },
+    counterParts,
+);
+ASSET_KIT.define(
+    "counterL",
+    {
+        label: "L字カウンター",
+        glyph: "└",
+        w: 1.8,
+        d: 1.8,
+        h: 1.0,
+        accent: "#c9a97a",
+        ctTopT: 0.06,
+        ctArm: 0.55,
+        ctOverhang: 0.06,
+    },
+    counterParts,
+);
+ASSET_KIT.define(
+    "counterU",
+    {
+        label: "コの字カウンター",
+        glyph: "⊔",
+        w: 2.2,
+        d: 1.6,
+        h: 1.0,
+        accent: "#c9a97a",
+        ctTopT: 0.06,
+        ctArm: 0.55,
+        ctOverhang: 0.06,
+    },
+    counterParts,
 );
 "use strict";
 window.cityGridInstallAssetUI = function (bridge) {
@@ -17898,6 +18207,9 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "recessedStackedBuilding",
                 "beveledStackedBuilding",
                 "stall",
+                "counter",
+                "counterL",
+                "counterU",
             ],
         },
         {

@@ -121,6 +121,29 @@ const ASSET_KIT = (function () {
     function scalePath(path, su = 1, sv = 1, cu = 0, cv = 0) {
         return path.map(([u, v]) => [cu + (u - cu) * su, cv + (v - cv) * sv]);
     }
+    // 多角形を内側へ t だけ縮める（L字・コの字のような「凹みのある」形でも使える）。
+    // 反時計回りの多角形を前提に、各辺を左（＝内側）へ t ずらし、頂点では
+    // 隣り合う2辺のずらし量を足して交点を作る。辺が軸に平行な図形なら、
+    // この足し算がそのまま正しい角の位置になる（凸でも凹でも同じ）。
+    function insetPath(path, t) {
+        const n = (path || []).length,
+            off = Math.abs(Number(t) || 0);
+        if (n < 3 || off < 1e-9) return (path || []).map(([u, v]) => [u, v]);
+        const dir = (a, b) => {
+            const du = b[0] - a[0],
+                dv = b[1] - a[1],
+                len = Math.hypot(du, dv) || 1;
+            // 左向きの法線（反時計回りの多角形では内側を向く）
+            return [(-dv / len) * off, (du / len) * off];
+        };
+        return path.map((v, k) => {
+            const p = path[(k - 1 + n) % n],
+                q = path[(k + 1) % n],
+                a = dir(p, v),
+                b = dir(v, q);
+            return [v[0] + a[0] + b[0], v[1] + a[1] + b[1]];
+        });
+    }
     function rotatePath(path, deg, cu = 0, cv = 0) {
         const t = (deg * Math.PI) / 180,
             c = Math.cos(t),
@@ -745,6 +768,7 @@ const ASSET_KIT = (function () {
         circlePath,
         offsetPath,
         scalePath,
+        insetPath,
         rotatePath,
         // 部品
         prism,

@@ -2448,6 +2448,8 @@ function specialGizmo(o) {
                         ? outdoorUnitGizmo(o)
                       : isSignalAsset(o)
                         ? signalGizmo(o)
+                      : isCounterAsset(o)
+                        ? counterGizmo(o)
                     : o && o.type === "asset" && o.asset === "sign"
                       ? signGizmo(o)
                       : o && o.type === "asset" && o.asset === "cone"
@@ -2556,8 +2558,189 @@ function signalGizmo(o) {
             "ポール",
             { x: 0, y: -1 },
             "#8ce6c2",
+        ),
+        // 頭（灯器・標識板）の幅と奥行き。左右／前後の面ハンドルでも変えられるが、
+        // 数値の目安が読めるよう、専用のハンドルも出す。
+        headW = screenHandle(
+            o,
+            "signal-head-w",
+            [g.headW / 2, 0, g.headCz], // 頭の右端から、右へ
+            [g.headW / 2, 0, g.headCz],
+            [g.headW / 2 + 1, 0, g.headCz],
+            g.headW,
+            0.15,
+            4,
+            "頭の幅",
+            { x: 1, y: 0 },
+            "#ffb36f",
+        ),
+        headD = screenHandle(
+            o,
+            "signal-head-d",
+            [0, -g.headD / 2, g.headCz], // 頭の手前の面から、手前へ
+            [0, -g.headD / 2, g.headCz],
+            [0, -g.headD / 2 - 1, g.headCz],
+            g.headD,
+            0.03,
+            2,
+            "奥行き",
+            { x: 0, y: 1 },
+            "#ffd34d",
         );
-    return { o, C3: L2W(o, 0, 0, g.H * 0.5), handles: { poleH: poleHandle } };
+    return { o, C3: L2W(o, 0, 0, g.H * 0.5), handles: { poleH: poleHandle, headW, headD } };
+}
+
+// ===== カウンター（テーブル天板が薄く、下の土台がどっしりしたもの）=====
+// 「普通／L字／コの字」の3種は、どれも同じ作り（薄い天板＋内側へ引いた土台）。
+// 形の違いは「足元の輪郭（footprint）」だけなので、天板の多角形を1か所で作り、
+// 土台はその多角形を内側へ縮めて作る（K.insetPath）。
+const COUNTER_SHAPES = { counter: "straight", counterL: "l", counterU: "u" };
+const isCounterAsset = (o) => !!o && o.type === "asset" && Object.prototype.hasOwnProperty.call(COUNTER_SHAPES, o.asset);
+function counterGeometry(o) {
+    // 数値は o → ASSETS の初期値 → 決め打ち、の順に見る（キットの K.param と同じ規則）。
+    const meta = (key, dflt) => {
+            const v = Number(o?.[key]);
+            if (Number.isFinite(v) && v !== 0) return Math.abs(v);
+            const m = Number(ASSETS?.[o?.asset]?.[key]);
+            return Number.isFinite(m) && m !== 0 ? Math.abs(m) : dflt;
+        },
+        W = Math.max(0.3, Math.abs(2 * (Number(o?.ra) || 1))),
+        D = Math.max(0.16, Math.abs(2 * (Number(o?.rb) || 0.3))),
+        H = Math.max(0.3, Math.abs(Number(o?.h) || 1)),
+        // 天板の厚さは「高さの4割」まで。土台が消えないようにする。
+        topT = Math.max(0.008, Math.min(H * 0.4, meta("ctTopT", 0.06))),
+        baseH = Math.max(0.05, H - topT),
+        // L字・コの字の腕の幅。幅・奥行きのどちらも 62% を超えると、
+        // 腕が反対側まで届いて「L」「コ」の形が壊れる（凹みが消える）。
+        // 横長・縦長に極端に伸ばしても形が保たれるよう、ここで頭打ちにする。
+        arm = Math.max(0.08, Math.min(Math.min(W, D) * 0.62, meta("ctArm", 0.55))),
+        // 天板の張り出し（土台をこれだけ内側へ引く）
+        overhang = Math.max(0, Math.min(arm * 0.3, meta("ctOverhang", 0.06)));
+    return { shape: COUNTER_SHAPES[o?.asset] || "straight", W, D, H, topT, baseH, arm, overhang };
+}
+// 天板の輪郭（奥行き方向は y）。反時計回りで返す。
+function counterFootprint(o) {
+    const g = counterGeometry(o),
+        hw = g.W / 2,
+        hd = g.D / 2,
+        arm = g.arm,
+        foot =
+            g.shape === "l"
+                ? [
+                      [-hw, -hd],
+                      [hw, -hd],
+                      [hw, -hd + arm],
+                      [-hw + arm, -hd + arm],
+                      [-hw + arm, hd],
+                      [-hw, hd],
+                  ]
+                : g.shape === "u"
+                  ? [
+                        [-hw, -hd],
+                        [hw, -hd],
+                        [hw, hd],
+                        [hw - arm, hd],
+                        [hw - arm, -hd + arm],
+                        [-hw + arm, -hd + arm],
+                        [-hw + arm, hd],
+                        [-hw, hd],
+                    ]
+                  : [
+                        [-hw, -hd],
+                        [hw, -hd],
+                        [hw, hd],
+                        [-hw, hd],
+                    ];
+    return { ...g, foot };
+}
+// カウンターの画面ハンドル：長さ／天板の厚さ／土台の高さ。
+function counterGizmo(o) {
+    if (!isCounterAsset(o)) return null;
+    const g = counterGeometry(o),
+        hw = g.W / 2,
+        hd = g.D / 2,
+        length = screenHandle(
+            o,
+            "counter-length",
+            [hw, 0, g.H], // 右端の上の角から、右へ
+            [hw, 0, g.H],
+            [hw + 1, 0, g.H],
+            g.W,
+            0.4,
+            8,
+            "幅",
+            { x: 1, y: 0 },
+            "#ffb36f",
+        ),
+        // 天板の厚さは 6cm 程度と小さい。1m の物差しで測ると 1px で 2cm 以上動いて
+        // しまうので、倍率を 3.5 倍にして「ゆっくり」動かせるようにする。
+        topT = screenHandle(
+            o,
+            "counter-top-t",
+            [hw, -hd, g.H],
+            [hw, -hd, g.H],
+            [hw, -hd, g.H + 1],
+            g.topT,
+            0.012,
+            0.3,
+            "天板の厚さ",
+            { x: 0, y: -1 },
+            "#7dd8ff",
+        ),
+        depth = screenHandle(
+            o,
+            "counter-depth",
+            [0, -hd, g.H], // 手前の縁の真ん中から、手前へ
+            [0, -hd, g.H],
+            [0, -hd - 1, g.H],
+            g.D,
+            0.2,
+            6,
+            "奥行き",
+            { x: 0, y: 1 },
+            "#ffd34d",
+        ),
+        baseH = screenHandle(
+            o,
+            "counter-base-h",
+            [-hw, -hd, 0],
+            [-hw, -hd, 0],
+            [-hw, -hd, 1],
+            g.baseH,
+            0.3,
+            3,
+            "土台の高さ",
+            { x: 0, y: -1 },
+            "#8ce6c2",
+        );
+    const zScale = Math.max(60, topT.scale); // 画面の上下 1m の長さ（px）
+    topT.scale = zScale * 3.5;
+    // L字・コの字だけ：腕の太さ（コの字の棒の太さ）。
+    // 手前の縁から内側の縁までを破線で示し、内側の縁の四角を前後へ動かして太さを変える。
+    // 奥行きハンドル（x=0）と重ならないよう、少し右へずらした位置に置く。
+    const handles = { length, depth, topT, baseH };
+    if (g.shape !== "straight") {
+        const ax = Math.min(hw * 0.5, Math.max(0, hw - g.arm - 0.05));
+        handles.arm = screenHandle(
+            o,
+            "counter-arm",
+            [ax, -hd, g.H], // 手前の縁から
+            [ax, -hd + g.arm, g.H], // 内側の縁（ここを掴む）
+            [ax, -hd + g.arm + 1, g.H], // 1m 奥を向きの基準に（ドラッグ 1:1）
+            g.arm,
+            0.08,
+            Math.max(0.1, Math.min(g.W, g.D) * 0.62),
+            "腕の太さ",
+            { x: 0, y: -1 },
+            "#c9a97a",
+        );
+        // 太さは 5cm 程度の値なので、画面の上下方向へ「ゆっくり」動かす。
+        // 奥行き（+y）方向の投影は、見下ろしが浅いビューでほぼ潰れて
+        // 数十 px 動かしても 2cm しか変わらないため、掴む向きは上下に固定する。
+        handles.arm.dir = { x: 0, y: -1 };
+        handles.arm.scale = zScale * 2;
+    }
+    return { o, C3: L2W(o, 0, 0, g.H * 0.5), handles };
 }
 
 // ===== 画面上のラベル（白い用紙でも読める共通表示） =====
@@ -2969,11 +3152,44 @@ function drawSpecialGizmo(c, o) {
             sq(h.s, h.color || "#ff9f68");
             gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}`, h.s.x + 9 / Z, h.s.y - 8 / Z, h.color || "#ff9f68", 12);
         }
+    } else if (isCounterAsset(sg.o)) {
+        // 長さ（左右）／天板の厚さ（上下・ゆっくり）／土台の高さ（上下）の3本。
+        Object.values(sg.handles || {}).forEach((h) => {
+            if (!h?.s?.ok) return;
+            const col = h.color || "#ffb36f",
+                d = h.dir || { x: 1, y: 0 };
+            c.strokeStyle = col;
+            c.lineWidth = 1.4 / Z;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.beginPath();
+            if (h.anchor?.ok) {
+                c.moveTo(h.anchor.x, h.anchor.y);
+                c.lineTo(h.s.x, h.s.y);
+            }
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, col, false);
+            // 動く向き（左右または上下）へ小さな矢じりを2つ
+            c.beginPath();
+            [1, -1].forEach((sgn) => {
+                const ax = h.s.x + d.x * sgn * 13 / Z,
+                    ay = h.s.y + d.y * sgn * 13 / Z;
+                c.moveTo(ax, ay);
+                c.lineTo(ax - d.x * 6 / Z - d.y * 4 / Z, ay - d.y * 6 / Z + d.x * 4 / Z);
+                c.lineTo(ax - d.x * 6 / Z + d.y * 4 / Z, ay - d.y * 6 / Z - d.x * 4 / Z);
+                c.closePath();
+            });
+            c.fillStyle = col;
+            c.fill();
+            gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}m`, h.s.x + 16 / Z, h.s.y - 8 / Z, col, 12);
+        });
     } else if (isSignalAsset(sg.o)) {
-        // ポールの高さハンドル。上下の矢印で「縦に伸びる」ことを示す。
-        const h = sg.handles?.poleH;
-        if (h?.s?.ok) {
-            const col = h.color || "#8ce6c2";
+        // ポールの高さ（上下）／頭の幅（左右）／奥行き（前後）の3本。
+        // どれも「動く向き」へ矢じりを2つ付けて、掴む前に向きが分かるようにする。
+        Object.values(sg.handles || {}).forEach((h) => {
+            if (!h?.s?.ok) return;
+            const col = h.color || "#8ce6c2",
+                d = h.dir || { x: 0, y: -1 };
             c.strokeStyle = col;
             c.lineWidth = 1.4 / Z;
             c.setLineDash([5 / Z, 4 / Z]);
@@ -2986,18 +3202,18 @@ function drawSpecialGizmo(c, o) {
             c.setLineDash([]);
             sq(h.s, col, false);
             c.beginPath();
-            c.moveTo(h.s.x, h.s.y - 13 / Z);
-            c.lineTo(h.s.x - 4 / Z, h.s.y - 7 / Z);
-            c.lineTo(h.s.x + 4 / Z, h.s.y - 7 / Z);
-            c.closePath();
-            c.moveTo(h.s.x, h.s.y + 13 / Z);
-            c.lineTo(h.s.x - 4 / Z, h.s.y + 7 / Z);
-            c.lineTo(h.s.x + 4 / Z, h.s.y + 7 / Z);
-            c.closePath();
+            [1, -1].forEach((sgn) => {
+                const ax = h.s.x + d.x * sgn * 13 / Z,
+                    ay = h.s.y + d.y * sgn * 13 / Z;
+                c.moveTo(ax, ay);
+                c.lineTo(ax - d.x * 6 / Z - d.y * 4 / Z, ay - d.y * 6 / Z + d.x * 4 / Z);
+                c.lineTo(ax - d.x * 6 / Z + d.y * 4 / Z, ay - d.y * 6 / Z - d.x * 4 / Z);
+                c.closePath();
+            });
             c.fillStyle = col;
             c.fill();
             gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}m`, h.s.x + 16 / Z, h.s.y - 8 / Z, col, 12);
-        }
+        });
     } else if (sg.o.asset === "outdoorUnit") {
         // ファンの左右位置ハンドル1本。左右の矢印で「横にだけ動く」ことを示す。
         const h = sg.handles?.fanX;
@@ -4031,7 +4247,8 @@ function hitGizmo(p) {
             active.asset === "stool" ||
             active.asset === "railing" ||
             active.asset === "outdoorUnit" ||
-            isSignalAsset(active)
+            isSignalAsset(active) ||
+            isCounterAsset(active)
         ) {
             const nearest = nearestHandleOf(Object.values(special.handles || {}), p, R),
                 hit = handleOrFace(nearest, (q) => ({
@@ -4620,6 +4837,13 @@ function beginGizmo(h, p) {
         h.t.startsWith("railing-") ||
         h.t === "outdoor-fan-x" ||
         h.t === "signal-pole-h" ||
+        h.t === "signal-head-w" ||
+        h.t === "signal-head-d" ||
+        h.t === "counter-length" ||
+        h.t === "counter-depth" ||
+        h.t === "counter-arm" ||
+        h.t === "counter-top-t" ||
+        h.t === "counter-base-h" ||
         h.t === "circle-radius" ||
         h.t === "wallSideSign-beveled-offset" ||
         h.t === "wallSideSign-bracket-length" ||
@@ -4819,6 +5043,50 @@ function dragEdit(p, freeRotation = false) {
             // 本数は整数。ほかの2つは 0.001 刻みで扱う（数値欄と同じ桁）。
             num = h.integer ? Math.round(value) : Math.round(value * 1000) / 1000;
         if (key) patch = { [key]: num };
+    } else if (ed.t === "counter-length") {
+        // 長さ（＝左右の幅）。左右へ同じだけ伸びる。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { ra: Math.round(value * 500) / 1000 };
+    } else if (ed.t === "counter-arm") {
+        // L字・コの字の腕の太さ。天板も土台も同じ太さで一緒に変わる。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { ctArm: Math.round(value * 1000) / 1000 };
+    } else if (ed.t === "counter-depth") {
+        // 奥行き（縦の長さ）。L字・コの字の腕の長さもこれで決まる。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { rb: Math.round(value * 500) / 1000 };
+    } else if (ed.t === "counter-top-t") {
+        // 天板の厚さ。全体の高さ h は変えず、土台がその分だけ縮む。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        patch = { ctTopT: Math.round(value * 1000) / 1000 };
+    } else if (ed.t === "counter-base-h") {
+        // 土台の高さ。天板は土台の上に載っているので、全体の高さ h を同じだけ変える。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
+        const topT = counterGeometry(ed.o0).topT;
+        patch = { h: Math.round((value + topT) * 1000) / 1000 };
+    } else if (ed.t === "signal-head-w" || ed.t === "signal-head-d") {
+        // 頭の幅（左右）と奥行き（前後）。左右・前後は対称に広がる。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max),
+            half = Math.round(value * 500) / 1000;
+        patch = ed.t === "signal-head-w" ? { ra: half } : { rb: half };
     } else if (ed.t === "signal-pole-h") {
         // ポールの高さ（＝アセットの高さ）。頭はポールの上に載るので、
         // 伸ばすと信号機・標識ごと上へ上がる。

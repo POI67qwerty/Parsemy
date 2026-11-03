@@ -1002,6 +1002,11 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "beveledStackedBuilding",
                 // 屋台は「建物として置くもの」なので建物グループへ入れる。
                 "stall",
+                // カウンター（普通／L字／コの字）も「建物として置くもの」。
+                // 長さ・奥行き・天板の厚さ・土台の高さは画面のハンドルで変えられる。
+                "counter",
+                "counterL",
+                "counterU",
             ],
         },
         {
