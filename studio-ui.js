@@ -1312,8 +1312,6 @@
                 ["recessedWindowMarginLeft", q.marginLeft],
                 ["recessedWindowMarginEnd", q.marginEnd],
                 ["recessedWindowDepth", q.windowDepth],
-                ["recessedBeamHeight", q.beamHeight],
-                ["recessedBeamProjection", q.beamProjection],
             ];
         values.forEach(([id, value]) => {
             const input = el(id);
@@ -1340,8 +1338,6 @@
                     recessedWindowMarginLeft: [0, Math.max(0, q.w - q.cornerBevel - 0.2)],
                     recessedWindowMarginEnd: [0, Math.max(0, q.d - q.cornerBevel - 0.2)],
                     recessedWindowDepth: [0.025, Math.max(0.025, recessedMaxInset(q.w, q.d))],
-                    recessedBeamHeight: [0, Math.min(0.6, q.floorHeight * 0.35)],
-                    recessedBeamProjection: [0, Math.max(0, Math.min(q.w - q.cornerBevel, q.d) * 0.25)],
                 }[name],
                 value = Number(rawValue);
             if (!limits || !Number.isFinite(value)) return;
@@ -1375,8 +1371,6 @@
         ["recessedWindowMarginLeft", "recessedWindowMarginLeft"],
         ["recessedWindowMarginEnd", "recessedWindowMarginEnd"],
         ["recessedWindowDepth", "recessedWindowDepth"],
-        ["recessedBeamHeight", "recessedBeamHeight"],
-        ["recessedBeamProjection", "recessedBeamProjection"],
     ].forEach(([id, name]) => {
         const input = el(id);
         if (!input) return;

@@ -173,6 +173,47 @@
         return parts;
     });
 
+    // ---- 五角形の立体（車のキャブ・上端を斜めに落とした塊）----
+    // 「前の面 → 斜め → 上面 → 背面」の五角形を、左右（x）へ押し出した立体。
+    //   w      … 幅（左右）。押し出す長さ
+    //   frontY / backY … 前の面・背面の y（正面は -Y）
+    //   edgeH  … 前の面の上端（＝「下がってる線」の高さ）
+    //   roofH  … 上面の高さ
+    //   slant  … 斜めの面が前後へ走る長さ（上面の始まり）
+    // 前の面・上面・背面が四角形になるので、軽トラのキャブも建物の塊もこれ1つで作れる。
+    K.registerPart("pentaPrism", (o) => {
+        const w = num(o.w, 1.6),
+            L = num(o.L, 2),
+            backY = num(o.backY, L / 2),
+            frontY = num(o.frontY, backY - L),
+            roofH = num(o.roofH, 1.6),
+            edgeH = Math.max(0.02, Math.min(num(o.edgeH, roofH * 0.45), roofH - 0.02)),
+            slant = Math.max(
+                0.01,
+                Math.min(num(o.slant, (roofH - edgeH) * 0.9), Math.max(0.01, backY - frontY - 0.02)),
+            ),
+            profile = [
+                [frontY, 0],
+                [frontY, edgeH],
+                [frontY + slant, roofH],
+                [backY, roofH],
+                [backY, 0],
+            ],
+            // 面を貼る側（三角形の向き）をそろえるため、反時計回りに直す。
+            path = K.area2(profile) < 0 ? profile.slice().reverse() : profile;
+        return [K.box(path, -w / 2, w / 2, { axis: "x" })];
+    });
+
+    // ---- タイヤ：円柱の左右の輪と少数の側面の母線 ----
+    K.registerPart("tire", (o) => {
+        const r = num(o.r, 0.3), t = num(o.t, 0.16), x = num(o.x, 0),
+            axleY = num(o.axleY, 0),
+            z = Number.isFinite(Number(o.z)) ? Number(o.z) : 0,
+            seg = Math.max(8, Math.round(num(o.seg, 16))),
+            verts = Number.isFinite(Number(o.verts)) ? Math.max(0, Math.round(Number(o.verts))) : 4;
+        return K.moveParts([K.cylinder(r, x - t / 2, x + t / 2, { axis: "x", seg, cy: r + z, verts })], 0, axleY, 0);
+    });
+
     // ---- 看板：板＋文字 ----
     K.registerPart("signBoard", (o) => {
         const w = num(o.w, 1.2),

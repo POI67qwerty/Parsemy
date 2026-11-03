@@ -2446,6 +2446,8 @@ function specialGizmo(o) {
                         ? stoolGizmo(o)
                       : o && o.type === "asset" && o.asset === "outdoorUnit"
                         ? outdoorUnitGizmo(o)
+                      : isVehicleAsset(o)
+                        ? vehicleGizmo(o)
                       : isSignalAsset(o)
                         ? signalGizmo(o)
                       : isCounterAsset(o)
@@ -2743,6 +2745,354 @@ function counterGizmo(o) {
         // 数十 px 動かしても 2cm しか変わらないため、掴む向きは上下に固定する。
         handles.arm.dir = { x: 0, y: -1 };
         handles.arm.scale = zScale * 2;
+    }
+    return { o, C3: L2W(o, 0, 0, g.H * 0.5), handles };
+}
+
+// ===== 五角形の立体と車（軽トラ・軽バン・乗用車）=====
+// 五角形の立体（キャブ）・荷台・タイヤは、どれも同じ寸法の組から作る。
+// 形を決める値をここ1か所にまとめ、線画（asset-kit-assets.js）とハンドルが
+// 同じ値を見るようにする（幅を変えたのにタイヤだけ動く、を防ぐ）。
+const VEHICLE_CFG = {
+    // pentaBox は「五角形の立体」そのもの（建物の塊）。荷台もタイヤも無い。
+    pentaBox: { bed: false, wheels: false, mode: "penta" },
+    keiTruck: { bed: true, wheels: true, mode: "penta" },
+    keiVan: { bed: false, wheels: true, mode: "penta" },
+    // 乗用車：前も後ろも斜めに落とした六角形（前の下がってる線＋後ろの下がってる線）。
+    sedan: { bed: false, wheels: true, mode: "penta", hex: true },
+    // 乗用車2：低い前の直方体＋高い後ろの直方体（L字の断面）＋タイヤ。
+    sedan2: { bed: false, wheels: true, mode: "step" },
+};
+const isVehicleAsset = (o) => !!o && o.type === "asset" && Object.prototype.hasOwnProperty.call(VEHICLE_CFG, o.asset);
+function pentaGeometry(o) {
+    // 0 は「触っていない」ではなく、そのまま値として扱う（前の面の前後は 0 が基準）。
+    const meta = (key, dflt) => {
+            const v = o?.[key];
+            if (v !== undefined && v !== null && v !== "") {
+                const n = Number(v);
+                if (Number.isFinite(n)) return n;
+            }
+            const m = ASSETS?.[o?.asset]?.[key];
+            return Number.isFinite(Number(m)) ? Number(m) : dflt;
+        },
+        num = (v, dflt) => (Number.isFinite(Number(v)) && Math.abs(Number(v)) > 1e-6 ? Math.abs(Number(v)) : dflt),
+        clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v)),
+        cfg = VEHICLE_CFG[o?.asset] || VEHICLE_CFG.pentaBox,
+        meta0 = ASSETS?.[o?.asset] || {},
+        W = Math.max(0.3, 2 * num(o?.ra, Math.max(0.15, (meta0.w || 1.4) / 2))),
+        L = Math.max(0.4, 2 * num(o?.rb, Math.max(0.2, (meta0.d || 2.4) / 2))),
+        H = Math.max(0.3, num(o?.h, meta0.h || 1.6)),
+        // 前の面（-Y）は前後へ出し入れできる。前に出すと車体がその分だけ長くなる。
+        nose = clamp(meta("vhNose", 0), -L * 0.35, L * 0.8),
+        // 後ろの面も同じように前後へ（＋で後ろへ伸びる）。
+        tail = clamp(meta("vhTail", 0), -L * 0.6, L * 0.35),
+        yF = -L / 2 - nose,
+        yB = L / 2 + tail,
+        // 荷台の長さ・高さ。荷台が無い種類でも値は持つ（切り替えても形が保たれる）。
+        bedL = clamp(meta("vhBedL", Math.min(L * 0.52, L - 0.6)), 0.2, Math.max(0.25, L - 0.5)),
+        bedH = clamp(meta("vhBedH", H * 0.55), 0.05, Math.max(0.1, H - 0.05)),
+        // キャブ（五角形）の後ろ＝荷台の前。
+        backY = cfg.bed ? yB - bedL : yB,
+        // 「下がってる線」＝前の面の上端。ここから斜めの面が屋根へ上がる。
+        edgeH = clamp(meta("vhFrontH", H * 0.55), 0.06, Math.max(0.08, H - 0.06)),
+        slant = clamp((H - edgeH) * 0.55, 0.02, Math.max(0.03, backY - yF - 0.04)),
+        // 後ろの「下がってる線」（六角形のときだけ）。0 なら今までどおりの五角形。
+        rearH = cfg.hex ? clamp(meta("vhRearH", H * 0.72), 0.06, Math.max(0.08, H - 0.06)) : 0,
+        rearSlant =
+            rearH > 0 ? clamp((H - rearH) * 0.5, 0.02, Math.max(0.03, backY - yF - slant - 0.05)) : 0,
+        // 前の直方体の高さ（L字の断面のとき）と、その境目の位置。
+        frontBoxH = clamp(meta("vhFrontBoxH", H * 0.5), 0.08, Math.max(0.1, H - 0.05)),
+        stepY = clamp(
+            yF + meta("vhStep", Math.max(0.3, L * 0.42)),
+            yF + 0.2,
+            Math.max(yF + 0.25, yB - 0.2),
+        ),
+        // タイヤ。太さ・大きさ・左右の間隔・前後の間隔・上下をそれぞれ独立に持つ。
+        tireR = clamp(meta("vhTireR", Math.max(0.16, H * 0.17)), 0.06, Math.max(0.1, Math.min(0.7, H * 0.45))),
+        tireW = clamp(meta("vhTireW", 0.16), 0.04, Math.max(0.05, W * 0.6)),
+        // タイヤは車体の側面から少しだけ外へ出す（線画で円が見えるように）。
+        // 狭めると車体の中へ入り、その分は隠れ線として消える。
+        track = clamp(meta("vhTrack", W + 0.04), 0.2, W + 1.4),
+        // タイヤの上下（0 で地面に接する。上げると浮く）。
+        tireZ = clamp(meta("vhTireZ", 0), -Math.max(0.05, tireR * 0.8), 3),
+        // ホイールベース（前後の間隔）は真ん中を動かさず、前のタイヤは後ろへ・
+        // 後ろのタイヤは前へ寄せる（左右対称に縮む）。
+        wheelMid = (yF + yB) / 2,
+        wbMax = Math.max(0.3, yB - yF - tireR * 2.8),
+        wb = clamp(meta("vhWb", L * 0.56), 0.3, wbMax),
+        frontA = wheelMid - wb / 2,
+        rearA = wheelMid + wb / 2,
+        // 断面（前の面の下端から、上・後ろを回って床へ戻る多角形）
+        profile =
+            cfg.mode === "step"
+                ? [
+                      [yF, 0],
+                      [yF, frontBoxH],
+                      [stepY, frontBoxH],
+                      [stepY, H],
+                      [yB, H],
+                      [yB, 0],
+                  ]
+                : rearH > 0
+                  ? [
+                        [yF, 0],
+                        [yF, edgeH],
+                        [yF + slant, H],
+                        [yB - rearSlant, H],
+                        [yB, rearH],
+                        [yB, 0],
+                    ]
+                  : [
+                        [yF, 0],
+                        [yF, edgeH],
+                        [yF + slant, H],
+                        [backY, H],
+                        [backY, 0],
+                    ];
+    return {
+        cfg,
+        W,
+        L,
+        H,
+        nose,
+        tail,
+        yF,
+        yB,
+        backY,
+        bedL,
+        bedH,
+        edgeH,
+        slant,
+        rearH,
+        rearSlant,
+        frontBoxH,
+        stepY,
+        tireR,
+        tireW,
+        track,
+        tireZ,
+        wheelMid,
+        wb,
+        wbMax,
+        frontA,
+        rearA,
+        profile,
+        // タイヤ（左右 × 前後）。x は左右、y は前後、z は中心の高さ（半径＋上下）。
+        wheels: [-1, 1].flatMap((sx) =>
+            [frontA, rearA].map((ay) => ({ x: (sx * track) / 2, y: ay, z: tireR + tireZ })),
+        ),
+    };
+}
+// 車・五角形の立体の画面ハンドル。
+//   上の面（屋根）／下がってる線（前の面の上端）／前の面の前後
+//   荷台の高さ・前後の長さ ／ タイヤの大きさ・太さ・左右の間隔・前後の間隔
+function vehicleGizmo(o) {
+    if (!isVehicleAsset(o)) return null;
+    const g = pentaGeometry(o),
+        hw = g.W / 2,
+        zMax = Math.max(1, g.H * 3),
+        handles = {};
+    if (g.cfg.mode === "step") {
+        // 乗用車2：低い前の直方体＋高い後ろの直方体。
+        //   前の直方体の高さ／前の面の前後／後ろの直方体の高さ／後ろの面の前後。
+        handles.frontBoxH = screenHandle(
+            o,
+            "vh-front-box-h",
+            [-hw, g.stepY, g.frontBoxH],
+            [-hw, g.stepY, g.frontBoxH],
+            [-hw, g.stepY, g.frontBoxH + 1],
+            g.frontBoxH,
+            0.08,
+            Math.max(0.1, g.H - 0.05),
+            "前の箱の高さ",
+            { x: 0, y: -1 },
+            "#7dd8ff",
+        );
+        handles.nose = screenHandle(
+            o,
+            "vh-nose",
+            [0, g.yF, g.frontBoxH * 0.5],
+            [0, g.yF, g.frontBoxH * 0.5],
+            [0, g.yF - 1, g.frontBoxH * 0.5],
+            g.nose,
+            -g.L * 0.35,
+            g.L * 0.8,
+            "前の面",
+            { x: 0, y: 1 },
+            "#ffd34d",
+        );
+        handles.rearBoxH = screenHandle(
+            o,
+            "vh-rear-box-h",
+            [hw, g.yB, g.H],
+            [hw, g.yB, g.H],
+            [hw, g.yB, g.H + 1],
+            g.H,
+            0.08,
+            zMax,
+            "後ろの箱の高さ",
+            { x: 0, y: -1 },
+            "#8ce6c2",
+        );
+        handles.tail = screenHandle(
+            o,
+            "vh-tail",
+            [0, g.yB, g.H * 0.5],
+            [0, g.yB, g.H * 0.5],
+            [0, g.yB + 1, g.H * 0.5],
+            g.tail,
+            -g.L * 0.6,
+            g.L * 0.35,
+            "後ろの面",
+            { x: 0, y: 1 },
+            "#ff9f68",
+        );
+    } else {
+        // 上の面（屋根）／下がってる線（前の面の上端）／前の面の前後。
+        handles.roofH = screenHandle(
+            o,
+            "vh-roof-h",
+            [hw, g.backY, g.H],
+            [hw, g.backY, g.H],
+            [hw, g.backY, g.H + 1],
+            g.H,
+            0.3,
+            zMax,
+            "上の面",
+            { x: 0, y: -1 },
+            "#8ce6c2",
+        );
+        handles.frontH = screenHandle(
+            o,
+            "vh-front-h",
+            [hw, g.yF, g.edgeH],
+            [hw, g.yF, g.edgeH],
+            [hw, g.yF, g.edgeH + 1],
+            g.edgeH,
+            0.06,
+            Math.max(0.1, g.H - 0.06),
+            "下がってる線",
+            { x: 0, y: -1 },
+            "#7dd8ff",
+        );
+        handles.nose = screenHandle(
+            o,
+            "vh-nose",
+            [0, g.yF, g.edgeH * 0.55],
+            [0, g.yF, g.edgeH * 0.55],
+            [0, g.yF - 1, g.edgeH * 0.55],
+            g.nose,
+            -g.L * 0.35,
+            g.L * 0.8,
+            "前の面",
+            { x: 0, y: 1 },
+            "#ffd34d",
+        );
+        // 六角形（乗用車）だけ：後ろの「下がってる線」。
+        if (g.cfg.hex)
+            handles.rearH = screenHandle(
+                o,
+                "vh-rear-h",
+                [hw, g.yB, g.rearH],
+                [hw, g.yB, g.rearH],
+                [hw, g.yB, g.rearH + 1],
+                g.rearH,
+                0.06,
+                Math.max(0.1, g.H - 0.06),
+                "後ろの下がってる線",
+                { x: 0, y: -1 },
+                "#a0e57c",
+            );
+        // 荷台（直方体）の高さと前後ろの長さ。荷台の無い種類には出さない。
+        if (g.cfg.bed) {
+            handles.bedH = screenHandle(
+                o,
+                "vh-bed-h",
+                [hw, g.yB, g.bedH],
+                [hw, g.yB, g.bedH],
+                [hw, g.yB, g.bedH + 1],
+                g.bedH,
+                0.05,
+                Math.max(0.1, g.H - 0.05),
+                "荷台の高さ",
+                { x: 0, y: -1 },
+                "#ffb36f",
+            );
+            handles.bedL = screenHandle(
+                o,
+                "vh-bed-l",
+                [0, g.yB, g.bedH * 0.8],
+                [0, g.yB, g.bedH * 0.8],
+                [0, g.yB + 1, g.bedH * 0.8],
+                g.bedL,
+                0.2,
+                Math.max(0.25, g.L - 0.5),
+                "荷台の長さ",
+                { x: 0, y: 1 },
+                "#ff9f68",
+            );
+        }
+    }
+    // タイヤ（大きさ・太さ・前後の間隔・上下）。どの車にも出す。
+    // 「タイヤの左右（間隔）」は、ご要望で「タイヤの上下」へ入れ替えた。
+    if (g.cfg.wheels) {
+        const outer = (sx) => (sx * g.track) / 2 + (sx * g.tireW) / 2,
+            zc = g.tireR + g.tireZ,
+            rearTop = zc + g.tireR;
+        handles.tireR = screenHandle(
+            o,
+            "vh-tire-r",
+            [outer(1), g.rearA, rearTop],
+            [outer(1), g.rearA, rearTop],
+            [outer(1) + 1, g.rearA, rearTop],
+            g.tireR,
+            0.06,
+            Math.max(0.1, Math.min(0.7, g.H * 0.45)),
+            "タイヤの大きさ",
+            { x: 1, y: 0 },
+            "#ad9cff",
+        );
+        handles.tireW = screenHandle(
+            o,
+            "vh-tire-w",
+            [outer(-1), g.rearA, rearTop],
+            [outer(-1), g.rearA, rearTop],
+            [outer(-1) - 1, g.rearA, rearTop],
+            g.tireW,
+            0.04,
+            Math.max(0.05, g.W * 0.6),
+            "タイヤの太さ",
+            { x: -1, y: 0 },
+            "#c9a97a",
+        );
+        // 前後の間隔。前のタイヤは後ろへ、後ろのタイヤは前へ（真ん中は動かさない）。
+        handles.wb = screenHandle(
+            o,
+            "vh-base",
+            [0, g.frontA, rearTop],
+            [0, g.frontA, rearTop],
+            [0, g.frontA - 1, rearTop],
+            g.wb,
+            0.3,
+            g.wbMax,
+            "タイヤの前後",
+            { x: 0, y: 1 },
+            "#f0c419",
+        );
+        // タイヤの上下（0 で地面に接する。上げると浮く）。
+        handles.tireZ = screenHandle(
+            o,
+            "vh-tire-z",
+            [outer(1), g.frontA, zc],
+            [outer(1), g.frontA, zc],
+            [outer(1), g.frontA, zc + 1],
+            g.tireZ,
+            -Math.max(0.05, g.tireR * 0.8),
+            3,
+            "タイヤの上下",
+            { x: 0, y: -1 },
+            "#ff7f9e",
+        );
     }
     return { o, C3: L2W(o, 0, 0, g.H * 0.5), handles };
 }
@@ -3156,6 +3506,37 @@ function drawSpecialGizmo(c, o) {
             sq(h.s, h.color || "#ff9f68");
             gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}`, h.s.x + 9 / Z, h.s.y - 8 / Z, h.color || "#ff9f68", 12);
         }
+    } else if (isVehicleAsset(sg.o)) {
+        // 五角形の立体・車の寸法ハンドル。掴む前から動く向きが分かるよう、
+        // 破線＋四角＋向きの矢じり＋「名前 数値m」を他のアセットと同じ見た目で出す。
+        Object.values(sg.handles || {}).forEach((h) => {
+            if (!h?.s?.ok) return;
+            const col = h.color || "#8ce6c2",
+                d = h.dir || { x: 0, y: -1 };
+            c.strokeStyle = col;
+            c.lineWidth = 1.4 / Z;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.beginPath();
+            if (h.anchor?.ok) {
+                c.moveTo(h.anchor.x, h.anchor.y);
+                c.lineTo(h.s.x, h.s.y);
+            }
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, col, false);
+            c.beginPath();
+            [1, -1].forEach((sgn) => {
+                const ax = h.s.x + (d.x * sgn * 13) / Z,
+                    ay = h.s.y + (d.y * sgn * 13) / Z;
+                c.moveTo(ax, ay);
+                c.lineTo(ax - (d.x * 6) / Z - (d.y * 4) / Z, ay - (d.y * 6) / Z + (d.x * 4) / Z);
+                c.lineTo(ax - (d.x * 6) / Z + (d.y * 4) / Z, ay - (d.y * 6) / Z - (d.x * 4) / Z);
+                c.closePath();
+            });
+            c.fillStyle = col;
+            c.fill();
+            gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}m`, h.s.x + 16 / Z, h.s.y - 8 / Z, col, 12);
+        });
     } else if (isCounterAsset(sg.o)) {
         // 長さ（左右）／天板の厚さ（上下・ゆっくり）／土台の高さ（上下）の3本。
         Object.values(sg.handles || {}).forEach((h) => {
@@ -4251,6 +4632,7 @@ function hitGizmo(p) {
             active.asset === "stool" ||
             active.asset === "railing" ||
             active.asset === "outdoorUnit" ||
+            isVehicleAsset(active) ||
             isSignalAsset(active) ||
             isCounterAsset(active)
         ) {
@@ -4853,7 +5235,9 @@ function beginGizmo(h, p) {
         h.t === "wallSideSign-bracket-length" ||
         h.t === "cone-height" ||
         h.t === "sphere-radius" ||
-        h.t.startsWith("person-joint-")
+        h.t.startsWith("person-joint-") ||
+        // 五角形の立体・車の寸法（上の面・下がってる線・前の面・荷台・タイヤ）。
+        h.t.startsWith("vh-")
     )
         ed = { ...base, t: h.t, sign: h.sign, p0: p };
     else if (h.t === "axis") {
@@ -5047,6 +5431,31 @@ function dragEdit(p, freeRotation = false) {
             // 本数は整数。ほかの2つは 0.001 刻みで扱う（数値欄と同じ桁）。
             num = h.integer ? Math.round(value) : Math.round(value * 1000) / 1000;
         if (key) patch = { [key]: num };
+    } else if (ed.t.startsWith("vh-")) {
+        // 五角形の立体・車の寸法。どれも「動かす面は1つだけ」なので、
+        // 掴んだ向きの成分だけを足し、ほかの寸法はそのまま残す。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max),
+            KEY = {
+                "vh-roof-h": "h", // 上の面（屋根）の高さ＝アセットの高さ
+                "vh-front-h": "vhFrontH", // 下がってる線（前の面の上端）
+                "vh-rear-h": "vhRearH", // 後ろの下がってる線（六角形）
+                "vh-nose": "vhNose", // 一番前の長方形の前後
+                "vh-tail": "vhTail", // 一番後ろの面の前後
+                "vh-front-box-h": "vhFrontBoxH", // 前の直方体の高さ
+                "vh-rear-box-h": "h", // 後ろの直方体の高さ＝アセットの高さ
+                "vh-bed-h": "vhBedH", // 荷台の高さ
+                "vh-bed-l": "vhBedL", // 荷台の前後ろの長さ
+                "vh-tire-r": "vhTireR", // タイヤの大きさ
+                "vh-tire-w": "vhTireW", // タイヤの太さ
+                "vh-tire-z": "vhTireZ", // タイヤの上下
+                "vh-track": "vhTrack", // タイヤの左右の間隔（ハンドルは廃止・値は残す）
+                "vh-base": "vhWb", // タイヤの前後の間隔
+            },
+            key = KEY[ed.t];
+        if (key) patch = { [key]: Math.round(value * 1000) / 1000 };
     } else if (ed.t === "counter-length") {
         // 長さ（＝左右の幅）。左右へ同じだけ伸びる。
         const h = ed.sign,

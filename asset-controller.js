@@ -153,8 +153,6 @@ window.cityGridInstallAssetUI = function (bridge) {
                 recessedWindowDepth: info.recessedWindowDepth,
                 recessedWindowBottom: info.recessedWindowBottom,
                 recessedSillHeight: info.recessedSillHeight ?? info.recessedWindowBottom,
-                recessedBeamHeight: info.recessedBeamHeight,
-                recessedBeamProjection: info.recessedBeamProjection,
                 recessedSideWindowW: info.recessedSideWindowW,
                 recessedWindowMarginLeft: info.recessedWindowMarginLeft,
                 recessedWindowMarginEnd: info.recessedWindowMarginEnd,
@@ -390,7 +388,11 @@ window.cityGridInstallAssetUI = function (bridge) {
     // child.attachment が親の開口側へ追従するため、親の移動・回転・寸法変更に対応できる。
     // ===== 3. 連結パーツと配置（ベランダ・建物付属） =====
     function placeLinkedAsset(kind, p) {
-        const childKind = kind === "buildingAwning" ? "awning" : "rect",
+        // テント付き建物（開口なし・開口あり）は子がテント、看板付き建物は子が看板。
+        const awningKind = kind === "buildingAwning" || kind === "buildingAwningOpen",
+            // 看板は「壁付け看板（単体）」と同じ板の形にして、ベベルの操作を戻す。
+            // （以前は rect の押し出しだったため、板の形状・ベベルのハンドルが無かった）
+            childKind = awningKind ? "awning" : "wallSign",
             q = p ? groundAt(p) : assetGroundPoint(ASSETS.building),
             parent = newAsset("building", null, q),
             child = newAsset(childKind, null, q),
@@ -398,7 +400,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         // 親建物は生成面（P.assetAxis）に従って作る。子テント／看板は
         // syncAttachedPart() が親と同じ k で貼り付けるため、親をX／Z面へ
         // 生成しても壁の上に載ったまま一緒に傾く。
-        if (kind === "buildingAwning" || kind === "buildingSign") {
+        if (awningKind || kind === "buildingSign") {
             parent.k = clamp(Math.round(Number(P.assetAxis ?? 1)), 0, 2);
             parent.d = -1;
             const [piu, piv] = PL[parent.k];
@@ -407,12 +409,14 @@ window.cityGridInstallAssetUI = function (bridge) {
             parent.lift = 1 + (Number(q[parent.k]) || 0);
             parent.off = [0, 0, 0];
         }
-        if (kind === "buildingAwning") {
+        if (awningKind) {
             parent.ra = ASSETS.building.w / 2;
             parent.rb = ASSETS.building.d / 2;
             parent.h = ASSETS.building.h;
             parent.extrude = true;
-            parent.openingEnabled = false;
+            // 開口なしの「テント付き建物」だけ開口を閉じる。
+            // 「テント付き開口建物」は開口のある建物として作る（開口W/Hは建物の既定値）。
+            parent.openingEnabled = kind === "buildingAwningOpen";
             parent.accent = "#d98b68";
         } else {
             // 看板付き建物は従来どおり開口ありを初期状態にする。
@@ -440,12 +444,18 @@ window.cityGridInstallAssetUI = function (bridge) {
             rotOffset: 0,
             verticalOnly: true,
         };
-        if (kind === "buildingSign") {
+        if (!awningKind) {
             child.ra = PART_W / 2;
             child.rb = 0.5 / 2;
             child.h = PART_H;
             child.extrude = true;
             child.accent = "#66e3c8";
+            // ベベルの初期値は壁付け看板（単体）と同じ。金具は建物へ直付けなので0本。
+            child.wallSignShape = "beveled";
+            child.wallSignBevelOffset = 0.18;
+            child.wallSignBevelSegments = 4;
+            child.wallSignBracketCount = 0;
+            child.wallSignBracketLength = 0.36;
         } else {
             child.ra = PART_W / 2;
             child.rb = 1 / 2;
@@ -457,6 +467,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             child.awningBackBottom = 0;
             child.awningEdgeEdited = false;
         }
+        // 壁付け看板の板は高さ中心が原点なので、下端を PART_BASE_Z（3.6m）へ合わせる。
+        if (!awningKind) child.attachment.baseZ = PART_BASE_Z + PART_H * 0.5;
         const attached = syncAttachedPart(child, parent);
         return { parent, child: attached };
     }
@@ -575,7 +587,8 @@ window.cityGridInstallAssetUI = function (bridge) {
     }
     // 通常アセット、ベランダ、接続アセットを入口で振り分ける配置関数。
     function placeAsset(kind, p) {
-        if (kind === "buildingAwning" || kind === "buildingSign") return placeLinkedAssetInstance(kind, p);
+        if (kind === "buildingAwning" || kind === "buildingAwningOpen" || kind === "buildingSign")
+            return placeLinkedAssetInstance(kind, p);
         if (kind === "balcony") return placeBalcony(p);
         sanitizeScene();
         const before = S.slice(),
@@ -682,7 +695,10 @@ window.cityGridInstallAssetUI = function (bridge) {
             parts = source.parts.map((part) => translateDefinition(fixOb(part), shift));
         const awning = parts.find((part) => part.asset === "awning"),
             building = parts.find((part) => part.asset === "building"),
-            rects = parts.filter((part) => part.type === "rect" && part.asset === "rect");
+            // 看板の子は、旧データ（rect の押し出し）と現データ（壁付け看板）の両方を受け付ける。
+            rects = parts.filter(
+                (part) => part.asset === "wallSign" || (part.type === "rect" && part.asset === "rect"),
+            );
         const child = awning || (building && rects.length ? rects[0] : null),
             parent = awning
                 ? parts.find((part) => part !== awning && (part.type === "rect" || part.asset === "building")) ||
@@ -705,6 +721,22 @@ window.cityGridInstallAssetUI = function (bridge) {
             p.openingH = Number(p.openingH) || Math.max(0.1, Number(p.h) || 3.6) * 0.66;
         } else {
             p.openingEnabled = p.openingEnabled !== false;
+            // 旧データの子看板（rect＋押し出し）を壁付け看板へ移行して、ベベルを操作できるようにする。
+            if (q.type === "rect" || q.asset === "rect") {
+                Object.assign(q, {
+                    type: "asset",
+                    asset: "wallSign",
+                    assetId: "wall-sign",
+                    assetName: (ASSETS.wallSign || {}).label || "壁付け看板（単体）",
+                    wallSignShape: q.wallSignShape || "beveled",
+                    wallSignBevelOffset: Number.isFinite(Number(q.wallSignBevelOffset)) ? Number(q.wallSignBevelOffset) : 0.18,
+                    wallSignBevelSegments: Number.isFinite(Number(q.wallSignBevelSegments)) ? Number(q.wallSignBevelSegments) : 4,
+                    wallSignBracketCount: 0,
+                    wallSignBracketLength: Number.isFinite(Number(q.wallSignBracketLength)) ? Number(q.wallSignBracketLength) : 0.36,
+                    extrude: true,
+                });
+                q.oldRectSign = true;
+            }
         }
         // 旧compound JSONにX/Z面の親が残っていても、接続建物は地面に立つY面へ戻す。
         // これにより、読み込み後のテント／看板も親の高さ・奥行き基準で接着できる。
@@ -727,7 +759,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             parentId: p.id,
             side: -1,
             x: dx * Math.cos(r) + dz * Math.sin(r),
-            baseZ: cb[1] - pb[1],
+            // 壁付け看板の板は高さ中心が原点なので、旧rect（下端基準）から移行した分を補正する。
+            baseZ: cb[1] - pb[1] + (q.oldRectSign ? Math.abs(Number(q.h) || 1) * 0.5 : 0),
             offsetZ: 0,
             rotOffset: 0,
             verticalOnly: true,
@@ -1000,6 +1033,11 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "stackedBuilding",
                 "recessedStackedBuilding",
                 "beveledStackedBuilding",
+                // テント付き建物・看板付き開口建物・テント付き開口建物は
+                // 「建物＋付属パーツ」だが、置くのは建物なので建物グループへ入れる。
+                "buildingAwning",
+                "buildingSign",
+                "buildingAwningOpen",
                 // 屋台は「建物として置くもの」なので建物グループへ入れる。
                 "stall",
                 // カウンター（普通／L字／コの字）も「建物として置くもの」。
@@ -1014,8 +1052,6 @@ window.cityGridInstallAssetUI = function (bridge) {
             label: "建物パーツ",
             // 建物に付ける部材・設備。屋根・テント・ベランダ・コの字壁・手すり・室外機。
             kinds: [
-                "buildingAwning",
-                "buildingSign",
                 "gableRoof",
                 "shedRoof",
                 "awning",
@@ -1023,6 +1059,8 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "uWall",
                 "railing",
                 "outdoorUnit",
+                // 五角形の立体（上端を斜めに落とした塊）。車のキャブと同じ部品で作る。
+                "pentaBox",
             ],
         },
         // 街並みの小物。新しいアセットを足して下の一覧へ書き忘れた場合も、
@@ -1051,6 +1089,9 @@ window.cityGridInstallAssetUI = function (bridge) {
             ],
         },
         { key: "person", label: "人間", kinds: ["person"] },
+        // 車（人物の隣）。キャブは五角形の立体、荷台は直方体、タイヤは円柱で作る。
+        // 寸法はすべて画面上の専用ハンドルで変えられる（engine-gizmo.js の vehicleGizmo）。
+        { key: "vehicle", label: "車", kinds: ["keiTruck", "keiVan", "sedan", "sedan2"] },
     ];
     // 看板は「壁付け看板（単体）」へ統合した。asset=sign と asset=wallSideSign
     // （建物へ接着する専用形状）は既存JSONの読み込み・表示用に定義だけ残し、棚からは外す。

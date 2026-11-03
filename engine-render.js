@@ -414,19 +414,6 @@ function exportSurfaceTriangles(o) {
                     ctri([a[0], a[1], z], [b[0], b[1], z], [c[0], c[1], z]);
                 });
             },
-            prism = (points, z0, z1) => {
-                cface(points, z0);
-                cface([...points].reverse(), z1);
-                for (let i = 0; i < points.length; i++) {
-                    const j = (i + 1) % points.length;
-                    cquad(
-                        [points[i][0], points[i][1], z0],
-                        [points[j][0], points[j][1], z0],
-                        [points[j][0], points[j][1], z1],
-                        [points[i][0], points[i][1], z1],
-                    );
-                }
-            },
             x = q.w * 0.5,
             y = q.d * 0.5,
             frontY = -y,
@@ -484,10 +471,6 @@ function exportSurfaceTriangles(o) {
                 );
                 return { outer, inner };
             },
-            drawBeam = (z1) => {
-                if (q.beamHeight <= 0 || q.beamProjection <= 0) return;
-                prism(recessedStackedBuildingBeamFootprint(q), z1 - q.beamHeight, z1);
-            },
             // 階の壁と、階の間を埋める壁の両方を同じ処理で作る。
             // capsをfalseにすると接合部の壁だけを描く。
             drawFloor = (z0, floorHeight, band, caps = true) => {
@@ -517,8 +500,6 @@ function exportSurfaceTriangles(o) {
                 cquad([x, y, z0], [-x, y, z0], [-x, y, z1], [x, y, z1]);
                 cquad([-x, y, z0], [-x, -y, z0], [-x, -y, z1], [-x, y, z1]);
                 drawWindowBand(z0, z1, band);
-                // 屋根になる最上階には梁／庇を上端へ作る。
-                if (caps) drawBeam(band ? band.top : z1);
             };
         const junctions = recessedStackedBuildingJunctionWindows(o, q);
         recessedStackedBuildingFloors(o, q).forEach((floor) => {
@@ -1638,11 +1619,12 @@ function updateSeamPicks(depth, cw, ch, tf) {
             cur = best.get(key);
         if (!cur || score > cur.score) best.set(key, { score, vis: sc.vis, s, mz: (a.depth + b.depth) / 2 });
     }
-    const picks = new Set();
+    const picks = new Set(),
+        th = window.__seamTh === undefined ? 0.25 : Number(window.__seamTh);
     best.forEach((v) => {
         // 差が小さい＝両側とも面＝面の中なので描かない。
         // 見えている部分がある線だけを描く（隠れている線を選んでしまうのを防ぐ）。
-        if (v.vis > 0 && v.score >= (window.__seamTh === undefined ? 0.25 : Number(window.__seamTh))) picks.add(v.s);
+        if (v.vis > 0 && v.score >= th) picks.add(v.s);
     });
     seamPicks = picks;
 }
@@ -1674,33 +1656,63 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     c.beginPath();
     let on = false;
     const myOwner = depthOwnerMap.get(s.ob.id) || 0;
-    // 【重要】面ONでは「1枚の面の内側を通る線」を線ごと描かない
-    // （ユーザー指定：描写しなくてよい線＝重なった線・本来見えない線は描かない）。
-    // 押し出した板（庇・屋根）の裏面の稜線が、面の上に薄く残っていた。
-    // 点ごとに判定すると、同じ線の途中だけ消えて**点線**になるので、
-    // 線に沿った9点を調べ、ほとんど（8/9以上）が面の内側ならその線を丸ごと省く。
-    // 面の縁を通る線は、必ずどこかで別の面か背景に当たるので残る。
-    if (!window.__noInterior && depthFace) {
-        let ins = 0,
-            hit = 0;
-        for (let i = 1; i <= 4; i++) {
-            const p = exportPoint(s.p[Math.round(((s.p.length - 1) * i) / 5)], tf);
-            if (!p) continue;
-            const x = Math.round(p.x),
-                y = Math.round(p.y);
-            if (x < 0 || y < 0 || x >= cw || y >= ch) continue;
-            const z = depthAtPoint(depth, cw, ch, p.x, p.y);
-            if (!Number.isFinite(z)) continue;
-            hit++;
-            if (Math.abs(p.depth - z) <= Math.max(0.5, Math.abs(z) * 0.05) && interiorOfFace(cw, ch, x, y, 2, myOwner)) ins++;
-            // 2点以上が「面の内側でない」なら、この線は面の縁を通っている＝描く（早めに切り上げる）。
-            else if (hit - ins >= 2) break;
-        }
-        if (hit >= 3 && ins >= hit - 1) return;
-    }
+    // 【重要】面の上へ意図的に描く線（凹窓の窓間仕切りなど）。
+    // 面の内側を通る線は「重なった線」として消すのが基本だが、窓の桟のように
+    // 面の上へ描くことを目的にした線まで消えると、窓の枚数を変えても
+    // 何も描かれない（実測：凹窓階層建物の窓間仕切りが全部消えていた）。
+    // 生成側が onFace を立てた線だけ、面の内側判定を通す。
+    const onFace = !!s.onFace;
+    // 線全体を数点だけ見て省略すると、試験点の間にある開口や遮蔽物の切れ目で
+    // 見える区間まで丸ごと消える。面の内側・背面は下の点ごとの判定で除去する。
     const okx = tf[0] || 1,
         oky = tf[3] || 1;
     // 画面座標・奥行き・（必要なら近くの画素）から、この点を描いてよいか決める。
+    // 確実に手前の面に覆われた点。断片の橋渡しでも同じ判定を使い、
+    // 本当の遮蔽物を短いノイズとして埋めてしまわない。
+    const definitelyOccluded = (e) => {
+        const x = Math.round(e.x), y = Math.round(e.y);
+        if (x < 0 || x >= cw || y < 0 || y >= ch) return false;
+        // 【重要】「まわりの画素すべてが、この線よりはっきり手前の平らな面」なら、
+        // その点は隠れる面の内側にある。同じオブジェクトの面かどうかに関係なく隠す。
+        // これが無いと、階層建物の縁（張り出した帯）の奥にある壁の稜線が、
+        // 「自分の面だから」という理由で残っていた（実測：縁の反対側の線が
+        // 0.4〜4.4m 奥なのに描かれていた）。下の「自分の面」系の緩い判定より先に見る。
+        if (!window.__noOccl && (!onFace || s.occludeSelf || !depthOwner || depthOwner[y * cw + x] !== myOwner)) {
+            const sameOwner = depthOwner && depthOwner[y * cw + x] === myOwner,
+                selfAllowance = onFace && sameOwner ? Math.max(0, Number(s.selfOcclusionAllowance) || 0) : 0,
+                occTol = Math.max(0.03, Math.abs(e.depth) * 0.002, selfAllowance);
+            let near9 = 0,
+                bg = 0,
+                zMin = Infinity,
+                zMax = -Infinity;
+            for (let dy = -1; dy <= 1; dy++) {
+                const yy = y + dy;
+                if (yy < 0 || yy >= ch) {
+                    bg++;
+                    continue;
+                }
+                for (let dx = -1; dx <= 1; dx++) {
+                    const xx = x + dx;
+                    if (xx < 0 || xx >= cw) {
+                        bg++;
+                        continue;
+                    }
+                    const zz = depth[yy * cw + xx];
+                    if (!Number.isFinite(zz)) {
+                        bg++;
+                        continue;
+                    }
+                    if (zz < e.depth - occTol) near9++;
+                    if (zz < zMin) zMin = zz;
+                    if (zz > zMax) zMax = zz;
+                }
+            }
+            // 面をほぼ真横から見ている所（1画素で奥行きが大きく変わる）では
+            // 判定しない。平らな面に囲まれているときだけ「隠れている」と決める。
+            if (!bg && near9 === 9 && zMax - zMin <= Math.max(0.10, Math.abs(e.depth) * 0.02)) return true;
+        }
+        return false;
+    };
     const accept = (e) => {
         const x = Math.round(e.x),
             y = Math.round(e.y);
@@ -1718,8 +1730,8 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         const zNear = Math.max(0.03, Math.abs(z) * 0.005);
         if (!window.__noInFront && e.depth < z - zNear) return true;
         if (!(e.depth > z + CG.depthEps(e.depth))) {
-            // 面ID照合による「平面の内側の線」の除去（既定オン・__noFaceCull で無効）。
-            if (!window.__noFaceCull) {
+            // 面IDによる面内線の除去。意図して面上に描く線は onFace を付ける。
+            if (!window.__noFaceCull && !onFace) {
                 const ow = depthOwner && depthOwner[i1];
                 if (ow && ow === myOwner) {
                     // 上下左右とも同じ面IDのときだけ「面の内側」と判断する。
@@ -1731,6 +1743,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
             }
             return true;
         }
+        if (definitelyOccluded(e)) return false;
         // その画素の面が「この線の持ち主」で、奥行きがほぼ同じなら、
         // その線は自分の面の稜線（面と面の取り合い）なので描く。
         const own = depthOwner && depthOwner[i1];
@@ -1744,7 +1757,9 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         // そこで奥行きではなく「その線が面の境目に乗っているか」で決める。
         // まわり±3px に別の面が混じっていれば境目＝見える稜線、1枚の面だけなら隠す。
         if (own && own === myOwner && depthFace && !window.__noOwnFace) {
-            const ownTol = Math.max(0.35, Math.abs(z) * 0.03);
+            // 大きすぎる許容は、部品の奥の稜線を「自分の面の縁」と誤認する。
+            // 室外機・信号機で 0.2〜0.3m 奥の線が出ていたため許容を絞る。
+            const ownTol = Math.max(0.12, Math.abs(z) * 0.01);
             if (e.depth <= z + ownTol) {
                 const f0 = depthFace[i1];
                 if (f0 && !faceCullAround(cw, ch, x, y, f0, myOwner)) return true;
@@ -1825,7 +1840,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     // （1画素で奥行きが数m変わる）では、判定が1点ごとに揺れて
     // **1〜6px おきの点線**になっていた。数px の切れ目は「線の途切れ」ではなく
     // 判定の揺れなので、前後の点が近ければ（bridge px 以内）線としてつなぐ。
-    // 本当に隠れている区間は数十px 以上あるので、隠線の正しさは変わらない。
+    // ただし確実に遮られている点では、短くても橋渡ししない。
     let pend = [], // いま隠れている途中の点（つながれば描く）
         pendFrom = null; // 隠れ始めた点（つながったときに埋める始点）
     const flushPend = () => {
@@ -1841,6 +1856,14 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
             return;
         }
         if (!accept(e)) {
+            // 実際に手前の面で覆われている区間は、短くても橋渡ししない。
+            if (definitelyOccluded(e)) {
+                flushRun();
+                flushPend();
+                on = false;
+                lastOk = null;
+                return;
+            }
             if (on) {
                 if (!pend.length) pendFrom = { x: e.x, y: e.y };
                 pend.push(e.sx, e.sy);
@@ -1912,23 +1935,11 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
                                 depth: 1 / (ia + (ib - ia) * t),
                             };
                         };
-                    // まず粗く調べる。区間ぜんぶが同じ状態（見える／隠れる）なら
-                    // 細かく刻む必要はないので、そのまま1本の線として引く。
-                    const nc = Math.min(16, Math.max(1, Math.ceil(len / 24)));
-                    let uniform = true;
-                    for (let j = 1; j < nc; j++)
-                        if (!accept(at(j / nc))) {
-                            uniform = false;
-                            break;
-                        }
-                    if (!uniform) {
-                        // 遮蔽物との境目がある区間だけ、細かく刻んで切る位置を合わせる。
-                        // ドラッグ中は刻みを粗くして、操作中の描画を軽くする
-                        // （操作が終われば次の描画で細かい刻みに戻る）。
-                        const step = typeof ed !== "undefined" && ed ? 20 : 6;
-                        const n = Math.min(48, Math.max(1, Math.ceil(len / step)));
-                        for (let j = 1; j < n; j++) emit(at(j / n));
-                    }
+                    // 粗い等間隔判定だけでは、その間の細い遮蔽物を見落とす。
+                    // 例：22px 幅の板が 24px 間隔の検査点の間に収まり、
+                    // 線が板を貫通していた。画面上の間隔で点ごとに判定する。
+                    const n = Math.max(1, Math.ceil(len / 2));
+                    for (let j = 1; j < n; j++) emit(at(j / n));
                 } else {
                     const n = Math.max(1, Math.ceil(Math.hypot(v[0] - a[0], v[1] - a[1], v[2] - a[2]) * 10));
                     for (let j = 1; j < n; j++) put(V.add(a, v, 1 - j / n, j / n));
@@ -1939,6 +1950,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     });
     flushRun();
     c.stroke();
+
 }
 
 // ===== 5. 線画レイヤー：線だけ別キャンバスに描き、アンチエイリアスを消して二値化する =====

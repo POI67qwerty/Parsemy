@@ -278,11 +278,9 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>窓枚数（各階）</span><input type=number class=nv id=recessedWindowCount min=1 max=12 step=1 style="width:100px"><span class=un>枚</span></label>
 <label><span>窓端の壁幅（左手前）</span><input type=number class=nv id=recessedWindowMarginLeft min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><span>窓の凹み奥行き</span><input type=number class=nv id=recessedWindowDepth min=0.025 step=0.05 style="width:100px"><span class=un>m</span></label>
-<label><span>梁／庇の高さ</span><input type=number class=nv id=recessedBeamHeight min=0 max=0.6 step=0.01 style="width:100px"><span class=un>m</span></label>
-<label><span>梁／庇の張り出し</span><input type=number class=nv id=recessedBeamProjection min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
 <label><span>窓端の壁幅（右奥）</span><input type=number class=nv id=recessedWindowMarginEnd min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><input type=checkbox id=recessedSideWindows checked> 右側面にも窓を作る</label>
-<div class="note">各階に同じ窓帯を反復します。1Fだけ追加高さを持たせ、前右角を初期4分割のベベルにして、正面から右側面まで凹みを連続させます。窓帯は階と階の接合部に配置され、接合部の高さと窓の高さは常に同じです。窓帯の幅は建物全体の寸法に追従し、編集するのは両端の壁幅（左手前・右奥）だけです。画面上の「階高」「1階の高さ」「階接合部の高さ」「端の壁幅」ハンドルは、3D・正面・横・上ビューのどこからでもドラッグできます。腰壁高さと各階上端の梁／庇も数値で調整できます。</div>
+<div class="note">各階に同じ窓帯を反復します。1Fだけ追加高さを持たせ、前右角を初期4分割のベベルにして、正面から右側面まで凹みを連続させます。窓帯は階と階の接合部に配置され、接合部の高さと窓の高さは常に同じです。窓帯の幅は建物全体の寸法に追従し、編集するのは両端の壁幅（左手前・右奥）だけです。画面上の「階高」「1階の高さ」「階接合部の高さ」「端の壁幅」ハンドルは、3D・正面・横・上ビューのどこからでもドラッグできます。</div>
 </div>
 <div id=stackedP style="display:none"><h3 id=stackedPanelTitle>縁付き階層建物</h3>
 <label><span>階数</span><input type=number class=nv id=stackFloorCount min=1 max=30 step=1 style="width:100px"></label>

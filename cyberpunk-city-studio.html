@@ -2205,11 +2205,9 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>窓枚数（各階）</span><input type=number class=nv id=recessedWindowCount min=1 max=12 step=1 style="width:100px"><span class=un>枚</span></label>
 <label><span>窓端の壁幅（左手前）</span><input type=number class=nv id=recessedWindowMarginLeft min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><span>窓の凹み奥行き</span><input type=number class=nv id=recessedWindowDepth min=0.025 step=0.05 style="width:100px"><span class=un>m</span></label>
-<label><span>梁／庇の高さ</span><input type=number class=nv id=recessedBeamHeight min=0 max=0.6 step=0.01 style="width:100px"><span class=un>m</span></label>
-<label><span>梁／庇の張り出し</span><input type=number class=nv id=recessedBeamProjection min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
 <label><span>窓端の壁幅（右奥）</span><input type=number class=nv id=recessedWindowMarginEnd min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><input type=checkbox id=recessedSideWindows checked> 右側面にも窓を作る</label>
-<div class="note">各階に同じ窓帯を反復します。1Fだけ追加高さを持たせ、前右角を初期4分割のベベルにして、正面から右側面まで凹みを連続させます。窓帯は階と階の接合部に配置され、接合部の高さと窓の高さは常に同じです。窓帯の幅は建物全体の寸法に追従し、編集するのは両端の壁幅（左手前・右奥）だけです。画面上の「階高」「1階の高さ」「階接合部の高さ」「端の壁幅」ハンドルは、3D・正面・横・上ビューのどこからでもドラッグできます。腰壁高さと各階上端の梁／庇も数値で調整できます。</div>
+<div class="note">各階に同じ窓帯を反復します。1Fだけ追加高さを持たせ、前右角を初期4分割のベベルにして、正面から右側面まで凹みを連続させます。窓帯は階と階の接合部に配置され、接合部の高さと窓の高さは常に同じです。窓帯の幅は建物全体の寸法に追従し、編集するのは両端の壁幅（左手前・右奥）だけです。画面上の「階高」「1階の高さ」「階接合部の高さ」「端の壁幅」ハンドルは、3D・正面・横・上ビューのどこからでもドラッグできます。</div>
 </div>
 <div id=stackedP style="display:none"><h3 id=stackedPanelTitle>縁付き階層建物</h3>
 <label><span>階数</span><input type=number class=nv id=stackFloorCount min=1 max=30 step=1 style="width:100px"></label>
@@ -6446,6 +6444,8 @@ function specialGizmo(o) {
                         ? stoolGizmo(o)
                       : o && o.type === "asset" && o.asset === "outdoorUnit"
                         ? outdoorUnitGizmo(o)
+                      : isVehicleAsset(o)
+                        ? vehicleGizmo(o)
                       : isSignalAsset(o)
                         ? signalGizmo(o)
                       : isCounterAsset(o)
@@ -6743,6 +6743,354 @@ function counterGizmo(o) {
         // 数十 px 動かしても 2cm しか変わらないため、掴む向きは上下に固定する。
         handles.arm.dir = { x: 0, y: -1 };
         handles.arm.scale = zScale * 2;
+    }
+    return { o, C3: L2W(o, 0, 0, g.H * 0.5), handles };
+}
+
+// ===== 五角形の立体と車（軽トラ・軽バン・乗用車）=====
+// 五角形の立体（キャブ）・荷台・タイヤは、どれも同じ寸法の組から作る。
+// 形を決める値をここ1か所にまとめ、線画（asset-kit-assets.js）とハンドルが
+// 同じ値を見るようにする（幅を変えたのにタイヤだけ動く、を防ぐ）。
+const VEHICLE_CFG = {
+    // pentaBox は「五角形の立体」そのもの（建物の塊）。荷台もタイヤも無い。
+    pentaBox: { bed: false, wheels: false, mode: "penta" },
+    keiTruck: { bed: true, wheels: true, mode: "penta" },
+    keiVan: { bed: false, wheels: true, mode: "penta" },
+    // 乗用車：前も後ろも斜めに落とした六角形（前の下がってる線＋後ろの下がってる線）。
+    sedan: { bed: false, wheels: true, mode: "penta", hex: true },
+    // 乗用車2：低い前の直方体＋高い後ろの直方体（L字の断面）＋タイヤ。
+    sedan2: { bed: false, wheels: true, mode: "step" },
+};
+const isVehicleAsset = (o) => !!o && o.type === "asset" && Object.prototype.hasOwnProperty.call(VEHICLE_CFG, o.asset);
+function pentaGeometry(o) {
+    // 0 は「触っていない」ではなく、そのまま値として扱う（前の面の前後は 0 が基準）。
+    const meta = (key, dflt) => {
+            const v = o?.[key];
+            if (v !== undefined && v !== null && v !== "") {
+                const n = Number(v);
+                if (Number.isFinite(n)) return n;
+            }
+            const m = ASSETS?.[o?.asset]?.[key];
+            return Number.isFinite(Number(m)) ? Number(m) : dflt;
+        },
+        num = (v, dflt) => (Number.isFinite(Number(v)) && Math.abs(Number(v)) > 1e-6 ? Math.abs(Number(v)) : dflt),
+        clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v)),
+        cfg = VEHICLE_CFG[o?.asset] || VEHICLE_CFG.pentaBox,
+        meta0 = ASSETS?.[o?.asset] || {},
+        W = Math.max(0.3, 2 * num(o?.ra, Math.max(0.15, (meta0.w || 1.4) / 2))),
+        L = Math.max(0.4, 2 * num(o?.rb, Math.max(0.2, (meta0.d || 2.4) / 2))),
+        H = Math.max(0.3, num(o?.h, meta0.h || 1.6)),
+        // 前の面（-Y）は前後へ出し入れできる。前に出すと車体がその分だけ長くなる。
+        nose = clamp(meta("vhNose", 0), -L * 0.35, L * 0.8),
+        // 後ろの面も同じように前後へ（＋で後ろへ伸びる）。
+        tail = clamp(meta("vhTail", 0), -L * 0.6, L * 0.35),
+        yF = -L / 2 - nose,
+        yB = L / 2 + tail,
+        // 荷台の長さ・高さ。荷台が無い種類でも値は持つ（切り替えても形が保たれる）。
+        bedL = clamp(meta("vhBedL", Math.min(L * 0.52, L - 0.6)), 0.2, Math.max(0.25, L - 0.5)),
+        bedH = clamp(meta("vhBedH", H * 0.55), 0.05, Math.max(0.1, H - 0.05)),
+        // キャブ（五角形）の後ろ＝荷台の前。
+        backY = cfg.bed ? yB - bedL : yB,
+        // 「下がってる線」＝前の面の上端。ここから斜めの面が屋根へ上がる。
+        edgeH = clamp(meta("vhFrontH", H * 0.55), 0.06, Math.max(0.08, H - 0.06)),
+        slant = clamp((H - edgeH) * 0.55, 0.02, Math.max(0.03, backY - yF - 0.04)),
+        // 後ろの「下がってる線」（六角形のときだけ）。0 なら今までどおりの五角形。
+        rearH = cfg.hex ? clamp(meta("vhRearH", H * 0.72), 0.06, Math.max(0.08, H - 0.06)) : 0,
+        rearSlant =
+            rearH > 0 ? clamp((H - rearH) * 0.5, 0.02, Math.max(0.03, backY - yF - slant - 0.05)) : 0,
+        // 前の直方体の高さ（L字の断面のとき）と、その境目の位置。
+        frontBoxH = clamp(meta("vhFrontBoxH", H * 0.5), 0.08, Math.max(0.1, H - 0.05)),
+        stepY = clamp(
+            yF + meta("vhStep", Math.max(0.3, L * 0.42)),
+            yF + 0.2,
+            Math.max(yF + 0.25, yB - 0.2),
+        ),
+        // タイヤ。太さ・大きさ・左右の間隔・前後の間隔・上下をそれぞれ独立に持つ。
+        tireR = clamp(meta("vhTireR", Math.max(0.16, H * 0.17)), 0.06, Math.max(0.1, Math.min(0.7, H * 0.45))),
+        tireW = clamp(meta("vhTireW", 0.16), 0.04, Math.max(0.05, W * 0.6)),
+        // タイヤは車体の側面から少しだけ外へ出す（線画で円が見えるように）。
+        // 狭めると車体の中へ入り、その分は隠れ線として消える。
+        track = clamp(meta("vhTrack", W + 0.04), 0.2, W + 1.4),
+        // タイヤの上下（0 で地面に接する。上げると浮く）。
+        tireZ = clamp(meta("vhTireZ", 0), -Math.max(0.05, tireR * 0.8), 3),
+        // ホイールベース（前後の間隔）は真ん中を動かさず、前のタイヤは後ろへ・
+        // 後ろのタイヤは前へ寄せる（左右対称に縮む）。
+        wheelMid = (yF + yB) / 2,
+        wbMax = Math.max(0.3, yB - yF - tireR * 2.8),
+        wb = clamp(meta("vhWb", L * 0.56), 0.3, wbMax),
+        frontA = wheelMid - wb / 2,
+        rearA = wheelMid + wb / 2,
+        // 断面（前の面の下端から、上・後ろを回って床へ戻る多角形）
+        profile =
+            cfg.mode === "step"
+                ? [
+                      [yF, 0],
+                      [yF, frontBoxH],
+                      [stepY, frontBoxH],
+                      [stepY, H],
+                      [yB, H],
+                      [yB, 0],
+                  ]
+                : rearH > 0
+                  ? [
+                        [yF, 0],
+                        [yF, edgeH],
+                        [yF + slant, H],
+                        [yB - rearSlant, H],
+                        [yB, rearH],
+                        [yB, 0],
+                    ]
+                  : [
+                        [yF, 0],
+                        [yF, edgeH],
+                        [yF + slant, H],
+                        [backY, H],
+                        [backY, 0],
+                    ];
+    return {
+        cfg,
+        W,
+        L,
+        H,
+        nose,
+        tail,
+        yF,
+        yB,
+        backY,
+        bedL,
+        bedH,
+        edgeH,
+        slant,
+        rearH,
+        rearSlant,
+        frontBoxH,
+        stepY,
+        tireR,
+        tireW,
+        track,
+        tireZ,
+        wheelMid,
+        wb,
+        wbMax,
+        frontA,
+        rearA,
+        profile,
+        // タイヤ（左右 × 前後）。x は左右、y は前後、z は中心の高さ（半径＋上下）。
+        wheels: [-1, 1].flatMap((sx) =>
+            [frontA, rearA].map((ay) => ({ x: (sx * track) / 2, y: ay, z: tireR + tireZ })),
+        ),
+    };
+}
+// 車・五角形の立体の画面ハンドル。
+//   上の面（屋根）／下がってる線（前の面の上端）／前の面の前後
+//   荷台の高さ・前後の長さ ／ タイヤの大きさ・太さ・左右の間隔・前後の間隔
+function vehicleGizmo(o) {
+    if (!isVehicleAsset(o)) return null;
+    const g = pentaGeometry(o),
+        hw = g.W / 2,
+        zMax = Math.max(1, g.H * 3),
+        handles = {};
+    if (g.cfg.mode === "step") {
+        // 乗用車2：低い前の直方体＋高い後ろの直方体。
+        //   前の直方体の高さ／前の面の前後／後ろの直方体の高さ／後ろの面の前後。
+        handles.frontBoxH = screenHandle(
+            o,
+            "vh-front-box-h",
+            [-hw, g.stepY, g.frontBoxH],
+            [-hw, g.stepY, g.frontBoxH],
+            [-hw, g.stepY, g.frontBoxH + 1],
+            g.frontBoxH,
+            0.08,
+            Math.max(0.1, g.H - 0.05),
+            "前の箱の高さ",
+            { x: 0, y: -1 },
+            "#7dd8ff",
+        );
+        handles.nose = screenHandle(
+            o,
+            "vh-nose",
+            [0, g.yF, g.frontBoxH * 0.5],
+            [0, g.yF, g.frontBoxH * 0.5],
+            [0, g.yF - 1, g.frontBoxH * 0.5],
+            g.nose,
+            -g.L * 0.35,
+            g.L * 0.8,
+            "前の面",
+            { x: 0, y: 1 },
+            "#ffd34d",
+        );
+        handles.rearBoxH = screenHandle(
+            o,
+            "vh-rear-box-h",
+            [hw, g.yB, g.H],
+            [hw, g.yB, g.H],
+            [hw, g.yB, g.H + 1],
+            g.H,
+            0.08,
+            zMax,
+            "後ろの箱の高さ",
+            { x: 0, y: -1 },
+            "#8ce6c2",
+        );
+        handles.tail = screenHandle(
+            o,
+            "vh-tail",
+            [0, g.yB, g.H * 0.5],
+            [0, g.yB, g.H * 0.5],
+            [0, g.yB + 1, g.H * 0.5],
+            g.tail,
+            -g.L * 0.6,
+            g.L * 0.35,
+            "後ろの面",
+            { x: 0, y: 1 },
+            "#ff9f68",
+        );
+    } else {
+        // 上の面（屋根）／下がってる線（前の面の上端）／前の面の前後。
+        handles.roofH = screenHandle(
+            o,
+            "vh-roof-h",
+            [hw, g.backY, g.H],
+            [hw, g.backY, g.H],
+            [hw, g.backY, g.H + 1],
+            g.H,
+            0.3,
+            zMax,
+            "上の面",
+            { x: 0, y: -1 },
+            "#8ce6c2",
+        );
+        handles.frontH = screenHandle(
+            o,
+            "vh-front-h",
+            [hw, g.yF, g.edgeH],
+            [hw, g.yF, g.edgeH],
+            [hw, g.yF, g.edgeH + 1],
+            g.edgeH,
+            0.06,
+            Math.max(0.1, g.H - 0.06),
+            "下がってる線",
+            { x: 0, y: -1 },
+            "#7dd8ff",
+        );
+        handles.nose = screenHandle(
+            o,
+            "vh-nose",
+            [0, g.yF, g.edgeH * 0.55],
+            [0, g.yF, g.edgeH * 0.55],
+            [0, g.yF - 1, g.edgeH * 0.55],
+            g.nose,
+            -g.L * 0.35,
+            g.L * 0.8,
+            "前の面",
+            { x: 0, y: 1 },
+            "#ffd34d",
+        );
+        // 六角形（乗用車）だけ：後ろの「下がってる線」。
+        if (g.cfg.hex)
+            handles.rearH = screenHandle(
+                o,
+                "vh-rear-h",
+                [hw, g.yB, g.rearH],
+                [hw, g.yB, g.rearH],
+                [hw, g.yB, g.rearH + 1],
+                g.rearH,
+                0.06,
+                Math.max(0.1, g.H - 0.06),
+                "後ろの下がってる線",
+                { x: 0, y: -1 },
+                "#a0e57c",
+            );
+        // 荷台（直方体）の高さと前後ろの長さ。荷台の無い種類には出さない。
+        if (g.cfg.bed) {
+            handles.bedH = screenHandle(
+                o,
+                "vh-bed-h",
+                [hw, g.yB, g.bedH],
+                [hw, g.yB, g.bedH],
+                [hw, g.yB, g.bedH + 1],
+                g.bedH,
+                0.05,
+                Math.max(0.1, g.H - 0.05),
+                "荷台の高さ",
+                { x: 0, y: -1 },
+                "#ffb36f",
+            );
+            handles.bedL = screenHandle(
+                o,
+                "vh-bed-l",
+                [0, g.yB, g.bedH * 0.8],
+                [0, g.yB, g.bedH * 0.8],
+                [0, g.yB + 1, g.bedH * 0.8],
+                g.bedL,
+                0.2,
+                Math.max(0.25, g.L - 0.5),
+                "荷台の長さ",
+                { x: 0, y: 1 },
+                "#ff9f68",
+            );
+        }
+    }
+    // タイヤ（大きさ・太さ・前後の間隔・上下）。どの車にも出す。
+    // 「タイヤの左右（間隔）」は、ご要望で「タイヤの上下」へ入れ替えた。
+    if (g.cfg.wheels) {
+        const outer = (sx) => (sx * g.track) / 2 + (sx * g.tireW) / 2,
+            zc = g.tireR + g.tireZ,
+            rearTop = zc + g.tireR;
+        handles.tireR = screenHandle(
+            o,
+            "vh-tire-r",
+            [outer(1), g.rearA, rearTop],
+            [outer(1), g.rearA, rearTop],
+            [outer(1) + 1, g.rearA, rearTop],
+            g.tireR,
+            0.06,
+            Math.max(0.1, Math.min(0.7, g.H * 0.45)),
+            "タイヤの大きさ",
+            { x: 1, y: 0 },
+            "#ad9cff",
+        );
+        handles.tireW = screenHandle(
+            o,
+            "vh-tire-w",
+            [outer(-1), g.rearA, rearTop],
+            [outer(-1), g.rearA, rearTop],
+            [outer(-1) - 1, g.rearA, rearTop],
+            g.tireW,
+            0.04,
+            Math.max(0.05, g.W * 0.6),
+            "タイヤの太さ",
+            { x: -1, y: 0 },
+            "#c9a97a",
+        );
+        // 前後の間隔。前のタイヤは後ろへ、後ろのタイヤは前へ（真ん中は動かさない）。
+        handles.wb = screenHandle(
+            o,
+            "vh-base",
+            [0, g.frontA, rearTop],
+            [0, g.frontA, rearTop],
+            [0, g.frontA - 1, rearTop],
+            g.wb,
+            0.3,
+            g.wbMax,
+            "タイヤの前後",
+            { x: 0, y: 1 },
+            "#f0c419",
+        );
+        // タイヤの上下（0 で地面に接する。上げると浮く）。
+        handles.tireZ = screenHandle(
+            o,
+            "vh-tire-z",
+            [outer(1), g.frontA, zc],
+            [outer(1), g.frontA, zc],
+            [outer(1), g.frontA, zc + 1],
+            g.tireZ,
+            -Math.max(0.05, g.tireR * 0.8),
+            3,
+            "タイヤの上下",
+            { x: 0, y: -1 },
+            "#ff7f9e",
+        );
     }
     return { o, C3: L2W(o, 0, 0, g.H * 0.5), handles };
 }
@@ -7156,6 +7504,37 @@ function drawSpecialGizmo(c, o) {
             sq(h.s, h.color || "#ff9f68");
             gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}`, h.s.x + 9 / Z, h.s.y - 8 / Z, h.color || "#ff9f68", 12);
         }
+    } else if (isVehicleAsset(sg.o)) {
+        // 五角形の立体・車の寸法ハンドル。掴む前から動く向きが分かるよう、
+        // 破線＋四角＋向きの矢じり＋「名前 数値m」を他のアセットと同じ見た目で出す。
+        Object.values(sg.handles || {}).forEach((h) => {
+            if (!h?.s?.ok) return;
+            const col = h.color || "#8ce6c2",
+                d = h.dir || { x: 0, y: -1 };
+            c.strokeStyle = col;
+            c.lineWidth = 1.4 / Z;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.beginPath();
+            if (h.anchor?.ok) {
+                c.moveTo(h.anchor.x, h.anchor.y);
+                c.lineTo(h.s.x, h.s.y);
+            }
+            c.stroke();
+            c.setLineDash([]);
+            sq(h.s, col, false);
+            c.beginPath();
+            [1, -1].forEach((sgn) => {
+                const ax = h.s.x + (d.x * sgn * 13) / Z,
+                    ay = h.s.y + (d.y * sgn * 13) / Z;
+                c.moveTo(ax, ay);
+                c.lineTo(ax - (d.x * 6) / Z - (d.y * 4) / Z, ay - (d.y * 6) / Z + (d.x * 4) / Z);
+                c.lineTo(ax - (d.x * 6) / Z + (d.y * 4) / Z, ay - (d.y * 6) / Z - (d.x * 4) / Z);
+                c.closePath();
+            });
+            c.fillStyle = col;
+            c.fill();
+            gzLabel(c, `${h.label} ${Number(h.start || 0).toFixed(2)}m`, h.s.x + 16 / Z, h.s.y - 8 / Z, col, 12);
+        });
     } else if (isCounterAsset(sg.o)) {
         // 長さ（左右）／天板の厚さ（上下・ゆっくり）／土台の高さ（上下）の3本。
         Object.values(sg.handles || {}).forEach((h) => {
@@ -8251,6 +8630,7 @@ function hitGizmo(p) {
             active.asset === "stool" ||
             active.asset === "railing" ||
             active.asset === "outdoorUnit" ||
+            isVehicleAsset(active) ||
             isSignalAsset(active) ||
             isCounterAsset(active)
         ) {
@@ -8853,7 +9233,9 @@ function beginGizmo(h, p) {
         h.t === "wallSideSign-bracket-length" ||
         h.t === "cone-height" ||
         h.t === "sphere-radius" ||
-        h.t.startsWith("person-joint-")
+        h.t.startsWith("person-joint-") ||
+        // 五角形の立体・車の寸法（上の面・下がってる線・前の面・荷台・タイヤ）。
+        h.t.startsWith("vh-")
     )
         ed = { ...base, t: h.t, sign: h.sign, p0: p };
     else if (h.t === "axis") {
@@ -9047,6 +9429,31 @@ function dragEdit(p, freeRotation = false) {
             // 本数は整数。ほかの2つは 0.001 刻みで扱う（数値欄と同じ桁）。
             num = h.integer ? Math.round(value) : Math.round(value * 1000) / 1000;
         if (key) patch = { [key]: num };
+    } else if (ed.t.startsWith("vh-")) {
+        // 五角形の立体・車の寸法。どれも「動かす面は1つだけ」なので、
+        // 掴んだ向きの成分だけを足し、ほかの寸法はそのまま残す。
+        const h = ed.sign,
+            deltaX = p.x - ed.p0.x,
+            deltaY = p.y - ed.p0.y,
+            value = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max),
+            KEY = {
+                "vh-roof-h": "h", // 上の面（屋根）の高さ＝アセットの高さ
+                "vh-front-h": "vhFrontH", // 下がってる線（前の面の上端）
+                "vh-rear-h": "vhRearH", // 後ろの下がってる線（六角形）
+                "vh-nose": "vhNose", // 一番前の長方形の前後
+                "vh-tail": "vhTail", // 一番後ろの面の前後
+                "vh-front-box-h": "vhFrontBoxH", // 前の直方体の高さ
+                "vh-rear-box-h": "h", // 後ろの直方体の高さ＝アセットの高さ
+                "vh-bed-h": "vhBedH", // 荷台の高さ
+                "vh-bed-l": "vhBedL", // 荷台の前後ろの長さ
+                "vh-tire-r": "vhTireR", // タイヤの大きさ
+                "vh-tire-w": "vhTireW", // タイヤの太さ
+                "vh-tire-z": "vhTireZ", // タイヤの上下
+                "vh-track": "vhTrack", // タイヤの左右の間隔（ハンドルは廃止・値は残す）
+                "vh-base": "vhWb", // タイヤの前後の間隔
+            },
+            key = KEY[ed.t];
+        if (key) patch = { [key]: Math.round(value * 1000) / 1000 };
     } else if (ed.t === "counter-length") {
         // 長さ（＝左右の幅）。左右へ同じだけ伸びる。
         const h = ed.sign,
@@ -9874,19 +10281,6 @@ function exportSurfaceTriangles(o) {
                     ctri([a[0], a[1], z], [b[0], b[1], z], [c[0], c[1], z]);
                 });
             },
-            prism = (points, z0, z1) => {
-                cface(points, z0);
-                cface([...points].reverse(), z1);
-                for (let i = 0; i < points.length; i++) {
-                    const j = (i + 1) % points.length;
-                    cquad(
-                        [points[i][0], points[i][1], z0],
-                        [points[j][0], points[j][1], z0],
-                        [points[j][0], points[j][1], z1],
-                        [points[i][0], points[i][1], z1],
-                    );
-                }
-            },
             x = q.w * 0.5,
             y = q.d * 0.5,
             frontY = -y,
@@ -9944,10 +10338,6 @@ function exportSurfaceTriangles(o) {
                 );
                 return { outer, inner };
             },
-            drawBeam = (z1) => {
-                if (q.beamHeight <= 0 || q.beamProjection <= 0) return;
-                prism(recessedStackedBuildingBeamFootprint(q), z1 - q.beamHeight, z1);
-            },
             // 階の壁と、階の間を埋める壁の両方を同じ処理で作る。
             // capsをfalseにすると接合部の壁だけを描く。
             drawFloor = (z0, floorHeight, band, caps = true) => {
@@ -9977,8 +10367,6 @@ function exportSurfaceTriangles(o) {
                 cquad([x, y, z0], [-x, y, z0], [-x, y, z1], [x, y, z1]);
                 cquad([-x, y, z0], [-x, -y, z0], [-x, -y, z1], [-x, y, z1]);
                 drawWindowBand(z0, z1, band);
-                // 屋根になる最上階には梁／庇を上端へ作る。
-                if (caps) drawBeam(band ? band.top : z1);
             };
         const junctions = recessedStackedBuildingJunctionWindows(o, q);
         recessedStackedBuildingFloors(o, q).forEach((floor) => {
@@ -11098,11 +11486,12 @@ function updateSeamPicks(depth, cw, ch, tf) {
             cur = best.get(key);
         if (!cur || score > cur.score) best.set(key, { score, vis: sc.vis, s, mz: (a.depth + b.depth) / 2 });
     }
-    const picks = new Set();
+    const picks = new Set(),
+        th = window.__seamTh === undefined ? 0.25 : Number(window.__seamTh);
     best.forEach((v) => {
         // 差が小さい＝両側とも面＝面の中なので描かない。
         // 見えている部分がある線だけを描く（隠れている線を選んでしまうのを防ぐ）。
-        if (v.vis > 0 && v.score >= (window.__seamTh === undefined ? 0.25 : Number(window.__seamTh))) picks.add(v.s);
+        if (v.vis > 0 && v.score >= th) picks.add(v.s);
     });
     seamPicks = picks;
 }
@@ -11134,33 +11523,63 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     c.beginPath();
     let on = false;
     const myOwner = depthOwnerMap.get(s.ob.id) || 0;
-    // 【重要】面ONでは「1枚の面の内側を通る線」を線ごと描かない
-    // （ユーザー指定：描写しなくてよい線＝重なった線・本来見えない線は描かない）。
-    // 押し出した板（庇・屋根）の裏面の稜線が、面の上に薄く残っていた。
-    // 点ごとに判定すると、同じ線の途中だけ消えて**点線**になるので、
-    // 線に沿った9点を調べ、ほとんど（8/9以上）が面の内側ならその線を丸ごと省く。
-    // 面の縁を通る線は、必ずどこかで別の面か背景に当たるので残る。
-    if (!window.__noInterior && depthFace) {
-        let ins = 0,
-            hit = 0;
-        for (let i = 1; i <= 4; i++) {
-            const p = exportPoint(s.p[Math.round(((s.p.length - 1) * i) / 5)], tf);
-            if (!p) continue;
-            const x = Math.round(p.x),
-                y = Math.round(p.y);
-            if (x < 0 || y < 0 || x >= cw || y >= ch) continue;
-            const z = depthAtPoint(depth, cw, ch, p.x, p.y);
-            if (!Number.isFinite(z)) continue;
-            hit++;
-            if (Math.abs(p.depth - z) <= Math.max(0.5, Math.abs(z) * 0.05) && interiorOfFace(cw, ch, x, y, 2, myOwner)) ins++;
-            // 2点以上が「面の内側でない」なら、この線は面の縁を通っている＝描く（早めに切り上げる）。
-            else if (hit - ins >= 2) break;
-        }
-        if (hit >= 3 && ins >= hit - 1) return;
-    }
+    // 【重要】面の上へ意図的に描く線（凹窓の窓間仕切りなど）。
+    // 面の内側を通る線は「重なった線」として消すのが基本だが、窓の桟のように
+    // 面の上へ描くことを目的にした線まで消えると、窓の枚数を変えても
+    // 何も描かれない（実測：凹窓階層建物の窓間仕切りが全部消えていた）。
+    // 生成側が onFace を立てた線だけ、面の内側判定を通す。
+    const onFace = !!s.onFace;
+    // 線全体を数点だけ見て省略すると、試験点の間にある開口や遮蔽物の切れ目で
+    // 見える区間まで丸ごと消える。面の内側・背面は下の点ごとの判定で除去する。
     const okx = tf[0] || 1,
         oky = tf[3] || 1;
     // 画面座標・奥行き・（必要なら近くの画素）から、この点を描いてよいか決める。
+    // 確実に手前の面に覆われた点。断片の橋渡しでも同じ判定を使い、
+    // 本当の遮蔽物を短いノイズとして埋めてしまわない。
+    const definitelyOccluded = (e) => {
+        const x = Math.round(e.x), y = Math.round(e.y);
+        if (x < 0 || x >= cw || y < 0 || y >= ch) return false;
+        // 【重要】「まわりの画素すべてが、この線よりはっきり手前の平らな面」なら、
+        // その点は隠れる面の内側にある。同じオブジェクトの面かどうかに関係なく隠す。
+        // これが無いと、階層建物の縁（張り出した帯）の奥にある壁の稜線が、
+        // 「自分の面だから」という理由で残っていた（実測：縁の反対側の線が
+        // 0.4〜4.4m 奥なのに描かれていた）。下の「自分の面」系の緩い判定より先に見る。
+        if (!window.__noOccl && (!onFace || s.occludeSelf || !depthOwner || depthOwner[y * cw + x] !== myOwner)) {
+            const sameOwner = depthOwner && depthOwner[y * cw + x] === myOwner,
+                selfAllowance = onFace && sameOwner ? Math.max(0, Number(s.selfOcclusionAllowance) || 0) : 0,
+                occTol = Math.max(0.03, Math.abs(e.depth) * 0.002, selfAllowance);
+            let near9 = 0,
+                bg = 0,
+                zMin = Infinity,
+                zMax = -Infinity;
+            for (let dy = -1; dy <= 1; dy++) {
+                const yy = y + dy;
+                if (yy < 0 || yy >= ch) {
+                    bg++;
+                    continue;
+                }
+                for (let dx = -1; dx <= 1; dx++) {
+                    const xx = x + dx;
+                    if (xx < 0 || xx >= cw) {
+                        bg++;
+                        continue;
+                    }
+                    const zz = depth[yy * cw + xx];
+                    if (!Number.isFinite(zz)) {
+                        bg++;
+                        continue;
+                    }
+                    if (zz < e.depth - occTol) near9++;
+                    if (zz < zMin) zMin = zz;
+                    if (zz > zMax) zMax = zz;
+                }
+            }
+            // 面をほぼ真横から見ている所（1画素で奥行きが大きく変わる）では
+            // 判定しない。平らな面に囲まれているときだけ「隠れている」と決める。
+            if (!bg && near9 === 9 && zMax - zMin <= Math.max(0.10, Math.abs(e.depth) * 0.02)) return true;
+        }
+        return false;
+    };
     const accept = (e) => {
         const x = Math.round(e.x),
             y = Math.round(e.y);
@@ -11178,8 +11597,8 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         const zNear = Math.max(0.03, Math.abs(z) * 0.005);
         if (!window.__noInFront && e.depth < z - zNear) return true;
         if (!(e.depth > z + CG.depthEps(e.depth))) {
-            // 面ID照合による「平面の内側の線」の除去（既定オン・__noFaceCull で無効）。
-            if (!window.__noFaceCull) {
+            // 面IDによる面内線の除去。意図して面上に描く線は onFace を付ける。
+            if (!window.__noFaceCull && !onFace) {
                 const ow = depthOwner && depthOwner[i1];
                 if (ow && ow === myOwner) {
                     // 上下左右とも同じ面IDのときだけ「面の内側」と判断する。
@@ -11191,6 +11610,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
             }
             return true;
         }
+        if (definitelyOccluded(e)) return false;
         // その画素の面が「この線の持ち主」で、奥行きがほぼ同じなら、
         // その線は自分の面の稜線（面と面の取り合い）なので描く。
         const own = depthOwner && depthOwner[i1];
@@ -11204,7 +11624,9 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         // そこで奥行きではなく「その線が面の境目に乗っているか」で決める。
         // まわり±3px に別の面が混じっていれば境目＝見える稜線、1枚の面だけなら隠す。
         if (own && own === myOwner && depthFace && !window.__noOwnFace) {
-            const ownTol = Math.max(0.35, Math.abs(z) * 0.03);
+            // 大きすぎる許容は、部品の奥の稜線を「自分の面の縁」と誤認する。
+            // 室外機・信号機で 0.2〜0.3m 奥の線が出ていたため許容を絞る。
+            const ownTol = Math.max(0.12, Math.abs(z) * 0.01);
             if (e.depth <= z + ownTol) {
                 const f0 = depthFace[i1];
                 if (f0 && !faceCullAround(cw, ch, x, y, f0, myOwner)) return true;
@@ -11285,7 +11707,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     // （1画素で奥行きが数m変わる）では、判定が1点ごとに揺れて
     // **1〜6px おきの点線**になっていた。数px の切れ目は「線の途切れ」ではなく
     // 判定の揺れなので、前後の点が近ければ（bridge px 以内）線としてつなぐ。
-    // 本当に隠れている区間は数十px 以上あるので、隠線の正しさは変わらない。
+    // ただし確実に遮られている点では、短くても橋渡ししない。
     let pend = [], // いま隠れている途中の点（つながれば描く）
         pendFrom = null; // 隠れ始めた点（つながったときに埋める始点）
     const flushPend = () => {
@@ -11301,6 +11723,14 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
             return;
         }
         if (!accept(e)) {
+            // 実際に手前の面で覆われている区間は、短くても橋渡ししない。
+            if (definitelyOccluded(e)) {
+                flushRun();
+                flushPend();
+                on = false;
+                lastOk = null;
+                return;
+            }
             if (on) {
                 if (!pend.length) pendFrom = { x: e.x, y: e.y };
                 pend.push(e.sx, e.sy);
@@ -11372,23 +11802,11 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
                                 depth: 1 / (ia + (ib - ia) * t),
                             };
                         };
-                    // まず粗く調べる。区間ぜんぶが同じ状態（見える／隠れる）なら
-                    // 細かく刻む必要はないので、そのまま1本の線として引く。
-                    const nc = Math.min(16, Math.max(1, Math.ceil(len / 24)));
-                    let uniform = true;
-                    for (let j = 1; j < nc; j++)
-                        if (!accept(at(j / nc))) {
-                            uniform = false;
-                            break;
-                        }
-                    if (!uniform) {
-                        // 遮蔽物との境目がある区間だけ、細かく刻んで切る位置を合わせる。
-                        // ドラッグ中は刻みを粗くして、操作中の描画を軽くする
-                        // （操作が終われば次の描画で細かい刻みに戻る）。
-                        const step = typeof ed !== "undefined" && ed ? 20 : 6;
-                        const n = Math.min(48, Math.max(1, Math.ceil(len / step)));
-                        for (let j = 1; j < n; j++) emit(at(j / n));
-                    }
+                    // 粗い等間隔判定だけでは、その間の細い遮蔽物を見落とす。
+                    // 例：22px 幅の板が 24px 間隔の検査点の間に収まり、
+                    // 線が板を貫通していた。画面上の間隔で点ごとに判定する。
+                    const n = Math.max(1, Math.ceil(len / 2));
+                    for (let j = 1; j < n; j++) emit(at(j / n));
                 } else {
                     const n = Math.max(1, Math.ceil(Math.hypot(v[0] - a[0], v[1] - a[1], v[2] - a[2]) * 10));
                     for (let j = 1; j < n; j++) put(V.add(a, v, 1 - j / n, j / n));
@@ -11399,6 +11817,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     });
     flushRun();
     c.stroke();
+
 }
 
 // ===== 5. 線画レイヤー：線だけ別キャンバスに描き、アンチエイリアスを消して二値化する =====
@@ -14087,6 +14506,8 @@ const ASSETS = {
     stairs: { label: "階段", glyph: "▰", w: 1.45, d: 2.4, h: 0.78, accent: "#ffb36f" },
     building: { label: "開口のある建物", glyph: "▣", w: 4, d: 3, h: 5, accent: "#8ce6c2" },
     buildingAwning: { label: "テント付き建物", glyph: "▣", w: 4, d: 3, h: 5, accent: "#d98b68" },
+    // テント付き建物の開口版。本体は開口のある建物、子はテント（店舗テントと同じ部品）。
+    buildingAwningOpen: { label: "テント付き開口建物", glyph: "▤", w: 4, d: 3, h: 5, accent: "#e3a06c" },
     buildingSign: { label: "看板付き開口建物", glyph: "▣", w: 4, d: 3, h: 5, accent: "#76d9ff" },
     stackedBuilding: { label: "縁付き階層建物", glyph: "▥", w: 4, d: 3, h: 8.98, accent: "#8ce6c2" },
     recessedStackedBuilding: {
@@ -14107,8 +14528,6 @@ const ASSETS = {
         recessedWindowDepth: 0.32,
         recessedWindowBottom: 0.48,
         recessedSillHeight: 0.48,
-        recessedBeamHeight: 0.12,
-        recessedBeamProjection: 0.1,
         recessedSideWindowW: 2.4,
         recessedWindowMarginLeft: 0.85,
         recessedWindowMarginEnd: 0.75,
@@ -14167,6 +14586,10 @@ const assetLabel = (o) =>
         ? o.linkedRole === "parent" || o.asset === "building"
             ? "テント付き建物"
             : "接続テント"
+        : o.linkedAsset === "buildingAwningOpen"
+          ? o.linkedRole === "parent" || o.asset === "building"
+              ? "テント付き開口建物"
+              : "接続テント"
         : o.linkedAsset === "buildingSign"
           ? o.linkedRole === "parent" || o.asset === "building"
               ? "看板付き開口建物"
@@ -14709,12 +15132,6 @@ function recessedStackedBuildingParams(o) {
         junctionHeight = Math.max(0.05, floorGap),
         // 窓は接合部いっぱいに収まるため、上下のずれは持たない。
         junctionOffset = 0,
-        beamHeight = clamp(finite(o?.recessedBeamHeight, 0.12), 0, Math.min(0.6, floorHeight * 0.35)),
-        beamProjection = clamp(
-            finite(o?.recessedBeamProjection, 0.1),
-            0,
-            Math.max(0, Math.min(w - cornerBevel, d) * 0.25),
-        ),
         sideWindowW = clamp(d - cornerBevel - marginEnd, 0.2, sideWindowMax);
     return {
         w,
@@ -14737,8 +15154,6 @@ function recessedStackedBuildingParams(o) {
         junctionHeight,
         junctionOffset,
         sillHeight,
-        beamHeight,
-        beamProjection,
         sideWindowW,
         sideWindows: o?.recessedSideWindows !== false,
     };
@@ -14859,23 +15274,6 @@ function recessedStackedBuildingCapPath(params, notch) {
         points = [...outer, ...[...inner].reverse()].map((point) => [point[0], point[1]]);
     return points;
 }
-function recessedStackedBuildingBeamFootprint(params) {
-    const x = params.w * 0.5,
-        y = params.d * 0.5,
-        b = params.cornerBevel,
-        p = params.beamProjection,
-        segments = params.cornerBevelSegments;
-    if (b <= 0.0001) return [[-x, -y - p], [x, -y - p], [x + p, -y], [x + p, y], [-x, y]];
-    const center = [x - b, -y + b],
-        radius = b + p,
-        points = [[-x, -y - p], [x - b, -y - p]];
-    for (let i = 1; i <= segments; i++) {
-        const angle = -Math.PI * 0.5 + (Math.PI * 0.5 * i) / segments;
-        points.push([center[0] + radius * Math.cos(angle), center[1] + radius * Math.sin(angle)]);
-    }
-    points.push([x + p, y], [-x, y]);
-    return points;
-}
 function recessedStackedBuildingWindowPaths(params) {
     const x = params.w * 0.5,
         y = params.d * 0.5,
@@ -14951,7 +15349,6 @@ function recessedStackedBuildingLines(o) {
         x = q.w * 0.5,
         y = q.d * 0.5,
         footprint = recessedStackedBuildingFootprint(q),
-        beamFootprint = recessedStackedBuildingBeamFootprint(q),
         drawOpening = (band) => {
             const paths = recessedStackedBuildingWindowPaths(q),
                 outer = q.sideWindows ? paths.outer : paths.outer.slice(0, 2),
@@ -14970,15 +15367,17 @@ function recessedStackedBuildingLines(o) {
                 line([to3(outer[index], zA), to3(outer[index], zB)], frame, detailWidth);
                 line([to3(inner[index], zA), to3(inner[index], zB)], dark, detailWidth);
             });
+            // 窓間仕切り（窓の枚数だけ増える桟）は、凹みの奥面の上へ描く線。
+            // 面の内側の線として隠線処理に消されないよう onFace を立てる。
             recessedStackedBuildingWindowMullionPoints(q).forEach(({ inner: back }) => {
-                line([to3(back, zA), to3(back, zB)], dark, detailWidth);
+                const mullion = customLineA(o, [to3(back, zA), to3(back, zB)], dark, detailWidth);
+                mullion.onFace = true;
+                // 凹みの奥面にある線。近い同一オブジェクトの面との食い違いは許すが、
+                // 建物の反対側など明らかに遠い線は隠す。許容は窓の凹み寸法に追従。
+                mullion.occludeSelf = true;
+                mullion.selfOcclusionAllowance = q.windowDepth * 2 + 0.1;
+                out.push(mullion);
             });
-        },
-        drawBeam = (z1) => {
-            if (q.beamHeight <= 0 || q.beamProjection <= 0) return;
-            const z0 = z1 - q.beamHeight;
-            closed(beamFootprint.map(([px, py]) => [px, py, z0]), frame, detailWidth);
-            closed(beamFootprint.map(([px, py]) => [px, py, z1]), frame, detailWidth);
         };
     const junctions = recessedStackedBuildingJunctionWindows(o, q);
     recessedStackedBuildingFloors(o, q).forEach(({ index, z, h }) => {
@@ -14994,13 +15393,7 @@ function recessedStackedBuildingLines(o) {
             if (!inBevelArc) line([[px, py, z], [px, py, z1]]);
         });
         // 窓帯は各階の接合部の中央へ置き、最上階の上には開口を作らない。
-        if (band) {
-            drawOpening(band);
-            drawBeam(band.top);
-        } else {
-            // 屋根になる最上階には梁／庇を上端へ描く。
-            drawBeam(z1);
-        }
+        if (band) drawOpening(band);
     });
     return out;
 }
@@ -16887,7 +17280,10 @@ function linesSphere(ctx) {
         const t = (i / 48) * Math.PI * 2;
         eq.push([eqR * Math.cos(t), eqR * Math.sin(t), zc]);
     }
-    out.push(lineA(o, eq, a, 0.9));
+    const equator = lineA(o, eq, a, 0.9);
+    equator.onFace = true; // 表面の意図的な線。
+    equator.occludeSelf = true; // 球の裏側は自分自身の面で隠す。
+    out.push(equator);
 }
 
 function linesTriPrism(ctx) {
@@ -17619,8 +18015,6 @@ function normalizedAsset(o) {
             recessedWindowDepth: params.windowDepth,
             recessedWindowBottom: params.windowBottom,
             recessedSillHeight: params.sillHeight,
-            recessedBeamHeight: params.beamHeight,
-            recessedBeamProjection: params.beamProjection,
             recessedSideWindowW: params.sideWindowW,
             recessedSideWindows: params.sideWindows,
         };
@@ -17846,14 +18240,12 @@ obBounds = function (o) {
     } else if (q.asset === "recessedStackedBuilding") {
         const params = recessedStackedBuildingParams(q),
             h = params.totalH,
-            xValues = [-params.w / 2, params.w / 2, params.w / 2 + params.beamProjection],
-            yValues = [-params.d / 2 - params.beamProjection, -params.d / 2, params.d / 2],
-            beamBottom = Math.max(0, h - params.beamHeight);
+            xValues = [-params.w / 2, params.w / 2],
+            yValues = [-params.d / 2, params.d / 2];
         xValues.forEach((x) =>
             yValues.forEach((y) => {
                 pts.push(customPt(q, x, y, 0));
                 pts.push(customPt(q, x, y, h));
-                pts.push(customPt(q, x, y, beamBottom));
             }),
         );
     } else if (isStackedBuildingAsset(q)) {
@@ -18888,6 +19280,47 @@ const ASSET_KIT = (function () {
         return parts;
     });
 
+    // ---- 五角形の立体（車のキャブ・上端を斜めに落とした塊）----
+    // 「前の面 → 斜め → 上面 → 背面」の五角形を、左右（x）へ押し出した立体。
+    //   w      … 幅（左右）。押し出す長さ
+    //   frontY / backY … 前の面・背面の y（正面は -Y）
+    //   edgeH  … 前の面の上端（＝「下がってる線」の高さ）
+    //   roofH  … 上面の高さ
+    //   slant  … 斜めの面が前後へ走る長さ（上面の始まり）
+    // 前の面・上面・背面が四角形になるので、軽トラのキャブも建物の塊もこれ1つで作れる。
+    K.registerPart("pentaPrism", (o) => {
+        const w = num(o.w, 1.6),
+            L = num(o.L, 2),
+            backY = num(o.backY, L / 2),
+            frontY = num(o.frontY, backY - L),
+            roofH = num(o.roofH, 1.6),
+            edgeH = Math.max(0.02, Math.min(num(o.edgeH, roofH * 0.45), roofH - 0.02)),
+            slant = Math.max(
+                0.01,
+                Math.min(num(o.slant, (roofH - edgeH) * 0.9), Math.max(0.01, backY - frontY - 0.02)),
+            ),
+            profile = [
+                [frontY, 0],
+                [frontY, edgeH],
+                [frontY + slant, roofH],
+                [backY, roofH],
+                [backY, 0],
+            ],
+            // 面を貼る側（三角形の向き）をそろえるため、反時計回りに直す。
+            path = K.area2(profile) < 0 ? profile.slice().reverse() : profile;
+        return [K.box(path, -w / 2, w / 2, { axis: "x" })];
+    });
+
+    // ---- タイヤ：円柱の左右の輪と少数の側面の母線 ----
+    K.registerPart("tire", (o) => {
+        const r = num(o.r, 0.3), t = num(o.t, 0.16), x = num(o.x, 0),
+            axleY = num(o.axleY, 0),
+            z = Number.isFinite(Number(o.z)) ? Number(o.z) : 0,
+            seg = Math.max(8, Math.round(num(o.seg, 16))),
+            verts = Number.isFinite(Number(o.verts)) ? Math.max(0, Math.round(Number(o.verts))) : 4;
+        return K.moveParts([K.cylinder(r, x - t / 2, x + t / 2, { axis: "x", seg, cy: r + z, verts })], 0, axleY, 0);
+    });
+
     // ---- 看板：板＋文字 ----
     K.registerPart("signBoard", (o) => {
         const w = num(o.w, 1.2),
@@ -19822,6 +20255,129 @@ ASSET_KIT.define(
     counterParts,
 );
 
+// --- 五角形の立体と車 ---
+// 形はすべて pentaGeometry(o)（engine-gizmo.js）が決める。
+// ここは「その値から部品を並べる」だけにして、ハンドルと同じ寸法を見るようにする。
+function vehicleParts(o, K) {
+    const g = pentaGeometry(o),
+        // 断面（五角形・六角形・L字）は pentaGeometry が作る。面の向きをそろえるため、
+        // 反時計回りに直してから左右へ押し出す。
+        profile = K.area2(g.profile) < 0 ? g.profile.slice().reverse() : g.profile,
+        parts = [K.box(profile, -g.W / 2, g.W / 2, { axis: "x" })];
+    // 荷台（直方体）。キャブの後ろから車体の後ろまで。
+    if (g.cfg.bed && g.bedL > 0.02)
+        parts.push(...K.moveParts([K.box(K.rectPath(g.W, g.bedL), 0, g.bedH)], 0, g.yB - g.bedL / 2, 0));
+    // タイヤ4つ。太さ（左右）・大きさ（半径）・前後の間隔・上下はすべて g から。
+    if (g.cfg.wheels)
+        g.wheels.forEach((w) =>
+            parts.push(...K.part("tire", { r: g.tireR, t: g.tireW, x: w.x, axleY: w.y, z: g.tireZ })),
+        );
+    return parts;
+}
+
+// 五角形の立体（建物の塊）。上端を斜めに落とした箱で、車のキャブと同じ部品。
+ASSET_KIT.define(
+    "pentaBox",
+    {
+        label: "五角形の立体",
+        glyph: "⬟",
+        w: 2.4,
+        d: 3.0,
+        h: 2.6,
+        accent: "#6c8fd6",
+        vhFrontH: 1.45,
+        vhNose: 0,
+    },
+    vehicleParts,
+);
+
+// 軽トラ（簡略化）：五角形のキャブ＋荷台＋タイヤ4つ。
+ASSET_KIT.define(
+    "keiTruck",
+    {
+        label: "軽トラ",
+        glyph: "🛻",
+        w: 1.48,
+        d: 3.4,
+        h: 1.8,
+        accent: "#6c8fd6",
+        vhFrontH: 0.98,
+        vhNose: 0,
+        vhBedL: 1.85,
+        vhBedH: 0.95,
+        vhTireR: 0.3,
+        vhTireW: 0.16,
+        vhTrack: 1.52,
+        vhWb: 2.0,
+    },
+    vehicleParts,
+);
+
+// 軽バン：屋根まで高い五角形＋タイヤ。荷台は無し。
+ASSET_KIT.define(
+    "keiVan",
+    {
+        label: "軽バン",
+        glyph: "🚐",
+        w: 1.55,
+        d: 3.5,
+        h: 2.05,
+        accent: "#7d9ed8",
+        vhFrontH: 1.12,
+        vhNose: 0.05,
+        vhTireR: 0.3,
+        vhTireW: 0.17,
+        vhTrack: 1.59,
+        vhWb: 2.3,
+    },
+    vehicleParts,
+);
+
+// 乗用車：低い屋根＋長い斜め（フロントガラス）。
+ASSET_KIT.define(
+    "sedan",
+    {
+        label: "乗用車",
+        glyph: "🚗",
+        w: 1.72,
+        d: 4.2,
+        h: 1.42,
+        accent: "#8a7dd8",
+        vhFrontH: 0.78,
+        vhNose: 0.12,
+        vhRearH: 0.72, // 後ろも斜めに落とす（六角形の断面）
+        vhTireR: 0.31,
+        vhTireW: 0.2,
+        vhTrack: 1.76,
+        vhWb: 2.6,
+    },
+    vehicleParts,
+);
+
+// 乗用車2：低い前の直方体＋高い後ろの直方体（L字の断面）＋タイヤ4本。
+// 前の箱の高さ・前の面の前後・後ろの箱の高さ・後ろの面の前後を、画面上で別々に変えられる。
+ASSET_KIT.define(
+    "sedan2",
+    {
+        label: "乗用車2",
+        glyph: "🚙",
+        w: 1.8,
+        d: 4.0,
+        h: 1.9,
+        accent: "#7f8ed8",
+        vhFrontBoxH: 0.95,
+        vhFrontH: 0.95,
+        vhStep: 1.5, // 前の直方体の長さ（境目の位置）
+        vhNose: 0,
+        vhTail: 0,
+        vhTireR: 0.34,
+        vhTireW: 0.22,
+        vhTrack: 1.84,
+        vhWb: 2.3,
+    },
+    vehicleParts,
+);
+
 /* City Grid Studio asset controller.
    アセットの配置・接続・JSON入出力・棚UIを担当する。
 
@@ -19977,8 +20533,6 @@ window.cityGridInstallAssetUI = function (bridge) {
                 recessedWindowDepth: info.recessedWindowDepth,
                 recessedWindowBottom: info.recessedWindowBottom,
                 recessedSillHeight: info.recessedSillHeight ?? info.recessedWindowBottom,
-                recessedBeamHeight: info.recessedBeamHeight,
-                recessedBeamProjection: info.recessedBeamProjection,
                 recessedSideWindowW: info.recessedSideWindowW,
                 recessedWindowMarginLeft: info.recessedWindowMarginLeft,
                 recessedWindowMarginEnd: info.recessedWindowMarginEnd,
@@ -20214,7 +20768,11 @@ window.cityGridInstallAssetUI = function (bridge) {
     // child.attachment が親の開口側へ追従するため、親の移動・回転・寸法変更に対応できる。
     // ===== 3. 連結パーツと配置（ベランダ・建物付属） =====
     function placeLinkedAsset(kind, p) {
-        const childKind = kind === "buildingAwning" ? "awning" : "rect",
+        // テント付き建物（開口なし・開口あり）は子がテント、看板付き建物は子が看板。
+        const awningKind = kind === "buildingAwning" || kind === "buildingAwningOpen",
+            // 看板は「壁付け看板（単体）」と同じ板の形にして、ベベルの操作を戻す。
+            // （以前は rect の押し出しだったため、板の形状・ベベルのハンドルが無かった）
+            childKind = awningKind ? "awning" : "wallSign",
             q = p ? groundAt(p) : assetGroundPoint(ASSETS.building),
             parent = newAsset("building", null, q),
             child = newAsset(childKind, null, q),
@@ -20222,7 +20780,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         // 親建物は生成面（P.assetAxis）に従って作る。子テント／看板は
         // syncAttachedPart() が親と同じ k で貼り付けるため、親をX／Z面へ
         // 生成しても壁の上に載ったまま一緒に傾く。
-        if (kind === "buildingAwning" || kind === "buildingSign") {
+        if (awningKind || kind === "buildingSign") {
             parent.k = clamp(Math.round(Number(P.assetAxis ?? 1)), 0, 2);
             parent.d = -1;
             const [piu, piv] = PL[parent.k];
@@ -20231,12 +20789,14 @@ window.cityGridInstallAssetUI = function (bridge) {
             parent.lift = 1 + (Number(q[parent.k]) || 0);
             parent.off = [0, 0, 0];
         }
-        if (kind === "buildingAwning") {
+        if (awningKind) {
             parent.ra = ASSETS.building.w / 2;
             parent.rb = ASSETS.building.d / 2;
             parent.h = ASSETS.building.h;
             parent.extrude = true;
-            parent.openingEnabled = false;
+            // 開口なしの「テント付き建物」だけ開口を閉じる。
+            // 「テント付き開口建物」は開口のある建物として作る（開口W/Hは建物の既定値）。
+            parent.openingEnabled = kind === "buildingAwningOpen";
             parent.accent = "#d98b68";
         } else {
             // 看板付き建物は従来どおり開口ありを初期状態にする。
@@ -20264,12 +20824,18 @@ window.cityGridInstallAssetUI = function (bridge) {
             rotOffset: 0,
             verticalOnly: true,
         };
-        if (kind === "buildingSign") {
+        if (!awningKind) {
             child.ra = PART_W / 2;
             child.rb = 0.5 / 2;
             child.h = PART_H;
             child.extrude = true;
             child.accent = "#66e3c8";
+            // ベベルの初期値は壁付け看板（単体）と同じ。金具は建物へ直付けなので0本。
+            child.wallSignShape = "beveled";
+            child.wallSignBevelOffset = 0.18;
+            child.wallSignBevelSegments = 4;
+            child.wallSignBracketCount = 0;
+            child.wallSignBracketLength = 0.36;
         } else {
             child.ra = PART_W / 2;
             child.rb = 1 / 2;
@@ -20281,6 +20847,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             child.awningBackBottom = 0;
             child.awningEdgeEdited = false;
         }
+        // 壁付け看板の板は高さ中心が原点なので、下端を PART_BASE_Z（3.6m）へ合わせる。
+        if (!awningKind) child.attachment.baseZ = PART_BASE_Z + PART_H * 0.5;
         const attached = syncAttachedPart(child, parent);
         return { parent, child: attached };
     }
@@ -20399,7 +20967,8 @@ window.cityGridInstallAssetUI = function (bridge) {
     }
     // 通常アセット、ベランダ、接続アセットを入口で振り分ける配置関数。
     function placeAsset(kind, p) {
-        if (kind === "buildingAwning" || kind === "buildingSign") return placeLinkedAssetInstance(kind, p);
+        if (kind === "buildingAwning" || kind === "buildingAwningOpen" || kind === "buildingSign")
+            return placeLinkedAssetInstance(kind, p);
         if (kind === "balcony") return placeBalcony(p);
         sanitizeScene();
         const before = S.slice(),
@@ -20506,7 +21075,10 @@ window.cityGridInstallAssetUI = function (bridge) {
             parts = source.parts.map((part) => translateDefinition(fixOb(part), shift));
         const awning = parts.find((part) => part.asset === "awning"),
             building = parts.find((part) => part.asset === "building"),
-            rects = parts.filter((part) => part.type === "rect" && part.asset === "rect");
+            // 看板の子は、旧データ（rect の押し出し）と現データ（壁付け看板）の両方を受け付ける。
+            rects = parts.filter(
+                (part) => part.asset === "wallSign" || (part.type === "rect" && part.asset === "rect"),
+            );
         const child = awning || (building && rects.length ? rects[0] : null),
             parent = awning
                 ? parts.find((part) => part !== awning && (part.type === "rect" || part.asset === "building")) ||
@@ -20529,6 +21101,22 @@ window.cityGridInstallAssetUI = function (bridge) {
             p.openingH = Number(p.openingH) || Math.max(0.1, Number(p.h) || 3.6) * 0.66;
         } else {
             p.openingEnabled = p.openingEnabled !== false;
+            // 旧データの子看板（rect＋押し出し）を壁付け看板へ移行して、ベベルを操作できるようにする。
+            if (q.type === "rect" || q.asset === "rect") {
+                Object.assign(q, {
+                    type: "asset",
+                    asset: "wallSign",
+                    assetId: "wall-sign",
+                    assetName: (ASSETS.wallSign || {}).label || "壁付け看板（単体）",
+                    wallSignShape: q.wallSignShape || "beveled",
+                    wallSignBevelOffset: Number.isFinite(Number(q.wallSignBevelOffset)) ? Number(q.wallSignBevelOffset) : 0.18,
+                    wallSignBevelSegments: Number.isFinite(Number(q.wallSignBevelSegments)) ? Number(q.wallSignBevelSegments) : 4,
+                    wallSignBracketCount: 0,
+                    wallSignBracketLength: Number.isFinite(Number(q.wallSignBracketLength)) ? Number(q.wallSignBracketLength) : 0.36,
+                    extrude: true,
+                });
+                q.oldRectSign = true;
+            }
         }
         // 旧compound JSONにX/Z面の親が残っていても、接続建物は地面に立つY面へ戻す。
         // これにより、読み込み後のテント／看板も親の高さ・奥行き基準で接着できる。
@@ -20551,7 +21139,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             parentId: p.id,
             side: -1,
             x: dx * Math.cos(r) + dz * Math.sin(r),
-            baseZ: cb[1] - pb[1],
+            // 壁付け看板の板は高さ中心が原点なので、旧rect（下端基準）から移行した分を補正する。
+            baseZ: cb[1] - pb[1] + (q.oldRectSign ? Math.abs(Number(q.h) || 1) * 0.5 : 0),
             offsetZ: 0,
             rotOffset: 0,
             verticalOnly: true,
@@ -20824,6 +21413,11 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "stackedBuilding",
                 "recessedStackedBuilding",
                 "beveledStackedBuilding",
+                // テント付き建物・看板付き開口建物・テント付き開口建物は
+                // 「建物＋付属パーツ」だが、置くのは建物なので建物グループへ入れる。
+                "buildingAwning",
+                "buildingSign",
+                "buildingAwningOpen",
                 // 屋台は「建物として置くもの」なので建物グループへ入れる。
                 "stall",
                 // カウンター（普通／L字／コの字）も「建物として置くもの」。
@@ -20838,8 +21432,6 @@ window.cityGridInstallAssetUI = function (bridge) {
             label: "建物パーツ",
             // 建物に付ける部材・設備。屋根・テント・ベランダ・コの字壁・手すり・室外機。
             kinds: [
-                "buildingAwning",
-                "buildingSign",
                 "gableRoof",
                 "shedRoof",
                 "awning",
@@ -20847,6 +21439,8 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "uWall",
                 "railing",
                 "outdoorUnit",
+                // 五角形の立体（上端を斜めに落とした塊）。車のキャブと同じ部品で作る。
+                "pentaBox",
             ],
         },
         // 街並みの小物。新しいアセットを足して下の一覧へ書き忘れた場合も、
@@ -20875,6 +21469,9 @@ window.cityGridInstallAssetUI = function (bridge) {
             ],
         },
         { key: "person", label: "人間", kinds: ["person"] },
+        // 車（人物の隣）。キャブは五角形の立体、荷台は直方体、タイヤは円柱で作る。
+        // 寸法はすべて画面上の専用ハンドルで変えられる（engine-gizmo.js の vehicleGizmo）。
+        { key: "vehicle", label: "車", kinds: ["keiTruck", "keiVan", "sedan", "sedan2"] },
     ];
     // 看板は「壁付け看板（単体）」へ統合した。asset=sign と asset=wallSideSign
     // （建物へ接着する専用形状）は既存JSONの読み込み・表示用に定義だけ残し、棚からは外す。
@@ -22512,8 +23109,6 @@ window.cityGridInstallAssetUI = function (bridge) {
                 ["recessedWindowMarginLeft", q.marginLeft],
                 ["recessedWindowMarginEnd", q.marginEnd],
                 ["recessedWindowDepth", q.windowDepth],
-                ["recessedBeamHeight", q.beamHeight],
-                ["recessedBeamProjection", q.beamProjection],
             ];
         values.forEach(([id, value]) => {
             const input = el(id);
@@ -22540,8 +23135,6 @@ window.cityGridInstallAssetUI = function (bridge) {
                     recessedWindowMarginLeft: [0, Math.max(0, q.w - q.cornerBevel - 0.2)],
                     recessedWindowMarginEnd: [0, Math.max(0, q.d - q.cornerBevel - 0.2)],
                     recessedWindowDepth: [0.025, Math.max(0.025, recessedMaxInset(q.w, q.d))],
-                    recessedBeamHeight: [0, Math.min(0.6, q.floorHeight * 0.35)],
-                    recessedBeamProjection: [0, Math.max(0, Math.min(q.w - q.cornerBevel, q.d) * 0.25)],
                 }[name],
                 value = Number(rawValue);
             if (!limits || !Number.isFinite(value)) return;
@@ -22575,8 +23168,6 @@ window.cityGridInstallAssetUI = function (bridge) {
         ["recessedWindowMarginLeft", "recessedWindowMarginLeft"],
         ["recessedWindowMarginEnd", "recessedWindowMarginEnd"],
         ["recessedWindowDepth", "recessedWindowDepth"],
-        ["recessedBeamHeight", "recessedBeamHeight"],
-        ["recessedBeamProjection", "recessedBeamProjection"],
     ].forEach(([id, name]) => {
         const input = el(id);
         if (!input) return;

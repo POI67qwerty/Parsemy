@@ -86,6 +86,8 @@ const ASSETS = {
     stairs: { label: "階段", glyph: "▰", w: 1.45, d: 2.4, h: 0.78, accent: "#ffb36f" },
     building: { label: "開口のある建物", glyph: "▣", w: 4, d: 3, h: 5, accent: "#8ce6c2" },
     buildingAwning: { label: "テント付き建物", glyph: "▣", w: 4, d: 3, h: 5, accent: "#d98b68" },
+    // テント付き建物の開口版。本体は開口のある建物、子はテント（店舗テントと同じ部品）。
+    buildingAwningOpen: { label: "テント付き開口建物", glyph: "▤", w: 4, d: 3, h: 5, accent: "#e3a06c" },
     buildingSign: { label: "看板付き開口建物", glyph: "▣", w: 4, d: 3, h: 5, accent: "#76d9ff" },
     stackedBuilding: { label: "縁付き階層建物", glyph: "▥", w: 4, d: 3, h: 8.98, accent: "#8ce6c2" },
     recessedStackedBuilding: {
@@ -106,8 +108,6 @@ const ASSETS = {
         recessedWindowDepth: 0.32,
         recessedWindowBottom: 0.48,
         recessedSillHeight: 0.48,
-        recessedBeamHeight: 0.12,
-        recessedBeamProjection: 0.1,
         recessedSideWindowW: 2.4,
         recessedWindowMarginLeft: 0.85,
         recessedWindowMarginEnd: 0.75,
@@ -166,6 +166,10 @@ const assetLabel = (o) =>
         ? o.linkedRole === "parent" || o.asset === "building"
             ? "テント付き建物"
             : "接続テント"
+        : o.linkedAsset === "buildingAwningOpen"
+          ? o.linkedRole === "parent" || o.asset === "building"
+              ? "テント付き開口建物"
+              : "接続テント"
         : o.linkedAsset === "buildingSign"
           ? o.linkedRole === "parent" || o.asset === "building"
               ? "看板付き開口建物"
@@ -708,12 +712,6 @@ function recessedStackedBuildingParams(o) {
         junctionHeight = Math.max(0.05, floorGap),
         // 窓は接合部いっぱいに収まるため、上下のずれは持たない。
         junctionOffset = 0,
-        beamHeight = clamp(finite(o?.recessedBeamHeight, 0.12), 0, Math.min(0.6, floorHeight * 0.35)),
-        beamProjection = clamp(
-            finite(o?.recessedBeamProjection, 0.1),
-            0,
-            Math.max(0, Math.min(w - cornerBevel, d) * 0.25),
-        ),
         sideWindowW = clamp(d - cornerBevel - marginEnd, 0.2, sideWindowMax);
     return {
         w,
@@ -736,8 +734,6 @@ function recessedStackedBuildingParams(o) {
         junctionHeight,
         junctionOffset,
         sillHeight,
-        beamHeight,
-        beamProjection,
         sideWindowW,
         sideWindows: o?.recessedSideWindows !== false,
     };
@@ -858,23 +854,6 @@ function recessedStackedBuildingCapPath(params, notch) {
         points = [...outer, ...[...inner].reverse()].map((point) => [point[0], point[1]]);
     return points;
 }
-function recessedStackedBuildingBeamFootprint(params) {
-    const x = params.w * 0.5,
-        y = params.d * 0.5,
-        b = params.cornerBevel,
-        p = params.beamProjection,
-        segments = params.cornerBevelSegments;
-    if (b <= 0.0001) return [[-x, -y - p], [x, -y - p], [x + p, -y], [x + p, y], [-x, y]];
-    const center = [x - b, -y + b],
-        radius = b + p,
-        points = [[-x, -y - p], [x - b, -y - p]];
-    for (let i = 1; i <= segments; i++) {
-        const angle = -Math.PI * 0.5 + (Math.PI * 0.5 * i) / segments;
-        points.push([center[0] + radius * Math.cos(angle), center[1] + radius * Math.sin(angle)]);
-    }
-    points.push([x + p, y], [-x, y]);
-    return points;
-}
 function recessedStackedBuildingWindowPaths(params) {
     const x = params.w * 0.5,
         y = params.d * 0.5,
@@ -950,7 +929,6 @@ function recessedStackedBuildingLines(o) {
         x = q.w * 0.5,
         y = q.d * 0.5,
         footprint = recessedStackedBuildingFootprint(q),
-        beamFootprint = recessedStackedBuildingBeamFootprint(q),
         drawOpening = (band) => {
             const paths = recessedStackedBuildingWindowPaths(q),
                 outer = q.sideWindows ? paths.outer : paths.outer.slice(0, 2),
@@ -969,15 +947,17 @@ function recessedStackedBuildingLines(o) {
                 line([to3(outer[index], zA), to3(outer[index], zB)], frame, detailWidth);
                 line([to3(inner[index], zA), to3(inner[index], zB)], dark, detailWidth);
             });
+            // 窓間仕切り（窓の枚数だけ増える桟）は、凹みの奥面の上へ描く線。
+            // 面の内側の線として隠線処理に消されないよう onFace を立てる。
             recessedStackedBuildingWindowMullionPoints(q).forEach(({ inner: back }) => {
-                line([to3(back, zA), to3(back, zB)], dark, detailWidth);
+                const mullion = customLineA(o, [to3(back, zA), to3(back, zB)], dark, detailWidth);
+                mullion.onFace = true;
+                // 凹みの奥面にある線。近い同一オブジェクトの面との食い違いは許すが、
+                // 建物の反対側など明らかに遠い線は隠す。許容は窓の凹み寸法に追従。
+                mullion.occludeSelf = true;
+                mullion.selfOcclusionAllowance = q.windowDepth * 2 + 0.1;
+                out.push(mullion);
             });
-        },
-        drawBeam = (z1) => {
-            if (q.beamHeight <= 0 || q.beamProjection <= 0) return;
-            const z0 = z1 - q.beamHeight;
-            closed(beamFootprint.map(([px, py]) => [px, py, z0]), frame, detailWidth);
-            closed(beamFootprint.map(([px, py]) => [px, py, z1]), frame, detailWidth);
         };
     const junctions = recessedStackedBuildingJunctionWindows(o, q);
     recessedStackedBuildingFloors(o, q).forEach(({ index, z, h }) => {
@@ -993,13 +973,7 @@ function recessedStackedBuildingLines(o) {
             if (!inBevelArc) line([[px, py, z], [px, py, z1]]);
         });
         // 窓帯は各階の接合部の中央へ置き、最上階の上には開口を作らない。
-        if (band) {
-            drawOpening(band);
-            drawBeam(band.top);
-        } else {
-            // 屋根になる最上階には梁／庇を上端へ描く。
-            drawBeam(z1);
-        }
+        if (band) drawOpening(band);
     });
     return out;
 }
@@ -2886,7 +2860,10 @@ function linesSphere(ctx) {
         const t = (i / 48) * Math.PI * 2;
         eq.push([eqR * Math.cos(t), eqR * Math.sin(t), zc]);
     }
-    out.push(lineA(o, eq, a, 0.9));
+    const equator = lineA(o, eq, a, 0.9);
+    equator.onFace = true; // 表面の意図的な線。
+    equator.occludeSelf = true; // 球の裏側は自分自身の面で隠す。
+    out.push(equator);
 }
 
 function linesTriPrism(ctx) {
@@ -3618,8 +3595,6 @@ function normalizedAsset(o) {
             recessedWindowDepth: params.windowDepth,
             recessedWindowBottom: params.windowBottom,
             recessedSillHeight: params.sillHeight,
-            recessedBeamHeight: params.beamHeight,
-            recessedBeamProjection: params.beamProjection,
             recessedSideWindowW: params.sideWindowW,
             recessedSideWindows: params.sideWindows,
         };
@@ -3845,14 +3820,12 @@ obBounds = function (o) {
     } else if (q.asset === "recessedStackedBuilding") {
         const params = recessedStackedBuildingParams(q),
             h = params.totalH,
-            xValues = [-params.w / 2, params.w / 2, params.w / 2 + params.beamProjection],
-            yValues = [-params.d / 2 - params.beamProjection, -params.d / 2, params.d / 2],
-            beamBottom = Math.max(0, h - params.beamHeight);
+            xValues = [-params.w / 2, params.w / 2],
+            yValues = [-params.d / 2, params.d / 2];
         xValues.forEach((x) =>
             yValues.forEach((y) => {
                 pts.push(customPt(q, x, y, 0));
                 pts.push(customPt(q, x, y, h));
-                pts.push(customPt(q, x, y, beamBottom));
             }),
         );
     } else if (isStackedBuildingAsset(q)) {

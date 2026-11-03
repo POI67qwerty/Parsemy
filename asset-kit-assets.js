@@ -916,3 +916,126 @@ ASSET_KIT.define(
     },
     counterParts,
 );
+
+// --- 五角形の立体と車 ---
+// 形はすべて pentaGeometry(o)（engine-gizmo.js）が決める。
+// ここは「その値から部品を並べる」だけにして、ハンドルと同じ寸法を見るようにする。
+function vehicleParts(o, K) {
+    const g = pentaGeometry(o),
+        // 断面（五角形・六角形・L字）は pentaGeometry が作る。面の向きをそろえるため、
+        // 反時計回りに直してから左右へ押し出す。
+        profile = K.area2(g.profile) < 0 ? g.profile.slice().reverse() : g.profile,
+        parts = [K.box(profile, -g.W / 2, g.W / 2, { axis: "x" })];
+    // 荷台（直方体）。キャブの後ろから車体の後ろまで。
+    if (g.cfg.bed && g.bedL > 0.02)
+        parts.push(...K.moveParts([K.box(K.rectPath(g.W, g.bedL), 0, g.bedH)], 0, g.yB - g.bedL / 2, 0));
+    // タイヤ4つ。太さ（左右）・大きさ（半径）・前後の間隔・上下はすべて g から。
+    if (g.cfg.wheels)
+        g.wheels.forEach((w) =>
+            parts.push(...K.part("tire", { r: g.tireR, t: g.tireW, x: w.x, axleY: w.y, z: g.tireZ })),
+        );
+    return parts;
+}
+
+// 五角形の立体（建物の塊）。上端を斜めに落とした箱で、車のキャブと同じ部品。
+ASSET_KIT.define(
+    "pentaBox",
+    {
+        label: "五角形の立体",
+        glyph: "⬟",
+        w: 2.4,
+        d: 3.0,
+        h: 2.6,
+        accent: "#6c8fd6",
+        vhFrontH: 1.45,
+        vhNose: 0,
+    },
+    vehicleParts,
+);
+
+// 軽トラ（簡略化）：五角形のキャブ＋荷台＋タイヤ4つ。
+ASSET_KIT.define(
+    "keiTruck",
+    {
+        label: "軽トラ",
+        glyph: "🛻",
+        w: 1.48,
+        d: 3.4,
+        h: 1.8,
+        accent: "#6c8fd6",
+        vhFrontH: 0.98,
+        vhNose: 0,
+        vhBedL: 1.85,
+        vhBedH: 0.95,
+        vhTireR: 0.3,
+        vhTireW: 0.16,
+        vhTrack: 1.52,
+        vhWb: 2.0,
+    },
+    vehicleParts,
+);
+
+// 軽バン：屋根まで高い五角形＋タイヤ。荷台は無し。
+ASSET_KIT.define(
+    "keiVan",
+    {
+        label: "軽バン",
+        glyph: "🚐",
+        w: 1.55,
+        d: 3.5,
+        h: 2.05,
+        accent: "#7d9ed8",
+        vhFrontH: 1.12,
+        vhNose: 0.05,
+        vhTireR: 0.3,
+        vhTireW: 0.17,
+        vhTrack: 1.59,
+        vhWb: 2.3,
+    },
+    vehicleParts,
+);
+
+// 乗用車：低い屋根＋長い斜め（フロントガラス）。
+ASSET_KIT.define(
+    "sedan",
+    {
+        label: "乗用車",
+        glyph: "🚗",
+        w: 1.72,
+        d: 4.2,
+        h: 1.42,
+        accent: "#8a7dd8",
+        vhFrontH: 0.78,
+        vhNose: 0.12,
+        vhRearH: 0.72, // 後ろも斜めに落とす（六角形の断面）
+        vhTireR: 0.31,
+        vhTireW: 0.2,
+        vhTrack: 1.76,
+        vhWb: 2.6,
+    },
+    vehicleParts,
+);
+
+// 乗用車2：低い前の直方体＋高い後ろの直方体（L字の断面）＋タイヤ4本。
+// 前の箱の高さ・前の面の前後・後ろの箱の高さ・後ろの面の前後を、画面上で別々に変えられる。
+ASSET_KIT.define(
+    "sedan2",
+    {
+        label: "乗用車2",
+        glyph: "🚙",
+        w: 1.8,
+        d: 4.0,
+        h: 1.9,
+        accent: "#7f8ed8",
+        vhFrontBoxH: 0.95,
+        vhFrontH: 0.95,
+        vhStep: 1.5, // 前の直方体の長さ（境目の位置）
+        vhNose: 0,
+        vhTail: 0,
+        vhTireR: 0.34,
+        vhTireW: 0.22,
+        vhTrack: 1.84,
+        vhWb: 2.3,
+    },
+    vehicleParts,
+);
