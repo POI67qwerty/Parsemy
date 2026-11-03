@@ -86,7 +86,8 @@
                     FLOOR_TOUCH_MAX_SCALE,
                 ),
                 mid0 = floorTouchCanvasPoint(mx, my),
-                anchor0 = [center0[0] + (mid0.x - W / 2) / scale0, center0[1] - (mid0.y - H / 2) / scale0];
+                shift = viewShift(),
+                anchor0 = orthWorldAt({ x: (mid0.x - shift[0]) / Z, y: (mid0.y - shift[1]) / Z });
             // 2本指の中心を基準に、同じワールド位置が指の間に残るようにする。
             // これでピンチ中の表示移動とズームが自然につながる。
             floorTouchPan = {
@@ -110,7 +111,7 @@
         if (Math.hypot(e.clientX - s.sx, e.clientY - s.sy) > 12) floorTouchMoved = true;
         s.x = e.clientX;
         s.y = e.clientY;
-        if (floorTouchMax >= 2 && floorTouchPan) {
+        if (floorTouchMax >= 2 && floorTouchPan && floorTouchIds.size >= 2) {
             const pts = [...floorTouchIds.values()],
                 mx = pts.reduce((a, t) => a + t.x, 0) / pts.length,
                 my = pts.reduce((a, t) => a + t.y, 0) / pts.length,
@@ -124,9 +125,12 @@
             // ピンチアウト＝scaleを大きくしてズームイン、ピンチイン＝ズームアウト。
             // 初期の指間にあったワールド座標を現在の指の中心へ固定する。
             window.cityFloorPlanScale = scale;
+            window.cityFloorPlanCenter = [...floorTouchPan.center0];
+            const projected = projPoint(floorTouchPan.anchor0, [Z, 0, 0, Z, ...viewShift()]);
+            // 投影と同じ変換を使って補正する。ホイール後のZ/パンやカメラ位置を含む。
             window.cityFloorPlanCenter = [
-                floorTouchPan.anchor0[0] - (mid.x - W / 2) / scale,
-                floorTouchPan.anchor0[1] + (mid.y - H / 2) / scale,
+                floorTouchPan.center0[0] + (projected.x - mid.x) / scale,
+                floorTouchPan.center0[1] - (projected.y - mid.y) / scale,
             ];
             floorTouchMoved = true;
             render();
@@ -1888,6 +1892,7 @@
             kind: "pan",
             pointerId: e.pointerId,
             p0: p,
+            raw0: rawOf(e.clientX, e.clientY),
             center0: [...(window.cityFloorPlanCenter || [0, 0])],
             tapClear,
             moved: false,
@@ -1948,7 +1953,7 @@
             if (floorTouchDown(e)) return;
             const p = pos(e),
                 panGesture = e.button === 1 || e.button === 2 || e.altKey || floorPlanPanMode;
-            if (panGesture && (orthView === "top" || orthView === "side")) {
+            if (panGesture && (orthView === "top" || orthView === "side" || orthView === "front")) {
                 beginFloorPan(e, p);
                 return;
             }
@@ -2319,10 +2324,10 @@
             e.preventDefault();
             e.stopImmediatePropagation();
             if (floorPlanDrag.kind === "pan") {
-                const p = pos(e),
+                const p = rawOf(e.clientX, e.clientY),
                     sc = Math.max(1, Number(orthScale()) || 1),
-                    dx = p.x - floorPlanDrag.p0.x,
-                    dy = p.y - floorPlanDrag.p0.y;
+                    dx = p.x - floorPlanDrag.raw0.x,
+                    dy = p.y - floorPlanDrag.raw0.y;
                 if (Math.hypot(dx, dy) > 2) floorPlanDrag.moved = true;
                 window.cityFloorPlanCenter = [floorPlanDrag.center0[0] - dx / sc, floorPlanDrag.center0[1] + dy / sc];
                 render();

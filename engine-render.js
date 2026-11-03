@@ -3095,6 +3095,7 @@ function render() {
     dirty = true;
     // カメラロック中は、どの入口から視点が動いても描く前に元へ戻す（最後の砦）。
     enforceCameraLock();
+    remember3DDisplay();
     // sigNow()は描画1回につき一度だけ計算する。以前は線ごとに再計算していたため、
     // アセットや線が多いシーンほど不要な文字列計算が増えていた。
     const currentSignature = sigNow();

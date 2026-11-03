@@ -1245,18 +1245,24 @@ const LOCK_ADMIN_KEYS = new Set(["locked", "visible"]); // ロック中でも変
 const CAMERA_KEYS = new Set(["cx", "cz", "ch", "yaw", "pitch", "roll", "lens", "hz", "fov"]);
 const obLocked = (o) => !!(o && o.locked === true);
 let cameraLock = false,
-    cameraLockSnap = null;
+    cameraLockSnap = null,
+    last3DDisplay = null;
+// 正投影で表示を操作しても、ロック時に保存するのは最後の3D表示。
+function remember3DDisplay() {
+    if (!orthView) last3DDisplay = { Z, ox, oy };
+}
 // 今の視点を記録する。カメラロック中は、この値へ常に戻す。
 function cameraSnapshotNow() {
-    const snap = { view: orthView, Z, ox, oy };
+    const display = orthView && last3DDisplay ? last3DDisplay : { Z, ox, oy };
+    const snap = { ...display };
     CAMERA_KEYS.forEach((k) => (snap[k] = Number(P[k]) || 0));
     return snap;
 }
 function setCameraLock(on) {
     cameraLock = !!on;
     cameraLockSnap = cameraLock ? cameraSnapshotNow() : null;
-    // ロックした瞬間にドラッグ中だった場合は、その操作を打ち切る。
-    if (cameraLock) {
+    // 3Dカメラ操作の途中だけ止める。正投影の表示操作はカメラ固定の対象外。
+    if (cameraLock && !orthView) {
         drag = null;
         mg = null;
     }
@@ -1279,17 +1285,21 @@ function enforceCameraLock() {
             changed = true;
         }
     });
-    if (Z !== snap.Z) {
-        Z = snap.Z;
-        changed = true;
-    }
-    if (ox !== snap.ox) {
-        ox = snap.ox;
-        changed = true;
-    }
-    if (oy !== snap.oy) {
-        oy = snap.oy;
-        changed = true;
+    // Z / ox / oy は3Dと正投影で一時的に共有される。正投影の表示操作は
+    // 戻さず、3Dへ復帰するときだけロックした3D表示に戻す。
+    if (!orthView) {
+        if (Z !== snap.Z) {
+            Z = snap.Z;
+            changed = true;
+        }
+        if (ox !== snap.ox) {
+            ox = snap.ox;
+            changed = true;
+        }
+        if (oy !== snap.oy) {
+            oy = snap.oy;
+            changed = true;
+        }
     }
     if (changed) {
         sync();

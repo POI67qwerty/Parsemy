@@ -19,6 +19,9 @@ const pos = (e) => {
 const TC = new Map(); // いま触れている指(touch)
 function clampView() {
     Z = clamp(Z, 1, 10);
+    // 正投影の原点は画面中央ではなく orthSetup の ax/ay。通常透視の枠で
+    // ox/oyを制限すると、ホイールの基準点が飛び、正の移動もできなくなる。
+    if (orthView) return;
     ox = clamp(ox, W - W * Z, 0);
     oy = clamp(oy, H - H * Z, 0);
 }
@@ -35,21 +38,23 @@ cv.addEventListener(
     "wheel",
     (e) => {
         e.preventDefault();
-        if (cameraLock) {
-            flashHint("カメラ固定中：ズームも固定です（L で解除）");
+        if (cameraLock && !orthView) {
+            flashHint("カメラ固定中：3D視点は動きません（L で解除）");
             return;
         }
-        if (mode === "view") {
+        if (mode === "view" && !orthView) {
             P.lens = clamp(P.lens * Math.exp(-e.deltaY * 0.0012), 14, 200);
             sync();
             render();
             return;
         }
         const r = rawOf(e.clientX, e.clientY),
-            q = { x: (r.x - ox) / Z, y: (r.y - oy) / Z };
+            shift = viewShift(),
+            q = { x: (r.x - shift[0]) / Z, y: (r.y - shift[1]) / Z };
         Z = clamp(Z * Math.exp(-e.deltaY * 0.0015), 1, 10);
-        ox = r.x - q.x * Z;
-        oy = r.y - q.y * Z;
+        const anchor = orthView ? orthSetup() : { ax: 0, ay: 0 };
+        ox = r.x - q.x * Z - anchor.ax * (1 - Z);
+        oy = r.y - q.y * Z - anchor.ay * (1 - Z);
         clampView();
         updZ();
         render();
@@ -80,7 +85,7 @@ function multiStart() {
     if (!mg) mg = { t0: Date.now(), n: 0, moved: false, x0: null, y0: null, x1: null, y1: null };
     const pts = [...TC.values()];
     mg.n = Math.max(mg.n, pts.length);
-    mg.view = mode === "view";
+    mg.view = mode === "view" && !orthView;
     const cx = pts.reduce((a, t) => a + t.x, 0) / Math.max(1, pts.length),
         cy = pts.reduce((a, t) => a + t.y, 0) / Math.max(1, pts.length);
     if (mg.x0 == null) {
@@ -97,7 +102,8 @@ function multiStart() {
         const rc = rawOf((pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2);
         mg.d0 = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
         mg.z0 = Z;
-        mg.q0 = { x: (rc.x - ox) / Z, y: (rc.y - oy) / Z };
+        const shift = viewShift();
+        mg.q0 = { x: (rc.x - shift[0]) / Z, y: (rc.y - shift[1]) / Z };
         mg.cx0 = P.cx;
         mg.cz0 = P.cz;
         mg.ch0 = P.ch;
@@ -135,8 +141,9 @@ function multiMove(tc) {
         } else {
             const rc = rawOf(mx, my);
             Z = clamp((mg.z0 * d) / mg.d0, 1, 10);
-            ox = rc.x - mg.q0.x * Z;
-            oy = rc.y - mg.q0.y * Z;
+            const anchor = orthView ? orthSetup() : { ax: 0, ay: 0 };
+            ox = rc.x - mg.q0.x * Z - anchor.ax * (1 - Z);
+            oy = rc.y - mg.q0.y * Z - anchor.ay * (1 - Z);
             clampView();
             updZ();
             render();
@@ -548,6 +555,11 @@ cv.onpointerdown = (e) => {
                       ? "view"
                       : mode; // 視点モードでは、残っている編集ツールよりもカメラ操作を優先する。
     if (act === "view") {
+        if (orthView) {
+            const r = rawOf(e.clientX, e.clientY);
+            drag = { kind: "orthPan", x: r.x, y: r.y, center: [...orthPlanCenter()] };
+            return;
+        }
         if (cameraLock) {
             // カメラ固定中は視点操作そのものを開始しない（オブジェクト編集は妨げない）。
             flashHint("カメラ固定中：視点は動きません（L で解除）");
@@ -648,7 +660,7 @@ cv.onpointermove = (e) => {
     if (boxPendingState === "pending" || boxPendingState === "cancel") return;
     if (e.pointerId !== ptr) return;
     const k = W / cv.getBoundingClientRect().width;
-    if (drag && cameraLock) {
+    if (drag && cameraLock && drag.kind !== "orthPan") {
         // 途中でロックした場合も、視点は記録した位置へ戻す。
         drag = null;
         enforceCameraLock();
@@ -656,6 +668,12 @@ cv.onpointermove = (e) => {
         return;
     }
     if (drag) {
+        if (drag.kind === "orthPan") {
+            const r = rawOf(e.clientX, e.clientY), sc = Math.max(1e-6, orthScale());
+            window.cityFloorPlanCenter = [drag.center[0] - (r.x - drag.x) / sc, drag.center[1] + (r.y - drag.y) / sc];
+            renderSoon();
+            return;
+        }
         const dx = e.clientX - drag.x,
             dy = e.clientY - drag.y;
         if (drag.kind === "pan") {

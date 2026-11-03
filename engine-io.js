@@ -373,8 +373,8 @@ function syncLockButtons() {
         else camBtn.textContent = cameraLock ? "カメラ固定中" : "カメラ固定";
         camBtn.classList.toggle("on", cameraLock);
         camBtn.title = cameraLock
-            ? "カメラ（視点）を固定しています。クリックまたは L で解除"
-            : "カメラ（視点）を固定して、誤操作で視点が動かないようにする（L）";
+            ? "3Dカメラを固定中。正面・横・上の拡大／表示移動はできます。クリックまたは L で解除"
+            : "3Dカメラを固定する（正面・横・上の表示操作は可能、L）";
     }
     document.body.classList.toggle("cameraLocked", cameraLock);
 }

@@ -2946,16 +2946,21 @@ const LOCK_ADMIN_KEYS = new Set(["locked", "visible"]);
 const CAMERA_KEYS = new Set(["cx", "cz", "ch", "yaw", "pitch", "roll", "lens", "hz", "fov"]);
 const obLocked = (o) => !!(o && o.locked === true);
 let cameraLock = false,
-    cameraLockSnap = null;
+    cameraLockSnap = null,
+    last3DDisplay = null;
+function remember3DDisplay() {
+    if (!orthView) last3DDisplay = { Z, ox, oy };
+}
 function cameraSnapshotNow() {
-    const snap = { view: orthView, Z, ox, oy };
+    const display = orthView && last3DDisplay ? last3DDisplay : { Z, ox, oy };
+    const snap = { ...display };
     CAMERA_KEYS.forEach((k) => (snap[k] = Number(P[k]) || 0));
     return snap;
 }
 function setCameraLock(on) {
     cameraLock = !!on;
     cameraLockSnap = cameraLock ? cameraSnapshotNow() : null;
-    if (cameraLock) {
+    if (cameraLock && !orthView) {
         drag = null;
         mg = null;
     }
@@ -2975,17 +2980,19 @@ function enforceCameraLock() {
             changed = true;
         }
     });
-    if (Z !== snap.Z) {
-        Z = snap.Z;
-        changed = true;
-    }
-    if (ox !== snap.ox) {
-        ox = snap.ox;
-        changed = true;
-    }
-    if (oy !== snap.oy) {
-        oy = snap.oy;
-        changed = true;
+    if (!orthView) {
+        if (Z !== snap.Z) {
+            Z = snap.Z;
+            changed = true;
+        }
+        if (ox !== snap.ox) {
+            ox = snap.ox;
+            changed = true;
+        }
+        if (oy !== snap.oy) {
+            oy = snap.oy;
+            changed = true;
+        }
     }
     if (changed) {
         sync();
@@ -11541,6 +11548,7 @@ function render() {
     }
     dirty = true;
     enforceCameraLock();
+    remember3DDisplay();
     const currentSignature = sigNow();
     if (S.some((s) => s.ob && s.cs !== currentSignature)) regenObjects();
     syncSel();
@@ -11654,6 +11662,7 @@ const pos = (e) => {
 const TC = new Map();
 function clampView() {
     Z = clamp(Z, 1, 10);
+    if (orthView) return;
     ox = clamp(ox, W - W * Z, 0);
     oy = clamp(oy, H - H * Z, 0);
 }
@@ -11670,21 +11679,23 @@ cv.addEventListener(
     "wheel",
     (e) => {
         e.preventDefault();
-        if (cameraLock) {
-            flashHint("カメラ固定中：ズームも固定です（L で解除）");
+        if (cameraLock && !orthView) {
+            flashHint("カメラ固定中：3D視点は動きません（L で解除）");
             return;
         }
-        if (mode === "view") {
+        if (mode === "view" && !orthView) {
             P.lens = clamp(P.lens * Math.exp(-e.deltaY * 0.0012), 14, 200);
             sync();
             render();
             return;
         }
         const r = rawOf(e.clientX, e.clientY),
-            q = { x: (r.x - ox) / Z, y: (r.y - oy) / Z };
+            shift = viewShift(),
+            q = { x: (r.x - shift[0]) / Z, y: (r.y - shift[1]) / Z };
         Z = clamp(Z * Math.exp(-e.deltaY * 0.0015), 1, 10);
-        ox = r.x - q.x * Z;
-        oy = r.y - q.y * Z;
+        const anchor = orthView ? orthSetup() : { ax: 0, ay: 0 };
+        ox = r.x - q.x * Z - anchor.ax * (1 - Z);
+        oy = r.y - q.y * Z - anchor.ay * (1 - Z);
         clampView();
         updZ();
         render();
@@ -11713,7 +11724,7 @@ function multiStart() {
     if (!mg) mg = { t0: Date.now(), n: 0, moved: false, x0: null, y0: null, x1: null, y1: null };
     const pts = [...TC.values()];
     mg.n = Math.max(mg.n, pts.length);
-    mg.view = mode === "view";
+    mg.view = mode === "view" && !orthView;
     const cx = pts.reduce((a, t) => a + t.x, 0) / Math.max(1, pts.length),
         cy = pts.reduce((a, t) => a + t.y, 0) / Math.max(1, pts.length);
     if (mg.x0 == null) {
@@ -11730,7 +11741,8 @@ function multiStart() {
         const rc = rawOf((pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2);
         mg.d0 = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
         mg.z0 = Z;
-        mg.q0 = { x: (rc.x - ox) / Z, y: (rc.y - oy) / Z };
+        const shift = viewShift();
+        mg.q0 = { x: (rc.x - shift[0]) / Z, y: (rc.y - shift[1]) / Z };
         mg.cx0 = P.cx;
         mg.cz0 = P.cz;
         mg.ch0 = P.ch;
@@ -11767,8 +11779,9 @@ function multiMove(tc) {
         } else {
             const rc = rawOf(mx, my);
             Z = clamp((mg.z0 * d) / mg.d0, 1, 10);
-            ox = rc.x - mg.q0.x * Z;
-            oy = rc.y - mg.q0.y * Z;
+            const anchor = orthView ? orthSetup() : { ax: 0, ay: 0 };
+            ox = rc.x - mg.q0.x * Z - anchor.ax * (1 - Z);
+            oy = rc.y - mg.q0.y * Z - anchor.ay * (1 - Z);
             clampView();
             updZ();
             render();
@@ -12149,6 +12162,11 @@ cv.onpointerdown = (e) => {
                       ? "view"
                       : mode;
     if (act === "view") {
+        if (orthView) {
+            const r = rawOf(e.clientX, e.clientY);
+            drag = { kind: "orthPan", x: r.x, y: r.y, center: [...orthPlanCenter()] };
+            return;
+        }
         if (cameraLock) {
             flashHint("カメラ固定中：視点は動きません（L で解除）");
             return;
@@ -12245,13 +12263,19 @@ cv.onpointermove = (e) => {
     if (boxPendingState === "pending" || boxPendingState === "cancel") return;
     if (e.pointerId !== ptr) return;
     const k = W / cv.getBoundingClientRect().width;
-    if (drag && cameraLock) {
+    if (drag && cameraLock && drag.kind !== "orthPan") {
         drag = null;
         enforceCameraLock();
         renderSoon();
         return;
     }
     if (drag) {
+        if (drag.kind === "orthPan") {
+            const r = rawOf(e.clientX, e.clientY), sc = Math.max(1e-6, orthScale());
+            window.cityFloorPlanCenter = [drag.center[0] - (r.x - drag.x) / sc, drag.center[1] + (r.y - drag.y) / sc];
+            renderSoon();
+            return;
+        }
         const dx = e.clientX - drag.x,
             dy = e.clientY - drag.y;
         if (drag.kind === "pan") {
@@ -12941,8 +12965,8 @@ function syncLockButtons() {
         else camBtn.textContent = cameraLock ? "カメラ固定中" : "カメラ固定";
         camBtn.classList.toggle("on", cameraLock);
         camBtn.title = cameraLock
-            ? "カメラ（視点）を固定しています。クリックまたは L で解除"
-            : "カメラ（視点）を固定して、誤操作で視点が動かないようにする（L）";
+            ? "3Dカメラを固定中。正面・横・上の拡大／表示移動はできます。クリックまたは L で解除"
+            : "3Dカメラを固定する（正面・横・上の表示操作は可能、L）";
     }
     document.body.classList.toggle("cameraLocked", cameraLock);
 }
@@ -23068,7 +23092,8 @@ window.cityGridInstallAssetUI = function (bridge) {
                     FLOOR_TOUCH_MAX_SCALE,
                 ),
                 mid0 = floorTouchCanvasPoint(mx, my),
-                anchor0 = [center0[0] + (mid0.x - W / 2) / scale0, center0[1] - (mid0.y - H / 2) / scale0];
+                shift = viewShift(),
+                anchor0 = orthWorldAt({ x: (mid0.x - shift[0]) / Z, y: (mid0.y - shift[1]) / Z });
             floorTouchPan = {
                 mx0: mx,
                 my0: my,
@@ -23090,7 +23115,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         if (Math.hypot(e.clientX - s.sx, e.clientY - s.sy) > 12) floorTouchMoved = true;
         s.x = e.clientX;
         s.y = e.clientY;
-        if (floorTouchMax >= 2 && floorTouchPan) {
+        if (floorTouchMax >= 2 && floorTouchPan && floorTouchIds.size >= 2) {
             const pts = [...floorTouchIds.values()],
                 mx = pts.reduce((a, t) => a + t.x, 0) / pts.length,
                 my = pts.reduce((a, t) => a + t.y, 0) / pts.length,
@@ -23102,9 +23127,11 @@ window.cityGridInstallAssetUI = function (bridge) {
                 ),
                 mid = floorTouchCanvasPoint(mx, my);
             window.cityFloorPlanScale = scale;
+            window.cityFloorPlanCenter = [...floorTouchPan.center0];
+            const projected = projPoint(floorTouchPan.anchor0, [Z, 0, 0, Z, ...viewShift()]);
             window.cityFloorPlanCenter = [
-                floorTouchPan.anchor0[0] - (mid.x - W / 2) / scale,
-                floorTouchPan.anchor0[1] + (mid.y - H / 2) / scale,
+                floorTouchPan.center0[0] + (projected.x - mid.x) / scale,
+                floorTouchPan.center0[1] - (projected.y - mid.y) / scale,
             ];
             floorTouchMoved = true;
             render();
@@ -24749,6 +24776,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             kind: "pan",
             pointerId: e.pointerId,
             p0: p,
+            raw0: rawOf(e.clientX, e.clientY),
             center0: [...(window.cityFloorPlanCenter || [0, 0])],
             tapClear,
             moved: false,
@@ -24803,7 +24831,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             if (floorTouchDown(e)) return;
             const p = pos(e),
                 panGesture = e.button === 1 || e.button === 2 || e.altKey || floorPlanPanMode;
-            if (panGesture && (orthView === "top" || orthView === "side")) {
+            if (panGesture && (orthView === "top" || orthView === "side" || orthView === "front")) {
                 beginFloorPan(e, p);
                 return;
             }
@@ -25132,10 +25160,10 @@ window.cityGridInstallAssetUI = function (bridge) {
             e.preventDefault();
             e.stopImmediatePropagation();
             if (floorPlanDrag.kind === "pan") {
-                const p = pos(e),
+                const p = rawOf(e.clientX, e.clientY),
                     sc = Math.max(1, Number(orthScale()) || 1),
-                    dx = p.x - floorPlanDrag.p0.x,
-                    dy = p.y - floorPlanDrag.p0.y;
+                    dx = p.x - floorPlanDrag.raw0.x,
+                    dy = p.y - floorPlanDrag.raw0.y;
                 if (Math.hypot(dx, dy) > 2) floorPlanDrag.moved = true;
                 window.cityFloorPlanCenter = [floorPlanDrag.center0[0] - dx / sc, floorPlanDrag.center0[1] + dy / sc];
                 render();
