@@ -69,10 +69,18 @@ ASSET_KIT.define(
     },
 );
 
-// ===== 自販機（穴あけ・曲面・文字の3つを使う作例）=====
-// ・胴は K.roundedBox（上下の縁と四隅を丸めた曲面）
-// ・前面の窓・小銭入れ・取り出し口は K.box(..., { axis:"y", holes:[...] })（ブーリアン差）
-// ・看板の文字は K.textPart（線のフォントを面に貼る）
+// 奥行き方向の稜線だけを丸める共通ハンドル（灯器と自販機の胴）。
+function depthBevelControl(key, initial, signal=false) {
+    const size=o=>signal?signalGeometry(o):{headW:Math.max(.2,2*Math.abs(o.ra)),headH:Math.max(.3,Math.abs(o.h)),headD:Math.max(.2,2*Math.abs(o.rb)),headBottom:0};
+    return {key,label:"前後辺のベベル",default:initial,min:0,max:o=>{const g=size(o);return Math.max(0,Math.min(g.headW,g.headH)*.4999);},step:.005,unit:"m",
+        handle:(o,v)=>{const g=size(o),x=g.headW/2,y=-g.headD/2-.025,z=g.headBottom+g.headH;
+            return {anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}};}};
+}
+
+// ===== 自販機（前後辺だけを丸めた胴と穴あき前面）=====
+// ・胴は前後方向に沿う4辺だけを丸める。
+// ・前面の窓・小銭入れ・取り出し口は K.box(..., { axis:"y", holes:[...] })。
+// ・看板の板は無地。
 ASSET_KIT.define(
     "vendingMachine",
     {
@@ -82,6 +90,8 @@ ASSET_KIT.define(
         d: 0.75,
         h: 1.83,
         accent: "#d94a4a",
+        geometryBounds: false,
+        controls: [depthBevelControl("vmDepthBevel", 0.03)],
         // 固有値（画面の数値欄・JSONにもそのまま載る）
         // 【割合の値】幅・高さに対する 0〜1 の割合。枠を広げると中の装飾も一緒に広がる。
         vmWindowWRatio: 0.62, // 商品の窓の幅（幅に対して）
@@ -92,11 +102,7 @@ ASSET_KIT.define(
         vmOutletHeightRatio: 0.11, // 取り出し口の高さ（高さに対して）
         vmOutletBottomRatio: 0.04, // 取り出し口の下端（高さに対して）
         vmCoinWRatio: 0.18, // 小銭入れの幅（幅に対して）
-        // 【実寸（m）】丸みと板の厚みは、幅を変えても見た目が変わらないので実寸で持つ。
-        vmBodyRadius: 0.05, // 上下の縁の丸み
-        vmCornerRadius: 0.08, // 四隅（縦の稜線）の丸み
-        vmCornerSeg: 2, // 四隅の分割数
-        vmVertSeg: 2, // 上下の縁の分割数
+        // 【実寸（m）】前面板の位置と厚み。
         vmPanelProud: 0.015, // 前面の板を胴から出す量
         vmPanelThickness: 0.05,
     },
@@ -106,10 +112,6 @@ ASSET_KIT.define(
             H = Math.max(0.3, Math.abs(o.h)),
             // 割合の固有値を 0〜1 に収めてから幅・高さへ掛ける（枠を広げると中も広がる）。
             ratio = (key, dflt, lo, hi) => Math.max(lo, Math.min(hi, K.param(o, key, dflt))),
-            bodyR = K.param(o, "vmBodyRadius", 0.05),
-            cornerR = K.param(o, "vmCornerRadius", 0.08),
-            cSeg = Math.round(K.param(o, "vmCornerSeg", 2)),
-            vSeg = Math.round(K.param(o, "vmVertSeg", 2)),
             winW = W * ratio("vmWindowWRatio", 0.62, 0.2, 0.94),
             winH = H * ratio("vmWindowHRatio", 0.35, 0.08, 0.6),
             winBottom = H * ratio("vmWindowBottomRatio", 0.36, 0.05, 0.7),
@@ -126,8 +128,8 @@ ASSET_KIT.define(
             frontPanel = (pw, ph, cz, holes, cx = 0) =>
                 K.box(K.rectPath(pw, ph, cx, cz), front - proud, front + panelT, { axis: "y", holes, holeSides: true });
 
-        // 1) 胴（曲面）
-        parts.push(K.roundedBox(W, D, H, bodyR, { cornerRadius: cornerR, seg: vSeg, cornerSeg: cSeg, z0: 0 }));
+        // 1) 前後方向の稜線だけを丸める。旧丸胴値は使用しない。
+        parts.push(K.depthBeveledBox(W, D, H, K.param(o, "vmDepthBevel", 0.03), {seg: 3}));
         // 2) 商品の窓（板に穴をあける）
         const winCz = winBottom + winH / 2,
             frameH = winH + Math.min(0.16, winH * 0.28);
@@ -530,6 +532,8 @@ ASSET_KIT.define(
         d: 0.24,
         h: 2.8,
         accent: "#5c6b73",
+        geometryBounds: false,
+        controls: [depthBevelControl("spDepthBevel", 0.05, true)],
         spHeadH: 0.34, // 灯器（頭）の高さ
         spPoleR: 0.042, // ポールの半径
         spBaseR: 0.16, // 台座の半径
@@ -544,7 +548,7 @@ ASSET_KIT.define(
             hood = Math.max(0, K.param(o, "tsHood", 0.1)),
             parts = signalPoleParts(K, g);
         // 灯器：角を丸めた横長の箱
-        parts.push(K.roundedBox(g.headW, g.headD, g.headH, Math.min(g.headH * 0.18, 0.055), { seg: 2, cornerSeg: 2, z0: g.headBottom }));
+        parts.push(K.depthBeveledBox(g.headW, g.headD, g.headH, K.param(o, "spDepthBevel", 0.05), {seg: 3, z0: g.headBottom}));
         // 灯（青・黄・赤）と、灯のまわりのひさし
         [-1, 0, 1].forEach((i) => {
             const x = i * g.headW * 0.3;
@@ -570,6 +574,8 @@ ASSET_KIT.define(
         d: 0.22,
         h: 2.4,
         accent: "#5c6b73",
+        geometryBounds: false,
+        controls: [depthBevelControl("spDepthBevel", 0.05, true)],
         spHeadH: 0.66,
         spPoleR: 0.038,
         spBaseR: 0.15,
@@ -586,7 +592,7 @@ ASSET_KIT.define(
             bottomCz = g.headBottom + g.headH * 0.27,
             parts = signalPoleParts(K, g),
             lens = (cz) => K.box(K.offsetPath(K.roundRectPath(lamp, lamp, Math.min(0.03, lamp * 0.16), 2), 0, cz), front - 0.022, front - 0.008, { axis: "y" });
-        parts.push(K.roundedBox(g.headW, g.headD, g.headH, Math.min(g.headW * 0.18, 0.05), { seg: 2, cornerSeg: 2, z0: g.headBottom }));
+        parts.push(K.depthBeveledBox(g.headW, g.headD, g.headH, K.param(o, "spDepthBevel", 0.05), {seg: 3, z0: g.headBottom}));
         parts.push(lens(topCz), lens(bottomCz));
         // ひさし（四角い枠）：灯のまわりの帯を手前へ張り出す。
         // 車両用と同じく「外側の枠＋内側の穴」にして、線画でも枠として見えるようにする。
@@ -1039,3 +1045,189 @@ ASSET_KIT.define(
     },
     vehicleParts,
 );
+
+// トラック形：直線部と両端の半円。横幅と直線部は独立して調整できる。
+function trackFootprint(o, inset = 0) {
+    const r = Math.max(0.001, Math.abs(Number(o.rb) || .001) - inset),
+        straight = Math.max(0, Math.abs(Number(o.ra) || 0) - Math.abs(Number(o.rb) || 0)),
+        out = [], n = 12;
+    for (let i=0;i<=n;i++) {const a=-Math.PI/2+Math.PI*i/n;out.push([straight+r*Math.cos(a),r*Math.sin(a)]);}
+    for (let i=0;i<=n;i++) {const a=Math.PI/2+Math.PI*i/n;out.push([-straight+r*Math.cos(a),r*Math.sin(a)]);}
+    return out;
+}
+ASSET_KIT.define("track", {
+    label:"トラック型",glyph:"▱",group:"primitive",w:3,d:1,h:0,accent:"#85dfd0",
+    controls:[
+        {key:"trackStraight",label:"長方形の長さ",type:"number",min:0,max:1000,step:.05,unit:"m",
+            get:o=>Math.max(0,2*(o.ra-o.rb)),patch:(o,v)=>({ra:(v+2*o.rb)/2}),
+            handle:(o,v)=>({anchor:[0,-o.rb,o.h],sample:[v/2,-o.rb,o.h],probe:[(v+1)/2,-o.rb,o.h],fallback:{x:1,y:0}})},
+        {key:"trackWidth",label:"長方形の幅",type:"number",min:.01,max:1000,step:.05,unit:"m",
+            get:o=>2*o.rb,patch:(o,v)=>({rb:v/2,ra:Math.max(0,o.ra-o.rb)+v/2}),
+            handle:(o,v)=>({anchor:[0,0,o.h],sample:[0,v/2,o.h],probe:[0,(v+1)/2,o.h],fallback:{x:0,y:1}})},
+    ],
+},(o,K)=> {
+    const path=trackFootprint(o),h=Math.max(0,Number(o.h)||0);
+    if(h<1e-6)return [K.face3(path.map(([x,y])=>[x,y,0]))];
+    return [K.box(path,0,h,{smooth:true,verts:0})];
+});
+
+// 柱の蛇腹。ひとつの断面を同じ位置で広げ／狭めて積み上げる。
+// 輪郭、線、三角面は全て同じリングから生成する。
+(function(){
+    const K=ASSET_KIT;
+    function supported(o) {
+        return !!o && (o.type==="rect" || o.type==="circ" || o.type==="cyl" ||
+            (o.type==="asset" && ["box","beveledBox","cornerCutBox","triPrism","cylinder","track"].includes(o.asset)));
+    }
+    const num=(v,f)=>Number.isFinite(Number(v))?Number(v):f;
+    const limit=(x,a,b)=>Math.max(a,Math.min(b,x));
+    // 画面上で3値を編集。溝深さは前面法線、厚さは段の上端、段数は柱の側方に置く。
+    // 平面・OFF時は蛇腹の形が存在しないため、ハンドルを表示しない。
+    function accordionHandle(o,key,value) {
+        if (!active(o)) return null;
+        const h=Math.max(.001,Number(o.h)), n=limit(Math.round(num(o.accordionCount,12)),1,48),
+            duty=limit(num(o.accordionDuty,.6),.05,.95), pitch=h/(n-(1-duty)),
+            i=Math.floor((n-1)/2), bandTop=(i+duty)*pitch, grooveZ=n>1?(i+duty+(1-duty)/2)*pitch:h/2,
+            x=Math.abs(o.ra), y=-Math.abs(o.rb);
+        if (key==="count") return {anchor:[-x,y,h*.8],sample:[-x,y,h*.8],probe:[-x,y,h*.8+1],fallback:{x:0,y:-1},pixelsPerUnit:16,color:"#ffbf69"};
+        if (key==="duty") return {anchor:[x*.35,y,i*pitch],sample:[x*.35,y,bandTop],probe:[x*.35,y,bandTop+1],fallback:{x:0,y:-1},scaleFactor:pitch,color:"#86d4ff"};
+        return {anchor:[-x*.35,y,grooveZ],sample:[-x*.35,y+value,grooveZ],probe:[-x*.35,y+value+1,grooveZ],fallback:{x:1,y:0},color:"#e49dff"};
+    }
+    window.accordionControls=o=>{
+        if(!supported(o))return [];
+        const list=[
+            {key:"accordionEnabled",label:"蛇腹",type:"boolean",default:false},
+            {key:"accordionCount",label:"蛇腹の段数",default:12,min:1,max:48,step:1,integer:true,unit:"段",handle:(o,v)=>accordionHandle(o,"count",v)},
+            {key:"accordionDuty",label:"段の厚さ（割合）",default:.6,min:.05,max:.95,step:.05,handle:(o,v)=>accordionHandle(o,"duty",v)},
+            {key:"accordionDepth",label:"溝の深さ",default:.04,min:0,max:maxRecess,step:.01,unit:"m",handle:(o,v)=>accordionHandle(o,"depth",v)},
+        ];
+        if(o.type==="rect" || (o.type==="asset" && ["box","beveledBox"].includes(o.asset)))list.push(
+            {key:"accordionRadius",label:"蛇腹の角丸半径",default:0,min:0,max:q=>Math.max(0,Math.min(Math.abs(q.ra),Math.abs(q.rb))-.0001),step:.01,unit:"m",get:q=>num(q.accordionRadius,q.asset==="beveledBox"?num(q.bevelOffset,0):0)},
+            {key:"accordionSegments",label:"角丸の分割数",default:4,min:1,max:12,step:1,integer:true},
+            ...["左手前","右手前","右奥","左奥"].map((label,i)=>({key:"accordionCorner"+i,label:"角丸："+label,type:"boolean",default:true}))
+        );
+        return list;
+    };
+    function active(o){return supported(o)&&o.accordionEnabled===true&&Number(o.h)>1e-6;}
+    function rectangular(o,inset) {
+        const w=Math.max(.002,2*Math.abs(o.ra)-2*inset), d=Math.max(.002,2*Math.abs(o.rb)-2*inset),
+            radius=limit(num(o.accordionRadius,o.asset==="beveledBox"?num(o.bevelOffset,0):0),0,Math.min(Math.abs(o.ra),Math.abs(o.rb))-.0001),
+            seg=limit(Math.round(num(o.accordionSegments,o.asset==="beveledBox"?num(o.bevelSegments,4):4)),1,12),
+            r=Math.min(Math.max(.00001,radius-inset),Math.min(w,d)/2-.00001),
+            cs=[[-w/2+r,-d/2+r,Math.PI], [w/2-r,-d/2+r,1.5*Math.PI], [w/2-r,d/2-r,0],[-w/2+r,d/2-r,Math.PI/2]],
+            sharp=[[-w/2,-d/2],[w/2,-d/2],[w/2,d/2],[-w/2,d/2]],out=[];
+        cs.forEach(([x,y,a],i)=>{if(radius<1e-8||o['accordionCorner'+i]===false)out.push(sharp[i]);else for(let j=0;j<=seg;j++){const t=a+Math.PI*j/(2*seg);out.push([x+r*Math.cos(t),y+r*Math.sin(t)]);}});
+        return out;
+    }
+    function maxRecess(o) {
+        let value=Math.max(0,Math.min(Math.abs(o.ra),Math.abs(o.rb))*.8);
+        if(o.asset==="cornerCutBox") {const opening=cornerCutOpeningParams(o);if(opening.enabled)
+            value=Math.min(value,opening.openingDepth*.45,Math.max(0,(opening.cutLength-opening.openingW-.005)/(Math.SQRT2*(2-Math.SQRT2))));}
+        return value;
+    }
+    function params(o) {
+        const h=Math.max(.001,Number(o.h)),count=limit(Math.round(num(o.accordionCount,12)),1,48),duty=limit(num(o.accordionDuty,.6),.05,.95),
+            recess=limit(num(o.accordionDepth,.04),0,maxRecess(o)),opening=o.asset==="cornerCutBox"?cornerCutOpeningParams(o):null;
+        return {h,count,duty,recess,opening};
+    }
+    function footprint(o,z,inset,q,notch) {
+        const w=Math.max(.002,2*Math.abs(o.ra)-2*inset), d=Math.max(.002,2*Math.abs(o.rb)-2*inset);
+        if(o.type==="circ"||o.type==="cyl"||o.asset==="cylinder")return Array.from({length:32},(_,i)=>[w/2*Math.cos(i*Math.PI/16),d/2*Math.sin(i*Math.PI/16)]);
+        if(o.asset==="track")return trackFootprint(o,inset);
+        if(o.asset==="triPrism") {
+            // 既存の三角柱は左右に三角、前後へ押し出した向き。
+            const rx=Math.max(.00001,Math.abs(o.ra)*(1-z/q.h)-inset),ry=Math.max(.001,Math.abs(o.rb)-inset);
+            return [[-rx,-ry],[rx,-ry],[rx,ry],[-rx,ry]];
+        }
+        if(o.asset==="cornerCutBox") {
+            const cut=q.opening, off=Math.max(0,cut.cornerOffset-(2-Math.SQRT2)*inset),poly=cornerCutFootprint(w,d,off,cut.cornerCutCorner);
+            if(!notch)return poly;
+            const mid=[(poly[0][0]+poly[poly.length-1][0])/2,(poly[0][1]+poly[poly.length-1][1])/2],
+                t=Math.max(0,(mid[0]-cut.midpoint[0])*cut.inward[0]+(mid[1]-cut.midpoint[1])*cut.inward[1]),
+                a=[cut.frontA[0]+cut.inward[0]*t,cut.frontA[1]+cut.inward[1]*t],
+                b=[cut.frontB[0]+cut.inward[0]*t,cut.frontB[1]+cut.inward[1]*t];
+            return [...poly,a,cut.backA,cut.backB,b];
+        }
+        return rectangular(o,inset);
+    }
+    // 断面に依存しない高さ方向の配置。新しい断面も同じ段配置を利用できる。
+    K.accordionBands = function(height,count,duty,recess) {
+        const h=Math.max(.001,num(height,1)),
+            n=limit(Math.round(num(count,12)),1,48),ratio=limit(num(duty,.6),.05,.95),
+            depth=Math.max(0,num(recess,.04)),pitch=h/(n-(1-ratio)),t=pitch*ratio,out=[];
+        for(let i=0;i<n;i++){
+            const a=i*pitch,b=Math.min(h,a+t);out.push({a,b,inset:0});
+            if(i<n-1)out.push({a:b,b:(i+1)*pitch,inset:depth});
+        }
+        return out;
+    };
+    // profile(z,inset) が各高さの多角形を返せば、任意の柱断面から同じ蛇腹面を作れる。
+    K.accordionLoft = function(profile, options={}) {
+        const rings=[];
+        for(const u of K.accordionBands(options.height,options.count,options.duty,options.depth)) {
+            const a={path:profile(u.a,u.inset),w:u.a},b={path:profile(u.b,u.inset),w:u.b},prev=rings[rings.length-1];
+            if(!prev||Math.abs(prev.w-a.w)>1e-8||JSON.stringify(prev.path)!==JSON.stringify(a.path))rings.push(a);
+            rings.push(b);
+        }
+        return K.loft(rings,{ringLines:Array.from({length:Math.max(0,rings.length-2)},(_,i)=>i+1),verticals:options.verticals||[]});
+    };
+    function build(o) {
+        const q=params(o), sections=[];
+        // N個の段とN-1個の溝がちょうど指定の高さを埋める。
+        const intervals=K.accordionBands(q.h,q.count,q.duty,q.recess);
+        let rings=[],notch=null;
+        const flush=(startCap,endCap)=>{if(rings.length>1){const n=rings[0].path.length;let verticals=Array.from({length:n},(_,i)=>i);
+            if(o.type==="circ"||o.type==="cyl"||o.asset==="cylinder"||o.asset==="track"){
+                // 曲面の縦線は画面上の左右輪郭だけにする。
+                const z=q.h/2,tf=[Z,0,0,Z,...viewShift()],ss=rings[0].path.map(([x,y])=>projPoint(L2W(o,x,y,z),tf).x);
+                verticals=[ss.indexOf(Math.min(...ss)),ss.indexOf(Math.max(...ss))];
+            }
+            sections.push(K.loft(rings,{capStart:startCap,capEnd:endCap,ringLines:Array.from({length:Math.max(0,rings.length-2)},(_,i)=>i+1),verticals}));}rings=[];};
+        let initial=true;
+        for(const unit of intervals){const cuts=[unit.a,unit.b];if(q.opening?.enabled&&q.opening.openingH>unit.a+1e-8&&q.opening.openingH<unit.b-1e-8)cuts.splice(1,0,q.opening.openingH);
+            for(let j=0;j<cuts.length-1;j++){
+                const a=cuts[j],b=cuts[j+1],isNotch=!!q.opening?.enabled&&(a+b)/2<q.opening.openingH;
+                if(notch!==null&&notch!==isNotch){flush(initial,false);initial=false;}
+                notch=isNotch;
+                const p0=footprint(o,a,unit.inset,q,isNotch),p1=footprint(o,b,unit.inset,q,isNotch);
+                if(!rings.length)rings.push({path:p0,w:a});else {const prev=rings[rings.length-1];if(Math.abs(prev.w-a)>1e-8||JSON.stringify(prev.path)!==JSON.stringify(p0))rings.push({path:p0,w:a});}
+                rings.push({path:p1,w:b});
+            }
+        }
+        flush(initial,true);
+        if(q.opening?.enabled){
+            const z=q.opening.openingH,unit=intervals.find(r=>r.a<=z+1e-8&&r.b>=z-1e-8)||intervals[0],p=footprint(o,z,unit.inset,q,true),n=p.length;
+            sections.push(K.face3([p[n-4],p[n-3],p[n-2],p[n-1]].map(([x,y])=>[x,y,z])));
+        }
+        if(o.asset==="cornerCutBox") {const fascia=cornerCutFasciaParts(o);if(fascia.g.enabled)fascia.parts.forEach(p=>sections.push(K.box(p,fascia.g.z0,fascia.g.z1,{surfaceColor:fascia.g.color})));}
+        return sections;
+    }
+    window.accordionParts=build;
+    K.accordionParts=build;
+    K.supportsAccordion=supported;
+    const previousAsset=genAsset,previousCore=genShapeCore,previousSurface=exportSurfaceTriangles;
+    function lines(o) {return build(o).flatMap(part=>{
+        if(!part.rings)return K.partEdges(part).map(e=>lineA(o,e,part.color||o.c,o.w));
+        const rings=part.rings,out=[];
+        for(const r of rings)out.push(polyA(o,r.path.map(([x,y])=>[x,y,r.w]),part.color||o.c,o.w));
+        for(const k of part.verticals||[])for(let i=0;i<rings.length-1;i++){
+            const a=rings[i],b=rings[i+1];
+            if(Math.abs(a.w-b.w)<1e-8)continue; // 水平な段面には放射状の内部線を描かない
+            out.push(lineA(o,[[...a.path[k],a.w],[...b.path[k],b.w]],part.color||o.c,o.w));
+        }
+        return out;
+    });}
+    genAsset=function(o){return active(o)?lines(o):previousAsset(o);};
+    genShapeCore=function(o){return active(o)?lines(o):previousCore(o);};
+    exportSurfaceTriangles=function(o){return active(o)?build(o).flatMap(p=>K.partTris(p).map(t=>{const tri=t.map(v=>L2W(o,...v));if(p.surfaceColor)tri.surfaceColor=p.surfaceColor;return tri;})):previousSurface(o);};
+})();
+
+// 通常のトラック柱でも滑らかな両端のシルエット母線を表示する。
+{
+    const baseTrackLines=ASSET_LINE_BUILDERS.track;
+    ASSET_LINE_BUILDERS.track=function(ctx){
+        baseTrackLines(ctx);const {o,out,c}=ctx,h=Math.max(0,Number(o.h)||0);if(h<1e-6)return;
+        const path=trackFootprint(o),tf=[Z,0,0,Z,...viewShift()],xs=path.map(([x,y])=>projPoint(L2W(o,x,y,h/2),tf).x);
+        for(const i of new Set([xs.indexOf(Math.min(...xs)),xs.indexOf(Math.max(...xs))]))if(i>=0){const [x,y]=path[i];out.push(lineA(o,[[x,y,0],[x,y,h]],c));}
+    };
+}

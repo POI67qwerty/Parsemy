@@ -1581,6 +1581,12 @@ function setOb(id, patch) {
         return false;
     }
     let next = { ...o, ...patch };
+    // トラック型の奥行き変更は直線部の長さを維持する。
+    if (o.type === "asset" && o.asset === "track") {
+        if (patch && Object.prototype.hasOwnProperty.call(patch,"rb") && !Object.prototype.hasOwnProperty.call(patch,"ra"))
+            next.ra = Math.max(next.rb, o.ra + next.rb - o.rb);
+        next.ra = Math.max(next.rb, next.ra);
+    }
     // 接続子の幅・横方向の面ハンドルは、反対側の面を固定したまま編集する。
     // syncAttachedPartで接着面へ戻す前に、移動後の中心を親ローカルXへ記録する。
     if (
@@ -1942,7 +1948,7 @@ function fieldPatch(o, name, v) {
             const r = Math.max(0.005, v / 2);
             return { ra: r, rb: r, h: r * 2 };
         }
-        return o.type === "rect" || o.type === "circ" || (o.type === "asset" && o.asset === "beveledBox")
+        return o.type === "rect" || o.type === "circ" || (o.type === "asset" && (o.asset === "beveledBox" || o.asset === "track"))
             ? { h: Math.max(0, v), extrude: v > 0 }
             : { h: Math.max(0.005, v) };
     }
@@ -1990,7 +1996,7 @@ function applyOb(name, v) {
 });
 $("obExtrude").onclick = () => {
     const o = obOf(sel);
-    if (!o || !(o.type === "rect" || o.type === "circ" || (o.type === "asset" && o.asset === "beveledBox"))) return;
+    if (!o || !(o.type === "rect" || o.type === "circ" || (o.type === "asset" && (o.asset === "beveledBox" || o.asset === "track")))) return;
     HU.push(S);
     RD = [];
     setOb(sel, { h: Math.max(0.12, Math.min(o.ra, o.rb) * 0.8), extrude: true });

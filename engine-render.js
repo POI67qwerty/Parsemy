@@ -1838,7 +1838,17 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     // 画面座標・奥行き・（必要なら近くの画素）から、この点を描いてよいか決める。
     // 確実に手前の面に覆われた点。断片の橋渡しでも同じ判定を使い、
     // 本当の遮蔽物を短いノイズとして埋めてしまわない。
+    const exactPerspectiveOccluded = (e) => {
+        if (e.accordionEpoch !== fishOcclusionEpoch) {
+            const ray=unscr({x:e.sx,y:e.sy}), forward=cam(ray)[2];
+            e.accordionEpoch=fishOcclusionEpoch;
+            e.accordionBlocked=forward>1e-9 && fishPointOccluded({sx:e.sx,sy:e.sy,depth:e.depth/forward});
+        }
+        return e.accordionBlocked;
+    };
     const definitelyOccluded = (e) => {
+        // 実面への光線交差で遮蔽が確定した点は、短い隙間として橋渡ししない。
+        if (fishLineOccluders && e.accordionEpoch === fishOcclusionEpoch && e.accordionBlocked === true) return true;
         const x = Math.round(e.x), y = Math.round(e.y);
         if (x < 0 || x >= cw || y < 0 || y >= ch) return false;
         if (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) return fishPointOccluded(e);
@@ -1897,6 +1907,10 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
                 faceCullAround(cw, ch, x, y, depthFace[i1], myOwner) && fishFaceInterior(e, s.ob.id, tf)) return false;
             return true;
         }
+        // 小さな灯器や自販機の前後ベベルは、細い曲面の隣で深度近似だけでは
+        // 背面の線が漏れることがある。面より奥の候補だけ実光線で再判定する。
+        if (!orthView && T !== "f" && s.depthBevelEdge && fishLineOccluders && !window.__legacyDepthBevelRay &&
+            Number.isFinite(z) && e.depth > z + CG.depthEps(e.depth) && exactPerspectiveOccluded(e)) return false;
         // 線がその面より「はっきり手前」なら、面の内側の線ではない（見える線）。
         // 奥行きバッファは 1画素より細い部材（手すり・スラブ・笠木）を
         // 持たないことがあり、その稜線は面より 10〜30cm 手前になる。
@@ -1964,7 +1978,14 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         // **1px おきの点線**になる（実測：建物の縦の稜線が 7〜11px おきに欠けた）。
         // 線の奥行きが「まわりの画素の奥行きの範囲」に入っていれば、
         // その線は面の輪郭の上にあると判断して描く（範囲より奥なら隠す）。
-        if (!window.__noRange && silhouetteRange(depth, cw, ch, x, y, e.depth) >= e.depth) return true;
+        if (!window.__noRange && silhouetteRange(depth, cw, ch, x, y, e.depth) >= e.depth) {
+            // 蛇腹の接近した段では、周辺深度の最大値だけだと奥の線を
+            // 表に出すことがある。通常透視でも曖昧な点だけ実面との光線を使う。
+            if (!orthView && T !== "f" && s.ob?.accordionEnabled && fishLineOccluders && !window.__legacyAccordionRange) {
+                if (exactPerspectiveOccluded(e)) return false;
+            }
+            return true;
+        }
         // 自分の面の「縁」に重なる線：隣の面（別ID）がほんの少しだけ手前なら、
         // その線は面と面の取り合い＝見える線として描く。差が大きい（本当に隠れている）
         // ときは描かないので、隠線の正しさは保たれる。
@@ -2302,7 +2323,11 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
         fishBlockedWidth=cw; fishBlockedHeight=ch; fishLineSerial=0;
         fishBlockedPixels=$("bin").checked ? new Int32Array(cw*ch) : null;
         fishVisiblePixels=fishBlockedPixels ? new Int32Array(cw*ch) : null;
-    } else { fishLineOccluders = null; fishBlockedPixels = null; fishVisiblePixels = null; }
+    } else {
+        fishBlockedPixels = null; fishVisiblePixels = null;
+        if (hiddenDepth && !orthView && T !== "f" && S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge)))) prepareFishLineOccluders();
+        else fishLineOccluders = null;
+    }
     // ベベルの縦線は「角ごとに輪郭の1本」だけ描く（面ONのとき）。
     if (hiddenDepth) updateSeamPicks(hiddenDepth, cw, ch, tfEff);
     // 二値化する層だけ、細い線が欠けないよう最小の太さを確保する。

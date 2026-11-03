@@ -2500,7 +2500,7 @@ function specialGizmo(o) {
                             : null;
     // 新アセットは controls の handle 定義から、表示・ヒット・編集を共通生成する。
     // 既存の専用ギズモもそのまま共存し、互いのハンドルの重なりを同じ処理で避ける。
-    if (o?.type === "asset" && typeof assetEditorControls === "function") {
+    if (o && typeof assetEditorControls === "function") {
         const registered=[];
         for(const c of assetEditorControls(o)) {
             if((c.type||"number")!=="number" || typeof c.handle!=="function")continue;
@@ -2509,7 +2509,10 @@ function specialGizmo(o) {
             const h=screenHandle(o,"asset-param-"+c.key,spec.anchor,spec.sample,spec.probe,value,
                 assetControlLimit(c.min,o,-Infinity),assetControlLimit(c.max,o,Infinity),c.label||c.key,
                 spec.fallback||{x:1,y:0},spec.color||"#8ce6c2");
-            h.paramKey=c.key;h.unit=c.unit||"";registered.push(h);
+            h.paramKey=c.key;h.unit=c.unit||"";h.integer=!!c.integer;
+            if(Number.isFinite(spec.pixelsPerUnit) && spec.pixelsPerUnit>0)h.scale=spec.pixelsPerUnit/Z;
+            else if(Number.isFinite(spec.scaleFactor) && spec.scaleFactor>0)h.scale=Math.max(60/Z,h.scale*spec.scaleFactor);
+            registered.push(h);
         }
         if(registered.length){
             if(!sg)sg={o,C3:L2W(o,0,0,Math.max(0,Number(o.h)||0)/2)};
@@ -3815,7 +3818,7 @@ function drawSpecialGizmo(c, o) {
         gzLabel(c, "半径", sg.handle.s.x + 9 / Z, sg.handle.s.y - 8 / Z, "#d5ccff", 12);
     }
     (sg.registeredHandles || []).forEach(h=>
-        valueHandle(h,{label:`${h.label} ${Number(h.start||0).toFixed(2)}${h.unit}`}));
+        valueHandle(h,{label:`${h.label} ${h.integer ? Math.round(Number(h.start)||0) : Number(h.start||0).toFixed(2)}${h.unit}`}));
     c.restore();
 }
 
@@ -5350,7 +5353,7 @@ function dragEdit(p, freeRotation = false) {
     };
     if (ed.t.startsWith("asset-param-")) {
         const h=ed.sign, control=assetEditorControls(o).find(c=>c.key===h.paramKey);
-        if(control) patch={[h.paramKey]:screenHandleDragValue(h,p,ed.p0)};
+        if(control) { const raw=screenHandleDragValue(h,p,ed.p0), value=control.integer ? clamp(Math.round(raw),h.min,h.max) : raw;patch=typeof control.patch === "function" ? control.patch(o,value) : {[h.paramKey]:value}; }
     } else if (ed.t === "cornerCut-offset") {
         patch = { cornerOffset: screenHandleDragValue(ed.sign,p,ed.p0) };
     } else if (ed.t.startsWith("cornerCut-facade-")) {

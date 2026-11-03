@@ -1777,7 +1777,7 @@
         if (!panel) return;
         panel.style.display = isSign ? "" : "none";
         const ext = el("obExtrude");
-        if (ext) ext.disabled = !!o && !(o.type === "rect" || o.type === "circ");
+        if (ext) ext.disabled = !!o && !(o.type === "rect" || o.type === "circ" || (o.type === "asset" && (o.asset === "beveledBox" || o.asset === "track")));
         if (!isSign) return;
         const vals = { faceW: o.faceW ?? 2 * o.ra * 0.7, faceH: o.faceH ?? o.h * 0.34 };
         [
@@ -2722,7 +2722,7 @@
     let genericAssetPanelKind=null, genericAssetPanelId=null, genericAssetEditSession=false;
     function syncGenericAssetEditor() {
         const panel=el("assetEditorP"), fields=el("assetEditorFields"), o=sel && obOf(sel),
-            controls=o?.type==="asset"?assetEditorControls(o):[];
+            controls=o?assetEditorControls(o):[];
         if(!panel || !fields)return;
         panel.style.display=controls.length?"":"none";
         if(!controls.length){genericAssetPanelKind=null;genericAssetPanelId=null;genericAssetEditSession=false;return;}
@@ -2756,9 +2756,10 @@
         let value;
         if(control.type==="boolean") value=!!input.checked;
         else {if(input.value.trim()===""||!Number.isFinite(Number(input.value)))return;
-            value=assetControlValue({...o,[key]:Number(input.value)},control);}
+            const v=Number(input.value), lo=assetControlLimit(control.min,o,-Infinity), hi=assetControlLimit(control.max,o,Infinity);
+            value=clamp(control.integer ? Math.round(v) : v,lo,hi);}
         if(!genericAssetEditSession){HU.push(S);RD=[];genericAssetEditSession=true;}
-        setOb(o.id,{[key]:value});render();
+        setOb(o.id,typeof control.patch === "function" ? control.patch(o,value) : {[key]:value});render();
     }
     if(el("assetEditorFields")){
         el("assetEditorFields").addEventListener("input",applyGenericAssetEditor);

@@ -1983,15 +1983,16 @@ function latticePanelA(o, opt = {}) {
 // アセット登録時の編集項目。既存の専用UIはそのまま残し、宣言したものだけ共通UIへ。
 // type は number / boolean。数値制約は数値または (o)=>数値で指定できる。
 function assetEditorControls(o) {
-    const list = ASSETS[o?.asset]?.controls;
-    return Array.isArray(list) ? list.filter(c => c && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(c.key || "") && ["number","boolean"].includes(c.type || "number")) : [];
+    const base = ASSETS[o?.asset]?.controls;
+    const list = [...(Array.isArray(base) ? base : []), ...(typeof window.accordionControls === "function" ? window.accordionControls(o) : [])];
+    return list.filter(c => c && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(c.key || "") && ["number","boolean"].includes(c.type || "number"));
 }
 function assetControlLimit(value, o, fallback) {
     const raw = typeof value === "function" ? value(o) : value;
     return Number.isFinite(Number(raw)) && raw !== null && raw !== undefined ? Number(raw) : fallback;
 }
 function assetControlValue(o, control) {
-    const raw = o?.[control.key] ?? control.default;
+    const raw = typeof control.get === "function" ? control.get(o) : o?.[control.key] ?? control.default;
     if (control.type === "boolean") return !!raw;
     const n=Number(raw), min=assetControlLimit(control.min,o,-Infinity), max=assetControlLimit(control.max,o,Infinity);
     return clamp(Number.isFinite(n)?n:0,min,max);

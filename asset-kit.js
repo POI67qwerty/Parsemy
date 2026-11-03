@@ -205,6 +205,17 @@ const ASSET_KIT = (function () {
         return { path, z0: Math.min(z0, z1), z1: Math.max(z0, z1), ...extra };
     }
     const box = (path, z0, z1, extra = {}) => prism(path, z0, z1, extra);
+    // x-z断面の四隅だけを丸め、前後（y）にそのまま押し出す。
+    // 前後端面の外周には別のベベルを作らない。
+    function depthBeveledBox(w, d, h, r, opts = {}) {
+        const width=Math.max(1e-4,Math.abs(Number(w)||0)),depth=Math.max(1e-4,Math.abs(Number(d)||0)),
+            height=Math.max(1e-4,Math.abs(Number(h)||0)),
+            radius=Math.max(0,Math.min(Number(r)||0,Math.min(width,height)*.4999)),
+            segments=Math.max(1,Math.min(12,Math.round(Number(opts.seg)||3))),
+            z0=Number.isFinite(Number(opts.z0))?Number(opts.z0):0,
+            path=roundRectPath(width,height,radius,segments,0,z0+height/2);
+        return box(path,-depth/2,depth/2,{axis:"y",depthBevelEdge:true});
+    }
     // 上下の面だけ（板・シート）。側面の線は出さない。
     const sheet = (path, z0, z1, extra = {}) => prism(path, z0, z1, { ...extra, sheet: true });
     // 円柱（脚・ポール・棒・タイヤ）。断面は正円の n 角形。
@@ -734,7 +745,11 @@ const ASSET_KIT = (function () {
             for (const part of parts) {
                 const color = part.color || ctx.c,
                     width = part.width || ctx.o.w;
-                for (const seg of partEdges(part)) ctx.out.push(lineA(ctx.o, seg, color, width));
+                for (const seg of partEdges(part)) {
+                    const line=lineA(ctx.o, seg, color, width);
+                    if(part.depthBevelEdge) line.depthBevelEdge=true;
+                    ctx.out.push(line);
+                }
             }
         };
         if (!exists) {
@@ -778,6 +793,7 @@ const ASSET_KIT = (function () {
         // 2Dの道筋
         rectPath,
         roundRectPath,
+        depthBeveledBox,
         ringPath,
         cylinder,
         part,
