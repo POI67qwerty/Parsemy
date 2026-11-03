@@ -12,7 +12,7 @@
    パネルと間取りUIは studio-ui.js に分離している。 */
 const $ = (id) => document.getElementById(id);
 function isStackedBuildingAsset(o) {
-    return o?.type === "asset" && ["stackedBuilding", "beveledStackedBuilding"].includes(o.asset);
+    return o?.type === "asset" && ["stackedBuilding", "beveledStackedBuilding", "cornerCutStackedBuilding"].includes(o.asset);
 }
 function isBeveledStackedBuildingAsset(o) {
     return o?.type === "asset" && o.asset === "beveledStackedBuilding";
@@ -156,6 +156,13 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 </div>
 <div id=buildingP style="display:none"><h3>建物の開口</h3>
 <label id=linkedBuildingOpeningRow style="display:none"><input type=checkbox id=linkedBuildingOpening> 開口をつける</label>
+<label id=buildingFacadeRow><input type=checkbox id=buildingFacadeEnabled> ファサード看板をつける</label>
+<div id=buildingFacadeControls style="display:none">
+<label><input type=checkbox id=buildingFacadeSides> 左右の側面にも回す</label>
+<label><span>看板の色</span><input type=color id=buildingFacadeColor value="#2f73bc"></label>
+<label><span>看板の高さ</span><input type=number class=nv id=buildingFacadeHeight min=0.05 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>看板の張り出し</span><input type=number class=nv id=buildingFacadeProjection min=0.02 max=2 step=0.01 style="width:100px"><span class=un>m</span></label>
+<div class="note">正面上部を横長に押し出した看板です。建物の幅・高さに追従します。文字・ロゴは含みません。</div></div>
 <label><span>開口の幅</span><input type=number class=nv id=ov_openingW step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><span>開口の高さ</span><input type=number class=nv id=ov_openingH step=0.05 style="width:100px"><span class=un>m</span></label>
 <div class="note">建物の外形は軸・回転に加え、3Dの白い外側面ハンドルでも幅・奥行き・高さを編集できます。緑のハンドルで開口の幅・高さ、オレンジの「奥の面」で閉じた内壁の奥行きを編集できます。</div>
@@ -258,6 +265,13 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 </div>
 <div id=cornerCutP style="display:none"><h3>隅切り直方体</h3>
 <label><span>隅切りオフセット</span><input type=number class=nv id=cornerCutOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><input type=checkbox id=cornerFacadeEnabled> ファサード看板をつける</label>
+<div id=cornerFacadeControls style="display:none">
+<label><input type=checkbox id=cornerFacadeSides> 隅切り両端の辺にも回す</label>
+<label><span>看板の色</span><input type=color id=cornerFacadeColor value="#2f73bc"></label>
+<label><span>看板の高さ</span><input type=number class=nv id=cornerFacadeHeight min=0.01 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>看板の張り出し</span><input type=number class=nv id=cornerFacadeProjection min=0.02 max=2 step=0.01 style="width:100px"><span class=un>m</span></label>
+<div class="note">正面と隅切り面に沿う立体の看板です。文字・ロゴは含みません。</div></div>
 <label><input type=checkbox id=cornerCutOpeningEnabled> 赤い隅切り面に開口</label>
 <div id=cornerCutOpeningControls style="display:none">
 <label><span>開口の幅</span><input type=number class=nv id=cornerCutOpeningW min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
@@ -289,9 +303,12 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <div id=stackOpeningControls style="display:none">
 <label><span>1F開口の幅</span><input type=number class=nv id=stackOpeningW min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><span>1F開口の高さ</span><input type=number class=nv id=stackOpeningH min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
-<label><span>1F開口の奥面</span><input type=number class=nv id=stackOpeningBack step=0.05 style="width:100px"><span class=un>m</span></label>
-<div class="note">開口は1Fだけに作成します。開口幅・高さ・奥面は建物アセットと同じように、設定欄またはキャンバス上の開口ハンドルから編集できます。奥面は建物中心からの位置です。</div>
+<label><span id=stackOpeningBackLabel>1F開口の奥面</span><input type=number class=nv id=stackOpeningBack step=0.05 style="width:100px"><span class=un>m</span></label>
+<div id=stackOpeningNote class="note">開口は1Fだけに作成します。開口幅・高さ・奥面は設定欄または画面上のハンドルから編集できます。奥面は建物中心からの位置です。</div>
 </div>
+<div id=stackCornerControls style="display:none">
+<label><span>隅切りオフセット</span><input type=number class=nv id=stackCornerOffset min=0.05 step=0.05 style="width:100px"><span class=un>m</span></label>
+<div class="note">各階の同じ角を隅切りします。赤いハンドルでも隅切り幅を変えられます。1Fの開口は隅切り面に作ります。</div></div>
 <label><span>階間</span><input type=number class=nv id=stackFloorGap min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
 <div id=stackBevelControls style="display:none">
 <label><span>ベベルオフセット</span><input type=number class=nv id=stackBevelOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>

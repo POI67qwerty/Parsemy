@@ -1006,7 +1006,7 @@
         return candidate &&
             candidate.type === "asset" &&
             candidate.asset === "building" &&
-            ["buildingAwning", "buildingSign"].includes(candidate.linkedAsset)
+            ["buildingAwning", "buildingAwningOpen", "buildingSign"].includes(candidate.linkedAsset)
             ? candidate
             : null;
     }
@@ -1143,6 +1143,15 @@
             openingCheck = el("linkedBuildingOpening");
         if (openingRow) openingRow.style.display = linked ? "" : "none";
         if (!isBuilding) return;
+        const fascia=buildingFasciaGeometry(o), check=el("buildingFacadeEnabled"), controls=el("buildingFacadeControls");
+        if(el("buildingFacadeRow")) el("buildingFacadeRow").style.display=buildingFacadeAllowed(o)?"":"none";
+        if(check) check.checked=fascia.enabled;
+        if(controls) controls.style.display=fascia.enabled ? "" : "none";
+        if(el("buildingFacadeSides")) el("buildingFacadeSides").checked=fascia.side;
+        if(el("buildingFacadeColor") && document.activeElement!==el("buildingFacadeColor")) el("buildingFacadeColor").value=fascia.color;
+        [["buildingFacadeHeight",fascia.height],["buildingFacadeProjection",fascia.projection]].forEach(([id,v])=>{
+            const input=el(id); if(input && document.activeElement!==input) input.value=Number(v).toFixed(3);
+        });
         if (openingCheck && linked) openingCheck.checked = o.openingEnabled !== false;
         const g = buildingGeometry(o);
         [
@@ -1153,6 +1162,24 @@
             if (n && document.activeElement !== n) n.value = Number(v).toFixed(3);
         });
     }
+    function applyBuildingFacade(key,value) {
+        const o=buildingPanelObject(); if(!o || !buildingFacadeAllowed(o)) return;
+        const g=buildingFasciaGeometry(o), patch={};
+        if(key==="facadeEnabled" || key==="facadeSides") patch[key]=!!value;
+        else if(key==="facadeColor" && /^#[0-9a-f]{6}$/i.test(value)) patch[key]=value;
+        else if(Number.isFinite(Number(value))) patch[key]=clamp(Number(value),key==="facadeHeight"?.05:.02,key==="facadeHeight"?g.h:2);
+        else return;
+        if(!buildingEditSession){HU.push(S);RD=[];buildingEditSession=true;}
+        setOb(o.id,patch); render();
+    }
+    const fasciaToggle=el("buildingFacadeEnabled");
+    if(fasciaToggle) fasciaToggle.onchange=()=>{buildingEditSession=false;applyBuildingFacade("facadeEnabled",fasciaToggle.checked);buildingEditSession=false;};
+    const fasciaSides=el("buildingFacadeSides"), fasciaColor=el("buildingFacadeColor");
+    if(fasciaSides) fasciaSides.onchange=()=>{buildingEditSession=false;applyBuildingFacade("facadeSides",fasciaSides.checked);buildingEditSession=false;};
+    if(fasciaColor) {fasciaColor.oninput=()=>applyBuildingFacade("facadeColor",fasciaColor.value);fasciaColor.onchange=()=>{buildingEditSession=false;};}
+    [["buildingFacadeHeight","facadeHeight"],["buildingFacadeProjection","facadeProjection"]].forEach(([id,key])=>{
+        const n=el(id); if(!n)return; n.oninput=()=>applyBuildingFacade(key,n.value); n.onchange=()=>{buildingEditSession=false;};
+    });
     function applyLinkedBuildingOpening(value) {
         const o = linkedBuildingParent();
         if (!o) return;
@@ -1434,6 +1461,12 @@
             gap = el("stackFloorGap");
         if (count && document.activeElement !== count) count.value = o.floorCount || o.floors?.length || 1;
         if (individualEdit) individualEdit.checked = stackedIndividualEdit(o);
+        const corner=o.asset === "cornerCutStackedBuilding", cornerControls=el("stackCornerControls"), cornerOffset=el("stackCornerOffset"),
+            backLabel=el("stackOpeningBackLabel"), openingNote=el("stackOpeningNote");
+        if(cornerControls) cornerControls.style.display=corner?"":"none";
+        if(cornerOffset && document.activeElement!==cornerOffset) cornerOffset.value=Number(o.cornerOffset ?? .8).toFixed(3);
+        if(backLabel) backLabel.textContent=corner?"1F開口の奥行き":"1F開口の奥面";
+        if(openingNote) openingNote.textContent=corner?"開口は1Fの隅切り面だけに作成します。幅・高さ・奥行きは数値欄と画面上のハンドルで編集できます。":"開口は1Fだけに作成します。開口幅・高さ・奥面は設定欄または画面上のハンドルから編集できます。奥面は建物中心からの位置です。";
         if (openingCheck) openingCheck.checked = stackedOpeningEnabled(o);
         if (openingControls) openingControls.style.display = stackedOpeningEnabled(o) ? "" : "none";
         if (stackedOpeningEnabled(o)) {
@@ -1446,7 +1479,7 @@
         if (gap && document.activeElement !== gap) gap.value = Number(o.floorGap || 0).toFixed(3);
         const title = el("stackedPanelTitle"),
             bevelControls = el("stackBevelControls");
-        if (title) title.textContent = beveled ? "ベベル直方体の縁付き階層建物" : "縁付き階層建物";
+        if (title) title.textContent = corner ? "隅切りの縁付き階層建物" : beveled ? "ベベル直方体の縁付き階層建物" : "縁付き階層建物";
         if (bevelControls) bevelControls.style.display = beveled ? "" : "none";
         if (beveled) {
             const floors = Array.isArray(o.floors) ? o.floors : [],
@@ -1553,19 +1586,31 @@
                               -g.d * 0.5 + 0.025,
                               g.d * 0.5 - 0.025,
                           );
+        // 隅切りは奥面の絶対位置ではなく、切り口からの奥行きを保存する。
+        const cornerNext=o.asset === "cornerCutStackedBuilding" && name === "openingBack" ? clamp(Number(value)||g.openingBack,.025,g.corner.maxDepth) : next;
         setOb(o.id, {
             openingEnabled: name === "openingEnabled" ? next : stackedOpeningEnabled(o),
-            [name]: next,
+            [name]: cornerNext,
             openingW: name === "openingW" ? next : g.openingW,
             openingH: name === "openingH" ? next : g.openingH,
             openingBack:
                 name === "openingBack"
-                    ? next
+                    ? cornerNext
                     : Number.isFinite(Number(o.openingBack))
                       ? Number(o.openingBack)
                       : g.openingBack,
         });
         render();
+    }
+    const stackCornerOffset=el("stackCornerOffset");
+    if(stackCornerOffset) {
+        stackCornerOffset.oninput=()=>{
+            const o=sel && obOf(sel); if(!o || o.asset!=="cornerCutStackedBuilding") return;
+            const n=Number(stackCornerOffset.value), f=o.floors?.[0]; if(!Number.isFinite(n)||!f)return;
+            if(!stackedEditSession){HU.push(S);RD=[];stackedEditSession=true;}
+            setOb(o.id,{cornerOffset:clamp(n,.05,Math.max(.05,Math.min(f.w,f.d)/2-.001))});render();
+        };
+        stackCornerOffset.onchange=()=>{stackedEditSession=false;};
     }
     function applyStackBevelProp(name, value) {
         const o = sel && obOf(sel);
@@ -2364,7 +2409,7 @@
         S.forEach((s) => {
             const q = s.ob;
             if (!q || q === o || q.type !== "asset") return;
-            if (!["building", "box", "stackedBuilding", "beveledStackedBuilding", "recessedStackedBuilding"].includes(q.asset))
+            if (!["building", "box", "stackedBuilding", "beveledStackedBuilding", "cornerCutStackedBuilding", "recessedStackedBuilding"].includes(q.asset))
                 return;
             const hb = obBounds(q),
                 hx = (hb.lo[0] + hb.hi[0]) * 0.5,
@@ -2588,6 +2633,14 @@
             ];
         if (offsetInput && document.activeElement !== offsetInput)
             offsetInput.value = Number(params?.cornerOffset ?? o.cornerOffset ?? 0).toFixed(3);
+        const fascia=buildingFasciaGeometry(o), facadeCheck=el("cornerFacadeEnabled");
+        if(facadeCheck) facadeCheck.checked=fascia.enabled;
+        if(el("cornerFacadeControls")) el("cornerFacadeControls").style.display=fascia.enabled?"":"none";
+        if(el("cornerFacadeSides")) el("cornerFacadeSides").checked=fascia.side;
+        if(el("cornerFacadeColor") && document.activeElement!==el("cornerFacadeColor")) el("cornerFacadeColor").value=fascia.color;
+        [["cornerFacadeHeight",fascia.height],["cornerFacadeProjection",fascia.projection]].forEach(([id,value])=>{
+            const input=el(id);if(input && document.activeElement!==input) input.value=Number(value).toFixed(3);
+        });
         if (openingEnabled) openingEnabled.checked = o.cornerCutOpeningEnabled === true;
         if (controls) controls.style.display = o.cornerCutOpeningEnabled === true ? "" : "none";
         values.forEach(([id, value]) => {
@@ -2595,6 +2648,22 @@
             if (input && document.activeElement !== input) input.value = Number(value).toFixed(3);
         });
     }
+    function applyCornerFacadeProp(name,value) {
+        const o=sel && obOf(sel);if(!o || o.asset!=="cornerCutBox")return;
+        const g=buildingFasciaGeometry(o),patch={};
+        if(name==="facadeEnabled"||name==="facadeSides")patch[name]=!!value;
+        else if(name==="facadeColor" && /^#[0-9a-f]{6}$/i.test(value))patch[name]=value;
+        else if(Number.isFinite(Number(value)))patch[name]=clamp(Number(value),name==="facadeHeight"?Math.min(.05,g.h):.02,name==="facadeHeight"?g.h:2);
+        else return;
+        if(!cornerCutEditSession){HU.push(S);RD=[];cornerCutEditSession=true;}
+        setOb(o.id,patch);render();
+    }
+    [["cornerFacadeEnabled","facadeEnabled"],["cornerFacadeSides","facadeSides"]].forEach(([id,key])=>{
+        const n=el(id);if(n)n.onchange=()=>{cornerCutEditSession=false;applyCornerFacadeProp(key,n.checked);cornerCutEditSession=false;};
+    });
+    [["cornerFacadeColor","facadeColor"],["cornerFacadeHeight","facadeHeight"],["cornerFacadeProjection","facadeProjection"]].forEach(([id,key])=>{
+        const n=el(id);if(n){n.oninput=()=>applyCornerFacadeProp(key,n.value);n.onchange=()=>{cornerCutEditSession=false;};}
+    });
     function applyCornerCutProp(name, rawValue) {
         const o = sel && obOf(sel);
         if (!o || o.type !== "asset" || o.asset !== "cornerCutBox") return;

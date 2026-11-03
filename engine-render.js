@@ -534,6 +534,18 @@ function exportSurfaceTriangles(o) {
                 quad(a, b, c, d0);
             }
         }
+        const fascia=cornerCutFasciaParts(o);
+        if(fascia.g.enabled) for(const polygon of fascia.parts) {
+            const mark=out.length, lo=fascia.g.z0, hi=fascia.g.z1,
+                point=(v,z)=>[v[0],v[1],z];
+            quad(point(polygon[0],lo),point(polygon[1],lo),point(polygon[2],lo),point(polygon[3],lo));
+            quad(point(polygon[3],hi),point(polygon[2],hi),point(polygon[1],hi),point(polygon[0],hi));
+            for(let i=0;i<polygon.length;i++) {
+                const j=(i+1)%polygon.length;
+                quad(point(polygon[i],lo),point(polygon[j],lo),point(polygon[j],hi),point(polygon[i],hi));
+            }
+            for(let i=mark;i<out.length;i++) out[i].surfaceColor=fascia.g.color;
+        }
         return out;
     }
     if (kind === "beveledBox" && typeof beveledBoxFootprint === "function") {
@@ -561,7 +573,7 @@ function exportSurfaceTriangles(o) {
         mesh.triangles.forEach((triangle) => out.push(triangle.map((v) => L(...v))));
         return out;
     }
-    if (kind === "stackedBuilding" || kind === "beveledStackedBuilding") {
+    if (kind === "stackedBuilding" || kind === "beveledStackedBuilding" || kind === "cornerCutStackedBuilding") {
         const floors =
             Array.isArray(o.floors) && o.floors.length
                 ? o.floors
@@ -584,7 +596,18 @@ function exportSurfaceTriangles(o) {
                     beveledBoxSegments(o.bevelSegments, o.bevelEdges),
                 ),
                 opening = i === 0 && stackedOpeningEnabled(o) ? stackedOpeningParams(o, f) : null;
-            if (kind === "beveledStackedBuilding") {
+            if (kind === "cornerCutStackedBuilding") {
+                // 階ごとの隅切り面は既存の隅切り直方体を共用し、親の回転を保って位置をずらす。
+                const base=customPt(o,0,0,0), dest=customPt(o,fx,fy,fz), shift=dest.map((v,j)=>v-base[j]),
+                    part={...o,asset:"cornerCutBox",ra:fw/2,rb:fd/2,h:fh,facadeEnabled:false,cornerCutOpeningEnabled:!!opening,
+                        cornerCutOpeningW:opening?.openingW,cornerCutOpeningH:opening?.openingH,cornerCutOpeningDepth:opening?.openingBack},
+                    append=tris=>tris.forEach(t=>out.push(t.map(p=>p.map((v,j)=>v+shift[j]))));
+                append(surfaceTriangles(part));
+                const offset=cornerCutBoxParams(part).cornerOffset+(2-Math.SQRT2)*ro,
+                    rim={...part,ra:(fw+2*ro)/2,rb:(fd+2*ro)/2,h:rh,cornerOffset:offset,cornerCutOpeningEnabled:false},
+                    rimBase=customPt(o,0,0,fh-rh), origin=customPt(o,0,0,0), rimShift=rimBase.map((v,j)=>v-origin[j]);
+                surfaceTriangles(rim).forEach(t=>out.push(t.map(p=>p.map((v,j)=>v+shift[j]+rimShift[j]))));
+            } else if (kind === "beveledStackedBuilding") {
                 if (opening) beveledOpeningAt(fx, fy, fw, fd, fz, fz + fh, bevelOffset, bevelSegments, opening);
                 else beveledAt(fx, fy, fw, fd, fz, fz + fh, bevelOffset, bevelSegments);
                 // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
@@ -621,6 +644,14 @@ function exportSurfaceTriangles(o) {
         return out;
     }
     if (kind === "building") {
+        const facade=buildingFasciaGeometry(o);
+        if (facade.enabled) {
+            const mark=out.length;
+            boxAt(0,-facade.d/2-facade.projection/2,facade.w,facade.projection,facade.z0,facade.z1);
+            if(facade.side) for(const sign of [-1,1]) boxAt(sign*(facade.w/2+facade.projection/2),-facade.projection/2,facade.projection,facade.d+facade.projection,facade.z0,facade.z1);
+            // 面表示だけ看板色を使う。深度・隠線処理では通常の三角形として扱う。
+            for(let i=mark;i<out.length;i++) out[i].surfaceColor=facade.color;
+        }
         // 開口OFFでは面表示も通常の閉じた直方体へ戻す。
         if (o.openingEnabled === false) {
             boxAt(0, 0, w, d, 0, h);
@@ -2640,7 +2671,7 @@ function drawObjectSurfaces(c) {
                 const area = (b.x - a.x) * (e.y - a.y) - (b.y - a.y) * (e.x - a.x);
                 if (Math.abs(area) < SURF_MIN_AREA) continue;
                 const t = {
-                    color,
+                    color: tr.surfaceColor || color,
                     alpha,
                     depth: (a.depth + b.depth + e.depth) / 3,
                     area,

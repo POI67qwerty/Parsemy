@@ -1389,7 +1389,7 @@ function stackedBevelHandle(o, f, index) {
     };
 }
 function stackedOpeningGizmo(o) {
-    if (!isStackedBuildingAsset(o) || !stackedOpeningEnabled(o)) return null;
+    if (!isStackedBuildingAsset(o) || !stackedOpeningEnabled(o) || o.asset === "cornerCutStackedBuilding") return null;
     const floors = Array.isArray(o.floors) && o.floors.length ? o.floors : [];
     if (!floors.length || typeof stackedOpeningParams !== "function") return null;
     const f = floors[0],
@@ -1568,7 +1568,18 @@ function stackedBuildingGizmo(o) {
         frame = [pr(x - w / 2, y, z), pr(x - w / 2, y, z + h), pr(x + w / 2, y, z + h), pr(x + w / 2, y, z)],
         bevelHandle = stackedBevelHandle(o, f, index),
         opening = stackedOpeningGizmo(o);
-    return { o, C3: p3(x, y, z + h * 0.5), center, frame, handles, bevelHandle, opening, floorIndex: index };
+    let cornerHandle = null, cornerOpening = null;
+    if (o.asset === "cornerCutStackedBuilding") {
+        // 各階の位置・寸法を尊重し、同じ隅切りハンドルを親座標へ投影する。
+        const part={...o,asset:"cornerCutBox",ra:w/2,rb:d/2,h,cornerCutOpeningEnabled:false};
+        cornerHandle=cornerCutGizmo(part,{parent:o,origin:[x,y,z]})?.handle || null;
+        if (stackedOpeningEnabled(o)) {
+            const first=floors[0], g=stackedOpeningParams(o,first), cp={...g.corner,enabled:true,openingH:g.openingH,
+                maxHeight:Math.max(.1,g.h-g.rimHeight-.01)};
+            cornerOpening=cornerCutOpeningGizmo(o,cp,[Number(first.x)||0,Number(first.y)||0,Number(first.z)||0]);
+        }
+    }
+    return { o, C3: p3(x, y, z + h * 0.5), center, frame, handles, bevelHandle, opening, cornerHandle, cornerOpening, floorIndex: index };
 }
 // 凹窓階層建物の窓寸法用ギズモ。正面窓の幅・高さ・凹み奥行きを
 // 1つのハンドル群へまとめ、変更値は全階へ反復して適用する。
@@ -1914,9 +1925,10 @@ function beveledBoxGizmo(o) {
 // 隅切り開口の幅・高さ・奥行き用ハンドル。
 // 3D投影で方向がつぶれる直交ビューでは画面上のフォールバック方向を使い、
 // すべてのビューで同じ数値を編集できるようにする。
-function cornerCutOpeningGizmo(o, opening) {
+function cornerCutOpeningGizmo(o, opening, origin = [0, 0, 0]) {
     if (!opening?.enabled) return null;
-    const pr = (xy, z) => scrW(pt(o, xy[0], xy[1], z)),
+    const [fx,fy,fz] = origin,
+        pr = (xy, z) => scrW(pt(o, xy[0]+fx, xy[1]+fy, z+fz)),
         mid = opening.midpoint,
         midZ = opening.openingH * 0.5,
         frontMid = [(opening.frontA[0] + opening.frontB[0]) * 0.5, (opening.frontA[1] + opening.frontB[1]) * 0.5],
@@ -2012,7 +2024,7 @@ function cornerCutOpeningGizmo(o, opening) {
     right.anchor = pr(frontMid, midZ);
     height.anchor = pr(frontMid, 0);
     return {
-        C3: L2W(o, mid[0], mid[1], midZ),
+        C3: L2W(o, mid[0]+fx, mid[1]+fy, midZ+fz),
         handles: { left, right, height, depth },
         panelFrame: [
             pr(opening.frontA, 0),
@@ -2028,19 +2040,42 @@ function cornerCutOpeningGizmo(o, opening) {
         ],
     };
 }
+// 隅切り看板の下端と外側に、看板の高さ・張り出しのハンドルを置く。
+// 高さは上端固定で下方向に増え、張り出しは隅切り面の法線方向に増える。
+function cornerCutFacadeGizmo(o) {
+    const f=cornerCutFasciaParts(o), g=f.g;
+    if (!g.enabled) return null;
+    const n=f.inner.length, a=f.inner[n-1], b=f.inner[0], c=f.outer[n-1], d=f.outer[0],
+        inner=[(a[0]+b[0])/2,(a[1]+b[1])/2],
+        outer=[(c[0]+d[0])/2,(c[1]+d[1])/2],
+        vx=outer[0]-inner[0], vy=outer[1]-inner[1], len=Math.hypot(vx,vy),
+        // 隅切りゼロでも、方角に応じた外向きを使う。
+        signs={"front-left":[-1,-1],"front-right":[1,-1],"back-right":[1,1],"back-left":[-1,1]},
+        fallback=signs[cornerCutBoxParams(o).cornerCutCorner],
+        nx=len>1e-8?vx/len:fallback[0]/Math.SQRT2, ny=len>1e-8?vy/len:fallback[1]/Math.SQRT2,
+        middle=(g.z0+g.z1)/2,
+        height=screenHandle(o,"cornerCut-facade-height",[outer[0],outer[1],g.z1],
+            [outer[0],outer[1],g.z0],[outer[0],outer[1],g.z0-1],g.height,Math.min(.05,g.h),g.h,
+            "看板の高さ",{x:0,y:1},"#f49ac2"),
+        projection=screenHandle(o,"cornerCut-facade-projection",[inner[0],inner[1],middle],
+            [outer[0],outer[1],middle],[outer[0]+nx,outer[1]+ny,middle],g.projection,.02,2,
+            "看板の張り出し",{x:1,y:0},"#73ddcb");
+    return {handles:{height,projection}};
+}
 // 隅切り直方体の切り口オフセット用ハンドル。
 // 切り口の中央を基準に、オフセットが増える方向を画面へ投影する。
 // 正面／横／上で片方の成分がつぶれても、残った成分または表示用の
 // フォールバック方向を使うため、どの直交ビューでも操作対象が見える。
-function cornerCutGizmo(o) {
+function cornerCutGizmo(o, options = {}) {
     if (!o || o.type !== "asset" || o.asset !== "cornerCutBox" || typeof cornerCutBoxParams !== "function") return null;
-    const q = cornerCutBoxParams(o),
+    const parent = options.parent || o, [fx,fy,fz] = options.origin || [0,0,0],
+        q = cornerCutBoxParams(o),
         footprint = cornerCutFootprint(q.w, q.d, q.cornerOffset, q.cornerCutCorner),
         a = footprint[footprint.length - 1],
         b = footprint[0],
         z = Math.max(0.01, Math.abs(Number(o.h) || 0.01)) * 0.5,
         mid = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5],
-        pr = (x, y, zz = z) => scrW(pt(o, x, y, zz)),
+        pr = (x, y, zz = z) => scrW(pt(parent, x+fx, y+fy, zz+fz)),
         anchor = pr(mid[0], mid[1]),
         step = Math.max(0.05, Math.min(Math.max(0.001, q.max - q.cornerOffset), Math.min(q.w, q.d) * 0.08)),
         probeFootprint = cornerCutFootprint(q.w, q.d, q.cornerOffset + step, q.cornerCutCorner),
@@ -2061,9 +2096,11 @@ function cornerCutGizmo(o) {
             : anchor;
     const opening = typeof cornerCutOpeningParams === "function" ? cornerCutOpeningParams(o) : null;
     return {
-        o,
-        C3: L2W(o, 0, 0, z),
-        opening: cornerCutOpeningGizmo(o, opening),
+        o: parent,
+        C3: L2W(parent, fx, fy, z+fz),
+        opening: cornerCutOpeningGizmo(parent, opening, [fx,fy,fz]),
+        // 階層の一時部品ではなく、単体の隅切り直方体だけに看板ハンドルを表示。
+        facade: options.parent ? null : cornerCutFacadeGizmo(o),
         handle: {
             kind: "cornerCut-offset",
             s: display,
@@ -3254,6 +3291,9 @@ function drawSpecialGizmo(c, o) {
             label: `隅切り ${Number(sg.handle?.start || 0).toFixed(2)}m`,
             textColor: "#ffd0d0",
         });
+        Object.values(sg.facade?.handles || {}).forEach((handle) =>
+            valueHandle(handle, { label: `${handle.label} ${Number(handle.start || 0).toFixed(2)}m` }),
+        );
         Object.values(sg.opening?.handles || {}).forEach((handle) =>
             valueHandle(handle, {
                 dash: [4, 3],
@@ -3415,6 +3455,12 @@ function drawSpecialGizmo(c, o) {
             }
             gzLabel(c, "1F 開口 W/H", opening.front.center.x + 8 / Z, opening.front.center.y - 8 / Z, "#d8fff0", 12);
         }
+        if (sg.cornerHandle) valueHandle(sg.cornerHandle, {
+            color:"#e24b4b", label:`隅切り ${Number(sg.cornerHandle.start||0).toFixed(2)}m`, textColor:"#ffd0d0"
+        });
+        Object.values(sg.cornerOpening?.handles || {}).forEach(handle => valueHandle(handle, {
+            dash:[4,3], width:1.4, font:11, label:`${handle.label} ${Number(handle.start||0).toFixed(2)}m`
+        }));
         if (sg.bevelHandle?.s?.ok && sg.bevelHandle?.anchor?.ok) {
             const bh = sg.bevelHandle;
             c.setLineDash([4 / Z, 3 / Z]);
@@ -4573,37 +4619,14 @@ function hitGizmo(p) {
             if (nearestFace) return { t: "wallSideSign-face", f: nearestFace.f, g: { o: active, C3: special.C3 } };
         }
         if (active.asset === "cornerCutBox") {
-            const opening = special.opening;
-            if (opening) {
-                const openingHits = [
-                    ["cornerCut-opening-width-left", opening.handles.left],
-                    ["cornerCut-opening-width-right", opening.handles.right],
-                    ["cornerCut-opening-height", opening.handles.height],
-                    ["cornerCut-opening-depth", opening.handles.depth],
-                ]
-                    .filter(([, handle]) => handle?.s?.ok)
-                    .map(([t, handle]) => ({ t, handle, d: Math.hypot(handle.s.x - p.x, handle.s.y - p.y) }))
-                    .filter((q) => q.d < R)
-                    .sort((a, b) => a.d - b.d);
-                if (openingHits.length) {
-                    // 開口ハンドルと外形の白い面ハンドルが重なるときは近い方へ渡す。
-                    const hit = openingHits[0],
-                        face = nearestFaceHit();
-                    if (!face || hit.d <= face.d + 1.5 / Z)
-                        return { t: hit.t, sign: hit.handle, g: { o: active, C3: opening.C3 } };
-                    return { t: "face", f: face.f, g: face.g };
-                }
-                if (opening.panelFrame?.every((q) => q?.ok) && insidePoly2D(p, opening.panelFrame))
-                    return {
-                        t: "cornerCut-opening-depth",
-                        sign: opening.handles.depth,
-                        g: { o: active, C3: opening.C3 },
-                    };
-            }
-            const h = special.handle,
-                cut = h?.s?.ok ? nearestHandleOf([h], p, R) : null,
-                cutHit = handleOrFace(cut, (q) => ({ t: "cornerCut-offset", sign: q.handle, g: { o: active, C3: special.C3 } }));
-            if (cutHit) return cutHit;
+            const opening=special.opening,
+                handles=[special.handle,...Object.values(opening?.handles || {}),...Object.values(special.facade?.handles || {})],
+                nearest=nearestHandleOf(handles,p,R),
+                hit=handleOrFace(nearest,q=>({t:q.handle.kind,sign:q.handle,g:{o:active,C3:special.C3}}));
+            // 明示的なハンドルを、開口面全体の奥行き操作より優先。
+            if(hit) return hit;
+            if (opening?.panelFrame?.every((q) => q?.ok) && insidePoly2D(p, opening.panelFrame))
+                return {t: "cornerCut-opening-depth", sign: opening.handles.depth, g: {o: active, C3: opening.C3}};
         }
         if (active.asset === "recessedStackedBuilding") {
             const nearest = nearestHandleOf(Object.values(special.handles || {}), p, R),
@@ -4677,6 +4700,14 @@ function hitGizmo(p) {
             if (nearest) return { t: nearest.handle.kind, sign: nearest.handle, g: { o: active, C3: special.C3 } };
         }
         if (isStackedBuildingAsset(active)) {
+            if (active.asset === "cornerCutStackedBuilding") {
+                const cornerHandles=[special.cornerHandle,...Object.values(special.cornerOpening?.handles || {})].filter(Boolean),
+                    nearest=nearestHandleOf(cornerHandles,p,R);
+                if (nearest) return {t:nearest.handle.kind,sign:nearest.handle,g:{o:active,C3:special.cornerOpening?.C3 || special.C3}};
+                const co=special.cornerOpening;
+                if (co?.panelFrame?.every(q=>q?.ok) && insidePoly2D(p,co.panelFrame))
+                    return {t:"cornerCut-opening-depth",sign:co.handles.depth,g:{o:active,C3:co.C3}};
+            }
             const opening = special.opening;
             if (opening) {
                 for (const h of [
@@ -5207,6 +5238,7 @@ function beginGizmo(h, p) {
         h.t === "beveled-offset" ||
         h.t === "cornerCut-offset" ||
         h.t.startsWith("cornerCut-opening-") ||
+        h.t.startsWith("cornerCut-facade-") ||
         h.t.startsWith("recessed-window-") ||
         h.t === "recessed-corner-bevel" ||
         h.t === "recessed-first-floor-height" ||
@@ -5335,13 +5367,21 @@ function dragEdit(p, freeRotation = false) {
             deltaY = p.y - ed.p0.y,
             offset = clamp(h.start + (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1), h.min, h.max);
         patch = { cornerOffset: offset };
+    } else if (ed.t.startsWith("cornerCut-facade-")) {
+        const h=ed.sign, dx=p.x-ed.p0.x, dy=p.y-ed.p0.y,
+            value=clamp(h.start+(dx*h.dir.x+dy*h.dir.y)/(h.scale||1),h.min,h.max);
+        patch=ed.t.endsWith("height") ? {facadeHeight:value} : {facadeProjection:value};
     } else if (ed.t.startsWith("cornerCut-opening-")) {
         const h = ed.sign,
             deltaX = p.x - ed.p0.x,
             deltaY = p.y - ed.p0.y,
             amount = (deltaX * h.dir.x + deltaY * h.dir.y) / (h.scale || 1),
             value = clamp(h.start + amount, h.min, h.max);
-        if (ed.t.includes("width")) patch = { cornerCutOpeningW: value };
+        if (o.asset === "cornerCutStackedBuilding") {
+            if (ed.t.includes("width")) patch = { openingW: value };
+            else if (ed.t.includes("height")) patch = { openingH: value };
+            else patch = { openingBack: value };
+        } else if (ed.t.includes("width")) patch = { cornerCutOpeningW: value };
         else if (ed.t.includes("height")) patch = { cornerCutOpeningH: value };
         else patch = { cornerCutOpeningDepth: value };
     } else if (
@@ -5682,6 +5722,15 @@ function dragEdit(p, freeRotation = false) {
             floor[key] = clamp(h.start + amount, h.min, h.max);
             if (!stackedIndividualEdit(o) && h.floorIndex === 0 && ["w", "d", "h"].includes(key))
                 floors.forEach((f) => (f[key] = floor[key]));
+            if (o.asset === "cornerCutStackedBuilding" && key === "h") {
+                // 階高を変えても上下の階が重ならないよう、元の各階間隔を保って上階を積み直す。
+                // 幅・奥行き・XY位置は変えない。個別編集なら変更した階より上だけを移動。
+                for (let i=h.floorIndex+1;i<floors.length;i++) {
+                    const previous=o.floors[i-1], current=o.floors[i],
+                        gap=(Number(current.z)||0)-(Number(previous.z)||0)-(Number(previous.h)||0);
+                    floors[i].z=(Number(floors[i-1].z)||0)+(Number(floors[i-1].h)||0)+gap;
+                }
+            }
             const last = floors[floors.length - 1];
             patch = { floors, floorCount: floors.length, h: (Number(last?.z) || 0) + (Number(last?.h) || 0) };
         }

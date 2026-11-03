@@ -160,7 +160,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 recessedSideWindows: info.recessedSideWindows !== false,
             };
         }
-        if (kind === "stackedBuilding" || kind === "beveledStackedBuilding") {
+        if (kind === "stackedBuilding" || kind === "beveledStackedBuilding" || kind === "cornerCutStackedBuilding") {
             const beveled = kind === "beveledStackedBuilding",
                 floorHeight = 2.2,
                 floorGap = 0.06,
@@ -181,11 +181,13 @@ window.cityGridInstallAssetUI = function (bridge) {
                 ...base,
                 type: "asset",
                 asset: kind,
-                assetId: beveled ? "beveled-stacked-building" : "stacked-building",
+                assetId: kind === "cornerCutStackedBuilding" ? "corner-cut-stacked-building" : beveled ? "beveled-stacked-building" : "stacked-building",
                 assetName: info.label,
                 // 生成面（k）は共通設定に従う（凹窓階層建物と同じ扱い）。
                 k,
                 d: -1,
+                // 画面のZ（上方向）まわりに反時計回り90度。既存の配置物は変更しない。
+                ...(kind === "cornerCutStackedBuilding" ? {rot:90} : {}),
                 h: floors[floors.length - 1].z + floorHeight,
                 ra: info.w / 2,
                 rb: info.d / 2,
@@ -197,9 +199,10 @@ window.cityGridInstallAssetUI = function (bridge) {
                 bevelOffset: beveled ? info.bevelOffset : undefined,
                 bevelSegments: beveled ? info.bevelSegments : undefined,
                 openingEnabled: false,
-                openingW: info.w * 0.56,
+                openingW: kind === "cornerCutStackedBuilding" ? 0.7 : info.w * 0.56,
                 openingH: floorHeight * 0.66,
-                openingBack: info.d * 0.5 - 0.025,
+                openingBack: kind === "cornerCutStackedBuilding" ? 0.8 : info.d * 0.5 - 0.025,
+                ...(kind === "cornerCutStackedBuilding" ? { cornerOffset: info.cornerOffset, cornerCutCorner:"front-left", cutColor:"#e24b4b" } : {}),
                 // 既定は1F編集を全階へ連動。旧JSONのsyncFirstは互換用に残す。
                 syncFirst: true,
                 individualEdit: false,
@@ -259,6 +262,8 @@ window.cityGridInstallAssetUI = function (bridge) {
                 cornerOffset: info.cornerOffset,
                 cornerCutCorner: info.cornerCutCorner,
                 cornerCutOpeningEnabled: false,
+                facadeEnabled: true,
+                facadeSides: false,
                 cornerCutOpeningW: info.cornerCutOpeningW,
                 cornerCutOpeningH: info.cornerCutOpeningH,
                 cornerCutOpeningDepth: info.cornerCutOpeningDepth,
@@ -1022,7 +1027,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         {
             key: "primitive",
             label: "プリミティブ",
-            kinds: ["rect", "box", "beveledBox", "cornerCutBox", "circle", "cone", "sphere", "triPrism", "triPyramid"],
+            kinds: ["rect", "box", "beveledBox", "circle", "cone", "sphere", "triPrism", "triPyramid"],
         },
         {
             key: "building",
@@ -1030,7 +1035,9 @@ window.cityGridInstallAssetUI = function (bridge) {
             // 建物そのもの（本体と、階を持つ建物）だけ。
             kinds: [
                 "building",
+                "cornerCutBox",
                 "stackedBuilding",
+                "cornerCutStackedBuilding",
                 "recessedStackedBuilding",
                 "beveledStackedBuilding",
                 // テント付き建物・看板付き開口建物・テント付き開口建物は
