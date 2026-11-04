@@ -385,6 +385,8 @@ const ASSET_KIT = (function () {
     // ===== 部品 → 線 =====
     const closedLoop = (path, axis, w) => [...path, path[0]].map(([u, v]) => toP3(axis, u, v, w));
     function partEdges(part) {
+        // 任意のメッシュも線と面を一つの部品にまとめる。
+        if (Array.isArray(part.meshEdges)) return part.meshEdges;
         // 自由な3Dの面
         if (Array.isArray(part.poly)) {
             const poly = part.poly;
@@ -458,6 +460,7 @@ const ASSET_KIT = (function () {
 
     // ===== 部品 → 面（ローカル3Dの三角形）=====
     function partTris(part) {
+        if (Array.isArray(part.meshTriangles)) return part.meshTriangles;
         const out = [];
         if (Array.isArray(part.poly)) {
             const poly = part.poly;
@@ -764,6 +767,10 @@ const ASSET_KIT = (function () {
                     if (part.signalPoleTopRing && edgeIndex >= 2) line.signalPoleSide = true;
                     edgeIndex++;
                     if (part.signalSmoothSide) line.signalSmoothSide = true;
+                    if (part.preciseTubeEdge) {
+                        line.preciseTubeEdge = true;
+                        line.tubeContourView = (typeof orthView !== 'undefined' && orthView) || '3d';
+                    }
                     if(part.depthBevelEdge) line.depthBevelEdge=true;
                     ctx.out.push(line);
                 }

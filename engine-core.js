@@ -1588,6 +1588,13 @@ function setOb(id, patch) {
         return false;
     }
     let next = { ...o, ...patch };
+    // 登録アセットが寸法の安全範囲を宣言した場合、数値欄とギズモの双方で守る。
+    const assetMeta = next.type === "asset" && typeof ASSETS !== "undefined" ? ASSETS[next.asset] : null;
+    if (typeof assetMeta?.constrainEdit === "function") next = assetMeta.constrainEdit(next, o, patch || {}) || next;
+    if (typeof assetMeta?.minHeight === "function" && patch && Object.prototype.hasOwnProperty.call(patch, "h"))
+        next.h = Math.max(Number(assetMeta.minHeight(next)) || 0.005, Number(next.h) || 0);
+    if (typeof assetMeta?.minHalfWidth === "function" && patch && Object.prototype.hasOwnProperty.call(patch, "ra"))
+        next.ra = Math.max(Number(assetMeta.minHalfWidth(next)) || 0.005, Number(next.ra) || 0);
     // トラック型の奥行き変更は直線部の長さを維持する。
     if (o.type === "asset" && o.asset === "track") {
         if (patch && Object.prototype.hasOwnProperty.call(patch,"rb") && !Object.prototype.hasOwnProperty.call(patch,"ra"))

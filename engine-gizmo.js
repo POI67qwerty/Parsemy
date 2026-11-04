@@ -298,7 +298,9 @@ function rotateCompoundBy(o, deg) {
 function facePatch(o, fid, dl) {
     const cs = Math.cos(o.rot * DG),
         sn = Math.sin(o.rot * DG),
-        m = 0.005;
+        m = 0.005,
+        meta = o?.type === "asset" ? ASSETS[o.asset] : null,
+        minHeight = typeof meta?.minHeight === "function" ? Math.max(m, Number(meta.minHeight(o)) || m) : m;
     if (fid === "top") {
         if (o.type === "asset" && o.asset === "sign") {
             // 看板の実外周は0.08h〜0.82h。上端を動かすと下端を固定する。
@@ -306,7 +308,7 @@ function facePatch(o, fid, dl) {
                 h = Math.max(m, o.h + dh);
             return { h, extrude: true, lift: o.lift - 0.08 * (h - o.h) };
         }
-        return { h: Math.max(m, o.h + dl), extrude: true };
+        return { h: Math.max(minHeight, o.h + dl), extrude: true };
     }
     if (fid === "base") {
         if (o.type === "asset" && o.asset === "sign") {
@@ -315,13 +317,16 @@ function facePatch(o, fid, dl) {
                 h = Math.max(m, o.h + dh);
             return { h, extrude: true, lift: o.lift - 0.82 * (h - o.h) };
         }
-        const h = Math.max(m, o.h + dl);
+        const h = Math.max(minHeight, o.h + dl);
         return { h, extrude: true, lift: o.lift - (h - o.h) };
     }
     const sg = fid[1] === "+" ? 1 : -1,
         isU = fid[0] === "u",
         r0 = isU ? o.ra : o.rb,
-        r1 = Math.max(m, r0 + dl / 2),
+        minRadius = isU && typeof meta?.minHalfWidth === "function" ? Math.max(m, Number(meta.minHalfWidth(o)) || m) :
+            !isU && typeof meta?.minHalfDepth === "function" ? Math.max(m, Number(meta.minHalfDepth(o)) || m) : m,
+        maxRadius = !isU && typeof meta?.maxHalfDepth === "function" ? Math.max(minRadius, Number(meta.maxHalfDepth(o)) || Infinity) : Infinity,
+        r1 = clamp(r0 + dl / 2, minRadius, maxRadius),
         dr = r1 - r0,
         ex = isU ? [cs, sn] : [-sn, cs];
     const q = { ca: o.ca + sg * dr * ex[0], cb: o.cb + sg * dr * ex[1] };

@@ -1893,7 +1893,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     // 何も描かれない（実測：凹窓階層建物の窓間仕切りが全部消えていた）。
     // 生成側が onFace を立てた線だけ、面の内側判定を通す。
     const onFace = !!s.onFace,
-        preciseSignalEdge = (s.signalPoleTopRing && !window.__legacyPoleRay) || (s.signalSmoothSide && !window.__legacySignalSmoothRay),
+        preciseSignalEdge = (s.signalPoleTopRing && !window.__legacyPoleRay) || (s.signalSmoothSide && !window.__legacySignalSmoothRay) || !!s.preciseTubeEdge,
         poleTip = s.signalPoleSide && !window.__legacyPoleRay && s.p?.length ? projPoint(s.p[s.p.length-1], tf) : null,
         preciseSignalAt = e => preciseSignalEdge || !!(poleTip?.ok && Math.hypot(e.x-poleTip.x,e.y-poleTip.y) < 24*Math.max(1,Math.abs(tf[0] || 1)));
     // 線全体を数点だけ見て省略すると、試験点の間にある開口や遮蔽物の切れ目で
@@ -1915,7 +1915,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         // 実面への光線交差で遮蔽が確定した点は、短い隙間として橋渡ししない。
         if (fishLineOccluders && e.accordionEpoch === fishOcclusionEpoch && e.accordionBlocked === true) return true;
         if (fishLineOccluders && preciseSignalAt(e) &&
-            (orthView ? signalOrthOccluded(e, s.signalSmoothSide ? 0.004 : 0.008) : T !== "f" && exactPerspectiveOccluded(e))) return true;
+            (orthView ? signalOrthOccluded(e, (s.signalSmoothSide || s.preciseTubeEdge) ? 0.004 : 0.008) : T !== "f" && exactPerspectiveOccluded(e))) return true;
         const x = Math.round(e.x), y = Math.round(e.y);
         if (x < 0 || x >= cw || y < 0 || y >= ch) return false;
         if (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) return fishPointOccluded(e);
@@ -1975,7 +1975,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
             return true;
         }
         if (fishLineOccluders && preciseSignalAt(e))
-            return !(orthView ? signalOrthOccluded(e, s.signalSmoothSide ? 0.004 : 0.008) : exactPerspectiveOccluded(e));
+            return !(orthView ? signalOrthOccluded(e, (s.signalSmoothSide || s.preciseTubeEdge) ? 0.004 : 0.008) : exactPerspectiveOccluded(e));
         // 小さな灯器や自販機の前後ベベルは、細い曲面の隣で深度近似だけでは
         // 背面の線が漏れることがある。面より奥の候補だけ実光線で再判定する。
         if (!orthView && T !== "f" && s.depthBevelEdge && fishLineOccluders && !window.__legacyDepthBevelRay &&
@@ -2394,7 +2394,7 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
         fishVisiblePixels=fishBlockedPixels ? new Int32Array(cw*ch) : null;
     } else {
         fishBlockedPixels = null; fishVisiblePixels = null;
-        if (hiddenDepth && S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyPoleRay && s.signalPoleTopRing) || (!window.__legacySignalSmoothRay && s.signalSmoothSide) || (!orthView && T !== "f" && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge)))))) prepareFishLineOccluders();
+        if (hiddenDepth && S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyPoleRay && s.signalPoleTopRing) || (!window.__legacySignalSmoothRay && s.signalSmoothSide) || s.preciseTubeEdge || (!orthView && T !== "f" && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge)))))) prepareFishLineOccluders();
         else fishLineOccluders = null;
     }
     // ベベルの縦線は「角ごとに輪郭の1本」だけ描く（面ONのとき）。
@@ -3193,7 +3193,7 @@ function render() {
     // sigNow()は描画1回につき一度だけ計算する。以前は線ごとに再計算していたため、
     // アセットや線が多いシーンほど不要な文字列計算が増えていた。
     const currentSignature = sigNow();
-    if (S.some((s) => s.ob && (s.cs !== currentSignature || (s.signalPoleTopRing && s.signalPoleContourView !== (orthView || "3d"))))) regenObjects();
+    if (S.some((s) => s.ob && (s.cs !== currentSignature || (s.signalPoleTopRing && s.signalPoleContourView !== (orthView || "3d")) || (s.preciseTubeEdge && s.tubeContourView !== (orthView || "3d"))))) regenObjects();
     syncSel();
     T === "f" ? calcF() : calc();
     const c = ctx;

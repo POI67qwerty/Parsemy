@@ -1263,3 +1263,88 @@ ASSET_KIT.define("track", {
         for(const i of new Set([xs.indexOf(Math.min(...xs)),xs.indexOf(Math.max(...xs))]))if(i>=0){const [x,y]=path[i];out.push(lineA(o,[[x,y,0],[x,y,h]],c));}
     };
 }
+
+// ===== 曲げ管の車止め（U字／中央脚付きM字） =====
+// 半円状の断面を角で回す。直線長は両曲げの接点の間で、幅変更時も曲げ半径を維持する。
+function guardPoleDiameter(o) { return Math.max(.02, Number(o?.guardDiameter) || .06); }
+function guardPoleBend(o) { return guardPoleDiameter(o) * 1.2; }
+// 下桟と両脚が離れないよう、曲げの下にパイプ1本ぶんの直線を確保。
+function guardPoleMinHeight(o) { return guardPoleBend(o) + guardPoleDiameter(o) * 1.5 + .025; }
+function guardPoleStraight(o) { return Math.max(.05, 2 * Math.abs(Number(o.ra) || 0) - 2 * guardPoleBend(o) - guardPoleDiameter(o)); }
+function guardPoleMinHalfWidth(o) { return (0.05 + 2 * guardPoleBend(o) + guardPoleDiameter(o)) / 2; }
+// 断面リングの三角面と視点ごとの外側2輪郭を同じデータから作る。
+function guardTubePart(o, sections, radius, ringMarks=[]) {
+    const N=16, rings=sections.map(s=>Array.from({length:N},(_,j)=>{
+        const a=2*Math.PI*j/N,c=Math.cos(a)*radius;
+        return [s.x+s.nx*c,Math.sin(a)*radius,s.z+s.nz*c];
+    })), triangles=[],edges=[], world=rings.map(r=>r.map(p=>L2W(o,...p))),
+        cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],
+        sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],
+        view=orthView?orthBasis().depth.map(v=>-v):null,camera=camPos();
+    for(let i=0;i<rings.length-1;i++){
+        const center=L2W(o,(sections[i].x+sections[i+1].x)/2,0,(sections[i].z+sections[i+1].z)/2), facing=[];
+        for(let j=0;j<N;j++){
+            const k=(j+1)%N,a=rings[i][j],b=rings[i][k],c=rings[i+1][k],d=rings[i+1][j];
+            triangles.push([a,b,c],[a,c,d]);
+            const A=world[i][j],B=world[i][k],D=world[i+1][j], normal=cross(sub(B,A),sub(D,A)), radial=sub(A,center);
+            if(dot(normal,radial)<0)for(let q=0;q<3;q++)normal[q]=-normal[q];
+            facing.push(dot(normal,view||sub(camera,A))>1e-12);
+        }
+        const idx=[];for(let j=0;j<N;j++)if(facing[(j+N-1)%N]!==facing[j])idx.push(j);
+        for(const j of (idx.length===2?idx:[0,N/2]))edges.push([rings[i][j],rings[i+1][j]]);
+    }
+    for(const [idx,reverse] of [[0,true],[rings.length-1,false]]){
+        const center=[sections[idx].x,0,sections[idx].z];
+        for(let j=0;j<N;j++){const k=(j+1)%N;triangles.push(reverse?[center,rings[idx][k],rings[idx][j]]:[center,rings[idx][j],rings[idx][k]]);}
+    }
+    for(const i of ringMarks)if(rings[i])edges.push([...rings[i],rings[i][0]]);
+    return {meshTriangles:triangles,meshEdges:edges,preciseTubeEdge:true};
+}
+function guardPoleBuild(o,K,midPost) {
+    const d=guardPoleDiameter(o),r=d/2,b=guardPoleBend(o),L=guardPoleStraight(o),H=Math.max(guardPoleMinHeight(o),Number(o.h)||.6),
+        x=L/2+b,top=H-r,zTop=top-b,foot=Math.min(.015,H*.08),sections=[],marks=[];
+    const add=(px,pz,nx,nz,mark=false)=>{sections.push({x:px,z:pz,nx,nz});if(mark)marks.push(sections.length-1);};
+    add(-x,foot,-1,0);add(-x,foot+(zTop-foot)*.32,-1,0,true);add(-x,foot+(zTop-foot)*.62,-1,0,true);
+    for(let i=0;i<=8;i++){const a=Math.PI-i*Math.PI/16;add(-L/2+b*Math.cos(a),zTop+b*Math.sin(a),Math.cos(a),Math.sin(a));}
+    for(const f of [-.32,-.12,.12,.32])add(L*f,top,0,1,true);
+    for(let i=0;i<=8;i++){const a=Math.PI/2-i*Math.PI/16;add(L/2+b*Math.cos(a),zTop+b*Math.sin(a),Math.cos(a),Math.sin(a));}
+    add(x,foot+(zTop-foot)*.62,1,0,true);add(x,foot+(zTop-foot)*.32,1,0,true);add(x,foot,1,0);
+    const parts=[guardTubePart(o,sections,r,marks)];
+    if(midPost){
+        const s=[{x:0,z:foot,nx:1,nz:0},{x:0,z:foot+(top-foot)*.34,nx:1,nz:0},{x:0,z:foot+(top-foot)*.62,nx:1,nz:0},{x:0,z:top,nx:1,nz:0}];
+        parts.push(guardTubePart(o,s,r,[1,2]));
+    } else if(o.guardCrossbar!==false) {
+        const z=Math.max(foot+r,Math.min(zTop-r,H*.46));
+        const s=[-x+r*.6,-L*.32,-L*.12,L*.12,L*.32,x-r*.6].map(px=>({x:px,z,nx:0,nz:1}));
+        parts.push(guardTubePart(o,s,r,[1,2,3,4]));
+    }
+    for(const px of (midPost?[-x,0,x]:[-x,x])) {
+        const plate=[{x:px,z:0,nx:1,nz:0},{x:px,z:foot,nx:1,nz:0}];
+        parts.push(guardTubePart(o,plate,d*.85,[0,1]));
+    }
+    return parts;
+}
+(function(){
+    const controls=[
+        {key:'guardStraight',label:'直線部分の長さ',min:.05,max:100,step:.05,unit:'m',get:guardPoleStraight,
+            patch:(o,v)=>({ra:(v+2*guardPoleBend(o)+guardPoleDiameter(o))/2}),
+            handle:(o,v)=>({anchor:[-v/2,0,o.h],sample:[v/2,0,o.h],probe:[(v+1)/2,0,o.h],fallback:{x:1,y:0}})},
+        {key:'guardDiameter',label:'パイプの太さ',default:.06,min:.02,max:o=>Math.max(.02,Math.min(1,(Number(o.h)-.025)/2.7)),step:.005,unit:'m',
+            patch:(o,v)=>({guardDiameter:v,ra:(guardPoleStraight(o)+2*v*1.2+v)/2,rb:Math.max(.025,v/2)}),
+            handle:(o,v)=>({anchor:[0,0,o.h-v/2],sample:[0,-v/2,o.h-v/2],probe:[0,-(v+1)/2,o.h-v/2],fallback:{x:1,y:0}})},
+    ];
+    const maxDiameter=o=>Math.max(.02,Math.min(1,(Number(o.h)-.025)/2.7));
+    const base={group:'street',w:1.3,d:.06,h:.6,accent:'#e7b626',minHeight:guardPoleMinHeight,minHalfWidth:guardPoleMinHalfWidth,
+        minHalfDepth:()=>.01,maxHalfDepth:o=>maxDiameter(o)/2,
+        // 共通の奥行き面ハンドル・数値欄も管の太さと連動させる。
+        constrainEdit:(next,old,patch)=>{
+            const has=(k)=>Object.prototype.hasOwnProperty.call(patch,k);
+            if(!has('guardDiameter')&&!has('rb'))return next;
+            const d=Math.max(.02,Math.min(maxDiameter(next),Number(has('guardDiameter')?next.guardDiameter:next.rb*2)||.06));
+            next.guardDiameter=d;next.rb=d/2;
+            if(!has('ra'))next.ra=(guardPoleStraight(old)+3.4*d)/2;
+            return next;
+        }};
+    ASSET_KIT.define('guardPoleU',{...base,label:'U字車止めポール',glyph:'∩',controls:[...controls,{key:'guardCrossbar',label:'下の横桟',type:'boolean',default:true}]},(o,K)=>guardPoleBuild(o,K,false));
+    ASSET_KIT.define('guardPoleM',{...base,label:'M字車止めポール',glyph:'♜',controls},(o,K)=>guardPoleBuild(o,K,true));
+})();
