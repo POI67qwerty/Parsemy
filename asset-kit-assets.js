@@ -1560,6 +1560,44 @@ ASSET_KIT.define('bezierCable',{
  }
  ASSET_KIT.define('shopWardrobe',{label:'タンス',glyph:'▤',group:'streetObjects',w:1.1,d:.5,h:1.55,accent:'#8d624a',minHalfWidth:()=>.1,minHalfDepth:()=>.06,minHeight:()=>.25,controls:wardrobeControls(false)},(o,K)=>wardrobeParts(o,K,false));
  ASSET_KIT.define('shopWardrobe2',{label:'タンス2',glyph:'▦',group:'streetObjects',w:1.1,d:.5,h:1.55,accent:'#8d624a',minHalfWidth:()=>.1,minHalfDepth:()=>.06,minHeight:()=>.25,controls:wardrobeControls(true)},(o,K)=>wardrobeParts(o,K,true));
+
+ // 店の陳列棚：前面が開いた本体と、独立した横板。中身の商品は作らない。
+ // h = 台座 + 上部パネル + 段数 × (空間の高さ + 棚板の厚さ)。
+ const shelfBase=.07, shelfHeader=.18, shelfMinClear=.08,
+  shelfRows=o=>Math.round(V(o,'shelfRows',2,1,8)),
+  shelfPitch=o=>(Math.max(shelfBase+shelfHeader,Number(o.h)||1.21)-shelfBase-shelfHeader)/shelfRows(o),
+  shelfBoard=o=>V(o,'shelfBoard',.035,.005,Math.max(.005,Math.min(.12,shelfPitch(o)-shelfMinClear))),
+  shelfClear=o=>Math.max(shelfMinClear,shelfPitch(o)-shelfBoard(o)),
+  shelfHeight=(n,clear,board)=>shelfBase+shelfHeader+n*(clear+board);
+ ASSET_KIT.define('displayShelf',{
+  label:'棚',glyph:'▤',group:'streetObjects',w:1.4,d:.55,h:1.21,accent:'#9b8866',
+  minHalfWidth:()=>.12,minHalfDepth:()=>.07,
+  minHeight:o=>shelfHeight(shelfRows(o),shelfMinClear,Math.max(.005,Number(o.shelfBoard)||.035)),
+  controls:[
+   {key:'shelfRows',label:'段数',default:2,min:1,max:8,step:1,integer:true,unit:'段',
+    patch:(o,v)=>({shelfRows:v,h:shelfHeight(v,shelfClear(o),shelfBoard(o))}),
+    handle:(o,v)=>({anchor:[-o.ra,-o.rb,o.h-.13],sample:[-o.ra-.12,-o.rb,o.h-.13],probe:[-o.ra+.88,-o.rb,o.h-.13],fallback:{x:1,y:0},pixelsPerUnit:24})},
+   {key:'shelfClearHeight',label:'1段の高さ',min:o=>shelfMinClear+shelfBoard(o),max:3,step:.05,unit:'m',get:shelfPitch,
+    patch:(o,v)=>({h:shelfHeight(shelfRows(o),v-shelfBoard(o),shelfBoard(o))}),
+    handle:(o,v)=>({anchor:[o.ra*.65,-o.rb,shelfBase],sample:[o.ra*.65,-o.rb,shelfBase+v],probe:[o.ra*.65,-o.rb,shelfBase+v+1],fallback:{x:0,y:-1}})},
+   {key:'shelfBoard',label:'棚板の厚さ',default:.035,min:.005,max:o=>Math.max(.005,Math.min(.12,shelfPitch(o)-shelfMinClear)),step:.005,unit:'m',
+    handle:(o,v)=>({anchor:[-o.ra*.55,-o.rb,shelfBase],sample:[-o.ra*.55,-o.rb,shelfBase+v],probe:[-o.ra*.55,-o.rb,shelfBase+v+1],fallback:{x:0,y:-1}})}
+  ]
+ },(o,K)=>{
+  const {w,d,h}=S(o),n=shelfRows(o),t=shelfBoard(o),pitch=shelfPitch(o),side=.035,back=.025,
+   openTop=h-shelfHeader,inner=w-2*side,bodyDepth=d-back,out=[
+    K.box(K.rectPath(w,d),0,shelfBase,flags),
+    K.box(K.rectPath(w,d),openTop,h,flags),
+    K.box(K.rectPath(side,d,-w/2+side/2,0),shelfBase,openTop,flags),
+    K.box(K.rectPath(side,d,w/2-side/2,0),shelfBase,openTop,flags),
+    K.box(K.rectPath(inner,back,0,d/2-back/2),shelfBase,openTop,flags)
+   ];
+  for(let i=0;i<n;i++)out.push(K.box(K.rectPath(inner,bodyDepth,0,-back/2),shelfBase+i*pitch,shelfBase+i*pitch+t,flags));
+  // 空白の上部パネルに細い縁。正面を塞ぐ扉は作らない。
+  const x=w/2-.025,y=-d/2-.001,z0=openTop+.025,z1=h-.025;
+  if(x>0 && z1>z0)out.push({meshTriangles:[],meshEdges:[[[ -x,y,z0],[x,y,z0],[x,y,z1],[-x,y,z1],[-x,y,z0]]],...flags});
+  return out;
+ });
  ASSET_KIT.define('pictureStairs',{label:'階段2',glyph:'▰',group:'street',w:1.4,d:2.1,h:1.2,accent:'#c5a768',geometryBounds:true,minHalfWidth:()=>.12,minHalfDepth:()=>.12,minHeight:()=>.15,controls:[
   {key:'pictureStairCount',label:'段数',default:7,min:2,max:20,step:1,integer:true,unit:'段',handle:(o,v)=>({anchor:[-o.ra,-o.rb,o.h*.4],sample:[-o.ra+.15+v*.025,-o.rb,o.h*.4],probe:[.85-o.ra+v*.025,-o.rb,o.h*.4],fallback:{x:1,y:0},pixelsPerUnit:24})},
   {key:'stairSideWidth',label:'両脇枠の幅',default:.07,min:.01,max:o=>Math.max(.01,Math.min(.5,o.ra*.7)),step:.01,unit:'m',handle:(o,v)=>({anchor:[-o.ra,-o.rb,o.h*.18],sample:[-o.ra+v,-o.rb,o.h*.18],probe:[1-o.ra+v,-o.rb,o.h*.18],fallback:{x:1,y:0}})},
