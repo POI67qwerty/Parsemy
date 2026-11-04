@@ -73,7 +73,7 @@ ASSET_KIT.define(
 function depthBevelControl(key, initial, signal=false) {
     const size=o=>signal?signalGeometry(o):{headW:Math.max(.2,2*Math.abs(o.ra)),headH:Math.max(.3,Math.abs(o.h)),headD:Math.max(.2,2*Math.abs(o.rb)),headBottom:0};
     return {key,label:"前後辺のベベル",default:initial,min:0,max:o=>{const g=size(o);return Math.max(0,Math.min(g.headW,g.headH)*.4999);},step:.005,unit:"m",
-        handle:(o,v)=>{const g=size(o),x=g.headW/2,y=-g.headD/2-.025,z=g.headBottom+g.headH;
+        handle:(o,v)=>{const g=size(o),x=(g.headX||0)+g.headW/2,y=-g.headD/2-.025,z=g.headBottom+g.headH;
             return {anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}};}};
 }
 
@@ -551,10 +551,18 @@ function signalPoleParts(K, g, o) {
             { verticals: [0, 7] },
         ), o),
         // ポール：首の中から頭のすぐ下まで。視点から見た実際の左右の縁を使う。
-        signalPoleContour(Object.assign(K.cylinder(poleR, collarTop - 0.01, g.headBottom + 0.02, { seg: 12, verts: 2 }), {signalPoleTopRing:true}), o),
+        signalPoleContour(Object.assign(K.cylinder(poleR, collarTop - 0.01, g.poleTop, { seg: 12, verts: 2 }), {signalPoleTopRing:true}), o),
     ];
 }
 
+// 横腕の長さは灯器と支柱の隙間。灯器の寸法や高さは変えない。
+function signalArmControl() { return {key:'signalArmGap',label:'横腕の長さ',default:.4,min:.05,max:4,step:.05,unit:'m',handle:(o,v)=>{const g=signalGeometry(o),x=g.headX;return {anchor:[0,0,g.H],sample:[x,0,g.H],probe:[x+1,0,g.H],fallback:{x:1,y:0}};}}; }
+function signalArmParts(o,K,g,headParts) {
+    if(!g.suspended)return headParts;
+    const moved=K.moveParts(headParts,g.headX,0,0).map(p=>p.signalSmoothSide?signalSmoothSides(p,o,K):p),
+        arm=K.box(K.rectPath(g.headX+g.poleR*2,g.armThickness,g.headX/2,0),g.H-g.armThickness,g.H);
+    return [arm,...moved];
+}
 // --- 1) 車両用信号機（横3灯）---
 ASSET_KIT.define(
     "trafficSignal",
@@ -565,8 +573,8 @@ ASSET_KIT.define(
         d: 0.24,
         h: 2.8,
         accent: "#5c6b73",
-        geometryBounds: false,
-        controls: [depthBevelControl("spDepthBevel", 0.05, true)],
+        geometryBounds: true,
+        controls: [depthBevelControl("spDepthBevel", 0.05, true),signalArmControl()],
         spHeadH: 0.34, // 灯器（頭）の高さ
         spPoleR: 0.042, // ポールの半径
         spBaseR: 0.16, // 台座の半径
@@ -579,7 +587,7 @@ ASSET_KIT.define(
             front = -g.headD / 2,
             lampR = Math.max(0.02, K.param(o, "tsLampR", 0.125)),
             hood = Math.max(0, K.param(o, "tsHood", 0.1)),
-            parts = signalPoleParts(K, g, o);
+            pole = signalPoleParts(K, g, o), parts = [];
         // 灯器：角を丸めた横長の箱
         parts.push(signalSmoothSides(K.depthBeveledBox(g.headW, g.headD, g.headH, K.param(o, "spDepthBevel", 0.05), {seg: 3, z0: g.headBottom}), o, K));
         // 灯（青・黄・赤）と、灯のまわりのひさし
@@ -593,7 +601,7 @@ ASSET_KIT.define(
                     ...K.moveParts([K.cylinder(lampR * 1.26, front - 0.012 - hood, front + 0.004, { axis: "y", caps: false, seg: 22 })], x, 0, g.headCz),
                 );
         });
-        return parts;
+        return [...pole,...signalArmParts(o,K,g,parts)];
     },
 );
 
@@ -607,8 +615,8 @@ ASSET_KIT.define(
         d: 0.22,
         h: 2.4,
         accent: "#5c6b73",
-        geometryBounds: false,
-        controls: [depthBevelControl("spDepthBevel", 0.05, true)],
+        geometryBounds: true,
+        controls: [depthBevelControl("spDepthBevel", 0.05, true),signalArmControl()],
         spHeadH: 0.66,
         spPoleR: 0.038,
         spBaseR: 0.15,
@@ -623,7 +631,7 @@ ASSET_KIT.define(
             // 上=止まれ（赤）／下=進め（青）。灯の中心の高さ。
             topCz = g.headBottom + g.headH * 0.72,
             bottomCz = g.headBottom + g.headH * 0.27,
-            parts = signalPoleParts(K, g, o),
+            pole = signalPoleParts(K, g, o), parts = [],
             lens = (cz) => signalSmoothSides(K.box(K.offsetPath(K.roundRectPath(lamp, lamp, Math.min(0.03, lamp * 0.16), 2), 0, cz), front - 0.022, front - 0.008, { axis: "y" }), o, K);
         parts.push(signalSmoothSides(K.depthBeveledBox(g.headW, g.headD, g.headH, K.param(o, "spDepthBevel", 0.05), {seg: 3, z0: g.headBottom}), o, K));
         parts.push(lens(topCz), lens(bottomCz));
@@ -645,7 +653,7 @@ ASSET_KIT.define(
                     ), o, K),
                 ),
             );
-        return parts;
+        return [...pole,...signalArmParts(o,K,g,parts)];
     },
 );
 
@@ -1347,4 +1355,94 @@ function guardPoleBuild(o,K,midPost) {
         }};
     ASSET_KIT.define('guardPoleU',{...base,label:'U字車止めポール',glyph:'∩',controls:[...controls,{key:'guardCrossbar',label:'下の横桟',type:'boolean',default:true}]},(o,K)=>guardPoleBuild(o,K,false));
     ASSET_KIT.define('guardPoleM',{...base,label:'M字車止めポール',glyph:'♜',controls},(o,K)=>guardPoleBuild(o,K,true));
+})();
+
+// ===== 軽量な街小物（画像の文字や細かい模様は省略） =====
+// 楕円断面を12分割。面と視点に応じた輪郭を同じ部品で持つ。
+function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
+    const N=12, rings=profile.map(([rx,ry,z])=>Array.from({length:N},(_,i)=>{const a=2*Math.PI*i/N;return [cx+rx*Math.cos(a),cy+ry*Math.sin(a),z];})),
+        loft=K.loft(rings.map(r=>({path:r.map(p=>[p[0],p[1]]),w:r[0][2]}))),tris=K.partTris(loft),edges=[],world=rings.map(r=>r.map(p=>L2W(o,...p))),
+        sub=(a,b)=>a.map((v,i)=>v-b[i]),cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],dot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0),
+        view=orthView?orthBasis().depth.map(x=>-x):null,camera=camPos();
+    for(let i=0;i<rings.length-1;i++){
+        const faces=[];
+        for(let j=0;j<N;j++){
+            const a=world[i][j],b=world[i][(j+1)%N],c=world[i+1][j],normal=cross(sub(b,a),sub(c,a));
+            faces.push(dot(normal,view||sub(camera,a))>0);
+        }
+        for(let j=0;j<N;j++)if(faces[(j+N-1)%N]!==faces[j])edges.push([rings[i][j],rings[i+1][j]]);
+    }
+    for(const i of [0,...marks,rings.length-1])if(rings[i])edges.push([...rings[i],rings[i][0]]);
+    return {meshTriangles:tris,meshEdges:edges,preciseTubeEdge:true,onFace:true};
+}
+(function(){
+ const size=o=>({w:Math.max(.05,Math.abs(o.ra)*2),d:Math.max(.05,Math.abs(o.rb)*2),h:Math.max(.001,Number(o.h)||.001)}),
+       val=(o,k,v,min,max)=>Math.max(min,Math.min(max,Number.isFinite(Number(o[k]))?Number(o[k]):v)),
+       vertical=(o,v,x,y,base=0)=>({anchor:[x,y,base],sample:[x,y,base+v],probe:[x,y,base+v+1],fallback:{x:0,y:-1}}),
+       common={minHalfWidth:()=>.025,minHalfDepth:()=>.025};
+ ASSET_KIT.define('streetCone',{...common,label:'交通コーン',glyph:'▲',group:'traffic',w:.42,d:.42,h:.7,accent:'#ed7845',minHeight:()=>.1,controls:[
+   {key:'coneBaseThickness',label:'台座の厚さ',default:.05,min:.01,max:o=>Math.max(.01,o.h*.35),step:.01,unit:'m',handle:(o,v)=>vertical(o,v,-o.ra,-o.rb)}
+ ]},(o,K)=>{const {w,d,h}=size(o),t=val(o,'coneBaseThickness',.05,.01,h*.35),z1=t+(h-t)*.35,z2=t+(h-t)*.67,rad=z=>.4*(1-.83*(z-t)/(h-t));return [K.box(K.rectPath(w,d),0,t),streetRoundPart(o,K,[[w*.4,d*.4,t],[w*rad(z1),d*rad(z1),z1],[w*rad(z2),d*rad(z2),z2],[w*.068,d*.068,h]],[1,2])];});
+ ASSET_KIT.define('streetPavement',{...common,label:'タイル舗道',glyph:'▦',group:'traffic',w:2.4,d:1.2,h:.12,accent:'#a3aaa7',minHeight:()=>.02,controls:[
+   {key:'pavementTileSize',label:'タイル間隔',default:.3,min:.08,max:2,step:.05,unit:'m',handle:(o,v)=>({anchor:[-o.ra,-o.rb,o.h+.001],sample:[-o.ra+v,-o.rb,o.h+.001],probe:[-o.ra+v+1,-o.rb,o.h+.001],fallback:{x:1,y:0}})}
+ ]},(o,K)=>{const {w,d,h}=size(o),step=val(o,'pavementTileSize',.3,.08,2),edges=[],dx=Math.max(step,w/32),dy=Math.max(step,d/32),z=h+.001;
+  // 一方向32本まで。非常に大きい場合は実効間隔を広げて負荷を制限。
+  for(let i=1;i*dx<w-1e-8;i++){const x=-w/2+i*dx;edges.push([[x,-d/2,z],[x,d/2,z]]);}
+  for(let i=1;i*dy<d-1e-8;i++){const y=-d/2+i*dy;edges.push([[-w/2,y,z],[w/2,y,z]]);}
+  return [K.box(K.rectPath(w,d),0,h),{meshTriangles:[],meshEdges:edges,onFace:true}];});
+ ASSET_KIT.define('streetParcel',{...common,label:'段ボール箱',glyph:'▣',group:'streetObjects',w:.62,d:.46,h:.44,accent:'#cba475',minHeight:()=>.05,controls:[
+   {key:'parcelTapeWidth',label:'テープ幅',default:.09,min:.01,max:o=>Math.max(.01,Math.abs(o.ra)*1.7),step:.01,unit:'m',handle:(o,v)=>({anchor:[0,0,o.h+.001],sample:[v/2,0,o.h+.001],probe:[(v+1)/2,0,o.h+.001],fallback:{x:1,y:0}})}
+ ]},(o,K)=>{const {w,d,h}=size(o),t=val(o,'parcelTapeWidth',.09,.01,w*.85),z=h+.001;return [K.box(K.rectPath(w,d),0,h),K.face3([[-t/2,-d/2,z],[t/2,-d/2,z],[t/2,d/2,z],[-t/2,d/2,z]],{onFace:true})];});
+ ASSET_KIT.define('streetBin',{...common,label:'ふた付きごみ箱',glyph:'▤',group:'streetObjects',w:.55,d:.55,h:.78,accent:'#55a9c5',minHeight:()=>.15,controls:[
+   {key:'binLidThickness',label:'ふたの厚さ',default:.07,min:.02,max:o=>Math.max(.02,o.h*.22),step:.01,unit:'m',handle:(o,v)=>{const z=o.h-Math.min(.08,o.h*.16),x=o.ra*.72;return {anchor:[x,0,z],sample:[x,0,z-v],probe:[x,0,z-v-1],fallback:{x:0,y:1}};}}
+ ]},(o,K)=>{const {w,d,h}=size(o),t=val(o,'binLidThickness',.07,.02,h*.22),top=h-Math.min(.08,h*.16),z=top-t,handleTop=h,handleBottom=top,bar=Math.min(.035,h*.07),span=w*.35;
+ return [streetRoundPart(o,K,[[w*.37,d*.37,0],[w*.43,d*.43,z]]),streetRoundPart(o,K,[[w*.48,d*.48,z],[w*.48,d*.48,top-t*.3],[w*.40,d*.40,top]],[1]),
+ K.box(K.rectPath(bar,bar,-span/2,0),handleBottom,handleTop),K.box(K.rectPath(bar,bar,span/2,0),handleBottom,handleTop),K.box(K.rectPath(span+bar,bar),handleTop-bar,handleTop)];});
+ ASSET_KIT.define('streetMailbox',{...common,label:'ポスト',glyph:'▣',group:'streetObjects',w:.5,d:.38,h:1.25,accent:'#d95c68',minHeight:o=>Math.max(.2,(Number(o.mailPostLength)||.42)+.16),controls:[
+   {key:'mailPostLength',label:'ポールの長さ',default:.42,min:.05,max:2.5,step:.05,unit:'m',patch:(o,v)=>({mailPostLength:v,h:o.h+v-(Number(o.mailPostLength)||.42)}),handle:(o,v)=>vertical(o,v,0,-o.rb*.5)},
+   {key:'mailPostDiameter',label:'ポールの太さ',default:.1,min:.02,max:o=>Math.max(.02,Math.min(o.ra,o.rb)*1.3),step:.01,unit:'m',handle:(o,v)=>({anchor:[0,0,(Number(o.mailPostLength)||.42)*.5],sample:[v/2,0,(Number(o.mailPostLength)||.42)*.5],probe:[(v+1)/2,0,(Number(o.mailPostLength)||.42)*.5],fallback:{x:1,y:0}})}
+ ]},(o,K)=>{const {w,d,h}=size(o),p=val(o,'mailPostLength',.42,.05,Math.max(.05,h-.16)),pd=val(o,'mailPostDiameter',.1,.02,Math.min(w,d)*.65),bh=h-p,y=-d/2-.001;
+ return [streetRoundPart(o,K,[[pd/2,pd/2,0],[pd/2,pd/2,p]]),K.depthBeveledBox(w,d,bh,Math.min(.035,w*.08,bh*.08),{z0:p,seg:2}),
+ K.face3([[-w*.38,y,p+bh*.38],[w*.38,y,p+bh*.38],[w*.38,y,p+bh*.76],[-w*.38,y,p+bh*.76]],{onFace:true}),K.face3([[-w*.32,y-.001,p+bh*.77],[w*.32,y-.001,p+bh*.77],[w*.32,y-.001,p+bh*.82],[-w*.32,y-.001,p+bh*.82]],{onFace:true})];});
+ ASSET_KIT.define('streetPlant',{...common,label:'鉢植え',glyph:'♧',group:'streetObjects',w:.72,d:.72,h:.9,accent:'#79b974',minHeight:o=>Math.max(.15,(Number(o.plantPotHeight)||.25)+.12),controls:[
+   {key:'plantPotHeight',label:'鉢の高さ',default:.25,min:.06,max:o=>Math.max(.06,o.h-.12),step:.01,unit:'m',handle:(o,v)=>vertical(o,v,o.ra*.48,0)}
+ ]},(o,K)=>{const {w,d,h}=size(o),ph=val(o,'plantPotHeight',.25,.06,h-.12),out=[streetRoundPart(o,K,[[w*.19,d*.19,0],[w*.27,d*.27,ph*.86],[w*.29,d*.29,ph],[w*.24,d*.24,ph]],[1,2])];
+ // 6枚の平面の葉でシルエットを出し、頂点・面数を抑える。
+ for(let i=0;i<6;i++){const a=2*Math.PI*i/6,ux=Math.cos(a),uy=Math.sin(a),z0=ph,z1=ph+(h-ph)*(i%2?.80:1),cx=w*.26*ux,cy=d*.26*uy;
+  out.push(K.face3([[w*.035*ux,d*.035*uy,z0],[cx-w*.105*uy,cy+d*.105*ux,(z0+z1)/2],[w*.45*ux,d*.45*uy,z1],[cx+w*.105*uy,cy-d*.105*ux,(z0+z1)/2]]));}
+ return out;});
+})();
+
+// ===== 提灯（単体／3制御点の二次ベジェ紐） =====
+function lanternPoint(o,i) {
+    const defaults=[[-2,0,0],[0,0,-.6],[2,0,0]],names=['Start','Bend','End'],n=names[i],
+        get=(axis,k)=>Number.isFinite(Number(o['lantern'+n+axis]))?Number(o['lantern'+n+axis]):defaults[i][k];
+    return [get('X',0),get('Y',1),(Number(o.h)||0)+get('Z',2)];
+}
+function lanternCurvePoint(o,t) {
+    const a=lanternPoint(o,0),b=lanternPoint(o,1),c=lanternPoint(o,2),u=1-t;
+    return a.map((v,i)=>u*u*v+2*u*t*b[i]+t*t*c[i]);
+}
+function lanternBody(o,K,cx,cy,z0,w,d,h) {
+    const profile=[[.30,.30,0],[.44,.44,.12],[.50,.50,.40],[.50,.50,.60],[.44,.44,.88],[.30,.30,1]].map(([rx,ry,z])=>[w*rx,d*ry,z0+h*z]);
+    return streetRoundPart(o,K,profile,[1,2,3,4],cx,cy);
+}
+(function(){
+    ASSET_KIT.define('paperLantern',{label:'提灯（単体）',glyph:'◉',group:'streetObjects',w:.34,d:.34,h:.48,accent:'#e0ad6d',minHeight:()=>.06,controls:[]},
+        (o,K)=>[lanternBody(o,K,0,0,0,Math.max(.05,Math.abs(o.ra)*2),Math.max(.05,Math.abs(o.rb)*2),Math.max(.06,Number(o.h)||.48))]);
+    const pointControls=[];
+    ['Start','Bend','End'].forEach((name,i)=>['X','Y','Z'].forEach((axis,k)=>{
+        const defaults=[[-2,0,0],[0,0,-.6],[2,0,0]],label=['始点','曲げ点','終点'][i],fallback=k===2?{x:0,y:-1}:k===1?{x:0,y:1}:{x:1,y:0};
+        pointControls.push({key:'lantern'+name+axis,label:label+axis+(k===2?'（高さ差）':''),default:defaults[i][k],min:-30,max:30,step:.05,unit:'m',
+            handle:(o,v)=>{const p=lanternPoint(o,i),sample=[...p],probe=[...p];sample[k]+=.24;probe[k]+=1.24;return {anchor:p,sample,probe,fallback,color:['#e8743d','#3fa45b','#4a7be8'][k]};}});
+    }));
+    const count={key:'lanternCount',label:'提灯の個数',default:6,min:1,max:16,step:1,integer:true,unit:'個',handle:(o,v)=>{const p=lanternCurvePoint(o,.5);return {anchor:p,sample:[p[0]+.25,p[1],p[2]+.25],probe:[p[0]+1.25,p[1],p[2]+.25],fallback:{x:1,y:0},pixelsPerUnit:24};}},
+        sz={key:'lanternSize',label:'提灯の大きさ',default:.42,min:.1,max:1.5,step:.05,unit:'m',handle:(o,v)=>{const n=Math.max(1,Math.round(Number(o.lanternCount)||6)),p=lanternCurvePoint(o,1/(n+1));return {anchor:p,sample:[p[0],p[1],p[2]-.06-v],probe:[p[0],p[1],p[2]-.06-v-1],fallback:{x:0,y:1}};}};
+    ASSET_KIT.define('lanternString',{label:'提灯の紐',glyph:'⌒',group:'streetObjects',w:4,d:.3,h:2.5,accent:'#e0ad6d',minHeight:()=>.1,
+        controls:[...pointControls,count,sz],
+        constrainEdit:(next,old,patch)=>{if(Object.prototype.hasOwnProperty.call(patch,'ra')&&Math.abs(old.ra)>1e-6){const ratio=next.ra/old.ra;['Start','Bend','End'].forEach((n,i)=>{const k='lantern'+n+'X';if(!Object.prototype.hasOwnProperty.call(patch,k))next[k]=lanternPoint(old,i)[0]*ratio;});}return next;}
+    },(o,K)=>{const n=clamp(Math.round(Number(o.lanternCount)||6),1,16),h=clamp(Number(o.lanternSize)||.42,.1,1.5),curve=Array.from({length:25},(_,i)=>lanternCurvePoint(o,i/24)),edges=[curve],out=[];
+        for(let i=0;i<n;i++){const p=lanternCurvePoint(o,(i+1)/(n+1));edges.push([p,[p[0],p[1],p[2]-.06]]);out.push(lanternBody(o,K,p[0],p[1],p[2]-.06-h,h*.72,h*.72,h));}
+        return [{meshTriangles:[],meshEdges:edges},...out];
+    });
 })();

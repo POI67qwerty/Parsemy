@@ -767,6 +767,7 @@ const ASSET_KIT = (function () {
                     if (part.signalPoleTopRing && edgeIndex >= 2) line.signalPoleSide = true;
                     edgeIndex++;
                     if (part.signalSmoothSide) line.signalSmoothSide = true;
+                    if (part.onFace) line.onFace = true;
                     if (part.preciseTubeEdge) {
                         line.preciseTubeEdge = true;
                         line.tubeContourView = (typeof orthView !== 'undefined' && orthView) || '3d';

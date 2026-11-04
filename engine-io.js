@@ -232,18 +232,19 @@ function unpack(d) {
     {
         const st = d.S.map((s) => (s.ob ? { ...s, ob: fixOb(s.ob) } : s)),
             seen = new Set(),
-            gen = [], // 前の版の図形（向きで保存）は、3Dで作り直す
-            needsPedUpdate = o => !!o && (o.asset === "pedSignal" || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsPedUpdate))),
-            regenerate = s => !!s.ob && (!s.d3 || needsPedUpdate(s.ob));
-        // 旧プロジェクトの歩行者信号は保存された3D線にも人型が残っている。
-        // 定義から再生成して消し、他の図形や手描き線はそのまま維持する。
+            out = [],
+            needsSignalUpdate = o => !!o && (["trafficSignal", "pedSignal"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsSignalUpdate))),
+            regenerate = s => !!s.ob && (!s.d3 || needsSignalUpdate(s.ob));
+        // 旧保存の信号機の線も新しい逆L字の形へ作り直す。歩行者信号の旧人型も消す。
+        // 元の最初の線の位置へ挿入し、他の物体や手描き線との並び順も保つ。
         st.forEach((s) => {
-            if (regenerate(s) && !seen.has(s.ob.id)) {
+            if (!regenerate(s)) out.push(s);
+            else if (!seen.has(s.ob.id)) {
                 seen.add(s.ob.id);
-                gen.push(...genShape(s.ob));
+                out.push(...genShape(s.ob));
             }
         });
-        S = [...st.filter(s => !regenerate(s)), ...gen];
+        S = out;
     }
     CR = d.cr || null;
     HU = [];

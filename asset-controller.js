@@ -1022,7 +1022,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     // 棚の構成（上から）:
     //   1段目 = 生成面セレクト／コピー／貼り付け／JSON読込 ＋ グループのタブ（どちらも固定）
     //   2段目 = 選択中グループのアセットカードだけを横スクロール
-    // カードが26枚あると1列では探しにくいので、5つのグループへ分けてタブで切り替える。
+    // カードを用途別グループに分け、タブで切り替える。
     // タブと操作部はスクロール領域の外に置くため、カードを端まで送っても消えない。
     const ASSET_GROUPS = [
         {
@@ -1071,31 +1071,10 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "pentaBox",
             ],
         },
-        // 街並みの小物。新しいアセットを足して下の一覧へ書き忘れた場合も、
-        // ここへ自動で入れて「棚から消える」事故を防ぐ（unassignedKinds）。
-        {
-            key: "street",
-            label: "街パーツ",
-            kinds: [
-                "stairs",
-                "crosswalk",
-                "ramp",
-                "pathPipe",
-                // 丸椅子は街の小物として「街パーツ」へ。
-                "stool",
-                "wallSign",
-                "windowGrid",
-                // 信号機・標識（ポールもの）。ポールの高さは画面上の専用ハンドルで変える。
-                "trafficSignal",
-                "pedSignal",
-                "signPost",
-                "signPost2",
-                "signTriangle",
-                "signDiamond",
-                "signCombo",
-                "crossingSign",
-            ],
-        },
+        // 既存の street キーを保ち、以前のタブ選択もそのまま復元できる。
+        { key: "street", label: "街の設備", kinds: ["stairs", "ramp", "pathPipe", "wallSign", "windowGrid", "vendingMachine", "lightboxSign"] },
+        { key: "traffic", label: "交通・標識", kinds: ["crosswalk", "trafficSignal", "pedSignal", "signPost", "signPost2", "signTriangle", "signDiamond", "signCombo", "crossingSign", "guardPoleU", "guardPoleM", "streetCone", "streetPavement"] },
+        { key: "streetObjects", label: "小物・植栽", kinds: ["stool", "streetParcel", "streetBin", "streetMailbox", "streetPlant", "paperLantern", "lanternString"] },
         { key: "person", label: "人間", kinds: ["person"] },
         // 車（人物の隣）。キャブは五角形の立体、荷台は直方体、タイヤは円柱で作る。
         // 寸法はすべて画面上の専用ハンドルで変えられる（engine-gizmo.js の vehicleGizmo）。

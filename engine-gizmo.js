@@ -2593,7 +2593,11 @@ function signalGeometry(o) {
         headW = Math.max(0.12, num(o?.ra, dflt.w / 2) * 2),
         headD = Math.max(0.03, num(o?.rb, dflt.d / 2) * 2),
         headH = Math.max(0.12, Math.min(H - 0.25, num(o?.spHeadH, dflt.h))),
-        headBottom = H - headH,
+        suspended = (o?.asset === "trafficSignal" || o?.asset === "pedSignal") && !window.__legacySignalMount,
+        armThickness = suspended ? 0.06 : 0,
+        armGap = suspended ? clamp(Number(o?.signalArmGap ?? 0.4), 0.05, 4) : 0,
+        headX = suspended ? armGap + headW / 2 : 0,
+        headBottom = H - headH - armThickness,
         poleR = Math.max(0.008, num(o?.spPoleR, 0.042)),
         baseR = Math.max(poleR * 2, num(o?.spBaseR, 0.16)),
         baseH = Math.min(headBottom * 0.5, num(o?.spBaseH, 0.16));
@@ -2602,13 +2606,13 @@ function signalGeometry(o) {
         headW,
         headH,
         headD,
-        headBottom,
+        headBottom, headX, suspended, armGap, armThickness, poleTop: suspended ? H-armThickness/2 : headBottom+0.02,
         headCz: headBottom + headH / 2,
         poleR,
         baseR,
         baseH,
         // 「ポール」ハンドルは頭の横（頭の幅の外）に出す。ポールと重ならない位置。
-        knobX: Math.max(headW / 2, baseR) + 0.12,
+        knobX: Math.max(headX+headW / 2, baseR) + 0.12,
     };
 }
 // 信号機・標識の専用ハンドル：ポールの高さ（＝アセットの高さ）を上下に動かす。
@@ -2633,9 +2637,9 @@ function signalGizmo(o) {
         headW = screenHandle(
             o,
             "signal-head-w",
-            [g.headW / 2, 0, g.headCz], // 頭の右端から、右へ
-            [g.headW / 2, 0, g.headCz],
-            [g.headW / 2 + 1, 0, g.headCz],
+            [g.headX + g.headW / 2, 0, g.headCz], // 頭の右端から、右へ
+            [g.headX + g.headW / 2, 0, g.headCz],
+            [g.headX + g.headW / 2 + 1, 0, g.headCz],
             g.headW,
             0.15,
             4,
@@ -2646,9 +2650,9 @@ function signalGizmo(o) {
         headD = screenHandle(
             o,
             "signal-head-d",
-            [0, -g.headD / 2, g.headCz], // 頭の手前の面から、手前へ
-            [0, -g.headD / 2, g.headCz],
-            [0, -g.headD / 2 - 1, g.headCz],
+            [g.headX, -g.headD / 2, g.headCz], // 頭の手前の面から、手前へ
+            [g.headX, -g.headD / 2, g.headCz],
+            [g.headX, -g.headD / 2 - 1, g.headCz],
             g.headD,
             0.03,
             2,
@@ -2656,7 +2660,7 @@ function signalGizmo(o) {
             { x: 0, y: 1 },
             "#ffd34d",
         );
-    return { o, C3: L2W(o, 0, 0, g.H * 0.5), handles: { poleH: poleHandle, headW, headD } };
+    return { o, C3: L2W(o, 0, 0, g.H * 0.5), handles: { poleH: poleHandle, ...(g.suspended || o.asset === "trafficSignal" || o.asset === "pedSignal" ? {headW} : {}), headD } };
 }
 
 // ===== カウンター（テーブル天板が薄く、下の土台がどっしりしたもの）=====
@@ -3821,6 +3825,18 @@ function drawSpecialGizmo(c, o) {
         c.setLineDash([]);
         sq(sg.handle.s, "#ad9cff");
         gzLabel(c, "半径", sg.handle.s.x + 9 / Z, sg.handle.s.y - 8 / Z, "#d5ccff", 12);
+    }
+    // 提灯のベジェは、実際の紐とは別に3制御点を破線で結び、曲げ点の役割を見せる。
+    if (sg.o.asset === "lanternString" && typeof lanternPoint === "function") {
+        const points = [0,1,2].map(i => scrW(pt(sg.o, ...lanternPoint(sg.o,i))));
+        if (points.every(p => p?.ok)) {
+            c.strokeStyle = "rgba(255,179,111,.85)";
+            c.lineWidth = 1.2 / Z;
+            c.setLineDash([5 / Z, 4 / Z]);
+            c.beginPath(); points.forEach((p,i) => i ? c.lineTo(p.x,p.y) : c.moveTo(p.x,p.y)); c.stroke();
+            c.setLineDash([]);
+            points.forEach(p => { c.beginPath(); c.arc(p.x,p.y,4 / Z,0,Math.PI*2); c.fillStyle="#fff"; c.fill(); c.stroke(); });
+        }
     }
     (sg.registeredHandles || []).forEach(h=>
         valueHandle(h,{label:`${h.label} ${h.integer ? Math.round(Number(h.start)||0) : Number(h.start||0).toFixed(2)}${h.unit}`}));
