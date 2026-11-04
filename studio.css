@@ -294,7 +294,7 @@ canvas {
 }
 .workspaceTabs {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 5px;
     margin: 10px 0 9px;
     padding: 3px;
@@ -1165,7 +1165,7 @@ body.cameraLocked #cv {
 }
 @media (max-width: 520px) {
     #studioQuick .workspaceTabs {
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(3, minmax(0, 1fr));
     }
     #bar {
         gap: 5px;

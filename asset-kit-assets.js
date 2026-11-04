@@ -382,18 +382,63 @@ ASSET_KIT.define(
 
 // 店先と同じカタログ部品を単体でも置けるようにする。
 // 店先そのものは旧JSON互換のため登録を残すが、棚には出さない。
+// テント2は、手前上端を固定して垂れを下へ伸ばす。壁側の上端だけを動かせる。
+// 古いデータには設定がないため、従来の形の寸法から初期値を求める。
+function shopAwningParams(o) {
+    const w=Math.max(.1,Math.abs(2*Number(o.ra)||1.32)), d=Math.max(.06,Math.abs(2*Number(o.rb)||.66)),
+        h=Math.max(.12,Math.abs(Number(o.h)||.42)),
+        read=(key,fallback)=>o[key]!=null && Number.isFinite(Number(o[key])) ? Number(o[key]) : fallback,
+        front=Math.max(.01,Math.min(h-.01,read('shopAwningFrontZ',h/3))),
+        valance=Math.max(.005,Math.min(5,read('shopAwningValanceH',h/3))),
+        t=Math.max(.005,Math.min(w*.4,d*.4,read('shopAwningThickness',Math.min(.04,w*.1,d*.18,h*(.04/.42)))));
+    return {w,d,h,front,valance,t};
+}
+// 傾きの回転中心は全高の中央なので、上辺を動かすと中心も動く。
+// オブジェクトのオフセットを変換基底から補正し、手前上端をワールド上で固定する。
+function shopAwningKeepFront(next,old) {
+    if (old.attachment || !(Number(old.rotX)||Number(old.rotZ))) return next;
+    const p=[0,0,shopAwningParams(old).front], target=L2W(old,...p), base=L2W(next,...p),
+        off=Array.isArray(next.off)?next.off.slice():[0,0,0],
+        columns=[0,1,2].map(i=>{const q=off.slice();q[i]+=1;return L2W({...next,off:q},...p).map((v,j)=>v-base[j]);}),
+        cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],
+        dot=(a,b)=>a.reduce((sum,v,i)=>sum+v*b[i],0), delta=target.map((v,i)=>v-base[i]),
+        det=dot(columns[0],cross(columns[1],columns[2]));
+    if (Math.abs(det)<1e-9) return next;
+    const change=[dot(delta,cross(columns[1],columns[2]))/det,dot(delta,cross(columns[2],columns[0]))/det,dot(delta,cross(columns[0],columns[1]))/det];
+    return {...next,off:off.map((v,i)=>v+change[i])};
+}
 ASSET_KIT.define('shopAwning', {
-    label:'店先テント', glyph:'▰', group:'buildingParts', w:1.32, d:.66, h:.42, accent:'#d98b68',
-    minHalfWidth:()=>.05, minHalfDepth:()=>.03, minHeight:()=>.12
+    label:'テント2', glyph:'▰', group:'buildingParts', w:1.32, d:.66, h:.42, accent:'#d98b68',
+    minHalfWidth:o=>Math.max(.05,(Number(o.shopAwningThickness)||shopAwningParams(o).t)/.8),
+    minHalfDepth:o=>Math.max(.03,(Number(o.shopAwningThickness)||shopAwningParams(o).t)/.8),
+    minHeight:o=>Math.max(.12,(Number(o.shopAwningFrontZ)||shopAwningParams(o).front)+.01),
+    // サイズを変えても、未編集だった垂れや手前上端が比率で動かないよう実寸を保存する。
+    constrainEdit:(next,old,patch)=>{const g=shopAwningParams(old), q={...next,
+        shopAwningFrontZ:next.shopAwningFrontZ ?? g.front,
+        shopAwningValanceH:next.shopAwningValanceH ?? g.valance,
+        shopAwningThickness:next.shopAwningThickness ?? g.t};
+        if (Object.prototype.hasOwnProperty.call(patch,'h') && !['lift','off','rot','rotX','rotZ','ca','cb','k'].some(k=>Object.prototype.hasOwnProperty.call(patch,k))) {
+            q.h=Math.max(.12,q.shopAwningFrontZ+.01,Number(q.h)||0);
+            return shopAwningKeepFront(q,old);
+        }
+        return q;},
+    controls:[
+        {key:'shopAwningValanceH',label:'のれんの高さ',min:.005,max:5,step:.01,unit:'m',get:o=>shopAwningParams(o).valance,
+            handle:(o,v)=>{const g=shopAwningParams(o),x=-g.w*.25,y=-g.d/2;
+                return {anchor:[x,y,g.front],sample:[x,y,g.front-v],probe:[x,y,g.front-v-1],fallback:{x:0,y:1}};}},
+        {key:'shopAwningTopZ',label:'斜面の上辺の高さ',min:o=>Math.max(.12,shopAwningParams(o).front+.01),max:5,step:.05,unit:'m',get:o=>shopAwningParams(o).h,
+            patch:(o,v)=>({h:v}),
+            handle:(o,v)=>{const g=shopAwningParams(o),x=g.w*.25,y=g.d/2;
+                return {anchor:[x,y,g.front],sample:[x,y,v],probe:[x,y,v+1],fallback:{x:0,y:-1}};}}
+    ]
 }, (o,K)=>{
-    const w=Math.max(.1,Math.abs(2*o.ra)), depth=Math.max(.06,Math.abs(2*o.rb)), h=Math.max(.12,Math.abs(o.h)),
-        t=Math.min(.04,w*.1,depth*.18,h*(.04/.42));
-    return K.part('awning', {w,d:depth-t,z:h,drop:h*(.28/.42),valanceH:h*(.14/.42),
-        armBelow:h*(.055/.42),armAbove:h*(.01/.42),t,at:[0,t/2,0]})
+    const g=shopAwningParams(o);
+    return K.part('awning', {w:g.w,d:g.d-g.t,z:g.h,drop:g.h-g.front,valanceH:g.valance,
+        t:g.t,arms:false,at:[0,g.t/2,0]})
         .map(part=>({...part,onFace:true,preciseTubeEdge:true}));
 });
 ASSET_KIT.define('shopWindow', {
-    label:'店先の窓', glyph:'▣', group:'buildingParts', w:1.15, d:.12, h:.6, accent:'#9bbbc7',
+    label:'窓', glyph:'▣', group:'buildingParts', w:1.15, d:.12, h:.6, accent:'#9bbbc7',
     // ガラス面より中央桟を手前に保ち、窓を薄くした際に桟が消えないようにする。
     minHalfWidth:()=>.05, minHalfDepth:()=>.015, minHeight:()=>.1
 }, (o,K)=>{
@@ -1596,6 +1641,68 @@ ASSET_KIT.define('bezierCable',{
   // 空白の上部パネルに細い縁。正面を塞ぐ扉は作らない。
   const x=w/2-.025,y=-d/2-.001,z0=openTop+.025,z1=h-.025;
   if(x>0 && z1>z0)out.push({meshTriangles:[],meshEdges:[[[ -x,y,z0],[x,y,z0],[x,y,z1],[-x,y,z1],[-x,y,z0]]],...flags});
+  return out;
+ });
+
+ // 棚2：前が開いたコの字の壁と、Z軸方向の四隅を面取りした独立した薄い棚板。
+ // 幅は壁幅と別値。板の下端位置を基準にするので、板厚変更で他の板がずれない。
+ const shelf2N=o=>Math.round(V(o,'shelf2Count',3,1,8)),
+  shelf2T=o=>V(o,'shelf2BoardT',.04,.02,.18),
+  shelf2Wall=o=>V(o,'shelf2WallT',.04,.01,Math.max(.01,Math.min(.35,Math.abs(o.ra)*.9,Math.abs(o.rb)*.9))),
+  shelf2Width=o=>V(o,'shelf2BoardW',1.4,.1,6),
+  shelf2BevelMax=o=>Math.max(0,Math.min(shelf2Width(o),2*Math.abs(o.rb)+.04)*.49),
+  shelf2Bevel=o=>V(o,'shelf2Bevel',.04,0,shelf2BevelMax(o)),
+  shelf2Gap=o=>Math.max(shelf2T(o)+.04,(Math.max(.1,Number(o.h)||1.2)-shelf2T(o))/Math.max(1,shelf2N(o)-1)),
+  shelf2Height=(n,g,t)=>Math.max(1,n-1)*g+t;
+ ASSET_KIT.define('displayShelf2',{
+  label:'棚2',glyph:'▥',group:'furniture',w:1.4,d:.55,h:1.2,accent:'#aa986c',
+  minHalfWidth:o=>Math.max(.1,(Number(o.shelf2WallT)||.04)/.9+.005),
+  minHalfDepth:o=>Math.max(.07,(Number(o.shelf2WallT)||.04)/.9+.005),
+  minHeight:o=>shelf2Height(shelf2N(o),shelf2T(o)+.04,shelf2T(o)),
+  controls:[
+   {key:'shelf2Count',label:'棚板の数',default:3,min:1,max:8,step:1,integer:true,unit:'枚',
+    patch:(o,v)=>({shelf2Count:v,h:shelf2Height(v,shelf2Gap(o),shelf2T(o))}),
+    handle:(o,v)=>({anchor:[-o.ra,-o.rb,o.h*.75],sample:[-o.ra-.15,-o.rb,o.h*.75],probe:[.85-o.ra,-o.rb,o.h*.75],fallback:{x:1,y:0},pixelsPerUnit:24})},
+   {key:'shelf2BoardW',label:'棚板の横幅',default:1.4,min:.1,max:6,step:.05,unit:'m',
+    handle:(o,v)=>({anchor:[0,-o.rb-.24,o.h],sample:[v/2,-o.rb-.24,o.h],probe:[(v+1)/2,-o.rb-.24,o.h],fallback:{x:1,y:0}})},
+   {key:'shelf2BoardT',label:'棚板の厚さ',default:.04,min:.02,max:o=>Math.max(.02,Math.min(.18,shelf2Gap(o)-.04)),step:.005,unit:'m',
+    patch:(o,v)=>({shelf2BoardT:v,h:shelf2Height(shelf2N(o),shelf2Gap(o),v)}),
+    handle:(o,v)=>{const z=shelf2N(o)===1?o.h-shelf2T(o):0;return {anchor:[-shelf2Width(o)*.3,-o.rb-.04,z],sample:[-shelf2Width(o)*.3,-o.rb-.04,z+v],probe:[-shelf2Width(o)*.3,-o.rb-.04,z+v+1],fallback:{x:0,y:-1}};}}, 
+   {key:'shelf2Bevel',label:'棚板の角のベベル',type:'range',default:.04,min:0,max:shelf2BevelMax,step:.005,unit:'m',
+    handle:(o,v)=>({anchor:[shelf2Width(o)/2,-o.rb-.12,o.h],sample:[shelf2Width(o)/2-v,-o.rb-.12,o.h],probe:[shelf2Width(o)/2-v-1,-o.rb-.12,o.h],fallback:{x:-1,y:0}})},
+   {key:'shelf2WallT',label:'コの字の壁の厚さ',default:.04,min:.01,max:o=>Math.max(.01,Math.min(.35,Math.abs(o.ra)*.9,Math.abs(o.rb)*.9)),step:.005,unit:'m',
+    handle:(o,v)=>({anchor:[-o.ra,-o.rb,o.h*.35],sample:[-o.ra+v,-o.rb,o.h*.35],probe:[1-o.ra+v,-o.rb,o.h*.35],fallback:{x:1,y:0}})},
+   {key:'shelf2Spacing',label:'棚板の間隔',min:o=>shelf2T(o)+.04,max:3,step:.05,unit:'m',get:shelf2Gap,
+    patch:(o,v)=>({h:shelf2Height(shelf2N(o),v,shelf2T(o))}),
+    handle:(o,v)=>({anchor:[o.ra*.6,-o.rb-.04,0],sample:[o.ra*.6,-o.rb-.04,v],probe:[o.ra*.6,-o.rb-.04,v+1],fallback:{x:0,y:-1}})}
+  ]
+ },(o,K)=>{
+  const w=Math.max(.2,2*Math.abs(o.ra)),d=Math.max(.14,2*Math.abs(o.rb)),h=Math.max(.1,Number(o.h)||1.2),
+   t=shelf2Wall(o),n=shelf2N(o),bt=shelf2T(o),bw=shelf2Width(o),gap=shelf2Gap(o),
+   x=w/2,y=d/2,wall=[[-x,-y],[x*-1,y],[x,y],[x,-y],[x-t,-y],[x-t,y-t],[-x+t,y-t],[-x+t,-y]],
+   out=[K.box(wall,0,h,flags)], bd=d+.04, cy=-.02;
+  for(let i=0;i<n;i++){
+   const z=n===1?h-bt:i*gap, b=shelf2Bevel(o), bx=bw/2, front=cy-bd/2, back=cy+bd/2,
+    segments=4, path=beveledBoxFootprint(bw,bd,b,segments).map(([px,py])=>[px,py+cy]),
+    seamMarks=[null,null,...path.map((_,index)=>beveledEdgeMark(index,b,segments,'shelf2-'+i))];
+   // ベベル直方体と同じ四分割の輪郭・上下の輪・縦のシルエット候補。
+   // 各棚板を別グループにし、どの視点でも角の候補が板間で競合しないようにする。
+   out.push(K.box(path,z,z+bt,{...flags,seamMarks}));
+   // 棚板は壁厚を変えても移動させない。壁と重なる奥端には、実際の
+   // 交線を壁の内面に置く。板の埋まった奥端を無理に透かして描かない。
+   // 四分割ベベルの輪郭と壁内面の正確な交点（円弧ではなく実際の直線分）。
+   const wallFront=y-t, crossX=(()=>{
+    const hits=[];
+    for(let j=0;j<path.length;j++){
+     const a=path[j],c=path[(j+1)%path.length];
+     if(Math.abs(a[1]-c[1])<1e-10){if(Math.abs(wallFront-a[1])<1e-9)hits.push(a[0],c[0]);continue;}
+     const q=(wallFront-a[1])/(c[1]-a[1]);if(q>=-1e-9&&q<=1+1e-9)hits.push(a[0]+q*(c[0]-a[0]));
+    }
+    return hits.length?Math.max(...hits):0;
+   })(), half=Math.min(x-t,crossX);
+   if(wallFront>front+1e-8 && wallFront<back-1e-8 && half>1e-8)
+    out.push({meshTriangles:[],meshEdges:[ [[-half,wallFront,z],[half,wallFront,z]], [[-half,wallFront,z+bt],[half,wallFront,z+bt]] ],...flags});
+  }
   return out;
  });
  ASSET_KIT.define('pictureStairs',{label:'階段2',glyph:'▰',group:'street',w:1.4,d:2.1,h:1.2,accent:'#c5a768',geometryBounds:true,minHalfWidth:()=>.12,minHalfDepth:()=>.12,minHeight:()=>.15,controls:[

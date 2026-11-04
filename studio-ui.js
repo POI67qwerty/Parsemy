@@ -34,9 +34,8 @@
     <div class="quickSub">必要な操作だけを短くまとめています</div>
     <nav class="workspaceTabs" aria-label="作業画面">
       <button type="button" class="workspaceTab" data-workspace-tab="character">人物</button>
-      <button type="button" class="workspaceTab" data-workspace-tab="pose">ポーズ</button>
-      <button type="button" class="workspaceTab" data-workspace-tab="floorplan">間取り</button>
       <button type="button" class="workspaceTab active" data-workspace-tab="perspective">視点</button>
+      <button type="button" class="workspaceTab" data-workspace-tab="object">オブジェクト</button>
     </nav>
 
     <section class="workspaceScreen" data-workspace-screen="character" hidden>
@@ -50,36 +49,6 @@
       <div class="quickField"><span>脚の開き</span><input id="personLegSpread" type="number" min="0.6" max="1.8" step="0.05" value="1"><em>倍</em></div>
       <div class="quickRow"><button id="applyPersonEdit" class="primary">選択人物に反映</button></div>
       <div class="sceneNote">人物を出したあとでも変更できます。編集モードで人物を選ぶか、シーン一覧から選択してください。</div>
-    </section>
-
-    <section class="workspaceScreen" data-workspace-screen="pose" hidden>
-      <div class="screenLead">選択中の人物にポーズを適用します。腕は既存仕様どおり表示しません。<small id="poseSelectionStatus">人物を選択するとポーズを変更できます</small></div>
-      <div class="quickRow">
-        <button type="button" class="poseButton" data-person-pose="stand">直立</button>
-        <button type="button" class="poseButton" data-person-pose="walk">歩行</button>
-        <button type="button" class="poseButton" data-person-pose="crouch">しゃがみ</button>
-        <button type="button" class="poseButton" data-person-pose="sit">着席</button>
-      </div>
-      <div class="quickField"><span>歩幅</span><input id="personPoseStride" type="number" min="0" max="0.5" step="0.01" value="0"><em>m</em></div>
-      <div class="quickField"><span>しゃがみ量</span><input id="personPoseCrouch" type="number" min="0" max="1" step="0.05" value="0"><em>倍</em></div>
-      <div class="quickField"><span>体の傾き</span><input id="personPoseLean" type="number" min="-0.35" max="0.35" step="0.01" value="0"><em>m</em></div>
-      <div class="quickField"><span>頭の傾き</span><input id="personHeadTilt" type="number" min="-25" max="25" step="1" value="0"><em>°</em></div>
-      <div class="quickField"><span>腰の回転</span><input id="personWaist" type="number" min="-60" max="60" step="1" value="0"><em>°</em></div>
-      <div class="quickField"><span>首の回転</span><input id="personNeck" type="number" min="-40" max="40" step="1" value="0"><em>°</em></div>
-      <div class="quickField"><span>左股関節</span><input id="personHipL" type="number" min="-80" max="80" step="1" value="0"><em>°</em></div>
-      <div class="quickField"><span>右股関節</span><input id="personHipR" type="number" min="-80" max="80" step="1" value="0"><em>°</em></div>
-      <div class="quickField"><span>左膝</span><input id="personKneeL" type="number" min="0" max="120" step="1" value="0"><em>°</em></div>
-      <div class="quickField"><span>右膝</span><input id="personKneeR" type="number" min="0" max="120" step="1" value="0"><em>°</em></div>
-      <div class="quickRow"><button id="applyPersonPoseDetail" class="primary">ポーズを微調整</button></div>
-      <div class="sceneNote">プリセット後に歩幅・しゃがみ量・体の傾き・頭の傾きを調整できます。腰・首・股関節・膝の角度は3Dビューの関節ギズモ（丸ハンドル）でも回せます。身長・体型は保持されます。</div>
-    </section>
-
-    <section class="workspaceScreen" data-workspace-screen="floorplan" hidden>
-      <div class="screenLead">家具・カメラを平面で編集<small id="floorPlanStatus">間取りモードを開くと、X・Z方向へドラッグできます</small></div>
-      <div class="quickRow"><button id="openFloorPlan" class="primary">開く</button><button id="closeFloorPlan">3Dへ戻る</button></div>
-      <div id="floorPlanSelectionStatus" class="sceneNote">未選択</div>
-      <div class="quickRow floorPlanRotateRow"><button id="floorRotateLeft" disabled>↺</button><button id="floorRotateRight" disabled>↻</button><button id="floorRotate90" disabled>90°</button><button id="floorDelete" disabled>削除</button></div>
-      <div class="sceneNote">間取りでは全ての生成面のオブジェクトをドラッグ移動できます。正面・上・横の移動ギズモ、選択中の前側の丸をドラッグした回転、カメラ本体のドラッグ移動、先端の丸のドラッグで向きの変更ができます。回転は3本のリング（上下＝オレンジの破線／左右＝X／手前奥＝Y）をドラッグすると15°刻み（30°・45°・90°も選べ）、Shiftを押しながらドラッグすると自由な角度です。矢印キーで移動、Q/Eで15°ずつ回転します。幅・奥行き・高さの編集も生成面に関係なく利用できます。テントの前縁Yを一番下まで下げる／前後を一番奥まで寄せると、断面が三角形の三角柱になります。接続テントは接着を保つため本体の移動は上下方向に制限されますが、テントの形（前縁Y＝上下＋手前奥、前後）は店舗テントと同じように編集できます。横壁看板は上下＋壁沿いの前後方向へ移動できます。壁付きベランダとコの字壁は、腰壁（コの字壁は前面の壁）の外側面にあるオレンジの四角をドラッグしても厚さを変えられます。ベランダは床と壁が同じ厚さで、厚くすると全体の高さも伸びます。</div>
     </section>
 
     <section class="workspaceScreen" data-workspace-screen="perspective">
@@ -119,13 +88,21 @@
       </div>
     </section>
 
-    <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　7 前　8 横　9 上　0 3D　／　詳細操作は「？」</div>
+    <section class="workspaceScreen" data-workspace-screen="object" hidden>
+    <div id="objectEditSectionSlot"></div>
     <div class="sceneTitle">シーン内オブジェクト</div>
     <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneInvertSel">選択を反転</button><button id="sceneHideSel">選択中を非表示</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneLockSel" title="選択中のオブジェクトをロック／解除（⌘/Ctrl+L）">選択をロック</button><button id="sceneUnlockAll" title="ロック中のオブジェクトをすべて解除">全ロック解除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button><button id="sceneCombineSel">結合</button><button id="sceneSeparateSel">結合解除</button></div>
     <div class="alignTools"><button id="centerOnScreenSel" title="選択中のオブジェクト（接着した子パーツ・グループを含む）を、いま見ている画面の中央へ移動">画面中央へ</button><button id="centerChildSel" title="テント付き建物・看板付き建物のテント／看板を、建物の左右（X方向）の中央へすぐ戻す。1個を選ぶだけで使えます">テント・看板を中央へ</button></div>
     <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Z軸（高さ）</option><option value=2>Y軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
     <div class="sceneNote">行のチェックで複数選択、✎で名前変更（空欄で標準名）。「選択中を非表示」は一覧の○から再表示。「画面中央へ」は1個でも動きます（看板付き建物・テント付き建物は建物本体の中心を画面中央へ合わせます）。整列は2個以上を選んでください。グループ化は後から解除できます。結合は複数の定義を一つの複合オブジェクトにまとめ、結合解除まで一体として扱います。</div>
-    <div id="objectList"><div class="emptyList">まだオブジェクトがありません</div></div>`;
+    <div id="objectList"><div class="emptyList">まだオブジェクトがありません</div></div>
+    </section>
+    <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　7 前　8 横　9 上　0 3D　／　詳細操作は「？」</div>`;
+    // 元の設定項目をそのまま移す（複製せず、既存イベントと値を保持する）。
+    // プリセットの旧details配列は、この元の順序で読み書きする。
+    const presetDetails = [...side.querySelectorAll("details")],
+        editSection = el("objP")?.closest("details");
+    if (editSection) quick.querySelector("#objectEditSectionSlot").appendChild(editSection);
     side.insertBefore(quick, side.firstChild);
     const humanInput = el("humanHeight");
     humanInput.value = Number(P.hm).toFixed(2);
@@ -133,68 +110,45 @@
     // ===== 2. 作業画面の切り替え =====
     // 1つのパネル内で画面を切り替え、必要な入力だけを表示する。
     function setStudioWorkspace(name) {
-        const valid = ["character", "pose", "floorplan", "perspective"],
-            tab = valid.includes(name) ? name : "perspective";
+        // 旧プリセットのpose/floorplanを読み込んでも、削除した欄へ切り替えない。
+        const tab = name === "character" || name === "pose" ? "character" : name === "object" ? "object" : "perspective";
         quick
             .querySelectorAll("[data-workspace-tab]")
             .forEach((b) => b.classList.toggle("active", b.dataset.workspaceTab === tab));
         quick.querySelectorAll("[data-workspace-screen]").forEach((screen) => {
             screen.hidden = screen.dataset.workspaceScreen !== tab;
         });
-        if (tab === "floorplan") window.cityFloorPlanEnter?.();
+        if (name === "floorplan") window.cityFloorPlanEnter?.();
         // 人物・ポーズの設定を開いても、前／横／上の間取り表示は維持する。
         // 3Dへ戻るときだけ、明示的に間取りを閉じる。
-        else if (window.cityFloorPlanActive && tab === "perspective") window.cityFloorPlanExit?.();
+        else if (window.cityFloorPlanActive && name === "perspective") window.cityFloorPlanExit?.();
     }
     quick
         .querySelectorAll("[data-workspace-tab]")
         .forEach((b) => (b.onclick = () => setStudioWorkspace(b.dataset.workspaceTab)));
     window.cityStudioWorkspace = setStudioWorkspace;
+    // 描画や数値変更のたびにタブを奪わない。選択の変化・明示的な再選択だけで切り替える。
+    let quickSelectedId = null;
+    window.cityGridObjectSelection = (id, explicit = false) => {
+        if (id && (explicit || id !== quickSelectedId)) {
+            setStudioWorkspace("object");
+            if (editSection) editSection.open = true;
+        }
+        quickSelectedId = id || null;
+    };
     const personHeightInput = el("personHeight"),
         personBodyInput = el("personBodyScale"),
         personShoulderInput = el("personShoulderScale"),
         personHeadInput = el("personHeadScale"),
         personLegInput = el("personLegSpread"),
-        personStatus = el("personSelectionStatus"),
-        poseStatus = el("poseSelectionStatus");
-    const personPoseStrideInput = el("personPoseStride"),
-        personPoseCrouchInput = el("personPoseCrouch"),
-        personPoseLeanInput = el("personPoseLean"),
-        personHeadTiltInput = el("personHeadTilt"),
-        // 関節角度（3Dビューの関節ギズモと同じ値）
-        personJointInputs = {
-            personWaist: el("personWaist"),
-            personNeck: el("personNeck"),
-            personHipL: el("personHipL"),
-            personHipR: el("personHipR"),
-            personKneeL: el("personKneeL"),
-            personKneeR: el("personKneeR"),
-        };
-    const poseButtons = [...quick.querySelectorAll("[data-person-pose]")];
-    const poseDefaults = {
-        stand: { stride: 0, crouch: 0, lean: 0, headTilt: 0 },
-        walk: { stride: 0.22, crouch: 0, lean: 0, headTilt: 0 },
-        crouch: { stride: 0.04, crouch: 0.65, lean: 0, headTilt: 0 },
-        sit: { stride: 0.1, crouch: 0.35, lean: 0, headTilt: 0 },
-    };
+        personStatus = el("personSelectionStatus");
     const selectedPerson = () => {
         const o = sel && obOf(sel);
         return o && o.type === "asset" && o.asset === "person" ? o : null;
     };
-    function personPoseDefaults(o) {
-        return (
-            poseDefaults[o?.pose] || {
-                stride: Number(o?.poseStride) || 0,
-                crouch: Number(o?.poseCrouch) || 0,
-                lean: Number(o?.poseLean) || 0,
-                headTilt: Number(o?.headTilt) || 0,
-            }
-        );
-    }
     function syncPersonControls() {
         const o = selectedPerson(),
-            h = o ? Number(o.h) || Number(P.hm) || 1.7 : Number(P.hm) || 1.7,
-            pd = personPoseDefaults(o);
+            h = o ? Number(o.h) || Number(P.hm) || 1.7 : Number(P.hm) || 1.7;
         if (personHeightInput && document.activeElement !== personHeightInput) personHeightInput.value = h.toFixed(2);
         if (personBodyInput && document.activeElement !== personBodyInput)
             personBodyInput.value = Number(o?.bodyScale ?? 1).toFixed(2);
@@ -204,26 +158,10 @@
             personHeadInput.value = Number(o?.headScale ?? 1).toFixed(2);
         if (personLegInput && document.activeElement !== personLegInput)
             personLegInput.value = Number(o?.legSpread ?? 1).toFixed(2);
-        if (personPoseStrideInput && document.activeElement !== personPoseStrideInput)
-            personPoseStrideInput.value = Number(o?.poseStride ?? pd.stride).toFixed(2);
-        if (personPoseCrouchInput && document.activeElement !== personPoseCrouchInput)
-            personPoseCrouchInput.value = Number(o?.poseCrouch ?? pd.crouch).toFixed(2);
-        if (personPoseLeanInput && document.activeElement !== personPoseLeanInput)
-            personPoseLeanInput.value = Number(o?.poseLean ?? pd.lean).toFixed(2);
-        if (personHeadTiltInput && document.activeElement !== personHeadTiltInput)
-            personHeadTiltInput.value = Number(o?.headTilt ?? pd.headTilt).toFixed(0);
-        Object.entries(personJointInputs).forEach(([key, input]) => {
-            if (input && document.activeElement !== input) input.value = Number(o?.[key] ?? 0).toFixed(0);
-        });
         if (personStatus)
             personStatus.textContent = o
                 ? `選択中：人物アセット（身長 ${h.toFixed(2)} m）`
                 : "人物アセットを選択すると個別編集できます";
-        if (poseStatus)
-            poseStatus.textContent = o
-                ? `選択中のポーズ：${{ stand: "直立", walk: "歩行", crouch: "しゃがみ", sit: "着席", custom: "カスタム" }[o.pose || "stand"] || "カスタム"}`
-                : "人物アセットを選択するとポーズを変更できます";
-        poseButtons.forEach((b) => b.classList.toggle("active", !!o && (o.pose || "stand") === b.dataset.personPose));
     }
     function applySelectedPerson() {
         const o = selectedPerson();
@@ -251,60 +189,7 @@
         });
         render();
     }
-    function applyPersonPose(pose) {
-        const o = selectedPerson();
-        if (!o) {
-            alert("先に人物アセットを選択してください");
-            return;
-        }
-        const d = poseDefaults[pose] || poseDefaults.stand;
-        HU.push(S);
-        RD = [];
-        // プリセットは姿勢を丸ごと決めるので、関節角度も0へ戻す。
-        setOb(o.id, {
-            pose,
-            poseStride: d.stride,
-            poseCrouch: d.crouch,
-            poseLean: d.lean,
-            headTilt: d.headTilt,
-            personWaist: 0,
-            personNeck: 0,
-            personHipL: 0,
-            personHipR: 0,
-            personKneeL: 0,
-            personKneeR: 0,
-        });
-        setStudioWorkspace("pose");
-        render();
-    }
-    function applyPersonPoseDetail() {
-        const o = selectedPerson();
-        if (!o) {
-            alert("先に人物アセットを選択してください");
-            return;
-        }
-        const stride = clamp(parseFloat(personPoseStrideInput.value) || 0, 0, 0.5),
-            crouch = clamp(parseFloat(personPoseCrouchInput.value) || 0, 0, 1),
-            lean = clamp(parseFloat(personPoseLeanInput.value) || 0, -0.35, 0.35),
-            headTilt = clamp(parseFloat(personHeadTiltInput.value) || 0, -25, 25),
-            // 関節角度も同時に反映する（ギズモで回した値と数値欄は同じ項目）
-            joints = {
-                personWaist: clamp(parseFloat(personJointInputs.personWaist.value) || 0, -60, 60),
-                personNeck: clamp(parseFloat(personJointInputs.personNeck.value) || 0, -40, 40),
-                personHipL: clamp(parseFloat(personJointInputs.personHipL.value) || 0, -80, 80),
-                personHipR: clamp(parseFloat(personJointInputs.personHipR.value) || 0, -80, 80),
-                personKneeL: clamp(parseFloat(personJointInputs.personKneeL.value) || 0, 0, 120),
-                personKneeR: clamp(parseFloat(personJointInputs.personKneeR.value) || 0, 0, 120),
-            };
-        HU.push(S);
-        RD = [];
-        setOb(o.id, { pose: "custom", poseStride: stride, poseCrouch: crouch, poseLean: lean, headTilt, ...joints });
-        setStudioWorkspace("pose");
-        render();
-    }
     el("applyPersonEdit").onclick = applySelectedPerson;
-    el("applyPersonPoseDetail").onclick = applyPersonPoseDetail;
-    poseButtons.forEach((b) => (b.onclick = () => applyPersonPose(b.dataset.personPose)));
     syncPersonControls();
 
     // ===== 2.1 床の半透明表示 =====
@@ -968,7 +853,6 @@
             render();
             return;
         }
-        if (chosen && chosen.type === "asset" && chosen.asset === "person") setStudioWorkspace("character");
         if (e.target.matches("[data-object-check]")) {
             if (e.target.checked) setSelection(id, true);
             else {
@@ -3359,8 +3243,6 @@
         SH.floorPlanDrag = value;
     };
     window.cityFloorPlanFit = fitFloorPlan;
-    el("openFloorPlan").onclick = () => setStudioWorkspace("floorplan");
-    el("closeFloorPlan").onclick = () => setStudioWorkspace("perspective");
 
     // ===== 5.1 カメラ・スケールのプリセット =====
     function setValues(values) {
@@ -3429,7 +3311,7 @@
         });
         const ui = {
             sideHidden: el("side")?.classList.contains("hide") || false,
-            details: [...document.querySelectorAll("#side details")].map((d) => !!d.open),
+            details: presetDetails.map((d) => !!d.open),
             trayOpen: el("assetTray")?.style.display === "block",
             workspace: quick?.querySelector("[data-workspace-tab].active")?.dataset.workspaceTab || "perspective",
         };
@@ -3536,7 +3418,7 @@
         tool = d.tool === "shape" ? "edit" : d.tool || tool;
         if (d.ui) {
             if (Array.isArray(d.ui.details))
-                document.querySelectorAll("#side details").forEach((section, i) => {
+                presetDetails.forEach((section, i) => {
                     if (i < d.ui.details.length) section.open = !!d.ui.details[i];
                 });
             if (typeof d.ui.sideHidden === "boolean") {
@@ -3552,17 +3434,12 @@
         }
         sync();
         if (d.floorActive) {
+            // 廃止した間取り欄の旧プリセットは「視点」を表示し、正投影はそのまま復元する。
+            if (d.ui?.workspace && window.cityStudioWorkspace)
+                window.cityStudioWorkspace(d.ui.workspace === "floorplan" ? "perspective" : d.ui.workspace);
             window.cityFloorPlanEnter?.(orthView || "top");
             if (Array.isArray(d.floorCenter)) window.cityFloorPlanCenter = [...d.floorCenter];
             if (Number.isFinite(d.floorScale)) window.cityFloorPlanScale = d.floorScale;
-            if (d.ui?.workspace === "floorplan") {
-                quick
-                    .querySelectorAll("[data-workspace-tab]")
-                    .forEach((b) => b.classList.toggle("active", b.dataset.workspaceTab === "floorplan"));
-                quick.querySelectorAll("[data-workspace-screen]").forEach((screen) => {
-                    screen.hidden = screen.dataset.workspaceScreen !== "floorplan";
-                });
-            }
             setMode(d.mode === "view" ? "view" : "draw");
             render();
         } else {

@@ -1867,10 +1867,6 @@
     floorPlanDock.querySelector('[data-floor-dock-action="pan-down"]').onclick = () => panFloorPlan(0, 80);
     floorPlanDock.querySelector('[data-floor-dock-action="pan-left"]').onclick = () => panFloorPlan(-80, 0);
     floorPlanDock.querySelector('[data-floor-dock-action="pan-right"]').onclick = () => panFloorPlan(80, 0);
-    el("floorRotateLeft").onclick = () => rotateFloorSelected(15);
-    el("floorRotateRight").onclick = () => rotateFloorSelected(-15);
-    el("floorRotate90").onclick = () => rotateFloorSelected(90);
-    el("floorDelete").onclick = () => el("obDel").click();
     floorPlanDock.querySelector('[data-floor-dock-action="left"]').onclick = () => rotateFloorSelected(15);
     floorPlanDock.querySelector('[data-floor-dock-action="right"]').onclick = () => rotateFloorSelected(-15);
     floorPlanDock.querySelector('[data-floor-dock-action="rot30"]').onclick = () => rotateFloorSelected(30);

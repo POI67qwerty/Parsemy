@@ -58,7 +58,7 @@ const ASSETS = {
     wallSign: { label: "壁付け看板（単体）", glyph: "▤", w: 1.6, d: 0.26, h: 1.8, accent: "#76d9ff" },
     // 棚には表示しないが、建物横壁へ接着する専用看板の描画・JSON互換用定義。
     wallSideSign: { label: "横壁看板", glyph: "▥", w: 1.5, d: 0.16, h: 1.8, accent: "#76d9ff" },
-    awning: { label: "店舗テント", glyph: "▱", w: 3, d: 1, h: 0.35, accent: "#d98b68" },
+    awning: { label: "台形", glyph: "▱", w: 3, d: 1, h: 0.35, accent: "#d98b68" },
     balcony: { label: "壁付けベランダ", glyph: "▱", w: 3.2, d: 1.8, h: 1.25, accent: "#e6a36f" },
     // コの字をZ軸（高さ方向）へ押し出した壁。前面＋左右の3枚で、床スラブは無い。
     uWall: { label: "コの字壁", glyph: "⊔", w: 3.2, d: 1.8, h: 1.1, accent: "#9db8d6" },
@@ -178,7 +178,8 @@ const assetLabel = (o) =>
           : o.type === "compound"
             ? "結合オブジェクト"
             : o.type === "asset"
-              ? o.assetName || ASSETS[o.asset]?.label || (o.asset === "cylinder" ? "円柱" : "アセット")
+              ? ((o.asset === "awning" && o.assetName === "店舗テント") || (o.asset === "shopAwning" && o.assetName === "店先テント") || (o.asset === "shopWindow" && o.assetName === "店先の窓")
+                    ? ASSETS[o.asset]?.label : o.assetName) || ASSETS[o.asset]?.label || (o.asset === "cylinder" ? "円柱" : "アセット")
               : o.type === "rect"
                 ? "長方形"
                 : o.type === "circ"

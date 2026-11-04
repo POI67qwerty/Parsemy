@@ -1587,10 +1587,12 @@ function setSelection(id, add = false) {
         sel = null;
     }
     normalizeSelection();
+    if (typeof window.cityGridObjectSelection === "function") window.cityGridObjectSelection(sel, !!id && !!sel);
 }
 function clearSelection() {
     sel = null;
     selIds.clear();
+    if (typeof window.cityGridObjectSelection === "function") window.cityGridObjectSelection(null);
 }
 function selectedObjects() {
     normalizeSelection();
@@ -1902,6 +1904,7 @@ function syncSel() {
     if (typeof window.syncLockButtons === "function") window.syncLockButtons();
     const o = sel && obOf(sel);
     if (sel && !o) sel = null;
+    if (typeof window.cityGridObjectSelection === "function") window.cityGridObjectSelection(o ? sel : null);
     $("objP").style.display = o ? "" : "none";
     if (!o) return;
     if (sel !== lastSel) {

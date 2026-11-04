@@ -827,6 +827,9 @@ const ASSET_KIT = (function () {
                         line.signalPoleContourView = orthView || "3d";
                     }
                     if (part.signalPoleTopRing && edgeIndex >= 2) line.signalPoleSide = true;
+                    // ベベル直方体と同じ角ごとの輪郭候補を、複数部品にも付けられる。
+                    const seam = part.seamMarks?.[edgeIndex];
+                    if (seam) { line.seam = seam.key; line.seamApex = !!seam.apex; }
                     edgeIndex++;
                     if (part.signalSmoothSide) line.signalSmoothSide = true;
                     if (part.onFace) line.onFace = true;

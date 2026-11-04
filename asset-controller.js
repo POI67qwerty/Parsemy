@@ -617,7 +617,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             if (wasFloor) {
                 fitFloorPlan();
                 setMode("draw");
-            } else if (kind === "person") setStudioWorkspace("character");
+            }
             syncSel();
             renderFresh();
         } catch (err) {
@@ -1031,7 +1031,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         {
             key: "primitive",
             label: "プリミティブ",
-            kinds: ["rect", "box", "beveledBox", "circle", "cone", "sphere", "triPrism", "triPyramid"],
+            kinds: ["rect", "box", "beveledBox", "circle", "cone", "sphere", "triPrism", "triPyramid", "awning"],
         },
         {
             key: "building",
@@ -1065,7 +1065,6 @@ window.cityGridInstallAssetUI = function (bridge) {
             kinds: [
                 "gableRoof",
                 "shedRoof",
-                "awning",
                 "shopAwning",
                 "shopWindow",
                 "balcony",
@@ -1079,7 +1078,8 @@ window.cityGridInstallAssetUI = function (bridge) {
         // 既存の street キーを保ち、以前のタブ選択もそのまま復元できる。
         { key: "street", label: "街の設備", kinds: ["stairs", "pictureStairs", "ramp", "pathPipe", "wallSign", "windowGrid", "vendingMachine", "lightboxSign", "bezierCable"] },
         { key: "traffic", label: "交通・標識", kinds: ["crosswalk", "trafficSignal", "pedSignal", "signPost", "signPost2", "signTriangle", "signDiamond", "signCombo", "crossingSign", "guardPoleU", "guardPoleM", "streetCone", "streetPavement"] },
-        { key: "streetObjects", label: "小物・植栽", kinds: ["stool", "squareStool", "streetParcel", "streetBin", "streetMailbox", "streetPlant", "streetPlantBox", "shopWardrobe", "shopWardrobe2", "displayShelf", "paperLantern", "lanternString", "shopNoren"] },
+        { key: "streetObjects", label: "小物・植栽", kinds: ["streetParcel", "streetBin", "streetMailbox", "streetPlant", "streetPlantBox", "paperLantern", "lanternString", "shopNoren"] },
+        { key: "furniture", label: "家具", kinds: ["stool", "squareStool", "shopWardrobe", "shopWardrobe2", "displayShelf", "displayShelf2"] },
         { key: "person", label: "人間", kinds: ["person"] },
         // 車（人物の隣）。キャブは五角形の立体、荷台は直方体、タイヤは円柱で作る。
         // 寸法はすべて画面上の専用ハンドルで変えられる（engine-gizmo.js の vehicleGizmo）。

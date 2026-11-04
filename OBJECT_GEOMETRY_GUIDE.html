@@ -1,0 +1,1379 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>オブジェクト生成の原理</title>
+<style>
+:root{
+  --ink:#20272f; --sub:#5b6672; --line:#dbe2ea; --bg:#ffffff; --tint:#f5f8fc;
+  --navy:#12304f; --blue:#1565c0; --red:#d32f2f; --green:#2e7d32; --amber:#ffd54f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:#eef2f7; color:var(--ink);
+  font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",
+              "Meiryo",system-ui,-apple-system,sans-serif;
+  line-height:1.95; font-size:16px; letter-spacing:.01em;
+}
+.page{max-width:940px; margin:0 auto; background:var(--bg);
+  padding:54px 62px 90px; box-shadow:0 2px 24px rgba(20,40,70,.10);}
+@media (max-width:700px){ .page{padding:28px 20px 60px} body{font-size:15px} }
+
+/* ---- 見出し ---- */
+h1{
+  font-size:2.0em; line-height:1.5; margin:0 0 .2em; letter-spacing:.02em; color:var(--navy);
+  border-bottom:4px solid var(--navy); padding-bottom:.35em;
+}
+h1::before{
+  content:var(--kicker, "REFERENCE"); display:block; font-size:.34em; letter-spacing:.28em;
+  color:var(--blue); font-weight:700; margin-bottom:.9em;
+}
+h2{
+  font-size:1.42em; margin:2.6em 0 .9em; padding:.42em .0em .42em .6em; color:#fff;
+  background:linear-gradient(90deg,var(--navy),#2f6f9e 70%,#4b93c0);
+  border-radius:6px; letter-spacing:.02em;
+}
+h3{
+  font-size:1.14em; margin:2.0em 0 .7em; padding:.1em 0 .3em .55em;
+  color:var(--navy); border-left:7px solid var(--blue); border-bottom:1px dotted var(--line);
+}
+h4{ font-size:1.02em; margin:1.5em 0 .5em; color:var(--blue); }
+h2+*, h3+*, h4+*{ margin-top:.2em }
+
+p{ margin:.75em 0; text-align:justify; }
+strong{ color:var(--navy); }
+a{ color:var(--blue); text-decoration:none; border-bottom:1px solid #b8d4f0; }
+
+/* ---- マーカー・色文字 ---- */
+.mk{ background:linear-gradient(transparent 58%, var(--amber) 58%, #ffe680 96%, transparent 96%);
+     font-weight:700; padding:0 .06em; }
+.rd{ color:var(--red); font-weight:700; }
+.bl{ color:var(--blue); font-weight:700; }
+.gr{ color:var(--green); font-weight:700; }
+
+/* ---- コード ---- */
+code{
+  background:#fdf0f3; color:#b3135a; border:1px solid #f6d3dd; border-radius:4px;
+  padding:.06em .38em; font-size:.9em; font-weight:600; white-space:nowrap;
+  font-family:"SFMono-Regular",Consolas,"Courier New",monospace;
+}
+pre{
+  background:#10192b; color:#e6edf6; border-radius:8px; padding:16px 20px;
+  overflow-x:auto; line-height:1.65; border-left:6px solid var(--blue);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.06); margin:1em 0;
+}
+pre code{ background:none; border:0; color:inherit; padding:0; font-weight:400; white-space:pre;
+  font-size:.86em; }
+
+/* ---- 表 ---- */
+table{ width:100%; border-collapse:separate; border-spacing:0; margin:1.1em 0;
+  font-size:.9em; background:#fff; border:1px solid var(--line); border-radius:8px;
+  overflow:hidden; }
+thead th{ background:var(--navy); color:#fff; text-align:left; padding:10px 12px;
+  font-weight:700; font-size:.95em; letter-spacing:.02em; border-right:1px solid rgba(255,255,255,.15); }
+thead th:last-child{ border-right:0 }
+tbody td{ padding:9px 12px; border-top:1px solid var(--line); vertical-align:top; }
+tbody tr:nth-child(even){ background:#f7fafd; }
+tbody tr:hover{ background:#eef6ff; }
+td code{ white-space:normal; word-break:break-word }
+
+/* ---- 引用＝呼び出しボックス ---- */
+blockquote{
+  margin:1.1em 0; padding:14px 18px 14px 46px; position:relative;
+  background:var(--tint); border-left:6px solid var(--blue); border-radius:6px;
+  color:#33404e;
+}
+blockquote::before{
+  content:"▶"; position:absolute; left:16px; top:13px; color:var(--blue); font-size:.9em;
+}
+blockquote p{ margin:.3em 0 }
+blockquote.warn{ background:#fff5f5; border-left-color:var(--red) }
+blockquote.warn::before{ content:"!"; font-weight:900; color:var(--red); left:20px;
+  border:2px solid var(--red); border-radius:50%; width:15px; height:15px; line-height:14px;
+  text-align:center; font-size:.7em; top:17px; }
+blockquote.point{ background:#fffdf0; border-left-color:#e0a800 }
+blockquote.point::before{ content:"★"; color:#e0a800 }
+blockquote.term{ background:#f2f6ff; border-left-color:#5c6bc0 }
+blockquote.term::before{ content:"?"; font-weight:900; color:#3949ab }
+blockquote.calc{ background:#f4fbf6; border-left-color:var(--green) }
+blockquote.calc::before{ content:"f(x)"; font-weight:700; color:var(--green); font-size:.72em }
+
+/* ---- リスト ---- */
+ul,ol{ margin:.7em 0 .9em; padding-left:1.6em }
+li{ margin:.32em 0 }
+li::marker{ color:var(--blue); font-weight:700 }
+ul ul,ol ol,ul ol,ol ul{ margin:.25em 0 }
+
+hr{ border:0; border-top:2px dashed #cfd9e4; margin:2.4em 0 }
+
+/* ---- 目次 ---- */
+.toc{ background:var(--tint); border:1px solid var(--line); border-radius:10px;
+  padding:18px 26px 22px; margin:1.6em 0 2.4em; }
+.toc h2{ background:none; color:var(--navy); font-size:1.05em; padding:0;
+  border-bottom:2px solid var(--blue); border-radius:0; margin:.1em 0 .8em; }
+.toc ul{ margin:.2em 0 .4em; padding-left:1.35em; line-height:1.7 }
+.toc li{ margin:.12em 0 }
+.toc > ul > li{ margin:.3em 0 }
+.toc ul ul{ margin:.1em 0 .3em }
+.toc a{ border-bottom:none }
+.toc a:hover{ text-decoration:underline }
+
+/* ---- ページ先頭の小物 ---- */
+.lead{ color:var(--sub); font-size:.95em }
+.badge{ display:inline-block; background:var(--navy); color:#fff; font-size:.72em;
+  padding:.1em .6em; border-radius:99px; margin-right:.5em; letter-spacing:.08em }
+
+@media print{
+  body{ background:#fff } .page{ box-shadow:none; max-width:none; padding:0 }
+  pre{ box-shadow:none } h2{ -webkit-print-color-adjust:exact; print-color-adjust:exact }
+}
+</style>
+</head>
+<body>
+<div class="page" style="--kicker:'STUDIO DOCUMENT';">
+<h1 id="オブジェクト生成の原理">オブジェクト生成の原理</h1>
+<p>
+<strong>「この立体は、どんな計算でできているのか」を全部たどる資料</strong>
+</p>
+<p>
+City Grid Studio に並ぶアセット（直方体・建物・テント・屋根・人物…）は、
+<br>
+画像を貼っているのではなく、<strong>すべて数値から点を作り、点を線で結び、線の内側を三角形で塗って</strong>います。
+<br>
+この資料は、その計算を <strong>①座標 → ②投影 → ③形 → ④面 → ⑤編集</strong> の順に、
+<br>
+実際のコードの式とセットで説明するものです。
+</p>
+<blockquote><p><strong>読み方</strong>：読みやすい色付き版は <strong><code>OBJECT_GEOMETRY_GUIDE.html</code></strong> （<code>python3 build-guide.py OBJECT_GEOMETRY_GUIDE.md</code> で再生成）です。 <code>asset.js</code> の関数1個ずつの一覧は <strong>§12</strong>（この資料の中）にまとめました。 さらに詳しい行単位の説明は <code>ASSET_JS_GUIDE.html</code> にあります。</p></blockquote>
+<hr>
+<div class="toc">
+<h2 id="目次">目次</h2>
+<ul>
+<li><a href="#1-1個のオブジェクトが画面に出るまで">1. 1個のオブジェクトが画面に出るまで</a>
+</li>
+<li><a href="#2-座標系形を決める土台">2. 座標系（形を決める土台）</a>
+<ul>
+<li><a href="#21-ワールド座標は-x右y上z奥">2.1 <span class="bl">ワールド座標</span>は X=右／Y=上／Z=奥</a>
+</li>
+<li><a href="#22-オブジェクト-o-が持っている数字">2.2 オブジェクト <code>o</code> が持っている数字</a>
+</li>
+<li><a href="#23-l2wローカル座標--ワールド座標">2.3 <code>L2W</code>：<span class="bl">ローカル座標</span> → <span class="bl">ワールド座標</span></a>
+</li>
+<li><a href="#24-例外壁に沿うパーツwallsidebasis">2.4 例外：壁に沿うパーツ（<code>wallSideBasis</code>）</a>
+</li>
+</ul>
+</li>
+<li><a href="#3-カメラと投影3dを画面にする計算">3. カメラと投影（3Dを画面にする計算）</a>
+<ul>
+<li><a href="#31-cam視点の回転3段">3.1 <code>cam()</code>：視点の回転3段</a>
+</li>
+<li><a href="#32-scr透視投影">3.2 <code>scr()</code>：透視投影</a>
+</li>
+<li><a href="#33-正投影前・横・上のビュー">3.3 正投影（前・横・上のビュー）</a>
+</li>
+<li><a href="#34-scr3-と-co3dの点を線にする">3.4 <code>scr3</code> と <code>CO</code>：3Dの点を線にする</a>
+</li>
+<li><a href="#35-dens3点の間を球面で埋める">3.5 <code>dens3</code>：点の間を球面で埋める</a>
+</li>
+</ul>
+</li>
+<li><a href="#4-genshape基本図形の作り方">4. <code>genShape</code>：基本図形の作り方</a>
+</li>
+<li><a href="#5-共通部品assetjs-の下請け">5. 共通部品（asset.js の下請け）</a>
+</li>
+<li><a href="#6-アセット別の生成原理">6. アセット別の生成原理</a>
+<ul>
+<li><a href="#61-一覧表初期寸法・線画・三角形・外接範囲">6.1 一覧表（初期寸法・線画・三角形・<span class="bl">外接範囲</span>）</a>
+</li>
+<li><a href="#62-1個ずつの計算">6.2 1個ずつの計算</a>
+</li>
+<li><a href="#63-付属パーツテント・看板・ベランダの取り付け計算">6.3 付属パーツ（テント・看板・ベランダ）の取り付け計算</a>
+</li>
+<li><a href="#64-全アセット共通レシピ表">6.4 全アセット共通レシピ表</a>
+</li>
+</ul>
+</li>
+<li><a href="#7-面表示塗りの原理">7. 面表示（塗り）の原理</a>
+</li>
+<li><a href="#8-編集したときに何が作り直されるか">8. 編集したときに何が作り直されるか</a>
+</li>
+<li><a href="#9-数字の早見表">9. 数字の早見表</a>
+</li>
+<li><a href="#10-検算のしかた">10. <span class="gr">検算</span>のしかた</a>
+</li>
+<li><a href="#11-つまずきやすい所">11. つまずきやすい所</a>
+</li>
+<li><a href="#12-assetjs-の関数リファレンス全116個">12. <code>asset.js</code> の関数リファレンス（全116個）</a>
+<ul>
+<li><a href="#121-線画の材料ローカル座標で立体を描く部品">12.1 線画の材料（<span class="bl">ローカル座標</span>で立体を描く部品）</a>
+</li>
+<li><a href="#122-輪郭と分割の計算形の決定版を作る">12.2 輪郭と分割の計算（形の「決定版」を作る）</a>
+</li>
+<li><a href="#123-数値の取り出しと正規化描く前の下ごしらえ">12.3 数値の取り出しと<span class="bl">正規化</span>（描く前の下ごしらえ）</a>
+</li>
+<li><a href="#124-アセット別の線画1形状--1関数">12.4 アセット別の線画（<span class="mk">1形状 = 1関数</span>）</a>
+</li>
+<li><a href="#125-凹窓階層建物の専用計算凹みをつなげるための部品">12.5 凹窓階層建物の専用計算（凹みを「つなげる」ための部品）</a>
+</li>
+<li><a href="#126-パスパイプ用のベクトル演算">12.6 パスパイプ用のベクトル演算</a>
+</li>
+<li><a href="#127-人物の骨格">12.7 人物の骨格</a>
+</li>
+<li><a href="#128-入口と登録">12.8 入口と登録</a>
+</li>
+</ul>
+</li>
+<li><a href="#13-engine-toolsjs--engine-corejs-側の計算関数">13. <code>engine-tools.js</code> / <code>engine-core.js</code> 側の計算関数</a>
+</li>
+<li><a href="#14-実際の数値で1回とおす検算の例">14. 実際の数値で1回とおす（<span class="gr">検算</span>の例）</a>
+</li>
+</ul>
+</div>
+<hr>
+<h2 id="1-1個のオブジェクトが画面に出るまで">1. 1個のオブジェクトが画面に出るまで</h2>
+<pre><code>① 棚の定義表  ASSETS[kind] = { label, w, d, h, accent, … }
+        │ 配置ボタン → asset-controller.js が寸法を ra / rb / h へ変換
+        ▼
+② オブジェクト  o = { type:"asset", asset:"building", ra, rb, h, ca, cb, k, d, lift, rot, off, … }
+        │ ①値の正規化   normalizedAsset(o)     … 下限・上限へ丸める
+        │ ②形の組み立て assetLines(q)          … 1形状 = 1関数（linesBuilding など）
+        │     その中で pt() = L2W() を呼び、ローカル座標 → ワールド座標
+        │ ③線に包む     lineA / polyA           … { c, w, d3:true, p:[点列] }
+        ▼
+③ 線画の配列    [{...}, {...}]  → S（シーンの線）に積まれる
+        │ 投影  scr3() … ワールドの点 → 画面座標
+        ▼
+④ 画面に描画    strokeW() で線、drawObjectSurfaces() で塗り
+        ▲
+        └ もう1本、面用の流れ： exportSurfaceTriangles(o) が同じ o から三角形を作る
+           （線と面が同じ寸法計算を共有するので、形がズレない）</code></pre>
+<p>
+<strong>大事な性質</strong>：線も面も <strong>保存されているのは「数値（o）」だけ</strong>。
+<br>
+形は毎回 <code>o</code> から作り直されます。だから寸法を1つ変えると、
+<br>
+線も塗りも当たり判定も同時に変わり、ズレが起きません。
+</p>
+<blockquote class="point"><p>ポイント：<code>lines*</code> 関数は <strong><span class="bl">ローカル座標</span>（x=幅／y=奥行き／z=高さ）だけ</strong>を扱い、 ワールドへの変換は <code>L2W()</code>（＝<code>pt()</code>）が一手に引き受けます。 だから回転・移動・接着を足しても、形の式は書き換えずに済みます。</p></blockquote>
+<hr>
+<h2 id="2-座標系形を決める土台">2. 座標系（形を決める土台）</h2>
+<h3 id="21-ワールド座標は-x右y上z奥">2.1 <span class="bl">ワールド座標</span>は X=右／Y=上／Z=奥</h3>
+<p>
+このアプリのワールドは <strong>Y が上</strong> です（数学の教科書と同じ右手系）。
+</p>
+<table><thead><tr><th>軸</th><th>向き</th><th>UI 上の呼び方</th></tr></thead><tbody>
+<tr><td><strong>X</strong></td><td>右</td><td>左右（赤）</td></tr>
+<tr><td><strong>Y</strong></td><td>上</td><td>上下（青）※ギズモ表示名は Z</td></tr>
+<tr><td><strong>Z</strong></td><td>奥（手前が −Z）</td><td>手前奥（緑）※ギズモ表示名は Y</td></tr>
+</tbody></table>
+<blockquote class="term"><p>用語：ギズモの表示名は「上下＝Z／手前奥＝Y」に統一していますが、 内部のワールド座標は上表のままです（<code>P.cx / P.ch / P.cz</code> も従来どおり）。 表示名と内部名が違うのは <strong>既存の保存データを壊さないため</strong>です。</p></blockquote>
+<p>
+面の向きは <code>k</code> で表します。<code>PL[k]</code> が「その面のなかの2軸」を返します。
+</p>
+<pre><code class="language-js">const PL = { 0: [2, 1], 1: [0, 2], 2: [0, 1] };
+//        k=0 → 面内は Z と Y（左右を向いた面）
+//        k=1 → 面内は X と Z（地面に平行な面）★ アセットの標準
+//        k=2 → 面内は X と Y（手前を向いた面）</code></pre>
+<p>
+アセットはほぼ全部 <strong><code>k=1, d=−1</code></strong> で作られます。これは
+<br>
+「地面に平行な面（幅×奥行き）を、上へ押し出す」という意味です。
+</p>
+<h3 id="22-オブジェクト-o-が持っている数字">2.2 オブジェクト <code>o</code> が持っている数字</h3>
+<table><thead><tr><th>プロパティ</th><th>意味</th><th>例（建物）</th></tr></thead><tbody>
+<tr><td><code>ra</code> / <code>rb</code></td><td>幅の<strong>半分</strong> / 奥行きの<strong>半分</strong></td><td>2 / 1.5（＝4 × 3 m）</td></tr>
+<tr><td><code>h</code></td><td>高さ（実寸）</td><td>5</td></tr>
+<tr><td><code>ca</code> / <code>cb</code></td><td>面内の中心位置</td><td>−14.715 / 17.5914</td></tr>
+<tr><td><code>k</code> / <code>d</code></td><td>面の向き / 面の位置（<span class="bl">法線方向</span>）</td><td>1 / −1</td></tr>
+<tr><td><code>lift</code></td><td>浮かせ量（<strong><code>d</code> を1とした割合</strong>）</td><td>0</td></tr>
+<tr><td><code>rot</code></td><td>面内の回転（度）</td><td>0</td></tr>
+<tr><td><code>off</code></td><td>3軸の微小オフセット <code>[x,y,z]</code></td><td><code>[0,0,0]</code></td></tr>
+<tr><td><code>c</code> / <code>w</code></td><td>線の色 / 太さ</td><td><code>#222222</code> / 2</td></tr>
+</tbody></table>
+<blockquote class="warn"><p>注意：<code>ra</code> / <code>rb</code> が「半分」です。<code>w = ra*2</code> に直してから形の式へ入れる、 というのが <code>assetLines()</code> の最初の1行です。</p></blockquote>
+<h3 id="23-l2wローカル座標--ワールド座標">2.3 <code>L2W</code>：ローカル座標 → ワールド座標</h3>
+<p>
+すべての形は、最後にこの1本を通ります。
+</p>
+<pre><code class="language-js">function L2W(o, x, y, z) {
+    const [iu, iv] = PL[o.k];          // 面内の2軸（k=1 なら iu=0(X), iv=2(Z)）
+    const cs = Math.cos(o.rot * DG),   // DG = π/180
+          sn = Math.sin(o.rot * DG);
+    const v = [0, 0, 0];
+    v[o.k] = o.d - o.d * o.lift - o.d * z;      // ① 法線方向（＝高さ）
+    v[iu]  = o.ca + x * cs - y * sn;            // ② 面内の横（回転つき）
+    v[iv]  = o.cb + x * sn + y * cs;            // ③ 面内の縦（回転つき）
+    const f = o.off || [0, 0, 0];
+    return [v[0] + f[0], v[1] + f[1], v[2] + f[2]];
+}</code></pre>
+<h4 id="パーツの外側の回転spin--spinpivot-結合体を回すため">パーツの外側の回転（<code>spin</code> / <code>spinPivot</code>）— 結合体を回すため</h4>
+<p>
+<code>k = 0</code> / <code>k = 2</code>（縦の面）は <code>rot</code> が「面の中の回転」になるため、**上下軸まわりの回転（ヨー）を
+<br>
+表せません**。そこで座標変換の一番外側に、面の向きに依存しないヨーを持たせています。
+</p>
+<table><thead><tr><th>項目</th><th>内容</th></tr></thead><tbody>
+<tr><td><code>spin</code></td><td>ワールド上下軸まわりの角度（度）</td></tr>
+<tr><td><code>spinPivot</code></td><td>その回転中心（ワールド座標 <code>[x,y,z]</code>）</td></tr>
+</tbody></table>
+<pre><code class="language-js">function applyPartSpin(o, v) {              // 1点 v にヨーを掛ける
+    const d = o.spin, p = o.spinPivot;
+    if (!d || !p) return v;
+    const a = d * DG, cs = Math.cos(a), sn = Math.sin(a),
+          dx = v[0] - p[0], dz = v[2] - p[2];
+    return [p[0] + dx * cs + dz * sn, v[1], p[2] - dx * sn + dz * cs];
+}</code></pre>
+<p>
+掛ける順番は <strong>面の中（<code>rot</code>）→ 平行移動（<code>off</code>）→ <code>spin</code> → 傾き（<code>rotX</code>/<code>rotZ</code>）</strong>。
+<br>
+ただし <strong><code>rot</code> と <code>spin</code> は＋の向きが逆</strong>（<code>rot</code> は (x,z) 平面で＋が反時計、<code>spin</code> は＋が時計）。
+<br>
+結合体を回すときは <code>k=1</code> のパーツの <code>rot</code> から角度を<strong>引く</strong>ことで向きをそろえている
+<br>
+（そろえないと「中心は時計回り・形だけ反時計回り」になり、角の点が最大1.0mずれる。§5V-4）。
+<br>
+<code>l2wRaw()</code>・<code>genShape()</code> の点の式・<code>L2W()</code> の壁沿い基底の分岐が同じ順番なので、
+<br>
+線画・面・当たり判定・ハンドルがそろって回ります。
+<br>
+<code>translateDefinition()</code> は形と <code>spinPivot</code> を同じ量だけ動かすので、移動しても軸がずれません。
+</p>
+<p>
+結合体を回すときは、全パーツが同じ <code>spinPivot</code> を共有するので<strong>剛体として回ります</strong>
+<br>
+（<code>rotateCompoundBy()</code>／<code>spinComposePivot()</code> は <code>CITY_GRID_STUDIO.md</code> §5V）。
+</p>
+<h4 id="傾きrotx--rotz-画面の回転リングで作る角度">傾き（<code>rotX</code> / <code>rotZ</code>）— 画面の回転リングで作る角度</h4>
+<p>
+上下（ワールドY）まわりの回転は従来どおり <code>rot</code>（画面上の回転）ですが、
+<br>
+<strong>左右（ワールドX）・手前奥（ワールドZ）まわりの回転</strong>は <code>rotX</code> / <code>rotZ</code> として持ちます。
+</p>
+<pre><code class="language-js">function objectTiltMatrix(o) {
+    const ax = (o.rotX || 0)·DG,  az = (o.rotZ || 0)·DG;
+    if (!ax &amp;&amp; !az) return null;              // 傾いていなければ何もしない（今までと同じ）
+    // R = Rz(az) · Rx(ax)
+    return [
+        [ cz, -sz·cx,  sz·sx],
+        [ sz,  cz·cx, -cz·sx],
+        [  0,     sx,     cx],
+    ];
+}
+// ローカル原点を中心に回す（中心は「高さの真ん中」＝ l2wRaw(o,0,0,h/2)）
+P' = center + M · (P − center)</code></pre>
+<p>
+<code>L2W</code> の最後でこの回転を掛けるので、<strong>線画・面の三角形・当たり判定・ハンドル</strong>が
+<br>
+すべて同じだけ傾きます。<code>rot</code>（上下）と <code>rotX</code>/<code>rotZ</code>（左右・手前奥）は独立に足せます。
+</p>
+<blockquote class="point"><p>ポイント：傾きの中心を「底面」ではなく「高さの真ん中」にしています。 底面を中心にすると、傾けたときに下の角が地面へ潜り込んで「倒れた」ように見えるためです。 回転角は画面のリングを掴んで決め、<strong>15°刻みでスナップ</strong>（Shiftで自由）します。</p></blockquote>
+<p>
+<code>k=1, d=−1</code> を代入すると、こうなります（アセットの標準形）。
+</p>
+<pre><code>ワールドX = ca + x·cosθ − y·sinθ
+ワールドY = −1 + lift + z          ← 高さ
+ワールドZ = cb + x·sinθ + y·cosθ</code></pre>
+<p>
+つまり <strong><code>z</code> はそのまま上へ</strong>（<code>−d·z = +z</code>）、<strong>x/y は回転行列で90°回る</strong>だけ。
+</p>
+<blockquote class="calc"><p>計算：<code>v[k] = d − d·lift − d·z</code> の <code>−d·z</code> がポイント。 <code>d</code> が負（＝面が手前向き）だと <code>−d = +1</code> になり、<code>z</code> は上向きに伸びます。 <code>d</code> が正のオブジェクト（奥向きの面）では上下が反転するので、アセットは必ず <code>d=−1</code> で作ります。</p></blockquote>
+<h3 id="24-例外壁に沿うパーツwallsidebasis">2.4 例外：壁に沿うパーツ（<code>wallSideBasis</code>）</h3>
+<p>
+横壁看板のように「建物の横壁に貼り付く」パーツは、水平面＋高さの式では表せません。
+<br>
+そこで親の姿勢から <strong>正規直交基底</strong>（origin / u / v / n）を作り、そこへ載せます。
+</p>
+<pre><code>ワールド = origin + u·x + v·y + n·z      （n = 壁の外向き法線）</code></pre>
+<p>
+基底は <code>syncAttachedPart()</code> が親の移動・回転・寸法変更のたびに更新します。
+<br>
+だから親を回しても看板は壁に貼り付いたまま動きます。
+</p>
+<h3 id="25-積層建物の-custompt-も-l2w-に統一">2.5 積層建物の <code>customPt</code> も <code>L2W</code> に統一</h3>
+<p>
+積層建物（縁付き・ベベル・凹窓）は寸法を <code>floors[]</code> に持ち、線画を
+<br>
+「x=幅／y=奥行き／z=高さ」のローカル座標で組み立てます。その変換が <code>customPt</code> です。
+</p>
+<pre><code class="language-js">const customPt = (o, x, y, z) =&gt; L2W(o, x, y, z);</code></pre>
+<p>
+以前は独自の式（回転 <code>rot</code> だけを掛ける）だったため、**生成面（<code>k</code>）を X／Z にしても
+<br>
+積層建物だけ向きが変わらない・傾けても傾かない**という差が出ていました。
+<br>
+<code>k=1, rot=0</code> のとき両者は完全に同じ結果なので、既存データの見た目は変わりません。
+</p>
+<hr>
+<h2 id="3-カメラと投影3dを画面にする計算">3. カメラと投影（3Dを画面にする計算）</h2>
+<h3 id="31-cam視点の回転3段">3.1 <code>cam()</code>：視点の回転3段</h3>
+<p>
+ワールドのベクトルを、カメラ座標へ移します。順番は <strong>水平回転 → 上下 → ロール</strong>。
+</p>
+<pre><code class="language-js">x1 =  v[0]·cos(yaw) + v[2]·sin(yaw)
+z1 = -v[0]·sin(yaw) + v[2]·cos(yaw)      // ← yaw は Y 軸まわり
+
+y2 =  v[1]·cos(pitch) - z1·sin(pitch)
+z2 =  v[1]·sin(pitch) + z1·cos(pitch)    // ← pitch は X 軸まわり
+
+→ ロール（魚眼モードのみ）を掛けて [x, y, z] を返す</code></pre>
+<p>
+カメラの位置は <code>camPos() = [P.cx, P.ch − 1, P.cz]</code>、逆向きの移動は <code>CO() = [−cx, 1−ch, −cz]</code>。
+<br>
+3D点を投影するときは <strong><code>点 + CO()</code></strong>（カメラからの相対位置）にしてから <code>cam()</code> へ入れます。
+</p>
+<h3 id="32-scr透視投影">3.2 <code>scr()</code>：透視投影</h3>
+<pre><code class="language-js">const q = cam(v);
+if (q[2] &lt;= 0.02) return { ok:false };      // カメラの後ろ／真横は描かない
+const f = (W * P.lens) / 36;                // 焦点距離（36mm センサー基準）
+x = W/2 + (f * q[0]) / q[2];
+y = (H * P.hz) / 100 - (f * q[1]) / q[2];   // hz は水平線の高さ（%）</code></pre>
+<p>
+<code>P.lens</code> を大きくすると望遠（画角が狭い）、小さくすると広角。
+<br>
+<code>hz</code> は「地平線を画面のどこに置くか」で、アイレベル表現に効きます。
+</p>
+<h3 id="33-正投影前・横・上のビュー">3.3 正投影（前・横・上のビュー）</h3>
+<p>
+間取り編集の3ビューは透視ではなく <strong>正投影</strong>（平行投影）です。
+<br>
+基底だけを差し替えて、同じ処理で3方向を出します。
+</p>
+<table><thead><tr><th>ビュー</th><th>right（画面右）</th><th>up（画面上）</th><th>depth（奥行き）</th></tr></thead><tbody>
+<tr><td>正面</td><td>X</td><td>Y</td><td>Z</td></tr>
+<tr><td>真横</td><td>Z</td><td>Y</td><td>−X</td></tr>
+<tr><td>真上</td><td>X</td><td>Z</td><td>−Y</td></tr>
+</tbody></table>
+<pre><code class="language-js">sc = orthScale();                       // 通常は min(W,H)/7.2（1mあたりのpx）
+x = ax + dot(v, right) * sc;
+y = ay - dot(v, up) * sc;
+depth = dot(v, depth);                  // 隠れ線の判定用</code></pre>
+<p>
+正投影は <strong>距離で大きさが変わらない</strong>ので、寸法の読み取りと編集に向いています。
+<br>
+3D との差が出ないように、正投影でも同じ <code>L2W</code> の点を使っています。
+</p>
+<h3 id="34-scr3-と-co3dの点を線にする">3.4 <code>scr3</code> と <code>CO</code>：3Dの点を線にする</h3>
+<pre><code class="language-js">const scr3 = (p) =&gt; (orthView ? scr(p) : scr(V.nrm(p)));</code></pre>
+<ul>
+<li><strong>正投影</strong> … 点そのものを投影（平行投影なので位置が意味を持つ）
+</li>
+<li><strong>透視</strong> … カメラからの <strong>向きベクトルに<span class="bl">正規化</span></strong>してから投影
+</li>
+</ul>
+<p>
+線の点列は「カメラからの向き」で持っているので、<strong>視点を回すと線が追従</strong>します。
+</p>
+<h3 id="35-dens3点の間を球面で埋める">3.5 <code>dens3</code>：点の間を球面で埋める</h3>
+<p>
+2点の間を、角度で細かく分割して補間します（<code>0.004 rad</code> 刻み）。
+</p>
+<pre><code class="language-js">n = ceil( acos( dot(nrm(u + CO), nrm(v + CO)) ) / 0.004 )</code></pre>
+<p>
+直線を「大円」として扱うので、魚眼（5点・6点透視）でも線が曲がって正しく見えます。
+<br>
+正投影ビューでは投影が線形なので、この補間は省いて高速化しています。
+</p>
+<hr>
+<h2 id="4-genshape基本図形の作り方">4. <code>genShape</code>：基本図形の作り方</h2>
+<p>
+アセット以外の素の図形（四角・円・直方体・円柱…）は <code>engine-core.js</code> の <code>genShape(o)</code> が作ります。
+<br>
+<code>asset.js</code> は <code>genShape</code> を <strong>包み直して</strong>、<code>type === "asset"</code> だけ <code>genAsset()</code> へ振り分けます。
+</p>
+<pre><code class="language-js">genShape = (o) =&gt; o?.type === "asset" ? genAsset(o) : baseGenShape(o);</code></pre>
+<h3 id="41-面内座標--押し出し">4.1 面内座標 → 押し出し</h3>
+<pre><code class="language-js">const [iu, iv] = PL[k];
+const q = (a, b, ee = 0) =&gt; {
+    v[k]  = d - d*lift + ee;               // ee = 押し出し量
+    v[iu] = ca + (a-ca)*cs - (b-cb)*sn;    // 中心まわりに rot 回転
+    v[iv] = cb + (a-ca)*sn + (b-cb)*cs;
+};
+const e = -d * h;                          // 押し出し量（h は高さ）</code></pre>
+<p>
+<code>h</code> を押し出すと <code>k</code> 方向へ <code>e = −d·h</code> 伸びます。<code>d=−1</code> なら上へ <code>+h</code>。
+</p>
+<h3 id="42-box-の隠れ線判定">4.2 <code>box</code> の隠れ線判定</h3>
+<p>
+直方体は 8頂点・6面・12辺を作り、<strong>見えている面に属する辺だけ</strong>を残します。
+</p>
+<pre><code class="language-js">vis[f] = dot(法線, 面の中心 → カメラ) &lt; 0
+辺は「両隣の面のどちらかが見えていれば」描く</code></pre>
+<p>
+法線の向きは、面の中心が箱の中心より外を向くように反転させてから判定します
+<br>
+（巻き方向に依存しないため）。<code>ob.wf</code>（ワイヤーフレーム）が真なら全辺を描きます。
+</p>
+<h3 id="43-その他の素の図形">4.3 その他の素の図形</h3>
+<table><thead><tr><th>type</th><th>作り方</th></tr></thead><tbody>
+<tr><td><code>rect</code></td><td>4隅を結ぶ1本の閉ポリゴン。<code>extrude:true</code> なら上の面と4本の縦辺も</td></tr>
+<tr><td><code>circ</code></td><td>楕円リング（既定12分割）。押し出し時は上下2本＋<strong>視点から見える左右の母線2本</strong></td></tr>
+<tr><td><code>cyl</code></td><td>上下の円。見えない側は「手前の弧だけ」に切り、縦の稜線は描かない</td></tr>
+<tr><td><code>triPrism</code></td><td>前後の三角形＋3本の稜線</td></tr>
+<tr><td><code>triPyramid</code></td><td>底面三角形＋頂点への3本</td></tr>
+</tbody></table>
+<hr>
+<h2 id="5-共通部品assetjs-の下請け">5. 共通部品（asset.js の下請け）</h2>
+<p>
+アセットの形は、ほぼこの部品の組み合わせでできています。
+<br>
+<strong>すべてローカル座標（x=幅／y=奥行き／z=高さ）だけ</strong>を扱います。
+</p>
+<table><thead><tr><th>部品</th><th>何をするか（式）</th></tr></thead><tbody>
+<tr><td><code>pt(o,x,y,z)</code></td><td><code>L2W</code> の別名。ローカル→ワールド</td></tr>
+<tr><td><code>lineA(o,pts,c,w)</code></td><td>折れ線を <code>{c,w,ob,d3:true,p:dens3(点列)}</code> に包む（<strong>線画の基本単位</strong>）</td></tr>
+<tr><td><code>polyA(o,pts,c,w)</code></td><td><code>lineA</code> に「先頭点を末尾へ足す」＝閉じた多角形</td></tr>
+<tr><td><code>boxA(o,w,d,z0,z1)</code></td><td>底面・上面の四角＋4本の縦辺（計6本）</td></tr>
+<tr><td><code>ringA(o,rx,ry,z,n)</code></td><td>楕円リング。<code>x=rx·cos t, y=ry·sin t, z</code></td></tr>
+<tr><td><code>spokesA(...)</code></td><td>2つのリングの対応点を結ぶ縦の補助線（円柱・ランタン）</td></tr>
+<tr><td><code>wireBoxA(o,cx,cy,w,d,z0,z1)</code></td><td>中心を指定できる <code>boxA</code>（部品を並べるとき用）</td></tr>
+<tr><td><code>wireCylinderA / wirePrismA / wirePyramidA</code></td><td>任意の多角形を押し出した立体の枠線</td></tr>
+<tr><td><code>rect2DOutlineA / quadFaceA / arcPointsA / discOutlineA</code></td><td>1枚の面・弧・円板を描く</td></tr>
+<tr><td><code>stairsRunA / latticePanelA</code></td><td>階段一式 / 格子パネル一式</td></tr>
+<tr><td><code>beveledBoxFootprint(w,d,b,seg)</code></td><td>4隅を円弧で面取りした平面輪郭（<strong>形の決定版</strong>）</td></tr>
+<tr><td><code>cornerCutFootprint(w,d,b,corner)</code></td><td>1隅を切った5角形の輪郭</td></tr>
+<tr><td><code>offsetPolyline2D(pts,dist)</code></td><td>折れ線を<span class="bl">法線方向</span>へずらす（<span class="bl">マイター</span>交点で折れ点を作る）</td></tr>
+<tr><td><code>polygonEarClip(pts)</code></td><td>凹んだ多角形の三角形分割（<span class="bl">耳切り法</span>）</td></tr>
+<tr><td><code>spanSplit / evenSpaced / linearRepeatOffsets</code></td><td>幅を等分する・等間隔に並べる</td></tr>
+<tr><td><code>assetDimensions / assetNum / assetBool</code></td><td>寸法の取り出しと安全な数値変換</td></tr>
+</tbody></table>
+<h3 id="ベベル輪郭の式beveledboxfootprint">ベベル輪郭の式（<code>beveledBoxFootprint</code>）</h3>
+<p>
+4隅の中心を内側へ <code>b</code> だけ寄せ、そこを半径 <code>b</code> の円弧で結びます。
+</p>
+<pre><code>角の中心： (±(hw−b), ±(hd−b))     hw=w/2, hd=d/2
+点：      中心 + b·(cosθ, sinθ)    θ を90°ずつ、各角を segments 分割</code></pre>
+<p>
+<code>segments=1</code> なら「1枚の平面で面取り（＝隅切り）」、<code>segments=4</code> なら丸みのあるベベル。
+<br>
+<code>b=0</code> なら普通の長方形の4点に戻ります。
+</p>
+<blockquote><p><strong>ベベルの面は線にしない</strong>（2026-11-02、依頼28-②で確定）： 面取りの弧の上にある縦の稜線は <code>bevelEdgeKind(index, offset, segments)</code> が <code>2</code> を返すので描きません。角ごとに残る1本（<code>1</code>）は <code>line.seam = 1</code> を付けておき、 <strong>面ONのときは描きません</strong>（線だけ表示では形が読めるように描きます）。 弧の両端だけ残す旧ルールでは、角をはさむ平行な2本が「二重線」に見え、 角ごとに1本残す案では「いちばん手前の角にだけ縦線が1本」になっていました。 凹窓階層建物（弧の上の縦線を描かない）と同じ扱いに揃えています。 ベベル階層建物は 169 → 73 → <strong>0本</strong>（線だけ表示では32本）、 ベベル直方体（押し出し2m）は 22 → 10 → <strong>0本</strong>（線だけ表示では4本）。</p></blockquote>
+<blockquote class="point"><p>ポイント：この1つの輪郭点列を、<strong>線画・面の三角形・<span class="bl">外接範囲</span></strong>が共有します。 だから「見た目の角」と「当たり判定の角」が食い違いません。</p></blockquote>
+<h3 id="折れ線オフセットoffsetpolyline2d">折れ線オフセット（<code>offsetPolyline2D</code>）</h3>
+<p>
+屋根の板厚を作るときに使う計算です。
+<br>
+各線分を法線 <code>n = (dz, −dx)/|…|</code> 方向へ <code>dist</code> ずらし、
+<br>
+隣り合う直線の <strong>交点</strong> を新しい折れ点にします（<span class="bl">マイター</span>）。
+</p>
+<pre><code>交点 t = cross(P_i − P_{i−1}, dir_i) / cross(dir_{i−1}, dir_i)</code></pre>
+<p>
+平行（<code>cross ≈ 0</code>）のときは点をそのまま使うので、0除算になりません。
+</p>
+<hr>
+<h2 id="6-アセット別の生成原理">6. アセット別の生成原理</h2>
+<h3 id="61-一覧表初期寸法・線画・三角形・外接範囲">6.1 一覧表（初期寸法・線画・三角形・<span class="bl">外接範囲</span>）</h3>
+<p>
+実測値（2026-11-01、<code>cyberpunk-city-studio.html</code> をブラウザで開き、各アセットを1個ずつ
+<br>
+配置したときの「増えた線の本数」「<code>exportSurfaceTriangles().length</code>」
+<br>
+「追加された線の点列の外接範囲」を読み取ったもの）。
+</p>
+<table><thead><tr><th>アセット</th><th>表示名</th><th>初期寸法 w×d×h (m)</th><th>線画</th><th>三角形</th><th>外接範囲 (w×h×d)</th></tr></thead><tbody>
+<tr><td><code>rect</code></td><td>長方形</td><td>1.5×1.0×0</td><td>1</td><td>2</td><td>1.5×0×1.0</td></tr>
+<tr><td><code>box</code></td><td>直方体</td><td>3.2×2.4×1.8</td><td>6</td><td>12</td><td>3.2×1.8×2.4</td></tr>
+<tr><td><code>beveledBox</code></td><td>ベベル直方体</td><td>3.2×2.4×0</td><td>1</td><td>80</td><td>3.2×0×2.4</td></tr>
+<tr><td><code>cornerCutBox</code></td><td>隅切り直方体</td><td>4.2×3.6×3.6</td><td>15</td><td>20</td><td>3.6×3.6×4.2</td></tr>
+<tr><td><code>circle</code></td><td>円</td><td>1.25×1.25×0</td><td>1</td><td>128</td><td>1.25×0×1.25</td></tr>
+<tr><td><code>cone</code></td><td>円錐</td><td>1.25×1.25×1.45</td><td>3</td><td>64</td><td>1.25×1.45×1.25</td></tr>
+<tr><td><code>sphere</code></td><td>球体</td><td>1.3×1.3×1.3</td><td>1</td><td>576</td><td>1.0×1.3×0.83</td></tr>
+<tr><td><code>triPrism</code></td><td>三角柱</td><td>1.4×1.8×1.25</td><td>5</td><td>10</td><td>1.4×1.25×1.8</td></tr>
+<tr><td><code>triPyramid</code></td><td>三角錐</td><td>1.5×1.5×1.45</td><td>4</td><td>5</td><td>1.5×1.45×1.5</td></tr>
+<tr><td><code>building</code></td><td>開口のある建物</td><td><strong>4×3×5</strong></td><td>17</td><td>38</td><td>4×5×3</td></tr>
+<tr><td><code>buildingAwning</code></td><td>テント付き建物</td><td><strong>4×3×5</strong>（親）＋ 3×1×1（子テント）</td><td>6＋6</td><td>12＋12</td><td>4×5×4.01（親＋子）</td></tr>
+<tr><td><code>buildingSign</code></td><td>看板付き開口建物</td><td><strong>4×3×5</strong>（親）＋ 3×0.5×1（子看板）</td><td>17＋6</td><td>38＋12</td><td>4×5×3.51（親＋子）</td></tr>
+<tr><td><code>stackedBuilding</code></td><td>縁付き階層建物</td><td>4×3×8.98</td><td>41</td><td>96</td><td>4.36×8.98×3.36</td></tr>
+<tr><td><code>recessedStackedBuilding</code></td><td>凹窓階層建物</td><td>5×3.6×12.5</td><td>76</td><td>384</td><td>5.1×12.5×3.7</td></tr>
+<tr><td><code>beveledStackedBuilding</code></td><td>ベベル縁付き階層建物</td><td>4×3×8.98</td><td>41（線だけ表示）</td><td>640</td><td>4.36×8.98×3.36</td></tr>
+<tr><td><code>gableRoof</code></td><td>切妻屋根</td><td>4.2×3.2×1.35</td><td>12</td><td>20</td><td>4.56×1.5×3.56</td></tr>
+<tr><td><code>shedRoof</code></td><td>片流れ屋根</td><td>4.2×3.2×1.1</td><td>10</td><td>12</td><td>4.52×1.23×3.52</td></tr>
+<tr><td><code>stairs</code></td><td>階段</td><td>1.45×2.4×0.78</td><td>32</td><td>52</td><td>1.45×0.78×2.4</td></tr>
+<tr><td><code>crosswalk</code></td><td>横断歩道</td><td>3.2×4.2×0.02</td><td>9</td><td>2</td><td>3.2×0×4.2</td></tr>
+<tr><td><code>ramp</code></td><td>スロープ</td><td>1.45×3.6×0.78</td><td>5</td><td>8</td><td>1.45×0.78×3.6</td></tr>
+<tr><td><code>pathPipe</code></td><td>パスパイプ</td><td>2.76×2.56×0.36</td><td>19</td><td>180</td><td>2.58×0.34×2.38</td></tr>
+<tr><td><code>awning</code></td><td>店舗テント</td><td><strong>3×1×0.35</strong></td><td>6</td><td>12</td><td>3×0.35×1</td></tr>
+<tr><td><code>balcony</code></td><td>壁付けベランダ</td><td>3.2×1.8×1.25</td><td>13</td><td>48</td><td>3.2×1.25×1.8</td></tr>
+<tr><td><code>uWall</code></td><td>コの字壁</td><td>3.2×1.8×1.1</td><td>10</td><td>36</td><td>3.2×1.1×1.8</td></tr>
+<tr><td><code>stall</code></td><td>屋台</td><td>2.4×1.4×2.4</td><td>21</td><td>60</td><td>2.4×2.4×1.88</td></tr>
+<tr><td><code>railing</code></td><td>手すり</td><td>2×1.2×1.05</td><td>110</td><td>228</td><td>2×1.05×1.2</td></tr>
+<tr><td><code>stool</code></td><td>丸椅子</td><td>0.36×0.36×0.45</td><td>12</td><td>192</td><td>0.36×0.45×0.36</td></tr>
+<tr><td><code>wallSign</code></td><td>壁付け看板（単体）</td><td>1.6×0.26×1.8</td><td>40</td><td>112</td><td>1.96×1.8×0.26</td></tr>
+<tr><td><code>windowGrid</code></td><td>窓グリッド</td><td>3.6×0.12×2.4</td><td>22</td><td>12</td><td>3.6×2.4×0.12</td></tr>
+<tr><td><code>person</code></td><td>人物</td><td>0.46×0.3×1.7</td><td>25</td><td>300</td><td>1.03×1.7×0.29</td></tr>
+</tbody></table>
+<blockquote><p><strong>計算の読み方</strong>：<code>線画</code> は追加したときに <code>S</code> へ積まれる線の本数、 <code>三角形</code> は <code>exportSurfaceTriangles(o).length</code>、<code>外接範囲</code> は 追加した線の点列の最小・最大（幅×高さ×奥行き）です。 人物の外接範囲が <code>1.03</code> 幅になっているのは、腕を開いたぶんも含むためです。</p></blockquote>
+<p>
+<code>wallSideSign</code>（横壁看板）は棚には出さず、建物の横壁へ接着する専用アセットです。
+</p>
+<h3 id="62-1個ずつの計算">6.2 1個ずつの計算</h3>
+<h4 id="box直方体-すべての基準"><code>box</code>（直方体）— すべての基準</h4>
+<pre><code>w = 2ra, d = 2rb
+底面4隅 (x=±w/2, y=±d/2, z=0) ／ 上面4隅（同じで z=h）
+→ boxA() が 底面・上面・4本の縦辺 = 6本の線
+→ 面は 6面 × 2三角形 = 12三角形</code></pre>
+<h4 id="beveledboxベベル直方体"><code>beveledBox</code>（ベベル直方体）</h4>
+<pre><code>輪郭 = beveledBoxFootprint(w, d, bevelOffset, bevelSegments)   // 4隅を円弧で面取り
+z0=0, z1=h に同じ輪郭を置き、対応する頂点を縦辺で結ぶ
+h=0（未押し出し）なら 1本の平面ポリゴンだけ</code></pre>
+<p>
+<code>bevelOffset</code> の上限は <code>min(w,d)/2 − 0.001</code>（＝角が消えて丸にならない限界）。
+</p>
+<h4 id="cornercutbox隅切り直方体"><code>cornerCutBox</code>（隅切り直方体）</h4>
+<pre><code>5角形の輪郭：(-hw+b, -hd) → (hw, -hd) → (hw, hd) → (-hw, hd) → (-hw, -hd+b)
+切り口の辺と、切り口側の2本の縦辺だけ赤（cutColor）
+開口ON：切り口の中央を基準に 幅 openingW・高さ openingH・奥行き openingDepth の
+        空洞を、切り口の法線（inward）方向へ掘る</code></pre>
+<p>
+<code>inward</code> は「切り口の接線を90°回した向き」のうち、
+<br>
+重心の側を向くほうを選びます（＝必ず内側へ掘れる）。
+<br>
+奥行きの上限は <code>cornerCutOpeningRayDistance()</code> = 切り口の中央から内側へ向かう光線が
+<br>
+反対側の辺に当たるまでの距離 − 0.025 m。
+</p>
+<h4 id="sign看板・wallsign壁付け看板"><code>sign</code>（看板）・<code>wallSign</code>（壁付け看板）</h4>
+<pre><code>看板：外枠 = boxA(w, d, 0.08h, 0.82h)
+      絵枠 = faceW × faceH の四角を board の手前 y へ（±fy ぶん浮かす）
+壁付け看板：板の輪郭（幅×高さ）を厚み方向へ押し出した箱
+      ベベルON なら wallSignFacePoints() = beveledBoxFootprint(幅, 高さ, offset, seg)
+      金具 = 板の左側面（−x）から bracketLength だけ横へ伸びる直方体を 0〜3本
+             高さは z = 高さ·(i+1)/(本数+1) − 高さ/2（中心基準で均等）</code></pre>
+<h4 id="wallsidesign横壁看板"><code>wallSideSign</code>（横壁看板）</h4>
+<p>
+親の横壁に沿う基底 <code>wallSideBasis</code> を使うため、<code>L2W</code> が通常の <code>k</code> 式ではなく
+<br>
+<code>origin + u·x + v·y + n·z</code> になります（§2.4）。
+<br>
+板は縦×横×厚み、金具は板の裏（壁側）から出る直方体で、本数は 0〜3。
+</p>
+<h4 id="awning店舗テント"><code>awning</code>（店舗テント）</h4>
+<pre><code>half = d/2, baseFrontY = -d/2
+edgeY : -d/2 〜 +d/2−0.025（前縁の奥行き）
+edgeZ : 0 〜 h          （前縁の高さ。0 まで下げると三角柱）
+thickness = clamp(awningThickness, 0.03, 0.45h) 既定 max(0.05, 0.14h)
+frontBottom / backBottom : 前後の下端（0〜edgeZ−0.03 / 0〜h−0.03）</code></pre>
+<p>
+描くのは <strong>天板（前縁→後縁）・底板・前面・後面・左右の側面</strong> の6枚。
+<br>
+初期値は <code>edgeY=−d/2, edgeZ=h</code> で、このとき天板が水平・前面が垂直になり <strong>直方体</strong>。
+<br>
+店舗テント（単体）は <strong>3×1×0.35</strong>（板厚 <code>max(0.05, 0.14·0.35)=0.05</code>）、
+<br>
+建物に付くテントは <strong>3×1×1</strong>（板厚 <code>max(0.04, 0.14·1)=0.14</code>）で、
+<br>
+どちらも <code>edgeZ=h</code> から始まるので <strong>最初から直方体</strong>です。
+<br>
+<code>snapAwningEdge()</code> が ±0.03 m で最大値・最小値へ吸着するので、
+<br>
+ハンドルを端まで動かすだけで必ず直方体（最大）か三角柱（最小・最奥）になります。
+<br>
+前縁のハンドルは <strong>上下（高さ）と手前奥（奥行き）の2軸</strong>を持ち、
+<br>
+2軸目は1軸目と直交させてあります（真下へ引いたのに手前奥も動く、を防ぐため）。
+</p>
+<h4 id="balcony壁付けベランダ"><code>balcony</code>（壁付けベランダ）</h4>
+<pre><code>床スラブ   = 箱(w, d, z 0 〜 t)
+前面腰壁   = 箱(w, t, z t 〜 t+railH)                      手前 y = −d/2+t/2
+左右腰壁   = 箱(t, d−t, z t 〜 t+railH)                    前面の腰壁の後ろ側から詰める
+支持ブラケット = (x=±0.34w, 壁側) → (同じx, 手前, 0) の2本</code></pre>
+<p>
+壁側が <code>+Y</code>、張り出しが <code>−Y</code>。床と腰壁を <strong>別の箱</strong>にしているので、
+<br>
+面編集で1枚を動かしても形が崩れません。左右の腰壁は前面の腰壁と角で重ならないように
+<br>
+<strong>前面の腰壁の後ろ側から詰めます</strong>（重ねると塗りが二重になって濃くなる）。
+</p>
+<p>
+線画（<code>linesBalcony</code>）は、この3つの箱を<strong>1つの立体として</strong>描きます。
+<br>
+重ねた箱をそのまま描くと、角に二重線が出て、スラブと腰壁の境に継ぎ目の線が入り、
+<br>
+手前の面が奥の線を隠して線が途中で欠けるためです（2026-11-01）。
+</p>
+<h4 id="stall屋台"><code>stall</code>（屋台）</h4>
+<p>
+写真のような売店。<strong>コの字の壁（奥＋左右）</strong>の手前下へ<strong>カウンター箱</strong>、
+<br>
+真上へ<strong>屋根箱</strong>を載せた形です。寸法はすべて <code>stallGeometry(o)</code> が唯一の出どころです。
+</p>
+<pre><code>奥の壁   = 箱(w, t, z 0 〜 roofBottom)                    y = +d/2 − t/2
+左右の壁 = 箱(t, d−t, z 0 〜 roofBottom)                  y = 0（奥の壁の手前まで）
+カウンター = 箱(w, cd, z 0 〜 ch)                         y = −d/2 − cd/2 （奥の面がコの字に密着）
+屋根     = 箱(w, d + ro, z roofBottom 〜 h)               y = −ro/2（手前へ ro だけ張り出す）
+
+t   = stallWallThickness   既定 w·0.0375
+ch  = stallCounterHeight   既定 h·0.44     ← 下の面（床）は動かさない
+cd  = stallCounterDepth    既定 d·0.34     ← 奥の面はコの字に付いたまま、手前の面だけ動く
+rt  = stallRoofThickness   既定 h·0.09     ← 上の面（= h）は動かさない、下の面だけ動く
+ro  = stallRoofOverhang    既定 d·0.24     ← 手前の面だけ動く
+roofBottom = h − rt</code></pre>
+<ul>
+<li><strong>全体の幅・奥行き・高さ</strong>は通常の寸法ハンドル（<code>ra</code> / <code>rb</code> / <code>h</code>）。
+<br>
+カウンターの幅・屋根の幅は <code>w</code> に、屋根の奥行きは <code>d + ro</code> に追従します。
+</li>
+<li><strong>高さを変えても屋根の厚さは比率で自動追従しません</strong>（<code>rt</code> は絶対値）。
+<br>
+ただし <code>stallRoofThickness</code> を未設定（0）にすると既定値 <code>h·0.09</code> に戻ります。
+</li>
+<li>カウンターの高さは <code>roofBottom − 0.12</code> を上限にしています（屋根の下面へ<span class="rd">めり込</span>ませないため）。
+</li>
+</ul>
+<h4 id="stool丸椅子"><code>stool</code>（丸椅子）</h4>
+<p>
+座面・ポール（脚）・台座の<strong>3つの円柱</strong>。屋台のカウンター（高さ約1.05 m）に合わせた初期値です。
+<br>
+半径はどれも<strong>正円</strong>（<code>ra</code> と <code>rb</code> を別々には使わない＝楕円にならない）。
+</p>
+<pre><code>台座   = 円柱(半径 g.baseR, z 0 〜 g.baseH)
+ポール = 円柱(半径 g.legR,  z g.baseTop 〜 g.poleTop)
+座面   = 円柱(半径 g.seatR, z g.seatBottom 〜 h)
+g = stoolGeometry(o)   // engine-tools.js：寸法の唯一の計算元</code></pre>
+<p>
+<code>stoolGeometry(o)</code> が返す値（<strong>6つの寸法はすべてここから決まる</strong>）:
+</p>
+<table><thead><tr><th>記号</th><th>意味</th><th>決め方</th><th>既定値（0.36×0.36×0.45）</th></tr></thead><tbody>
+<tr><td><code>seatR</code></td><td>座面の半径</td><td><code>stoolSeatRadius</code>（未設定なら <code>min(w,d)/2</code>）</td><td>0.18</td></tr>
+<tr><td><code>seatT</code></td><td>座面の高さ（厚み）</td><td><code>stoolSeatThickness</code>（未設定なら <code>h·0.13</code>）</td><td>0.0585</td></tr>
+<tr><td><code>legR</code></td><td>ポールの半径</td><td><code>stoolLegRadius</code>（未設定なら <code>min(w,d)·0.11</code>）。<code>min(seatR, baseR)</code> を上限に clamp</td><td>0.0396</td></tr>
+<tr><td><code>legH</code></td><td>ポールの高さ</td><td><code>h − seatT − baseH</code>（自動）</td><td>0.3510</td></tr>
+<tr><td><code>baseR</code></td><td>台座の半径</td><td><code>stoolBaseRadius</code>（未設定なら <code>min(w,d)·0.30</code>）</td><td>0.108</td></tr>
+<tr><td><code>baseH</code></td><td>台座の高さ</td><td><code>stoolBaseHeight</code>（未設定なら <code>h·0.09</code>）</td><td>0.0405</td></tr>
+</tbody></table>
+<ul>
+<li>幅・奥行きは<strong>座面の半径1つ</strong>から決まります（<code>ra = rb = seatR</code>）。
+<br>
+左右の面ハンドル（<code>u+</code> / <code>u-</code>）は出しません（出すと座面だけ楕円になり、
+<br>
+半径ハンドルの値と食い違うため）。
+</li>
+<li>全体の高さ <code>h</code> は通常の寸法ハンドル（上下の面）で編集できます。
+</li>
+<li>面（塗り）は3つの円柱を <code>exportSurfaceTriangles</code> の <code>cylinder(r, z0, z1, n)</code> で作ります。
+</li>
+</ul>
+<h4 id="stairs階段"><code>stairs</code>（階段）</h4>
+<pre><code>n = clamp(steps, 2, 24)      既定 6
+1段の奥行き sd = d/n 、1段の高さ sh = h/n
+i 段目：踏面を z=(i+1)·sh に、蹴上げを y0 = -d/2 + i·sd に
+断面は「手前から奥へ上がる」実際の階段形状</code></pre>
+<h4 id="crosswalk横断歩道"><code>crosswalk</code>（横断歩道）</h4>
+<pre><code>n = clamp(stripes, 3, 16)    既定 7
+gap = d/(n+1) 、白線の幅 stripeD = 0.6·gap
+i 本目：y = -d/2 + gap·(i+1) 、z=0.012 に薄い四角</code></pre>
+<h4 id="cylinder--cone--sphere"><code>cylinder</code> / <code>cone</code> / <code>sphere</code></h4>
+<pre><code>円柱：上下の楕円リング2本（n=12）。縦の稜線は描かない
+円錐：底面リング（n=16）＋ 視点から見える左右2本の母線（角度 ph±90°）
+球  ：緯度・経線を描かず「視点に正対する円」1本（48分割）。
+      中心は L2W(o,0,0,h/2)、半径 r = min(w,d,h)/2</code></pre>
+<p>
+球の式はカメラの right/up をそのまま使うので、<strong>どの視点でも画面上で真円</strong>になります。
+</p>
+<h4 id="triprism--tripyramid"><code>triPrism</code> / <code>triPyramid</code></h4>
+<pre><code>三角柱：前後の三角形（y=∓d/2）＋ 対応頂点を結ぶ3本
+三角錐：底面三角形（y=-d/2 から y=+d/2 の二等辺）＋ 頂点 (0,0,h) への3本</code></pre>
+<h4 id="lanternランタン"><code>lantern</code>（ランタン）</h4>
+<pre><code>胴：z=0.22h 〜 0.7h の八角リング2本 ＋ 8本の縦骨
+上の絞り：0.7h → 0.78h（半径 0.82 倍）＋吊り手 0.78h→0.94h→h
+内側の帯：0.36h と 0.56h に半径1.02倍のリング（紙提灯の雰囲気）</code></pre>
+<h4 id="person人物-1つの骨格計算を全員で共有"><code>person</code>（人物）— 1つの骨格計算を全員で共有</h4>
+<p>
+<code>personPose(o)</code> が <strong>関節の位置</strong>を返し、線画・面メッシュ・関節ギズモが同じ値を使います。
+</p>
+<pre><code>身長 h、体格 bodyScale、肩幅 shoulderScale、頭 headScale、脚の開き legSpread
+基本の高さ
+  legTop = (0.47 − 0.16·crouch)·h
+  torso0 = (0.44 − 0.16·crouch)·h   （腰）
+  torso1 = (0.78 − 0.18·crouch)·h   （肩）
+  head0/head1 = (0.84 / 0.99 − 0.18·crouch)·h
+脚（回転しても長さが変わらない）
+  hip → knee の向きを thighLen 倍、hip 角度ぶん回す
+  knee → foot は、さらに −knee角度 ぶん回す
+胴
+  腰の支点 (0, torso0) のまわりに waistAngle だけ回す → 肩の面・首の根元が追従
+頭
+  首の根元から (waistAngle + neckAngle) 方向へ head0〜head1 を積む</code></pre>
+<p>
+角度の符号は「正で前に振る（−y 側）」、膝だけ「正で曲げる」。
+</p>
+<h4 id="building開口のある建物"><code>building</code>（開口のある建物）</h4>
+<pre><code>w=2ra, d=2rb, h
+openingW = clamp(openingW, 0.1, w−0.1)      既定 0.56w → 4m なら 2.24m
+openingH = clamp(openingH, 0.1, h−0.1)      既定 0.66h → 5m なら 3.3m
+backY    = clamp(openingBack, −d/2+0.025, d/2−0.025)   既定は奥の面（1.475m）</code></pre>
+<p>
+形は「外側の箱」と「内側の空洞」を <strong>別々の輪郭</strong>として描きます。
+</p>
+<pre><code>外枠の正面・背面の四角（w × h）
+内側の開口枠（−ow/2〜+ow/2, 0〜oh）を正面・背面・奥パネルに
+奥パネル（backY）が背面と一致しないときだけ、その四角も描く
+左右の柱（幅 sideT=(w−ow)/2）と上梁（高さ topT=h−oh）は外枠との差で表現
+窓グリッド（任意）は開口と重なる窓を省いて貼る（windowRectHitsOpening）</code></pre>
+<h4 id="stackedbuilding--beveledstackedbuilding縁付き階層建物"><code>stackedBuilding</code> / <code>beveledStackedBuilding</code>（縁付き階層建物）</h4>
+<pre><code>floors[] の各階 f を下から順に描く
+  本体 = addBox(f, w, d, z=0, h)        ※ z は f.z のオフセットで加算
+  縁   = addBox(f, w+2·rimOverhang, d+2·rimOverhang, h−rimHeight, rimHeight)
+         rimHeight 既定 0.16 / rimOverhang 既定 0.18
+  開口 = 1F だけ（openingEnabled が真のとき）。openingW/H は stackedOpeningParams()
+共有辺を二重に描かないよう、箱の12辺を1回ずつ描く（底面は最下階のみ、上面は縁が隠すため省略）
+beveledStackedBuilding は同じ処理を beveledBoxFootprint で行う</code></pre>
+<h4 id="recessedstackedbuilding凹窓階層建物"><code>recessedStackedBuilding</code>（凹窓階層建物）</h4>
+<pre><code>各階：z を積む（1F だけ firstFloorHeight = floorHeight + firstFloorExtra）
+     階の間は floorGap（関数の既定 0.12／配置時の初期値 1.25）= 接合部の高さ = 窓の高さ
+輪郭：beveledBoxFootprint の「正面右の角だけ」を cornerBevel（既定 0.45）で丸める
+窓帯：外周の折れ線 outer と、内側へ windowDepth だけ入った inner の間の帯
+      横壁側（+x）まで回り込むので、正面と横面の凹みがつながって見える
+      mullion（縦の間柱）は外周の累積長を windowCount 等分した位置
+蓋：階の上端（接合部）は窓の幅だけ切り欠いた多角形を作り、
+     polygonEarClip で三角形分割する（重心分割だと凹みの外へはみ出す）</code></pre>
+<h4 id="pathpipeパスパイプ"><code>pathPipe</code>（パスパイプ）</h4>
+<pre><code>中心線 = 制御点を丸めた折れ線（角は円弧で置換）
+各点でフレームを作る： tangent、reference（|tz|&gt;0.92 なら Y 軸、他は Z 軸）、
+                     side = tangent × reference 、 binormal = tangent × side
+リング = center + side·r·cosθ + binormal·r·sinθ（sides 既定 10）
+側面 = 隣り合うリングの四角を2三角形へ。両端は中心から扇状に蓋をする</code></pre>
+<h4 id="gableroof--shedroof屋根-板厚はどこでも同じ"><code>gableRoof</code> / <code>shedRoof</code>（屋根）— 板厚はどこでも同じ</h4>
+<pre><code>overhang 既定 0.18、thickness 既定 0.12
+外側の断面（u-z 平面）
+  切妻：(-halfSpan, lowZ) → (0, h) → (halfSpan, lowZ)
+  片流れ：(-halfSpan, lowZ) → (halfSpan, h)
+内側の断面 = offsetPolyline2D(外側, thickness)     ← 法線方向へ t だけずらす
+断面 = 〔外側を進む〕＋〔内側を逆順で戻る〕＝閉じた多角形
+両端（軒先）は「鉛直に切る」：高さを t·L/run だけ下げる（L=斜辺長, run=水平長）
+   → 斜面上の垂距離が端でも中央でもちょうど t のまま
+棟に沿って axis（x か y）へ half だけ押し出す</code></pre>
+<blockquote class="point"><p>ポイント：内側の線を <strong><span class="bl">法線方向</span>のオフセット</strong>で作るので、 勾配が急でも緩でも <strong>板の薄さはどこでも均一</strong>になります。</p></blockquote>
+<h4 id="rampスロープ"><code>ramp</code>（スロープ）</h4>
+<pre><code>手前 (y=-d/2, z=0) が床、奥 (y=+d/2, z=h) が立ち上がり
+側面・底面・斜面・背面の6辺を結ぶ
+handrail=true なら左右に手すり（高さ railH 既定 0.42）と支柱4本ずつ</code></pre>
+<h4 id="windowgrid窓グリッド"><code>windowGrid</code>（窓グリッド）</h4>
+<pre><code>板の厚み t = d（0.01 以上）。表裏に同じ四角を置き、4隅を結んで厚みを出す
+窓の割り付け（facadeWindowGridRects）
+  usableW = w − 2·marginX          marginX 既定 0.12w
+  usableH = h − sill − head        sill 既定 0.22h / head 既定 0.12h
+  cellW = (usableW − gapX·(cols−1)) / cols
+  cellH = (usableH − gapZ·(rows−1)) / rows
+  窓1枚の大きさ windowW / windowH を指定すると、セル中央に置いて四方を均等に空ける
+  → 分割数（rows × cols）と窓1枚の大きさの **両方** が画面上で編集できる</code></pre>
+<h4 id="custom読み込んだ任意形状"><code>custom</code>（読み込んだ任意形状）</h4>
+<pre><code>geometry.vertices（点）と edges / loops（辺・面の並び）を、そのまま3D線画へ
+この形だけは作成サイトと同じ座標系なので、customPt()（x=左右/y=奥行き/z=高さ）を使う</code></pre>
+<blockquote class="warn"><p>注意：<code>custom</code> は座標系が他と違うため、<strong><span class="rd">必ず専用の点列</span>（customPt）</strong> を通します。 <code>L2W</code> に混ぜると、オブジェクトを動かしたときに線だけ取り残されます。</p></blockquote>
+<hr>
+<h3 id="63-付属パーツテント・看板・ベランダの取り付け計算">6.3 付属パーツ（テント・看板・ベランダ）の取り付け計算</h3>
+<p>
+建物に付くテント・看板・ベランダは <strong>親（建物）と子（パーツ）の2オブジェクト</strong>です。
+<br>
+子は <code>attachment</code> を持ち、位置と向きを <strong>親のローカル座標から毎回計算し直します</strong>（<code>syncAttachedPart</code>）。
+</p>
+<pre><code>attachment = { parentId, side, x, baseZ, offsetZ, rotOffset, verticalOnly }
+
+parentH        = max(0.1, 親の h)
+z              = clamp(baseZ + offsetZ, 0.02, parentH − 0.02)   // 下端の高さ
+attachedNormal = |子の rb| + 0.008                              // 壁へめり込まない逃げ
+faceY          = side · (|親の rb| + attachedNormal)            // 親の壁面の位置
+(ca, lift, cb) = L2W(親, x, faceY, z)                           // 子の中心
+rot            = 親の rot + rotOffset</code></pre>
+<table><thead><tr><th>種類</th><th><code>side</code></th><th><code>x</code></th><th><code>baseZ</code>（下端）</th><th>初期寸法</th></tr></thead><tbody>
+<tr><td>付属テント</td><td>−1（手前の壁）</td><td>0（幅の中央）</td><td><strong>3.6 m</strong></td><td>幅3 × 奥行き1 × 高さ1</td></tr>
+<tr><td>付属看板</td><td>−1（手前の壁）</td><td>0（幅の中央）</td><td><strong>3.6 m</strong></td><td>幅3 × 奥行き0.5 × 高さ1</td></tr>
+<tr><td>壁付けベランダ</td><td>−1（手前の壁）</td><td>0</td><td><code>0.58·親の h</code>（または指定階の z）</td><td>3.2 × 1.8 × 1.25</td></tr>
+</tbody></table>
+<blockquote class="calc"><p>計算：建物 4×3×5 に付属テントを付ける場合、 <code>attachedNormal = 0.5 + 0.008 = 0.508</code>、<code>faceY = −(1.5 + 0.508) = −2.008</code>。 テントの中心は手前へ 2.008 m、<code>z = 3.6</code> なので <strong>下端3.6 m・上端4.6 m</strong>。 建物の高さ5 mに対して <strong>上に0.4 mの余白</strong>が残ります。</p></blockquote>
+<ul>
+<li><code>side</code> がどちらでも、テントの奥側の面が壁に <strong>ぴったり接する</strong>ように <code>rb</code> を足しています。
+</li>
+<li>親を回転・移動・寸法変更すると、<code>setOb</code> が子も作り直すので <strong>貼り付いたまま追従</strong>します。
+</li>
+<li><code>verticalOnly: true</code> は「子テントの移動ギズモは上下だけ」という意味です
+<br>
+（幅・奥行き・前縁は <code>edgeZ</code> / <code>edgeY</code> / <code>ra</code> / <code>rb</code> のハンドルで編集します）。
+</li>
+</ul>
+<p>
+<strong>厚さはハンドルで編集</strong>（2026-11-01：床と壁で厚さを分けない指示に合わせ、ハンドルも1本）。
+</p>
+<table><thead><tr><th>ハンドル</th><th>位置</th><th>変わる値</th><th>範囲</th></tr></thead><tbody>
+<tr><td><code>balcony-thickness</code>（<code>#ff9f68</code>）</td><td>前面腰壁の<strong>外側面</strong>の中央</td><td><code>balconyThickness</code> と <code>h</code></td><td>0.035 〜 <code>min(w,d)·0.35</code></td></tr>
+<tr><td><code>uWall-thickness</code>（<code>#ff9f68</code>）</td><td>コの字壁の<strong>屋根の手前角</strong>の少し外</td><td><code>uWallThickness</code>（屋根と側壁で共通。<code>h</code> は変えない）</td><td>0.035 〜 <code>min(w,d)·0.35</code></td></tr>
+</tbody></table>
+<p>
+<strong>屋台の4つのハンドル</strong>（2026-11-02 追加。どれも「動かす面は1つだけ」）
+</p>
+<table><thead><tr><th>ハンドル</th><th>位置</th><th>変わる値</th><th>範囲</th></tr></thead><tbody>
+<tr><td><code>stall-wall-thickness</code>（<code>#ffb36f</code>）</td><td>コの字の<strong>左の壁の外側の面</strong>（手前の縁の少し上）</td><td><code>stallWallThickness</code>（奥＋左右で共通）</td><td>0.03 〜 <code>min(w,d)·0.3</code></td></tr>
+<tr><td><code>stall-counter-front</code>（<code>#ff9f68</code>）</td><td>カウンターの<strong>手前の面</strong>の中央</td><td><code>stallCounterDepth</code></td><td>0.05 〜 <code>d·3</code></td></tr>
+<tr><td><code>stall-counter-top</code>（<code>#ffd0a8</code>）</td><td>カウンターの<strong>上面</strong>の中央</td><td><code>stallCounterHeight</code></td><td>0.1 〜 <code>roofBottom−0.12</code></td></tr>
+<tr><td><code>stall-roof-front</code>（<code>#7dd8ff</code>）</td><td>屋根の<strong>手前の面</strong>の中央</td><td><code>stallRoofOverhang</code></td><td>0 〜 <code>w</code></td></tr>
+<tr><td><code>stall-roof-bottom</code>（<code>#9db8d6</code>）</td><td>屋根の<strong>下面</strong>の少し手前（面の外）</td><td><code>stallRoofThickness</code></td><td>0.04 〜 <code>h·0.4</code></td></tr>
+</tbody></table>
+<p>
+<strong>手すりの3つのハンドル</strong>（2026-11-02 追加。<code>railingGizmo(o)</code>）
+</p>
+<table><thead><tr><th>ハンドル</th><th>位置</th><th>変わる値</th><th>範囲</th></tr></thead><tbody>
+<tr><td><code>railing-thickness</code>（<code>#ff9f68</code>）</td><td>上の横桟の<strong>左端</strong>から手前（−Y）へ</td><td><code>railingThickness</code>（<code>scale</code> 1000＝繊細に動く）</td><td>0.012 〜 <code>min(w,d)·0.22, h·0.22</code></td></tr>
+<tr><td><code>railing-bottom</code>（<code>#ffb36f</code>）</td><td>手前の<strong>下の横桟</strong>の少し手前</td><td><code>railingBottomGap</code>（<code>scale</code> 420）</td><td>0.02 〜 <code>h − 3t</code></td></tr>
+<tr><td><code>railing-count</code>（<code>#7dd8ff</code>）</td><td>上の横桟の<strong>真ん中</strong>から真上</td><td><code>railingCount</code>（<code>scale</code> 40＝40pxで1本、<code>integer</code>）</td><td>形の区間数 〜 40</td></tr>
+</tbody></table>
+<ul>
+<li>手すりの幅・奥行き・高さは共通の面ハンドル（<code>u±</code> / <code>v±</code> / <code>top</code> / <code>base</code>）。
+<br>
+<strong><code>gizmo()</code> の <code>solid</code> に <code>railing</code> を入れてあるので、3Dでも <code>top</code> / <code>base</code> が出る</strong>。
+</li>
+</ul>
+<p>
+<strong>円の半径ハンドル</strong>（2026-11-02 追加。<code>gizmo()</code> / <code>specialGizmo()</code> の <code>circleGizmo(o)</code>）
+</p>
+<table><thead><tr><th>ハンドル</th><th>位置</th><th>変わる値</th><th>範囲</th></tr></thead><tbody>
+<tr><td><code>circle-radius</code>（<code>#ad9cff</code>）</td><td>円の<strong>外周の右</strong>（半径の長さの破線で中心と結ぶ）</td><td><code>ra</code> と <code>rb</code> を<strong>同じ値</strong>へ（常に正円）</td><td>0.02 〜 60</td></tr>
+</tbody></table>
+<ul>
+<li>円（<code>type:"circ"</code>）は幅・奥行きを別々に変える面ハンドル（<code>u+</code> / <code>u-</code> / <code>v+</code> / <code>v-</code>）を<strong>出しません</strong>。
+<br>
+高さは従来どおり上下の面（<code>top</code> / <code>base</code>）で編集します。
+</li>
+</ul>
+<p>
+<strong>丸椅子の6つのハンドル</strong>（2026-11-02 追加。<code>stoolGizmo(o)</code>）
+</p>
+<table><thead><tr><th>ハンドル</th><th>位置</th><th>変わる値</th><th>範囲</th></tr></thead><tbody>
+<tr><td><code>stool-seat-radius</code>（<code>#ad9cff</code>）</td><td>右側・座面の段の高さ</td><td><code>stoolSeatRadius</code> ＋ <code>ra</code> / <code>rb</code></td><td>0.02 〜 <code>min(w,d)</code></td></tr>
+<tr><td><code>stool-leg-radius</code>（<code>#c3b6ff</code>）</td><td>右側・ポールの段の高さ</td><td><code>stoolLegRadius</code></td><td>0.005 〜 <code>min(seatR, baseR)</code></td></tr>
+<tr><td><code>stool-base-radius</code>（<code>#e0dbff</code>）</td><td>右側・台座の段の高さ</td><td><code>stoolBaseRadius</code></td><td>0.01 〜 <code>min(w,d)·0.5</code></td></tr>
+<tr><td><code>stool-seat-height</code>（<code>#ff9f68</code>）</td><td>左側・座面の段の高さ（上下方向）</td><td><code>stoolSeatThickness</code></td><td>0.02 〜 <code>h·0.6</code></td></tr>
+<tr><td><code>stool-leg-height</code>（<code>#ffb36f</code>）</td><td>左側・ポールの段の高さ（上下方向）</td><td><code>h</code>（＝ポール＋座面＋台座）</td><td>0.02 〜 <code>h·3</code></td></tr>
+<tr><td><code>stool-base-height</code>（<code>#ffd0a8</code>）</td><td>左側・台座の段の高さ（上下方向）</td><td><code>stoolBaseHeight</code></td><td>0.01 〜 <code>h·0.45</code></td></tr>
+</tbody></table>
+<ul>
+<li>半径の3本は右（ローカル +X）、高さの3本は左（ローカル −X）へ振り分けています。
+<br>
+丸椅子は高さ 0.45 m しかなく、6本を同じ側に置くと掴み間違えるためです。
+</li>
+<li><strong>ポールの高さ</strong>は真ん中の段なので、<code>h</code>（全体の高さ）を書き換えて上下の段はそのまま残します。
+</li>
+<li>半径は常に正円（<code>ra = rb</code>）。座面の半径は <code>w</code>/<code>d</code> そのものなので <code>ra</code>/<code>rb</code> も同時に更新します。
+</li>
+</ul>
+<ul>
+<li>値は <code>balconyGeometry(o)</code> / <code>uWallGeometry(o)</code> を通して読むので、線画・面・数値パネル・
+<br>
+ハンドルがすべて同じ数を見ます（<code>linesBalcony</code> もこの関数を呼ぶ）。
+</li>
+<li>ベランダは厚さを増やすと <code>h = 新しい厚さ + railH</code> も一緒に更新（数値パネルと同じ）。
+<br>
+コの字壁は <code>h</code> が壁の高さそのものなので、厚さを変えても高さは動きません。
+</li>
+<li>特別ハンドルは <strong><code>hitGizmo()</code> の <code>special</code> 分岐に登録しないと掴めません</strong>
+<br>
+（表示はされるがドラッグしても値が変わらない、という症状になる）。
+</li>
+<li>ハンドルの位置は<strong>オブジェクトのシルエットの外</strong>へ少し出します。面の上に置くと、
+<br>
+真横ビューで壁と重なってオブジェクトの移動に負け、掴めないため。
+</li>
+</ul>
+<h3 id="64-全アセット共通レシピ表">6.4 全アセット共通レシピ表</h3>
+<p>
+「どの部品を、何本の線で、どう面を張るか」の一覧です。実装を読むときの索引に使ってください。
+</p>
+<table><thead><tr><th>アセット</th><th>線画の作り方（使う部品）</th><th>面（塗り）の作り方</th></tr></thead><tbody>
+<tr><td><code>rect</code></td><td><code>genShape</code> の <code>rect</code>（4隅1本、<code>extrude</code> なら上面＋4辺）</td><td>4隅を2三角形</td></tr>
+<tr><td><code>box</code></td><td><code>boxA</code>（底面＋上面＋縦4本）</td><td>6面 × 2三角形</td></tr>
+<tr><td><code>beveledBox</code></td><td><code>beveledWireBoxA</code>（面取り輪郭2枚＋縦辺）</td><td>輪郭の辺ごとに側面＋上下の蓋（扇）</td></tr>
+<tr><td><code>cornerCutBox</code></td><td><code>cornerCutWireBoxA</code>＋<code>cornerCutOpeningWireBoxA</code></td><td>5角形の輪郭＋切り口＋開口の内側</td></tr>
+<tr><td><code>circle</code> / <code>cone</code> / <code>sphere</code></td><td><code>linesCylinder</code> / <code>linesCone</code> / <code>linesSphere</code></td><td>リング／扇／緯度経線メッシュ</td></tr>
+<tr><td><code>triPrism</code> / <code>triPyramid</code></td><td><code>wirePrismA</code> / <code>wirePyramidA</code></td><td>側面の四角・三角形＋蓋</td></tr>
+<tr><td><code>building</code></td><td><code>linesBuilding</code>（外枠・開口枠・奥パネル・<code>appendFacadeWindows</code>）</td><td>開口で切り欠いた外箱6面＋内側面</td></tr>
+<tr><td><code>buildingAwning</code> / <code>buildingSign</code></td><td>親（<code>linesBuilding</code> か <code>boxA</code>）＋子（<code>linesAwning</code> / <code>wallSignFacePoints</code>）</td><td>親の面＋子の面</td></tr>
+<tr><td><code>stackedBuilding</code></td><td><code>linesStackedBuilding</code>（<code>boxA</code> を階数ぶん＋縁）</td><td>階ごとの箱</td></tr>
+<tr><td><code>beveledStackedBuilding</code></td><td>同上を <code>beveledWireBoxA</code> で</td><td>階ごとの面取り箱</td></tr>
+<tr><td><code>recessedStackedBuilding</code></td><td><code>recessedStackedBuildingLines</code>（<code>recessedStackedBuildingWindowPaths</code> 等）</td><td><code>polygonEarClip</code> で凹みごと三角形化</td></tr>
+<tr><td><code>gableRoof</code> / <code>shedRoof</code></td><td><code>roofSlabLines</code>（<code>roofSlab</code> の断面を押し出し）</td><td>断面の側面＋両端の蓋</td></tr>
+<tr><td><code>stairs</code></td><td><code>stairsRunA</code></td><td>段の踏面・蹴上げ</td></tr>
+<tr><td><code>crosswalk</code></td><td><code>linesCrosswalk</code>（白線を等間隔）</td><td>平らな面1組</td></tr>
+<tr><td><code>ramp</code></td><td><code>linesRamp</code>（6辺＋手すり）</td><td>側面・斜面・底面・背面</td></tr>
+<tr><td><code>pathPipe</code></td><td><code>pathPipeMesh</code> の輪郭リング</td><td>リング間の四角＋蓋</td></tr>
+<tr><td><code>awning</code></td><td><code>linesAwning</code>（天板・底板・前面・後面・側面）</td><td>同じ6枚を四角として</td></tr>
+<tr><td><code>balcony</code></td><td><code>linesBalcony</code>（<code>wireBoxA</code> を3枚＋ブラケット）</td><td>床・腰壁の箱（厚さは共通）</td></tr>
+<tr><td><code>uWall</code></td><td><code>linesUWall</code>（断面8点の押し出し＝10本）</td><td>屋根板1枚＋側壁2枚の箱（重ねない）。<code>gizmo()</code> の <code>solid</code> に登録（3Dでも高さ編集可）</td></tr>
+<tr><td><code>stall</code></td><td><code>linesStall</code>（コの字の断面＋奥の面＋稜線＋カウンター＋屋根＝21本）</td><td>奥の壁・左右の壁・カウンター・屋根の5箱（重ねない）</td></tr>
+<tr><td><code>stool</code></td><td><code>linesStool</code>（座面・ポール・台座で各2輪＋シルエット2本＝12本）</td><td>円柱3本を輪で分割（192三角形）</td></tr>
+<tr><td><code>railing</code></td><td><code>linesRailing</code>（柱の箱＋足元の板＋横桟2本＋縦桟で各12本、形と本数で変わる＝既定96本／線分1,368本）</td><td>部材ごとの箱（柱・足元の板・上下の横桟・縦桟＝228三角形）。<strong>足元→柱→横桟の順に積み、重ねない</strong>。<code>gizmo()</code> の <code>solid</code> に登録（3Dでも高さ編集可）</td></tr>
+<tr><td><code>wallSign</code></td><td><code>linesWallSign</code>（<code>wallSignFacePoints</code> ＋ <code>wallSignBrackets</code>）</td><td>板の表裏・側面</td></tr>
+<tr><td><code>windowGrid</code></td><td><code>linesWindowGrid</code>（<code>facadeWindowGridRects</code>）</td><td>板の面（窓は線のみ）</td></tr>
+<tr><td><code>person</code></td><td><code>linesPerson</code>（<code>personPose</code> の骨格）</td><td>手足を四角柱にして生成</td></tr>
+<tr><td><code>custom</code></td><td><code>linesCustom</code>（<code>customPt</code> で頂点・辺）</td><td>専用の面定義、無ければ<span class="rd">包絡箱</span></td></tr>
+</tbody></table>
+<hr>
+<h2 id="7-面表示塗りの原理">7. 面表示（塗り）の原理</h2>
+<p>
+「面表示」をONにすると、線画に加えて <strong>半透明の面</strong>が塗られます。
+</p>
+<pre><code class="language-js">exportSurfaceTriangles(o)   // o → 三角形の配列（ワールド座標の3点）
+   ↓  視点ごとに exportPoint() で画面座標＋奥行きへ
+   ↓  3点のどれかが画面外／奥行き不定なら捨てる
+   ↓  画面での面積が 0.001 未満なら捨てる（線に潰れた面）
+   ↓  奥行き（3点の平均）で降順ソート = 遠い面から描く（ペインター法）
+   ↓  不透明度ごとにグループ分け（通常は全部 0.22 で1グループ）
+   ↓  オフスクリーンの層へ「不透明」で描く（重なっても濃くならない）
+   ↓  面が写った範囲だけを切り出し、1回だけ半透明で合成
+   ↓  globalAlpha = surfaceAlpha(o)（既定 0.22）で drawImage</code></pre>
+<blockquote class="warn"><p>重要：面を1枚ずつ半透明で塗ると、<strong>同じオブジェクトの中で面が重なる場所だけ 透明度が積み上がって乗算したように濃くなる</strong>（開口の奥の壁、柱の裏、箱の角など）。 そこで「不透明で1枚の層に描いてから、最後に1回だけ半透明で重ねる」方式にしています。 層の中で三角形どうしが重なっても色は濃くならず、<strong>どの面も同じ濃さのベタ塗り</strong>になります。 オブジェクトが2つ重なる場所は、層が2枚重なるので少しだけ濃くなります（半透明の正しい見え方）。</p></blockquote>
+<p>
+層を作るときの工夫：
+</p>
+<table><thead><tr><th>工夫</th><th>理由</th></tr></thead><tbody>
+<tr><td>面が写る範囲だけの大きさで層を作る</td><td>画面全体を毎回クリアすると重い（140オブジェクトで実測1.5倍遅かった）</td></tr>
+<tr><td>同じ色は1本のパスへまとめる（400枚ずつ）</td><td>三角形ごとに <code>fill</code> するとパス生成が増えて重い</td></tr>
+<tr><td>パスへ入れる前に三角形の巻き方向をそろえる</td><td>逆巻きが混ざると <code>nonzero</code> で打ち消し合い、塗りが抜ける（裏表の面が重なる立体で顕著）</td></tr>
+<tr><td>塗りと同じ色で <code>1/拡大率</code> の太さの縁をなぞる</td><td>隣り合う三角形の継ぎ目に細い筋が透けるのを防ぐ（画面上で常に1px）</td></tr>
+</tbody></table>
+<p>
+三角形の作り方はアセットごとに専用です（<code>exportSurfaceTriangles</code> の中）。
+</p>
+<table><thead><tr><th>アセット</th><th>面の作り方</th></tr></thead><tbody>
+<tr><td><code>box</code> / <code>sign</code> / <code>rect</code></td><td>8頂点・6面を四角→三角形2枚</td></tr>
+<tr><td><code>beveledBox</code></td><td>輪郭の各辺について、中心から扇状に蓋＋側面の四角</td></tr>
+<tr><td><code>cornerCutBox</code></td><td>5角形の輪郭＋切り口。開口ON は切り口を分割し、内側の側面・上面・奥壁を追加</td></tr>
+<tr><td><code>building</code></td><td>外箱6面を、開口の幅・高さで切り欠いた形（左右の柱・上梁・奥パネル・内側面）</td></tr>
+<tr><td><code>stackedBuilding</code></td><td>階ごとの箱（<code>beveledStackedBuilding</code> は面取り輪郭で）</td></tr>
+<tr><td><code>person</code></td><td>骨格（<code>personPose</code>）から手足を四角柱として生成</td></tr>
+<tr><td><code>pathPipe</code></td><td>リング間の四角＋両端の蓋</td></tr>
+<tr><td>屋根・スロープ・窓グリッド</td><td>断面（閉じた多角形）を押し出した側面と両端の蓋</td></tr>
+<tr><td>専用の面関数がまだ無いアセット（新規追加したもの・<code>custom</code> など）</td><td><strong><span class="rd">包絡箱</span></strong>（外接直方体）で近似</td></tr>
+</tbody></table>
+<blockquote class="warn"><p>重要：面は「実際の形の外側を塗らない」ことを優先しています。 凹んだ形（凹窓階層建物など）は、<span class="rd">包絡箱</span>ではなく <strong>凹みに沿った多角形</strong>を <code>polygonEarClip</code>（<span class="bl">耳切り法</span>）で三角形分割します。 重心から扇状に分割すると、凹みをまたいで <strong>形の外へはみ出した尖り</strong>が出るためです。</p></blockquote>
+<p>
+面の三角形は <code>WeakMap</code> に <strong>オブジェクトの値そのもの（JSON文字列）をキー</strong>として
+<br>
+キャッシュされます。1つでも数値が変わればキーが変わるので、古い面が残りません。
+</p>
+<hr>
+<h2 id="8-編集したときに何が作り直されるか">8. 編集したときに何が作り直されるか</h2>
+<pre><code>数値パネル／ギズモ／間取りハンドル
+        │ setOb(id, patch)     ← 変更の唯一の入口
+        ├ ロック中なら拒否（locked / visible だけ例外）
+        ├ 接着パーツなら attachment を親ローカルへ換算し直す
+        ├ S から古い線を消し、genShape(syncAttachedPart(o)) で作り直す
+        └ 子パーツ（attachment.parentId === id）も同時に作り直す
+        ▼
+     render() が「カメラ署名 sigNow() が変わったら regenObjects()」で全体を更新</code></pre>
+<ul>
+<li><strong><code>normalizedAsset(o)</code></strong> … 描く前に寸法・ベベル・階数などを安全な範囲へ丸める
+<br>
+（例：<code>h</code> は 0.01 以上、<code>bevelOffset</code> は <code>min(w,d)/2</code> 以下）
+</li>
+<li><strong><code>syncAttachedPart(o)</code></strong> … 接着パーツの位置・姿勢を親から計算し直す
+</li>
+<li><strong><code>fixOb(o)</code></strong> … 古い保存データ（<code>sc</code>/<code>hr</code> 形式、<code>rect</code> だった親建物など）を現在の形へ移行
+</li>
+</ul>
+<blockquote class="point"><p>ポイント：<code>setOb</code> を通す限り、線・面・外接範囲・ハンドルの位置は <strong>すべて同じ <code>o</code> から作り直される</strong>ので、片方だけ古いという状態になりません。</p></blockquote>
+<hr>
+<h2 id="9-数字の早見表">9. 数字の早見表</h2>
+<table><thead><tr><th>場所</th><th>値</th><th>意味</th></tr></thead><tbody>
+<tr><td><code>building</code> 初期寸法</td><td><code>4 × 3 × 5</code></td><td>幅・奥行き・高さ</td></tr>
+<tr><td><code>building</code> 開口幅</td><td><code>0.56·w</code></td><td>既定の開口幅（4m なら 2.24）</td></tr>
+<tr><td><code>building</code> 開口高</td><td><code>0.66·h</code></td><td>既定の開口高（5m なら 3.3）</td></tr>
+<tr><td><code>building</code> 奥パネル</td><td><code>±(d/2 − 0.025)</code></td><td>壁から 2.5cm 内側（3m なら 1.475）</td></tr>
+<tr><td>窓グリッド marginX</td><td><code>0.12·w</code></td><td>左右の余白</td></tr>
+<tr><td>窓グリッド sill / head</td><td><code>0.22·h</code> / <code>0.12·h</code></td><td>下・上の余白</td></tr>
+<tr><td>窓グリッド gapX / gapZ</td><td><code>0.06·w</code> / <code>0.10·h</code></td><td>窓同士の間隔</td></tr>
+<tr><td><code>stackedBuilding</code> 縁</td><td><code>rimHeight 0.16</code> / <code>rimOverhang 0.18</code></td><td>各階の上端の縁</td></tr>
+<tr><td><code>recessedStackedBuilding</code> ベベル</td><td><code>0.45</code>（上限 <code>min(w,d)·0.45</code>）</td><td>正面右角の丸み</td></tr>
+<tr><td>同上 窓の高さ</td><td><code>= floorGap</code>（既定 0.12）</td><td>接合部いっぱい</td></tr>
+<tr><td>屋根 overhang / thickness</td><td><code>0.18</code> / <code>0.12</code></td><td>軒の出と板厚</td></tr>
+<tr><td><code>awning</code> 初期寸法</td><td><code>3 × 1 × 0.35</code></td><td>単体の店舗テント</td></tr>
+<tr><td><code>awning</code> 板厚（単体）</td><td><code>max(0.05, 0.14·h)</code></td><td>0.35 → 0.05</td></tr>
+<tr><td><code>awning</code> 板厚（付属）</td><td><code>max(0.04, 0.14·h)</code></td><td>1 → 0.14</td></tr>
+<tr><td><code>awning</code> 吸着幅</td><td><code>±0.03 m</code></td><td>直方体へスナップ</td></tr>
+<tr><td>付属テント／看板</td><td>幅3・高さ1・下端 <code>3.6</code></td><td><code>attachment.baseZ</code></td></tr>
+<tr><td>付属テントの奥行き</td><td><code>1</code>（看板は <code>0.5</code>）</td><td>壁から手前へ</td></tr>
+<tr><td><code>wallSign</code> 金具</td><td><code>0.36</code> 長さ / 太さ <code>min(w,h)·0.07</code></td><td>板の左側面から横へ</td></tr>
+<tr><td><code>wallSign</code> ベベル上限</td><td><code>min(w,h)·0.45 − 0.001</code></td><td>角が消えない限界</td></tr>
+<tr><td><code>balcony</code> 厚さ（床＝腰壁）</td><td><code>0.14</code></td><td>床と腰壁で共通</td></tr>
+<tr><td><code>uWall</code> 壁の厚さ</td><td><code>0.12</code></td><td>3枚とも共通</td></tr>
+<tr><td><code>person</code> 高さ配分</td><td><code>0.47 / 0.78 / 0.99·h</code></td><td>脚の付け根・肩・頭の上</td></tr>
+<tr><td><code>stairs</code></td><td><code>sd=d/n, sh=h/n</code></td><td>1段の奥行き・高さ</td></tr>
+<tr><td><code>crosswalk</code></td><td><code>gap=d/(n+1), 幅=0.6·gap</code></td><td>白線の間隔と幅</td></tr>
+<tr><td>面の不透明度</td><td><code>0.22</code></td><td><code>surfaceAlpha</code> 既定</td></tr>
+<tr><td>点の球面分割</td><td><code>0.004 rad</code></td><td><code>dens3</code> の刻み</td></tr>
+</tbody></table>
+<hr>
+<h2 id="10-検算のしかた">10. <span class="gr">検算</span>のしかた</h2>
+<p>
+ブラウザで実際に測る（<code>index.html</code> を開いて開発者ツールのコンソール）。
+</p>
+<pre><code class="language-js">// 建物を1個置く
+document.querySelector('[data-asset="building"]').click();
+const o = [...new Set(S.filter(s =&gt; s.ob).map(s =&gt; s.ob))][0];
+
+// ① 寸法 → 2 / 1.5 / 5
+[o.ra, o.rb, o.h];
+
+// ② 開口の式 → 2.24 / 3.3 / 1.475
+buildingGeometry(o);
+
+// ③ ローカル→ワールド（底面と天端）
+L2W(o, 0, 0, 0)[1];          // 底面の高さ（通常 −1）
+L2W(o, 0, 0, o.h)[1] - L2W(o, 0, 0, 0)[1];   // 5（= 高さそのもの）
+
+// ④ 線の本数と三角形の数
+S.length;                       // 17
+exportSurfaceTriangles(o).length; // 38
+
+// ⑤ 外接範囲（選択枠・当たり判定が使う値）
+obBounds(o);</code></pre>
+<p>
+期待値（2026-11-01 実測）：
+</p>
+<table><thead><tr><th>項目</th><th>値</th></tr></thead><tbody>
+<tr><td><code>buildingGeometry</code></td><td><code>w 4 / d 3 / h 5 / openingW 2.24 / openingH 3.3 / backY 1.475</code></td></tr>
+<tr><td><code>L2W(o, 0, 0, h)</code> の高さ差</td><td><code>5</code>（底面 −1 → 天端 4）</td></tr>
+<tr><td><code>S.length</code> / 三角形</td><td><code>17</code> / <code>38</code></td></tr>
+<tr><td>付属テントの中心</td><td>手前へ <code>2.008</code>（= 1.5 + 0.5 + 0.008）、高さ <code>3.6</code></td></tr>
+</tbody></table>
+<blockquote class="calc"><p>計算：<code>0.56 × 4 = 2.24</code>、<code>0.66 × 5 = 3.3</code>、<code>1.5 − 0.025 = 1.475</code>。 この3つが資料と実機で一致すれば、寸法の式が資料どおりに動いています。</p></blockquote>
+<hr>
+<h2 id="11-つまずきやすい所">11. つまずきやすい所</h2>
+<ul>
+<li><strong><code>ra</code> / <code>rb</code> は半分</strong>。「幅4m」は <code>ra = 2</code>。<code>w = ra*2</code> を忘れると線が半分になります。
+</li>
+<li><strong><code>d</code> は必ず −1</strong>。<code>d</code> を正にすると <code>−d·z</code> の符号が反転し、上下が逆に伸びます。
+</li>
+<li><strong><code>z</code> はローカル高さ</strong>。<code>L2W</code> の中では <code>−d·z</code> として掛かるので、
+<br>
+アセットの式の中では「実寸の高さ」をそのまま渡してかまいません。
+</li>
+<li><strong>共有辺を二重に描かない</strong>。階層建物は面ごとに輪郭を足すと縁が2重線になるため、
+<br>
+箱の12辺を1回ずつ描いています。
+</li>
+<li><strong>凹んだ形は専用の三角形分割が必要</strong>。重心分割は形の外へはみ出します（耳切り法を使う）。
+</li>
+<li><strong>接着パーツは親の変更で作り直す</strong>。<code>setOb</code> が子も再生成しますが、
+<br>
+手で <code>S</code> を触ったときは <code>syncAttachedPart</code> を通してください。
+</li>
+<li><strong>面表示の近似</strong>：専用の面関数がまだ無いアセットは<span class="rd">包絡箱</span>で塗るため、
+<br>
+凹みの内部には面が入りません。線画は正確です（新アセットを足すときは
+<br>
+<code>exportSurfaceTriangles</code> に分岐を1つ足すのが本筋）。
+</li>
+</ul>
+<hr>
+<h2 id="12-assetjs-の関数リファレンス全116個">12. <code>asset.js</code> の関数リファレンス（全116個）</h2>
+<p>
+<code>asset.js</code> は「形を作る部品」と「アセット1個ずつの線画」でできています。
+<br>
+形を足すときは <strong>① 部品を探す → ② <code>lines*</code> を1本書く → ③ <code>registerAsset</code> で登録</strong> の順に進めます。
+</p>
+<h3 id="121-線画の材料ローカル座標で立体を描く部品">12.1 線画の材料（ローカル座標で立体を描く部品）</h3>
+<table><thead><tr><th>関数</th><th>役割</th></tr></thead><tbody>
+<tr><td><code>boxA(o, w, d, z0, z1)</code></td><td>底面・上面の四角と縦4辺＝6本。原点は面の中心、<code>z0</code>〜<code>z1</code> の箱</td></tr>
+<tr><td><code>wireBoxA(o, cx, cy, w, d, z0, z1)</code></td><td>中心を <code>(cx, cy)</code> で指定できる <code>boxA</code>（部品を並べるとき用）</td></tr>
+<tr><td><code>beveledWireBoxA(o, cx, cy, w, d, z0, z1, offset, segments)</code></td><td>4隅を円弧で面取りした箱。輪郭2枚＋対応する縦辺</td></tr>
+<tr><td><code>cornerCutWireBoxA(o, w, d, z0, z1, offset, corner)</code></td><td>1隅を切った5角形の箱。切り口側だけ <code>cutColor</code> で色を変える</td></tr>
+<tr><td><code>cornerCutOpeningWireBoxA(o, opening, z1)</code></td><td>隅切り面に掘った開口（側面・上面・奥壁）を描く</td></tr>
+<tr><td><code>ringA(o, rx, ry, z, n)</code></td><td>楕円リング1本。<code>x=rx·cos t, y=ry·sin t</code></td></tr>
+<tr><td><code>spokesA(o, c0, r0, z0, c1, r1, z1, n)</code></td><td>2つのリングの対応点を結ぶ縦の補助線（円柱・ランタン）</td></tr>
+<tr><td><code>wireCylinderA(o, cx, cy, r, z0, z1, segments)</code></td><td>上下のリング＋見えている母線2本の円柱</td></tr>
+<tr><td><code>wirePrismA(o, polygon, z0, z1)</code></td><td>任意の多角形を <code>z0</code>〜<code>z1</code> へ押し出した立体の枠線</td></tr>
+<tr><td><code>wirePyramidA(o, polygon, zBase, apexZ, apexX, apexY)</code></td><td>多角形の底から頂点への稜線</td></tr>
+<tr><td><code>rect2DOutlineA(o, cx, cy, w, d, z)</code></td><td>1枚の平面四角（押し出さない面）</td></tr>
+<tr><td><code>quadFaceA(o, a, b, c, d)</code></td><td>4点を結ぶ面の輪郭（三角形分割の下ごしらえ）</td></tr>
+<tr><td><code>arcPointsA(o, cx, cy, rx, ry, z, a0, a1, segments)</code></td><td>指定角度範囲の弧の点列</td></tr>
+<tr><td><code>discOutlineA(o, cx, cy, rx, ry, z, segments)</code></td><td>円板の輪郭（1周ぶん）</td></tr>
+<tr><td><code>stairsRunA(o, opt)</code></td><td>階段一式（踏面・蹴上げ・両側面の階段状輪郭・任意の手すり）</td></tr>
+<tr><td><code>latticePanelA(o, opt)</code></td><td>格子パネル（縦棒 <code>cols</code> 本・横棒 <code>rows</code> 本）</td></tr>
+</tbody></table>
+<h3 id="122-輪郭と分割の計算形の決定版を作る">12.2 輪郭と分割の計算（形の「決定版」を作る）</h3>
+<table><thead><tr><th>関数</th><th>役割（式）</th></tr></thead><tbody>
+<tr><td><code>beveledBoxFootprint(w, d, b, seg)</code></td><td>4隅の中心を内側へ <code>b</code> 寄せ、半径 <code>b</code> の円弧で結んだ輪郭点列。<code>b=0</code> で長方形</td></tr>
+<tr><td><code>beveledBoxSegments(value, legacy, fallback)</code></td><td>面取りの分割数を 1〜12 の整数へ丸める（分割数1＝隅切り）</td></tr>
+<tr><td><code>cornerCutFootprint(w, d, b, corner)</code></td><td>1隅を切った5角形の輪郭（<code>corner</code> で切る隅を選ぶ）</td></tr>
+<tr><td><code>cornerCutOpeningRayDistance(origin, dir, poly)</code></td><td>切り口の中央から内側へ向かう光線が反対側の辺に当たるまでの距離（開口の奥行き上限）</td></tr>
+<tr><td><code>offsetPolyline2D(pts, dist)</code></td><td>折れ線を<span class="bl">法線方向</span>へ <code>dist</code> ずらす。折れ点はマイター交点（平行時は元の点）</td></tr>
+<tr><td><code>polygonEarClip(pts)</code></td><td>凹んだ多角形の三角形分割（耳切り法）。凹みの外へはみ出さない</td></tr>
+<tr><td><code>spanSplit(total, count, gap, minSize)</code></td><td>幅 <code>total</code> を <code>count</code> 個へ、隙間 <code>gap</code> を挟んで等分（中心と大きさを返す）</td></tr>
+<tr><td><code>evenSpaced(count, span)</code></td><td>等間隔の位置（0 を中心に ±）</td></tr>
+<tr><td><code>linearRepeatOffsets(count, spacing, axis)</code></td><td>一定間隔のオフセット配列（支柱・ブラケット用）</td></tr>
+<tr><td><code>smoothUnit(t)</code></td><td>0..1 → 両端でなめらかな 0..1（smoothstep）。反り・テーパー用</td></tr>
+<tr><td><code>lerp(a, b, t)</code> / <code>inverseLerp(a, b, v)</code></td><td>線形補間とその逆算</td></tr>
+<tr><td><code>boundsOfPoints(pts)</code></td><td>点列の外接範囲 <code>{lo, hi}</code>。点が無くても <code>[0,0,0]</code> を返す</td></tr>
+<tr><td><code>snapValue(v, step)</code></td><td><code>step</code>（既定0.1）刻みへ吸着し、小数6桁で丸める</td></tr>
+<tr><td><code>roundTo(v, digits)</code></td><td>表示用の丸め（内部計算には使わない）</td></tr>
+</tbody></table>
+<h3 id="123-数値の取り出しと正規化描く前の下ごしらえ">12.3 数値の取り出しと正規化（描く前の下ごしらえ）</h3>
+<table><thead><tr><th>関数</th><th>役割</th></tr></thead><tbody>
+<tr><td><code>assetNum(o, key, fallback, min, max)</code></td><td>値を安全な数値へ（NaN・範囲外を丸める）</td></tr>
+<tr><td><code>assetBool(o, key, fallback)</code></td><td>truthy 判定を boolean にそろえる</td></tr>
+<tr><td><code>finiteNumber(v, fallback)</code></td><td>有限数でなければ <code>fallback</code></td></tr>
+<tr><td><code>assetDimensions(o)</code></td><td><code>w / d / h</code> をまとめて返す（<code>ra*2</code> などの換算を1か所に）</td></tr>
+<tr><td><code>assetFootprintArea(o)</code> / <code>assetVolume(o)</code></td><td>面積・体積（今後の機能用に残置。未使用）</td></tr>
+<tr><td><code>translateLocalPoints(pts, dx, dy, dz)</code></td><td>ローカル点列の平行移動</td></tr>
+<tr><td><code>mirrorLocalPoints(pts, axis)</code></td><td>ローカル点列の反転（左右・前後の対称部品用）</td></tr>
+<tr><td><code>scaledAssetProps(o, scale)</code></td><td>寸法をまとめて <code>scale</code> 倍した複製プロパティ</td></tr>
+<tr><td><code>aabbOverlaps(a, b, pad)</code> / <code>assetsOverlap(a, b, pad)</code></td><td>外接範囲の重なり判定（配置の衝突チェック用）</td></tr>
+<tr><td><code>normalizedAsset(o)</code></td><td><strong>描く前の正規化の入口</strong>。接着パーツの同期、面取り量・分割数・開口の上下限、<code>h</code> の下限などをここでそろえる</td></tr>
+<tr><td><code>beveledBoxParams(o)</code></td><td>面取りの量と分割数を上限つきで返す（上限 <code>min(w,d)/2 − 0.001</code>）</td></tr>
+<tr><td><code>cornerCutBoxParams(o)</code> / <code>cornerCutOpeningParams(o)</code></td><td>隅切り・その開口の寸法と向き</td></tr>
+<tr><td><code>wallSignParams(o)</code></td><td>看板の幅・厚み・高さ・金具の本数と長さ・ベベル設定</td></tr>
+<tr><td><code>stackedOpeningParams(o, f)</code></td><td>階層建物の1F開口の初期値と上限</td></tr>
+<tr><td><code>recessedMaxInset(w, d)</code></td><td>凹窓階層建物の共通上限（短辺の45%）</td></tr>
+<tr><td><code>recessedStackedBuildingParams(o)</code></td><td>凹窓階層建物の全パラメータを1か所にまとめる</td></tr>
+<tr><td><code>recessedStackedBuildingFloors(o)</code></td><td>各階の <code>z</code> と高さを積み上げて返す</td></tr>
+<tr><td><code>recessedHandlePatch(o, kind, value)</code></td><td>3D と直交ビューのハンドル操作を同じ patch に翻訳（片方だけ反応しない<span class="rd">事故</span>を防ぐ）</td></tr>
+<tr><td><code>roofParams(o)</code> / <code>roofFitFromHost(host, kind)</code></td><td>屋根の寸法・軒の出・板厚／建物に合わせた屋根の寸法合わせ</td></tr>
+<tr><td><code>rampParams(o)</code></td><td>スロープの勾配と手すり高さ</td></tr>
+<tr><td><code>buildingParams(o)</code></td><td>開口建物の <code>w / d / h / openingW / openingH / backY / sideT / topT</code></td></tr>
+<tr><td><code>closedBuildingLines(o, w, d, h)</code></td><td>開口OFFの建物を閉じた箱として描く（<code>openingEnabled</code> 未指定は開口あり扱い）</td></tr>
+<tr><td><code>windowGridOptions(o, wallW, wallH)</code> / <code>normalizedWindowFields(q)</code></td><td>窓グリッドの余白・間隔・窓サイズの正規化</td></tr>
+<tr><td><code>facadeWindowGridRects(wallW, wallH, opt)</code></td><td>窓1枚ずつの矩形を計算（<code>cellW</code>, <code>cellH</code>, 窓サイズ指定時はセル中央）</td></tr>
+<tr><td><code>windowRectHitsOpening(rect, opening)</code></td><td>開口と重なる窓を判定（重なる窓は描かない）</td></tr>
+<tr><td><code>appendFacadeWindows(o, out, w, d, h, color, opening)</code></td><td>建物の壁へ窓グリッドを貼る（正面・側面・背面）</td></tr>
+</tbody></table>
+<h3 id="124-アセット別の線画1形状--1関数">12.4 アセット別の線画（<span class="mk">1形状 = 1関数</span>）</h3>
+<table><thead><tr><th>関数</th><th>アセット</th></tr></thead><tbody>
+<tr><td><code>linesCustom</code></td><td><code>custom</code>（読み込んだ任意形状。<code>customPt</code> 経由）</td></tr>
+<tr><td><code>linesBox</code></td><td><code>box</code>（<code>boxA</code> を1回）</td></tr>
+<tr><td><code>linesBeveledBox</code></td><td><code>beveledBox</code>（h=0 なら平面1本）</td></tr>
+<tr><td><code>linesCornerCutBox</code></td><td><code>cornerCutBox</code>（＋開口）</td></tr>
+<tr><td><code>linesSign</code></td><td><code>sign</code>（外枠と絵枠）</td></tr>
+<tr><td><code>linesWallSign</code></td><td><code>wallSign</code>（板＋金具）</td></tr>
+<tr><td><code>linesWallSideSign</code></td><td><code>wallSideSign</code>（横壁接着。<code>wallSideBasis</code> を使う）</td></tr>
+<tr><td><code>linesPathPipe</code></td><td><code>pathPipe</code>（<code>pathPipeMesh</code> の輪郭）</td></tr>
+<tr><td><code>linesRecessedStackedBuilding</code></td><td><code>recessedStackedBuilding</code>（凹窓階層）</td></tr>
+<tr><td><code>linesStackedBuilding</code></td><td><code>stackedBuilding</code> / <code>beveledStackedBuilding</code>（<code>beveled</code> フラグで分岐）</td></tr>
+<tr><td><code>linesBalcony</code></td><td><code>balcony</code>（床・腰壁・ブラケット）</td></tr>
+<tr><td><code>linesUWall</code></td><td><code>uWall</code>（前面＋左右の3枚の壁）</td></tr>
+<tr><td><code>linesStairs</code></td><td><code>stairs</code>（<code>stairsRunA</code>）</td></tr>
+<tr><td><code>linesCrosswalk</code></td><td><code>crosswalk</code>（白線を等間隔）</td></tr>
+<tr><td><code>linesCylinder</code></td><td><code>cyl</code>（上下リング、母線は描かない）</td></tr>
+<tr><td><code>linesCone</code></td><td><code>cone</code>（底面＋左右の母線）</td></tr>
+<tr><td><code>linesSphere</code></td><td><code>sphere</code>（視点に正対する輪郭円＋赤道の線）</td></tr>
+<tr><td><code>linesTriPrism</code></td><td><code>triPrism</code></td></tr>
+<tr><td><code>linesTriPyramid</code></td><td><code>triPyramid</code></td></tr>
+<tr><td><code>linesLantern</code></td><td><code>lantern</code>（八角の胴＋絞り＋吊り手）</td></tr>
+<tr><td><code>linesPerson</code></td><td><code>person</code>（<code>personPose</code> の骨格から手足を描く）</td></tr>
+<tr><td><code>linesBuilding</code></td><td><code>building</code>（外枠・開口・奥パネル・窓グリッド）</td></tr>
+<tr><td><code>linesAwning</code></td><td><code>awning</code>（天板・底板・前面・後面・左右側面）</td></tr>
+<tr><td><code>roofSlabLines(ctx, kind)</code></td><td>屋根の共通処理（断面を作って押し出す）</td></tr>
+<tr><td><code>linesGableRoof</code> / <code>linesShedRoof</code></td><td><code>gableRoof</code> / <code>shedRoof</code>（<code>roofSlabLines</code> を呼ぶだけ）</td></tr>
+<tr><td><code>linesRamp</code></td><td><code>ramp</code>（斜面・側面・手すり）</td></tr>
+<tr><td><code>linesWindowGrid</code></td><td><code>windowGrid</code>（板＋窓の桟）</td></tr>
+<tr><td><code>linesRailing</code></td><td><code>railing</code>（柱＋足元の板＋上下の横桟＋縦の棒）</td></tr>
+</tbody></table>
+<h3 id="125-凹窓階層建物の専用計算凹みをつなげるための部品">12.5 凹窓階層建物の専用計算（凹みを「つなげる」ための部品）</h3>
+<table><thead><tr><th>関数</th><th>役割</th></tr></thead><tbody>
+<tr><td><code>recessedStackedBuildingLines(o)</code></td><td>全体の組み立て（各階・窓帯・蓋・間柱）</td></tr>
+<tr><td><code>recessedStackedBuildingFootprint(p)</code></td><td>正面右の角だけを丸めた輪郭</td></tr>
+<tr><td><code>recessedStackedBuildingWindowPaths(p)</code></td><td>外周と内側の2本の折れ線で作る「窓帯」の帯（横面まで回り込む）</td></tr>
+<tr><td><code>recessedStackedBuildingWindowMullionPoints(p)</code></td><td>外周の累積長を等分した間柱の位置</td></tr>
+<tr><td><code>recessedStackedBuildingJunctionWindows(o, p)</code></td><td>各階の接合部の中央へ窓帯を置く（最上部には作らない）</td></tr>
+<tr><td><code>recessedStackedBuildingCapPath(p, notch)</code></td><td>接合部のスラブを、窓の幅だけ切り欠いた多角形にする</td></tr>
+<tr><td><code>recessedStackedBuildingBeamFootprint(p)</code></td><td>窓の上端に入る梁の輪郭</td></tr>
+<tr><td><code>wallSignFacePoints(params)</code></td><td>看板の表裏の輪郭（ベベル時は4隅を丸めた多角形）</td></tr>
+<tr><td><code>wallSignBrackets(params)</code></td><td>板の <code>−x</code> 側面から横へ出る金具の直方体（0〜3本）</td></tr>
+</tbody></table>
+<h3 id="126-パスパイプ用のベクトル演算">12.6 パスパイプ用のベクトル演算</h3>
+<table><thead><tr><th>関数</th><th>役割</th></tr></thead><tbody>
+<tr><td><code>pathVecSub / Add / Scale / Dot / Cross / Length / Unit</code></td><td>3Dベクトルの基本演算（<code>Unit</code> は長さ0のとき <code>fallback</code>）</td></tr>
+<tr><td><code>pathRotateAroundAxis(v, axis, angle)</code></td><td>軸まわりの回転（ロドリゲスの式）</td></tr>
+<tr><td><code>pathPipeDefaultPoints()</code> / <code>pathPipeControlPoints(o)</code></td><td>制御点の既定値／オブジェクトの <code>path</code> を安全に取り出す</td></tr>
+<tr><td><code>pathPipeRoundedPath(o)</code></td><td>折れ線の角を円弧で置き換えた中心線</td></tr>
+<tr><td><code>pathPipeMesh(o)</code></td><td>中心線の各点にリングを置き、隣り合うリングを三角形でつなぐ</td></tr>
+</tbody></table>
+<h3 id="127-人物の骨格">12.7 人物の骨格</h3>
+<table><thead><tr><th>関数</th><th>役割</th></tr></thead><tbody>
+<tr><td><code>personPose(o)</code></td><td>身長・体格・肩幅・頭・脚の開き・しゃがみ・腰／膝／首の角度から <strong>関節座標を全部返す</strong>。線画・面・関節ギズモがこの1つの結果を共有する</td></tr>
+</tbody></table>
+<h3 id="128-入口と登録">12.8 入口と登録</h3>
+<table><thead><tr><th>関数</th><th>役割</th></tr></thead><tbody>
+<tr><td><code>assetLines(o)</code></td><td><code>ASSET_LINE_BUILDERS[o.asset]</code> を引き、<code>ctx = {o, kind, w, d, h, c, out}</code> を渡して線画を作る</td></tr>
+<tr><td><code>registerAsset(kind, meta, builder)</code></td><td>新しいアセットを <code>ASSETS</code> と <code>ASSET_LINE_BUILDERS</code> の両方へ登録（既存名は上書きしない）</td></tr>
+<tr><td><code>describeAsset(o)</code></td><td>デバッグ用の1行要約（寸法・名前・線の本数）</td></tr>
+<tr><td><code>genAsset(o)</code></td><td><code>genShape</code> から呼ばれる入口。<code>normalizedAsset</code> → <code>assetLines</code> の順に進む</td></tr>
+</tbody></table>
+<hr>
+<h2 id="13-engine-toolsjs--engine-corejs-側の計算関数">13. <code>engine-tools.js</code> / <code>engine-core.js</code> 側の計算関数</h2>
+<p>
+形そのものではなく、<strong>投影・面・当たり判定・再生成</strong>を担当する関数です。
+</p>
+<table><thead><tr><th>関数</th><th>ファイル</th><th>役割</th></tr></thead><tbody>
+<tr><td><code>L2W(o, x, y, z)</code></td><td>engine-core</td><td>ローカル → ワールド（§2.3 の式）。<code>d=−1</code> で <code>z</code> が上向き。最後に傾き（<code>rotX</code>/<code>rotZ</code>）を掛ける</td></tr>
+<tr><td><code>l2wRaw(o, x, y, z)</code></td><td>engine-core</td><td>傾きを掛ける前の座標（傾きの中心を出すのにも使う）</td></tr>
+<tr><td><code>objectTiltMatrix(o)</code></td><td>engine-core</td><td><code>rotX</code>/<code>rotZ</code> から作る回転行列（無ければ <code>null</code>＝今までどおり）</td></tr>
+<tr><td><code>applyObjectTilt(o, v, base)</code></td><td>engine-core</td><td>傾きの回転を1点へ適用（中心＝高さの真ん中）</td></tr>
+<tr><td><code>customPt(o, x, y, z)</code></td><td>asset</td><td>積層建物などの変換。中身は <code>L2W</code> へ委譲（§2.5）</td></tr>
+<tr><td><code>ringBasis(axis)</code> / <code>ringParamAt(poly, p)</code> / <code>wrapPi(a)</code></td><td>engine-tools</td><td>画面の回転リング（軸に直交する2軸・掴んだ位置の角度・角度差の畳み込み）</td></tr>
+<tr><td><code>cam(v)</code> / <code>camPos()</code> / <code>CO()</code></td><td>engine-core</td><td>カメラ座標への回転／視点位置／その逆ベクトル</td></tr>
+<tr><td><code>scr(v)</code></td><td>engine-core</td><td>透視投影（<code>P.lens</code> と <code>P.hz</code> を使う）</td></tr>
+<tr><td><code>orthScale()</code></td><td>engine-core</td><td>正投影の倍率（既定 <code>min(W,H)/7.2</code> px/m）</td></tr>
+<tr><td><code>scr3(p)</code></td><td>engine-core</td><td>正投影と透視を切り替えて点を画面へ</td></tr>
+<tr><td><code>dens3(a)</code></td><td>engine-tools</td><td>点列を角度 0.004 rad 刻みで球面補間（魚眼でも線が曲がらない）</td></tr>
+<tr><td><code>genShape(o)</code></td><td>engine-core</td><td>素の図形とアセットの振り分け（<code>type==="asset"</code> は <code>genAsset</code>）</td></tr>
+<tr><td><code>buildingGeometry(o)</code></td><td>engine-tools</td><td>建物の開口寸法（§6.2）を計算する唯一の場所</td></tr>
+<tr><td><code>awningGeometry(o)</code></td><td>engine-tools</td><td>テントの前縁 <code>edgeZ</code> / <code>edgeY</code> と板厚・上下端を計算</td></tr>
+<tr><td><code>balconyGeometry(o)</code></td><td>engine-tools</td><td>ベランダの厚さ（床＝腰壁の共通値）と <code>railH</code> を出す唯一の場所。<code>linesBalcony</code> もこれを呼ぶ</td></tr>
+<tr><td><code>uWallGeometry(o)</code></td><td>engine-tools</td><td>コの字壁の <code>thickness</code>（3枚共通）と <code>w</code>/<code>d</code>/<code>h</code> を出す唯一の場所</td></tr>
+<tr><td><code>balconyGizmo(o)</code> / <code>uWallGizmo(o)</code></td><td>engine-tools</td><td>厚さのハンドル（<code>balcony-thickness</code> / <code>uWall-thickness</code>）</td></tr>
+<tr><td><code>railingGeometry(o)</code></td><td>engine-tools</td><td>手すりの形・本数・太さ・下の横桟と、柱／横桟／縦桟の位置を出す唯一の場所（線画・面・パネルが共用）</td></tr>
+<tr><td><code>railingGizmo(o)</code></td><td>engine-tools</td><td>手すりのハンドル3本（<code>railing-thickness</code> / <code>railing-bottom</code> / <code>railing-count</code>）</td></tr>
+<tr><td><code>obBounds(o)</code></td><td>engine-tools</td><td>外接範囲（選択枠・当たり判定・スナップ）</td></tr>
+<tr><td><code>surfaceTriangles(o)</code></td><td>engine-tools</td><td>面の三角形（キャッシュ付き）</td></tr>
+<tr><td><code>exportSurfaceTriangles(o)</code></td><td>engine-tools</td><td>書き出し用の三角形（面表示・JSON出力）</td></tr>
+<tr><td><code>surfaceCacheKey(o)</code></td><td>engine-tools</td><td>値のJSONをキーにした面キャッシュ（1つでも数値が変われば無効化）</td></tr>
+<tr><td><code>surfaceColor(o)</code> / <code>surfaceAlpha(o)</code></td><td>engine-tools</td><td>面の色と不透明度（既定 0.22）</td></tr>
+<tr><td><code>drawObjectSurfaces(c)</code></td><td>engine-tools</td><td>奥行きで並べ替えて面を塗る（ペインター法）</td></tr>
+<tr><td><code>facePatch</code> / <code>buildingOuterFacePatch</code> / <code>compoundFacePatch</code> / <code>addExportBoxFaces</code> / <code>spreadFlatFaces</code></td><td>engine-tools</td><td>面ごとの編集（1枚だけ動かす）と面の組み立て</td></tr>
+<tr><td><code>faceScreenGuide</code> / <code>faceSnap</code></td><td>engine-tools</td><td>面ハンドルの画面ガイド／スナップ</td></tr>
+<tr><td><code>setOb(id, patch)</code></td><td>engine-core</td><td><strong>変更の唯一の入口</strong>。線・面・子パーツを作り直す</td></tr>
+<tr><td><code>regenObjects()</code></td><td>engine-core</td><td>シーン全体の再生成（カメラ署名が変わったとき）</td></tr>
+<tr><td><code>sigNow()</code></td><td>engine-core</td><td>カメラ・ズーム・ビューの署名（再生成の判定）</td></tr>
+<tr><td><code>selectedObjects()</code> / <code>obOf(id)</code></td><td>engine-core</td><td>選択中の定義／ID から定義を引く</td></tr>
+<tr><td><code>syncAttachedPart(o, parent)</code></td><td>engine-core</td><td>接着パーツの位置・向きを親から計算（§6.3）</td></tr>
+<tr><td><code>render()</code> / <code>renderFresh()</code></td><td>engine-tools</td><td>1回描く／追加直後に描き直す（別タスクでもう一度描く）</td></tr>
+</tbody></table>
+<hr>
+<h2 id="14-実際の数値で1回とおす検算の例">14. 実際の数値で1回とおす（<span class="gr">検算</span>の例）</h2>
+<p>
+「建物 4×3×5 に付属テント（3×1×1）を付ける」を最後まで計算してみます。
+</p>
+<pre><code>① 建物の寸法         ra=2, rb=1.5, h=5
+② 開口              openingW = 0.56×4 = 2.24
+                    openingH = 0.66×5 = 3.3
+                    backY    = 1.5 − 0.025 = 1.475
+③ 線と面            親は「開口なしの閉じた箱」なので 線 6本 ／ 三角形 12枚
+                    （テント付き建物の親は openingEnabled=false で作られる）
+④ 付属テントの位置   attachedNormal = 0.5 + 0.008 = 0.508
+                    faceY  = −(1.5 + 0.508) = −2.008   （手前へ 2.008 m）
+                    z      = 3.6                        （下端）
+                    上端   = 3.6 + 1 = 4.6              （建物5mの0.4m下）
+⑤ テントの形         edgeZ = h = 1、edgeY = −rb = −0.5 → 直方体
+                    板厚 = max(0.04, 0.14×1) = 0.14
+⑥ 線と面            子テントは 線 6本 ／ 三角形 12枚
+                    → 親子合計で 12本・24枚</code></pre>
+<p>
+確かめ方（開発者ツールのコンソール）：
+</p>
+<pre><code class="language-js">const objs = window.cityGridStudioBridge.sceneObjects();
+const parent = objs.find(o =&gt; o.asset === "building");
+const child  = objs.find(o =&gt; o.attachment);
+[parent.ra * 2, parent.rb * 2, parent.h];   // → [4, 3, 5]
+buildingGeometry(parent);                    // → openingW 2.24 / openingH 3.3 / backY 1.475
+child.attachment.baseZ;                      // → 3.6（地面からの高さ）
+child.lift - 1;                              // → 2.6（ワールドY。地面が −1 なので 3.6m）
+assetLines(parent).length;                   // → 6（閉じた箱）
+exportSurfaceTriangles(child).length;        // → 12</code></pre>
+<blockquote class="warn"><p>注意：ワールドの高さは <strong>地面が <code>y = −1</code></strong> です。 「地面から3.6m」は <code>y = 2.6</code>。資料の「3.6」はすべて <strong>地面からの実寸</strong>で、 <code>lift − 1</code> のような式の結果とは 1 だけずれます。</p></blockquote>
+<blockquote class="point"><p>ポイント：すべての数値が「初期値の表（§6.1）」と「式（§6.2・§6.3）」の 両方から同じ値になることを確かめてあります。片方だけ違えば、式か表が古い証拠です。</p></blockquote>
+</div>
+</body>
+</html>

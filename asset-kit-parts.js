@@ -129,7 +129,7 @@
         // 手前の垂れ（幕）。板厚のぶんだけ手前へ出す。
         parts.push(K.box(K.offsetPath(K.rectPath(w, valanceH), 0, zFront - valanceH / 2), -d / 2 - t, -d / 2, { axis: "y" }));
         // 腕（下からの支え）。
-        [-w * 0.42, w * 0.42].forEach((x) =>
+        if (o.arms !== false) [-w * 0.42, w * 0.42].forEach((x) =>
             parts.push(...K.moveParts([K.box(K.rectPath(t, d), zFront - armBelow, zFront + armAbove)], x, 0, 0)),
         );
         return parts;
