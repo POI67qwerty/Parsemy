@@ -1031,7 +1031,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         {
             key: "primitive",
             label: "プリミティブ",
-            kinds: ["rect", "box", "beveledBox", "circle", "cone", "sphere", "triPrism", "triPyramid", "awning"],
+            kinds: ["rect", "box", "beveledBox", "circle", "cone", "sphere", "triPrism", "triPyramid", "awning", "screenHood"],
         },
         {
             key: "building",

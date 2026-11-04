@@ -354,6 +354,12 @@ const ASSET_KIT = (function () {
     function moveParts(parts, dx = 0, dy = 0, dz = 0) {
         const list = Array.isArray(parts) ? parts : [parts];
         return list.filter(Boolean).map((part) => {
+            if (Array.isArray(part.meshTriangles) || Array.isArray(part.meshEdges)) {
+                const shift = p => [p[0] + dx, p[1] + dy, p[2] + dz];
+                return {...part,
+                    meshTriangles: Array.isArray(part.meshTriangles) ? part.meshTriangles.map(t => t.map(shift)) : undefined,
+                    meshEdges: Array.isArray(part.meshEdges) ? part.meshEdges.map(e => e.map(shift)) : undefined};
+            }
             if (Array.isArray(part.poly)) return { ...part, poly: part.poly.map(([x, y, z]) => [x + dx, y + dy, z + dz]) };
             if (Array.isArray(part.rings)) {
                 const [du, dv, dw] = shiftOf(part.axis || "z", dx, dy, dz);
@@ -874,9 +880,24 @@ const ASSET_KIT = (function () {
         sample[index]+=sign*value;probe[index]+=sign*(value+1);
         return {anchor:anchor.slice(),sample,probe,fallback:axis==="z"?{x:0,y:-sign}:{x:sign,y:0}};
     }
+    // 寸法変更の前後で、指定したローカル上の取付点を同じワールド位置に保つ。
+    // 回転・生成面・傾きによって off の基底が変わっても使える。
+    function keepAnchorPatch(old, patch, before, after = before) {
+        if (!old || old.attachment || typeof L2W !== 'function') return patch;
+        const next={...old,...patch}, off=Array.isArray(next.off)?next.off.slice():[0,0,0],
+            target=L2W(old,...before), base=L2W(next,...after),
+            columns=[0,1,2].map(i=>{const v=off.slice();v[i]+=1;return L2W({...next,off:v},...after).map((x,j)=>x-base[j]);}),
+            cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],
+            dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],
+            delta=target.map((x,i)=>x-base[i]), det=dot(columns[0],cross(columns[1],columns[2]));
+        if (!Number.isFinite(det) || Math.abs(det)<1e-9) return patch;
+        const adjustment=[dot(delta,cross(columns[1],columns[2]))/det,dot(delta,cross(columns[2],columns[0]))/det,dot(delta,cross(columns[0],columns[1]))/det];
+        return {...patch,off:off.map((x,i)=>x+adjustment[i])};
+    }
     const API = {
         // 登録
         define,
+        keepAnchorPatch,
         // 値の読み取り
         param,
         num,

@@ -384,6 +384,74 @@ ASSET_KIT.define(
 // 店先そのものは旧JSON互換のため登録を残すが、棚には出さない。
 // テント2は、手前上端を固定して垂れを下へ伸ばす。壁側の上端だけを動かせる。
 // 古いデータには設定がないため、従来の形の寸法から初期値を求める。
+// モニター用の四面枠。折れ点は左右連動し、背面と下の枠は傾けない。
+function screenHoodParams(o) {
+    const w=Math.max(.1,Math.abs(2*Number(o.ra)||1.1)), h=Math.max(.1,Math.abs(Number(o.h)||.8)),
+        length=Math.max(.005,Math.abs(2*Number(o.rb)||.4)),
+        value=(key,f)=>o[key]!=null && Number.isFinite(Number(o[key])) ? Number(o[key]) : f,
+        frameDepth=Math.max(.005,Math.min(length,value('hoodFrameDepth',length*.25))),
+        brimLength=Math.max(0,length-frameDepth),
+        rawT=Math.max(.005,Math.min(w*.4,h*.28,value('hoodThickness',.04))),
+        rawB=Math.max(0,Math.min(w*.45,h*.45,value('hoodBevel',.1))),
+        pad=Math.max(rawT,rawB)+.001,
+        knee=Math.max(pad,Math.min(h-pad,value('hoodKnee',h*.55))),
+        maxT=Math.max(.005,Math.min(w*.4,h*.28,knee-.001,h-knee-.001)),
+        maxB=Math.max(0,Math.min(w*.45,h*.45,knee-.001,h-knee-.001)),
+        t=Math.max(.005,Math.min(maxT,rawT)), bevel=Math.max(0,Math.min(maxB,rawB));
+    return {w,h,length,frameDepth,brimLength,t,bevel,knee,maxT,maxB,kneeMin:Math.max(t,bevel)+.001,kneeMax:h-Math.max(t,bevel)-.001};
+}
+ASSET_KIT.define('screenHood',{
+    label:'ひさし',glyph:'▣',group:'primitive',w:1.1,d:.4,h:.8,accent:'#86aac0',
+    minHalfWidth:o=>Math.max(.05,(Number(o.hoodThickness)||.04)/.8,(Number(o.hoodBevel)||0)/.9),
+    minHalfDepth:o=>Math.max(.0025,screenHoodParams(o).frameDepth/2),
+    minHeight:o=>{const g=screenHoodParams(o);return Math.max(.1,g.knee+Math.max(g.t,g.bevel)+.001);},
+    // 旧データの枠は旧表示どおり全奥行きの1/4から始め、編集後は実寸を保持。
+    constrainEdit:(next,old,patch)=>{const g=screenHoodParams(old),q={...next,
+        hoodFrameDepth:next.hoodFrameDepth??g.frameDepth,hoodKnee:next.hoodKnee??g.knee,
+        hoodThickness:next.hoodThickness??g.t,hoodBevel:next.hoodBevel??g.bevel},
+        has=k=>Object.prototype.hasOwnProperty.call(patch,k);
+        if(has('hoodFrameDepth')) {
+            q.hoodFrameDepth=clamp(Number(q.hoodFrameDepth)||g.frameDepth,.005,5);
+            // APIから枠の長さだけを変えた場合も、背面を固定してつばの実寸を維持。
+            if(!has('rb')) {
+                const rb=(q.hoodFrameDepth+g.brimLength)/2,
+                    anchored=ASSET_KIT.keepAnchorPatch(old,{rb},[0,old.rb,old.h],[0,rb,old.h]);
+                q.rb=rb;if(anchored.off)q.off=anchored.off;
+            }
+        }
+        if(has('rb'))q.rb=Math.max(q.hoodFrameDepth/2,Number(q.rb)||0);
+        if(has('hoodThickness'))q.hoodThickness=clamp(Number(q.hoodThickness)||g.t,.005,g.maxT);
+        if(has('hoodBevel'))q.hoodBevel=clamp(Number(q.hoodBevel)||0,0,g.maxB);
+        if(has('hoodKnee'))q.hoodKnee=clamp(Number(q.hoodKnee)||g.knee,g.kneeMin,g.kneeMax);
+        if(has('h'))q.h=Math.max(Number(q.h)||0,Number(q.hoodKnee)+Math.max(Number(q.hoodThickness)||0,Number(q.hoodBevel)||0)+.001,
+            (Number(q.hoodThickness)||0)/.28,(Number(q.hoodBevel)||0)/.45,.1);
+        return q;},
+    controls:[
+        {key:'hoodLength',label:'ひさしのつばの長さ',min:0,max:5,step:.01,unit:'m',
+            get:o=>screenHoodParams(o).brimLength,
+            patch:(o,v)=>{const g=screenHoodParams(o),rb=(g.frameDepth+v)/2;
+                return ASSET_KIT.keepAnchorPatch(o,{rb},[0,o.rb,o.h],[0,rb,o.h]);},
+            handle:(o,v)=>{const g=screenHoodParams(o),x=-g.w*.2,base=g.length/2-g.frameDepth;
+                return {anchor:[x,base,g.h+.08],sample:[x,base-v,g.h+.08],probe:[x,base-v-1,g.h+.08],fallback:{x:0,y:1}};}},
+        {key:'hoodFrameDepth',label:'枠の長さ',default:.1,min:.005,max:5,step:.01,unit:'m',
+            get:o=>screenHoodParams(o).frameDepth,
+            patch:(o,v)=>{const g=screenHoodParams(o),rb=(v+g.brimLength)/2;
+                return ASSET_KIT.keepAnchorPatch(o,{rb,hoodFrameDepth:v},[0,o.rb,o.h],[0,rb,o.h]);},
+            handle:(o,v)=>{const g=screenHoodParams(o),x=g.w*.28,back=g.length/2,z=g.knee*.3;
+                return {anchor:[x,back,z],sample:[x,back-v,z],probe:[x,back-v-1,z],fallback:{x:0,y:1}};}},
+        {key:'hoodKnee',label:'ひさしの傾き（折れ点の高さ）',min:o=>screenHoodParams(o).kneeMin,max:o=>screenHoodParams(o).kneeMax,step:.01,unit:'m',
+            get:o=>screenHoodParams(o).knee,
+            handle:(o,v)=>{const g=screenHoodParams(o),x=g.w/2,y=g.length/2-g.frameDepth;
+                return {anchor:[x,y,0],sample:[x,y,v],probe:[x,y,v+1],fallback:{x:0,y:-1}};}},
+        {key:'hoodThickness',label:'ひさしの厚さ',default:.04,min:.005,max:o=>screenHoodParams(o).maxT,step:.005,unit:'m',
+            handle:(o,v)=>{const g=screenHoodParams(o),x=-g.w/2,y=g.length/2-g.frameDepth,z=g.knee*.55;
+                return {anchor:[x,y,z],sample:[x+v,y,z],probe:[x+v+1,y,z],fallback:{x:1,y:0}};}},
+        {key:'hoodBevel',label:'上下の角のベベル',type:'range',default:.1,min:0,max:o=>screenHoodParams(o).maxB,step:.005,unit:'m',
+            handle:(o,v)=>{const g=screenHoodParams(o),x=g.w/2,y=-g.length/2;
+                return {anchor:[x,y,g.h+.1],sample:[x-v,y,g.h+.1],probe:[x-v-1,y,g.h+.1],fallback:{x:-1,y:0}};}}
+    ]
+},(o,K)=>{const g=screenHoodParams(o);return K.part('screenHood',{w:g.w,h:g.h,frameDepth:g.frameDepth,brimLength:g.brimLength,knee:g.knee,t:g.t,bevel:g.bevel});});
+
 function shopAwningParams(o) {
     const w=Math.max(.1,Math.abs(2*Number(o.ra)||1.32)), d=Math.max(.06,Math.abs(2*Number(o.rb)||.66)),
         h=Math.max(.12,Math.abs(Number(o.h)||.42)),

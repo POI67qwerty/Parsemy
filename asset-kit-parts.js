@@ -107,6 +107,68 @@
         return parts;
     });
 
+    // ---- 画面用ひさし：上・下・左右を囲む、前後が開いた枠 ----
+    // 上側は正面(-Y)に張り出し、左右の折れ点から下は短い直線部分になる。
+    // 四隅の断面と輪郭候補はベベル直方体と同じ4分割・seam方式。
+    K.registerPart("screenHood", (o) => {
+        const read=(v,f)=>v!==null && v!==undefined && Number.isFinite(Number(v)) ? Number(v) : f,
+            w=Math.max(.1,Math.abs(read(o.w,1.1))), h=Math.max(.1,Math.abs(read(o.h,.8))),
+            oldLength=Math.max(.02,Math.abs(read(o.length,.4))),
+            frameDepth=Math.max(.005,read(o.frameDepth,oldLength*.25)),
+            brimLength=Math.max(0,read(o.brimLength,oldLength-frameDepth)),
+            length=frameDepth+brimLength,
+            t=Math.max(.005,Math.min(read(o.t,.04),w*.4,h*.28)),
+            b=Math.max(0,Math.min(read(o.bevel,.1),w*.45,h*.45)),
+            pad=Math.max(t,b)+.001, knee=Math.max(pad,Math.min(h-pad,read(o.knee,h*.55))),
+            innerB=Math.max(0,b-t), back=length/2,
+            // 枠の奥行きと、枠より手前へ張り出すつばは独立した実寸。
+            front=z=>back-(frameDepth+brimLength*Math.max(0,Math.min(1,(z-knee)/(h-knee))));
+        // 対応する内外の点を同じ順番にそろえる。内角が直角の場合は角頂点を繰り返し、
+        // 零面積三角形と重複線を出さない（外側のベベルを維持）。
+        const count=b>1e-6 ? 20 : 4, seg=count===20 ? 4 : 1;
+        function contour(width,height,radius) {
+            let p=beveledBoxFootprint(width,height,radius,4);
+            if(count===20 && p.length===4)p=p.flatMap(v=>Array.from({length:5},()=>v.slice()));
+            const out=[];
+            p.forEach(([x,z],i)=>{
+                out.push({x,z:z+h/2,corner:i});
+                const n=count===20?5:1;
+                if(i===n*2-1)out.push({x:width/2,z:knee,corner:null});
+                if(i===n*4-1)out.push({x:-width/2,z:knee,corner:null});
+            });
+            return out;
+        }
+        const outer=contour(w,h,b), inner=contour(w-2*t,h-2*t,innerB),
+            point=(v,y)=>[v.x,y,v.z], pfront=v=>point(v,front(v.z)), pback=v=>point(v,back),
+            triangles=[], edges=[], marks=[];
+        const area=(a,c,d)=>{const u=c.map((x,i)=>x-a[i]),v=d.map((x,i)=>x-a[i]);return Math.hypot(u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]);};
+        const tri=(a,c,d)=>{if(area(a,c,d)>1e-12)triangles.push([a,c,d]);};
+        const quad=(a,c,d,e)=>{tri(a,c,d);tri(a,d,e);};
+        for(let i=0;i<outer.length;i++){
+            const j=(i+1)%outer.length, a=outer[i],c=outer[j],u=inner[i],v=inner[j],
+                af=pfront(a),cf=pfront(c),uf=pfront(u),vf=pfront(v),
+                ab=pback(a),cb=pback(c),ub=pback(u),vb=pback(v);
+            quad(af,ab,cb,cf); // 外側
+            quad(uf,vf,vb,ub); // 開口の内側
+            quad(ab,ub,vb,cb); // 背面の縁
+            quad(af,cf,vf,uf); // 前面の縁
+        }
+        const same=(a,c)=>Math.hypot(...a.map((v,i)=>v-c[i]))<1e-10;
+        const addEdge=(e,mark=null)=>{if(e.length>=2&&!e.every(p=>same(p,e[0]))){edges.push(e);marks.push(mark);}};
+        const loop=(list,fn)=>{const p=list.map(fn).filter((v,i,a)=>i===0||!same(v,a[i-1]));if(p.length>2)addEdge([...p,p[0]]);};
+        loop(outer,pfront);loop(inner,pfront);loop(outer,pback);loop(inner,pback);
+        for(const [list,radius,group] of [[outer,b,'hoodOuter'],[inner,innerB,'hoodInner']]){
+            let prior=null;
+            for(const v of list){
+                if(v.corner===null)continue;
+                const a=pfront(v),c=pback(v);if(prior && same(a,prior))continue;prior=a;
+                const mark=radius>1e-6 ? beveledEdgeMark(v.corner,radius,seg,group) : null;
+                addEdge([a,c],mark);
+            }
+        }
+        return [{meshTriangles:triangles,meshEdges:edges,seamMarks:marks,onFace:true,preciseTubeEdge:true,color:o.color,width:o.width}];
+    });
+
     // ---- 日よけ（オーニング）：斜めの幕＋手前の垂れ＋腕 ----
     // 断面（Y-Z）を左右（X）へ押し出すので、勾配がそのまま立体になる。
     K.registerPart("awning", (o) => {

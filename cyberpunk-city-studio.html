@@ -14660,7 +14660,7 @@ function unpack(d) {
         const st = d.S.map((s) => (s.ob ? { ...s, ob: fixOb(s.ob) } : s)),
             seen = new Set(),
             out = [],
-            needsAssetUpdate = o => !!o && (o.arrayEnabled === true || o.doorEnabled === true || o.openingOffset != null || ["shopAwning", "displayShelf2", "trafficSignal", "pedSignal", "railing", "streetMailbox", "streetParcel", "streetPlantBox", "squareStool", "shopWardrobe", "shopWardrobe2", "pictureStairs", "guardPoleHalf"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsAssetUpdate))),
+            needsAssetUpdate = o => !!o && (o.arrayEnabled === true || o.doorEnabled === true || o.openingOffset != null || ["screenHood", "shopAwning", "displayShelf2", "trafficSignal", "pedSignal", "railing", "streetMailbox", "streetParcel", "streetPlantBox", "squareStool", "shopWardrobe", "shopWardrobe2", "pictureStairs", "guardPoleHalf"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsAssetUpdate))),
             regenerate = s => !!s.ob && (!s.d3 || needsAssetUpdate(s.ob));
         // 形を更新した既存アセットの保存線を新しい形へ作り直す。
         // 元の最初の線の位置へ挿入し、他の物体や手描き線との並び順も保つ。
@@ -19496,6 +19496,12 @@ const ASSET_KIT = (function () {
     function moveParts(parts, dx = 0, dy = 0, dz = 0) {
         const list = Array.isArray(parts) ? parts : [parts];
         return list.filter(Boolean).map((part) => {
+            if (Array.isArray(part.meshTriangles) || Array.isArray(part.meshEdges)) {
+                const shift = p => [p[0] + dx, p[1] + dy, p[2] + dz];
+                return {...part,
+                    meshTriangles: Array.isArray(part.meshTriangles) ? part.meshTriangles.map(t => t.map(shift)) : undefined,
+                    meshEdges: Array.isArray(part.meshEdges) ? part.meshEdges.map(e => e.map(shift)) : undefined};
+            }
             if (Array.isArray(part.poly)) return { ...part, poly: part.poly.map(([x, y, z]) => [x + dx, y + dy, z + dz]) };
             if (Array.isArray(part.rings)) {
                 const [du, dv, dw] = shiftOf(part.axis || "z", dx, dy, dz);
@@ -20016,9 +20022,24 @@ const ASSET_KIT = (function () {
         sample[index]+=sign*value;probe[index]+=sign*(value+1);
         return {anchor:anchor.slice(),sample,probe,fallback:axis==="z"?{x:0,y:-sign}:{x:sign,y:0}};
     }
+    // 寸法変更の前後で、指定したローカル上の取付点を同じワールド位置に保つ。
+    // 回転・生成面・傾きによって off の基底が変わっても使える。
+    function keepAnchorPatch(old, patch, before, after = before) {
+        if (!old || old.attachment || typeof L2W !== 'function') return patch;
+        const next={...old,...patch}, off=Array.isArray(next.off)?next.off.slice():[0,0,0],
+            target=L2W(old,...before), base=L2W(next,...after),
+            columns=[0,1,2].map(i=>{const v=off.slice();v[i]+=1;return L2W({...next,off:v},...after).map((x,j)=>x-base[j]);}),
+            cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],
+            dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],
+            delta=target.map((x,i)=>x-base[i]), det=dot(columns[0],cross(columns[1],columns[2]));
+        if (!Number.isFinite(det) || Math.abs(det)<1e-9) return patch;
+        const adjustment=[dot(delta,cross(columns[1],columns[2]))/det,dot(delta,cross(columns[2],columns[0]))/det,dot(delta,cross(columns[0],columns[1]))/det];
+        return {...patch,off:off.map((x,i)=>x+adjustment[i])};
+    }
     const API = {
         // 登録
         define,
+        keepAnchorPatch,
         // 値の読み取り
         param,
         num,
@@ -20185,6 +20206,68 @@ const ASSET_KIT = (function () {
             parts.push(...K.moveParts([K.box(K.rectPath(w, t), h, h + bh)], 0, d / 2 - t / 2, 0));
         }
         return parts;
+    });
+
+    // ---- 画面用ひさし：上・下・左右を囲む、前後が開いた枠 ----
+    // 上側は正面(-Y)に張り出し、左右の折れ点から下は短い直線部分になる。
+    // 四隅の断面と輪郭候補はベベル直方体と同じ4分割・seam方式。
+    K.registerPart("screenHood", (o) => {
+        const read=(v,f)=>v!==null && v!==undefined && Number.isFinite(Number(v)) ? Number(v) : f,
+            w=Math.max(.1,Math.abs(read(o.w,1.1))), h=Math.max(.1,Math.abs(read(o.h,.8))),
+            oldLength=Math.max(.02,Math.abs(read(o.length,.4))),
+            frameDepth=Math.max(.005,read(o.frameDepth,oldLength*.25)),
+            brimLength=Math.max(0,read(o.brimLength,oldLength-frameDepth)),
+            length=frameDepth+brimLength,
+            t=Math.max(.005,Math.min(read(o.t,.04),w*.4,h*.28)),
+            b=Math.max(0,Math.min(read(o.bevel,.1),w*.45,h*.45)),
+            pad=Math.max(t,b)+.001, knee=Math.max(pad,Math.min(h-pad,read(o.knee,h*.55))),
+            innerB=Math.max(0,b-t), back=length/2,
+            // 枠の奥行きと、枠より手前へ張り出すつばは独立した実寸。
+            front=z=>back-(frameDepth+brimLength*Math.max(0,Math.min(1,(z-knee)/(h-knee))));
+        // 対応する内外の点を同じ順番にそろえる。内角が直角の場合は角頂点を繰り返し、
+        // 零面積三角形と重複線を出さない（外側のベベルを維持）。
+        const count=b>1e-6 ? 20 : 4, seg=count===20 ? 4 : 1;
+        function contour(width,height,radius) {
+            let p=beveledBoxFootprint(width,height,radius,4);
+            if(count===20 && p.length===4)p=p.flatMap(v=>Array.from({length:5},()=>v.slice()));
+            const out=[];
+            p.forEach(([x,z],i)=>{
+                out.push({x,z:z+h/2,corner:i});
+                const n=count===20?5:1;
+                if(i===n*2-1)out.push({x:width/2,z:knee,corner:null});
+                if(i===n*4-1)out.push({x:-width/2,z:knee,corner:null});
+            });
+            return out;
+        }
+        const outer=contour(w,h,b), inner=contour(w-2*t,h-2*t,innerB),
+            point=(v,y)=>[v.x,y,v.z], pfront=v=>point(v,front(v.z)), pback=v=>point(v,back),
+            triangles=[], edges=[], marks=[];
+        const area=(a,c,d)=>{const u=c.map((x,i)=>x-a[i]),v=d.map((x,i)=>x-a[i]);return Math.hypot(u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]);};
+        const tri=(a,c,d)=>{if(area(a,c,d)>1e-12)triangles.push([a,c,d]);};
+        const quad=(a,c,d,e)=>{tri(a,c,d);tri(a,d,e);};
+        for(let i=0;i<outer.length;i++){
+            const j=(i+1)%outer.length, a=outer[i],c=outer[j],u=inner[i],v=inner[j],
+                af=pfront(a),cf=pfront(c),uf=pfront(u),vf=pfront(v),
+                ab=pback(a),cb=pback(c),ub=pback(u),vb=pback(v);
+            quad(af,ab,cb,cf); // 外側
+            quad(uf,vf,vb,ub); // 開口の内側
+            quad(ab,ub,vb,cb); // 背面の縁
+            quad(af,cf,vf,uf); // 前面の縁
+        }
+        const same=(a,c)=>Math.hypot(...a.map((v,i)=>v-c[i]))<1e-10;
+        const addEdge=(e,mark=null)=>{if(e.length>=2&&!e.every(p=>same(p,e[0]))){edges.push(e);marks.push(mark);}};
+        const loop=(list,fn)=>{const p=list.map(fn).filter((v,i,a)=>i===0||!same(v,a[i-1]));if(p.length>2)addEdge([...p,p[0]]);};
+        loop(outer,pfront);loop(inner,pfront);loop(outer,pback);loop(inner,pback);
+        for(const [list,radius,group] of [[outer,b,'hoodOuter'],[inner,innerB,'hoodInner']]){
+            let prior=null;
+            for(const v of list){
+                if(v.corner===null)continue;
+                const a=pfront(v),c=pback(v);if(prior && same(a,prior))continue;prior=a;
+                const mark=radius>1e-6 ? beveledEdgeMark(v.corner,radius,seg,group) : null;
+                addEdge([a,c],mark);
+            }
+        }
+        return [{meshTriangles:triangles,meshEdges:edges,seamMarks:marks,onFace:true,preciseTubeEdge:true,color:o.color,width:o.width}];
     });
 
     // ---- 日よけ（オーニング）：斜めの幕＋手前の垂れ＋腕 ----
@@ -20699,6 +20782,74 @@ ASSET_KIT.define(
 // 店先そのものは旧JSON互換のため登録を残すが、棚には出さない。
 // テント2は、手前上端を固定して垂れを下へ伸ばす。壁側の上端だけを動かせる。
 // 古いデータには設定がないため、従来の形の寸法から初期値を求める。
+// モニター用の四面枠。折れ点は左右連動し、背面と下の枠は傾けない。
+function screenHoodParams(o) {
+    const w=Math.max(.1,Math.abs(2*Number(o.ra)||1.1)), h=Math.max(.1,Math.abs(Number(o.h)||.8)),
+        length=Math.max(.005,Math.abs(2*Number(o.rb)||.4)),
+        value=(key,f)=>o[key]!=null && Number.isFinite(Number(o[key])) ? Number(o[key]) : f,
+        frameDepth=Math.max(.005,Math.min(length,value('hoodFrameDepth',length*.25))),
+        brimLength=Math.max(0,length-frameDepth),
+        rawT=Math.max(.005,Math.min(w*.4,h*.28,value('hoodThickness',.04))),
+        rawB=Math.max(0,Math.min(w*.45,h*.45,value('hoodBevel',.1))),
+        pad=Math.max(rawT,rawB)+.001,
+        knee=Math.max(pad,Math.min(h-pad,value('hoodKnee',h*.55))),
+        maxT=Math.max(.005,Math.min(w*.4,h*.28,knee-.001,h-knee-.001)),
+        maxB=Math.max(0,Math.min(w*.45,h*.45,knee-.001,h-knee-.001)),
+        t=Math.max(.005,Math.min(maxT,rawT)), bevel=Math.max(0,Math.min(maxB,rawB));
+    return {w,h,length,frameDepth,brimLength,t,bevel,knee,maxT,maxB,kneeMin:Math.max(t,bevel)+.001,kneeMax:h-Math.max(t,bevel)-.001};
+}
+ASSET_KIT.define('screenHood',{
+    label:'ひさし',glyph:'▣',group:'primitive',w:1.1,d:.4,h:.8,accent:'#86aac0',
+    minHalfWidth:o=>Math.max(.05,(Number(o.hoodThickness)||.04)/.8,(Number(o.hoodBevel)||0)/.9),
+    minHalfDepth:o=>Math.max(.0025,screenHoodParams(o).frameDepth/2),
+    minHeight:o=>{const g=screenHoodParams(o);return Math.max(.1,g.knee+Math.max(g.t,g.bevel)+.001);},
+    // 旧データの枠は旧表示どおり全奥行きの1/4から始め、編集後は実寸を保持。
+    constrainEdit:(next,old,patch)=>{const g=screenHoodParams(old),q={...next,
+        hoodFrameDepth:next.hoodFrameDepth??g.frameDepth,hoodKnee:next.hoodKnee??g.knee,
+        hoodThickness:next.hoodThickness??g.t,hoodBevel:next.hoodBevel??g.bevel},
+        has=k=>Object.prototype.hasOwnProperty.call(patch,k);
+        if(has('hoodFrameDepth')) {
+            q.hoodFrameDepth=clamp(Number(q.hoodFrameDepth)||g.frameDepth,.005,5);
+            // APIから枠の長さだけを変えた場合も、背面を固定してつばの実寸を維持。
+            if(!has('rb')) {
+                const rb=(q.hoodFrameDepth+g.brimLength)/2,
+                    anchored=ASSET_KIT.keepAnchorPatch(old,{rb},[0,old.rb,old.h],[0,rb,old.h]);
+                q.rb=rb;if(anchored.off)q.off=anchored.off;
+            }
+        }
+        if(has('rb'))q.rb=Math.max(q.hoodFrameDepth/2,Number(q.rb)||0);
+        if(has('hoodThickness'))q.hoodThickness=clamp(Number(q.hoodThickness)||g.t,.005,g.maxT);
+        if(has('hoodBevel'))q.hoodBevel=clamp(Number(q.hoodBevel)||0,0,g.maxB);
+        if(has('hoodKnee'))q.hoodKnee=clamp(Number(q.hoodKnee)||g.knee,g.kneeMin,g.kneeMax);
+        if(has('h'))q.h=Math.max(Number(q.h)||0,Number(q.hoodKnee)+Math.max(Number(q.hoodThickness)||0,Number(q.hoodBevel)||0)+.001,
+            (Number(q.hoodThickness)||0)/.28,(Number(q.hoodBevel)||0)/.45,.1);
+        return q;},
+    controls:[
+        {key:'hoodLength',label:'ひさしのつばの長さ',min:0,max:5,step:.01,unit:'m',
+            get:o=>screenHoodParams(o).brimLength,
+            patch:(o,v)=>{const g=screenHoodParams(o),rb=(g.frameDepth+v)/2;
+                return ASSET_KIT.keepAnchorPatch(o,{rb},[0,o.rb,o.h],[0,rb,o.h]);},
+            handle:(o,v)=>{const g=screenHoodParams(o),x=-g.w*.2,base=g.length/2-g.frameDepth;
+                return {anchor:[x,base,g.h+.08],sample:[x,base-v,g.h+.08],probe:[x,base-v-1,g.h+.08],fallback:{x:0,y:1}};}},
+        {key:'hoodFrameDepth',label:'枠の長さ',default:.1,min:.005,max:5,step:.01,unit:'m',
+            get:o=>screenHoodParams(o).frameDepth,
+            patch:(o,v)=>{const g=screenHoodParams(o),rb=(v+g.brimLength)/2;
+                return ASSET_KIT.keepAnchorPatch(o,{rb,hoodFrameDepth:v},[0,o.rb,o.h],[0,rb,o.h]);},
+            handle:(o,v)=>{const g=screenHoodParams(o),x=g.w*.28,back=g.length/2,z=g.knee*.3;
+                return {anchor:[x,back,z],sample:[x,back-v,z],probe:[x,back-v-1,z],fallback:{x:0,y:1}};}},
+        {key:'hoodKnee',label:'ひさしの傾き（折れ点の高さ）',min:o=>screenHoodParams(o).kneeMin,max:o=>screenHoodParams(o).kneeMax,step:.01,unit:'m',
+            get:o=>screenHoodParams(o).knee,
+            handle:(o,v)=>{const g=screenHoodParams(o),x=g.w/2,y=g.length/2-g.frameDepth;
+                return {anchor:[x,y,0],sample:[x,y,v],probe:[x,y,v+1],fallback:{x:0,y:-1}};}},
+        {key:'hoodThickness',label:'ひさしの厚さ',default:.04,min:.005,max:o=>screenHoodParams(o).maxT,step:.005,unit:'m',
+            handle:(o,v)=>{const g=screenHoodParams(o),x=-g.w/2,y=g.length/2-g.frameDepth,z=g.knee*.55;
+                return {anchor:[x,y,z],sample:[x+v,y,z],probe:[x+v+1,y,z],fallback:{x:1,y:0}};}},
+        {key:'hoodBevel',label:'上下の角のベベル',type:'range',default:.1,min:0,max:o=>screenHoodParams(o).maxB,step:.005,unit:'m',
+            handle:(o,v)=>{const g=screenHoodParams(o),x=g.w/2,y=-g.length/2;
+                return {anchor:[x,y,g.h+.1],sample:[x-v,y,g.h+.1],probe:[x-v-1,y,g.h+.1],fallback:{x:-1,y:0}};}}
+    ]
+},(o,K)=>{const g=screenHoodParams(o);return K.part('screenHood',{w:g.w,h:g.h,frameDepth:g.frameDepth,brimLength:g.brimLength,knee:g.knee,t:g.t,bevel:g.bevel});});
+
 function shopAwningParams(o) {
     const w=Math.max(.1,Math.abs(2*Number(o.ra)||1.32)), d=Math.max(.06,Math.abs(2*Number(o.rb)||.66)),
         h=Math.max(.12,Math.abs(Number(o.h)||.42)),
@@ -23087,7 +23238,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         {
             key: "primitive",
             label: "プリミティブ",
-            kinds: ["rect", "box", "beveledBox", "circle", "cone", "sphere", "triPrism", "triPyramid", "awning"],
+            kinds: ["rect", "box", "beveledBox", "circle", "cone", "sphere", "triPrism", "triPyramid", "awning", "screenHood"],
         },
         {
             key: "building",
