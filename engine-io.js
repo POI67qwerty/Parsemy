@@ -232,14 +232,18 @@ function unpack(d) {
     {
         const st = d.S.map((s) => (s.ob ? { ...s, ob: fixOb(s.ob) } : s)),
             seen = new Set(),
-            gen = []; // 前の版の図形（向きで保存）は、3Dで作り直す
+            gen = [], // 前の版の図形（向きで保存）は、3Dで作り直す
+            needsPedUpdate = o => !!o && (o.asset === "pedSignal" || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsPedUpdate))),
+            regenerate = s => !!s.ob && (!s.d3 || needsPedUpdate(s.ob));
+        // 旧プロジェクトの歩行者信号は保存された3D線にも人型が残っている。
+        // 定義から再生成して消し、他の図形や手描き線はそのまま維持する。
         st.forEach((s) => {
-            if (s.ob && !s.d3 && !seen.has(s.ob.id)) {
+            if (regenerate(s) && !seen.has(s.ob.id)) {
                 seen.add(s.ob.id);
                 gen.push(...genShape(s.ob));
             }
         });
-        S = [...st.filter((s) => !(s.ob && !s.d3)), ...gen];
+        S = [...st.filter(s => !regenerate(s)), ...gen];
     }
     CR = d.cr || null;
     HU = [];

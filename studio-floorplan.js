@@ -142,7 +142,7 @@
         const s = floorTouchIds.get(e.pointerId);
         if (Math.hypot(e.clientX - s.sx, e.clientY - s.sy) > 12) floorTouchMoved = true;
         floorTouchIds.delete(e.pointerId);
-        if (floorTouchIds.size) return true;
+        if (floorTouchIds.size) return floorTouchMax >= 2;
         const count = floorTouchMax,
             moved = floorTouchMoved,
             quick = Date.now() - floorTouchT0 < 650;
@@ -155,7 +155,7 @@
             else if (count === 3) redo();
             else if (count >= 4 && window.cityPrimitiveMenuToggle) window.cityPrimitiveMenuToggle();
         }
-        return true;
+        return count >= 2;
     }
     // Safariで画面遷移やサイドパネル操作がpointerupを欠落させても、
     // 次の指操作を古い本数として扱わない。
@@ -194,21 +194,17 @@
     // 真横ビューは画面の左右がZ、上下がYなので、床面との交差ではなく
     // 正投影の表示中心・倍率から直接ワールドのZ/Yへ戻す。
     function floorPlanSideWorldAt(p) {
-        if (orthView !== "side") return null;
-        if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
-        const sc = Math.max(1, Number(orthScale()) || 1),
-            pc = window.cityFloorPlanCenter || [0, 0];
-        return { z: (p.x - W / 2) / sc + pc[0], y: -(p.y - H / 2) / sc + pc[1] };
+        if (orthPlane() !== "side") return null;
+        const q=orthWorldAt(p, [0,0,0]);
+        return {z:q[2],y:q[1]};
     }
     function floorPlanFrontWorldAt(p) {
-        if (orthView !== "front") return null;
-        if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
-        const sc = Math.max(1, Number(orthScale()) || 1),
-            pc = window.cityFloorPlanCenter || [0, 0];
-        return { x: (p.x - W / 2) / sc + pc[0], y: -(p.y - H / 2) / sc + pc[1] };
+        if (orthPlane() !== "front") return null;
+        const q=orthWorldAt(p, [0,0,0]);
+        return {x:q[0],y:q[1]};
     }
     function floorPlanVerticalWorldAt(p) {
-        return orthView === "side" ? floorPlanSideWorldAt(p) : orthView === "front" ? floorPlanFrontWorldAt(p) : null;
+        return orthPlane() === "side" ? floorPlanSideWorldAt(p) : orthPlane() === "front" ? floorPlanFrontWorldAt(p) : null;
     }
     function floorPlanObjectZRange(o) {
         const h = Math.max(0, Number(o?.h) || 0);
@@ -226,9 +222,9 @@
                     dist = Math.max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], 0.6) * 0.5 + 0.42;
                 out.object = { o, base, center: scrW(base), world: { x: base[0], z: base[2] + dist } };
                 out.object.s =
-                    orthView === "front"
+                    orthPlane() === "front"
                         ? scrW([base[0] + dist, base[1], base[2]])
-                        : scrW([base[0], orthView === "side" ? base[1] : -1, base[2] + dist]);
+                        : scrW([base[0], orthPlane() === "side" ? base[1] : -1, base[2] + dist]);
             } else {
                 const [z0, z1] = floorPlanObjectZRange(o),
                     bounds = obBounds(o),
@@ -252,25 +248,25 @@
                     world: { x: base[0] - Math.sin(a) * dist, z: base[2] + Math.cos(a) * dist },
                 };
                 out.object.s =
-                    orthView === "front"
+                    orthPlane() === "front"
                         ? scrW([base[0] + Math.cos(a) * dist, base[1], base[2]])
-                        : scrW([out.object.world.x, orthView === "side" ? base[1] : -1, out.object.world.z]);
+                        : scrW([out.object.world.x, orthPlane() === "side" ? base[1] : -1, out.object.world.z]);
             }
         }
         const yaw = Number(P.yaw || 0) * DG,
             pitch = Number(P.pitch || 0) * DG,
             body = { x: P.cx, z: P.cz },
-            cameraY = orthView === "side" || orthView === "front" ? P.ch - 1 : -1,
+            cameraY = orthPlane() === "side" || orthPlane() === "front" ? P.ch - 1 : -1,
             horiz = Math.cos(pitch),
             target = {
                 x: P.cx - Math.sin(yaw) * FLOOR_CAMERA_RAY * horiz,
                 z: P.cz + Math.cos(yaw) * FLOOR_CAMERA_RAY * horiz,
             },
             targetY =
-                orthView === "side" || orthView === "front" ? cameraY + Math.sin(pitch) * FLOOR_CAMERA_RAY : cameraY,
+                orthPlane() === "side" || orthPlane() === "front" ? cameraY + Math.sin(pitch) * FLOOR_CAMERA_RAY : cameraY,
             half = Math.atan(18 / Math.max(12, Number(P.lens) || 38)),
             lensWorld =
-                orthView === "top"
+                orthPlane() === "top"
                     ? [
                           P.cx - Math.sin(yaw - half) * FLOOR_CAMERA_RAY * horiz,
                           cameraY,
@@ -394,7 +390,7 @@
                 side: 1,
                 screen: true,
             });
-        if (orthView === "top") {
+        if (orthPlane() === "top") {
             add(
                 "w",
                 "幅＋",
@@ -439,7 +435,7 @@
                 { x: 0, y: 1 },
                 Math.max(0, b.hi[1] - b.lo[1]),
             );
-        } else if (orthView === "side") {
+        } else if (orthPlane() === "side") {
             add(
                 "d",
                 "奥行＋",
@@ -479,7 +475,7 @@
                     -1,
                 );
             } else addScreen("h", "高さ", { x: center.x, y: center.y - 52 / Z, ok: true }, { x: 0, y: -1 }, 0);
-        } else if (orthView === "front") {
+        } else if (orthPlane() === "front") {
             add(
                 "w",
                 "幅＋",
@@ -548,7 +544,7 @@
             zMax = Math.max(0, g.h),
             yMin = -g.d / 2,
             yMax = g.d / 2;
-        if (orthView === "top") {
+        if (orthPlane() === "top") {
             const gap = orthHandleGap(Math.max(g.w, g.d, 0.6));
             out.push({
                 kind: "awningEdgeZ",
@@ -587,7 +583,7 @@
         // 前縁（手前の上辺）は上下だけでなく手前奥へも動かせる。
         // 2本目の軸を同じハンドルへ持たせ、斜めに引いても両方いっぺんに変わる。
         // 上から見た図では上下（高さ）が見えないので、2軸目は出さない。
-        if (orthView === "front") {
+        if (orthPlane() === "front") {
             // 正面図では手前奥が画面に出ない（真横から見ているため）。
             // 「前後」ハンドルと同じ約束で、画面の横方向を手前奥へ割り当てる。
             const edgeZHandle = out.find((q) => q.kind === "awningEdgeZ");
@@ -598,7 +594,7 @@
                 edgeZHandle.min2 = yMin;
                 edgeZHandle.max2 = yMax;
             }
-        } else if (orthView !== "top") {
+        } else if (orthPlane() !== "top") {
             const qy2 = scrW(L2W(o, hx, g.edgeY + 0.1, g.edgeZ)),
                 edgeZHandle = out.find((q) => q.kind === "awningEdgeZ");
             if (qy2.ok && edgeZHandle) {
@@ -691,7 +687,7 @@
                 inner: true,
             });
         };
-        if (orthView === "top") {
+        if (orthPlane() === "top") {
             [near, far].forEach((yy, idx) => {
                 add(
                     "buildingOpeningW",
@@ -721,7 +717,7 @@
                 -g.d / 2 + 0.025,
                 g.d / 2 - 0.025,
             );
-        } else if (orthView === "front") {
+        } else if (orthPlane() === "front") {
             add(
                 "buildingOpeningW",
                 "開口W",
@@ -760,7 +756,7 @@
                     inner: true,
                     screen: true,
                 });
-        } else if (orthView === "side") {
+        } else if (orthPlane() === "side") {
             [near, far].forEach((yy, idx) =>
                 add(
                     "buildingOpeningH",
@@ -898,7 +894,7 @@
                     rb: { x: center.x, y: center.y - gap },
                     h: { x: center.x - gap, y: center.y },
                 },
-            }[orthView] || {};
+            }[orthPlane()] || {};
         [
             ["ra", "幅"],
             ["rb", "高さ"],
@@ -979,7 +975,7 @@
             if (px < 0.01) return;
             handles.push({ kind, label, s, dir: { x: dx / px, y: dy / px }, scale: px / 0.1, start, min, side });
         };
-        if (orthView === "top") {
+        if (orthPlane() === "top") {
             // 幅・奥行はプラス側とマイナス側の両面にハンドルを出す。
             add("w", "幅＋", L2W(o, o.ra, 0, 0), L2W(o, o.ra + 0.1, 0, 0), Math.abs(o.ra) * 2, 0.01, 1);
             add("w", "幅−", L2W(o, -o.ra, 0, 0), L2W(o, -o.ra - 0.1, 0, 0), Math.abs(o.ra) * 2, 0.01, -1);
@@ -1006,7 +1002,7 @@
                 min: 0,
                 screen: true,
             });
-        } else if (orthView === "side") {
+        } else if (orthPlane() === "side") {
             add("d", "奥行＋", L2W(o, 0, o.rb, zc), L2W(o, 0, o.rb + 0.1, zc), Math.abs(o.rb) * 2, 0.01, 1);
             add("d", "奥行−", L2W(o, 0, -o.rb, zc), L2W(o, 0, -o.rb - 0.1, zc), Math.abs(o.rb) * 2, 0.01, -1);
             // 真横ビューは黒い外枠の上端・下端へ高さハンドルを置く。
@@ -1029,7 +1025,7 @@
                 add("h", "上端", L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + 0.1), Math.max(0, Number(o.h) || 0), 0, 1);
                 add("h", "下端", L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - 0.1), Math.max(0, Number(o.h) || 0), 0, -1);
             }
-        } else if (orthView === "front") {
+        } else if (orthPlane() === "front") {
             // 正面では幅と高さを直接編集し、見えない奥行きは画面上へ逃がしたハンドルで編集する。
             // 正面の幅ハンドルも、看板では黒い外枠の下端へ置く。
             // 全高の底面 z=0 に置くと、看板の外枠から下へ浮いてしまう。
@@ -1139,13 +1135,13 @@
         // 斜め右下へ逃がして必ず掴めるようにする。
         const diag = { x: Math.SQRT1_2, y: Math.SQRT1_2 },
             defs =
-                orthView === "top"
+                orthPlane() === "top"
                     ? [
                           { vec: [1, 0, 0], name: "X", col: "#e8743d" },
                           { vec: [0, 0, 1], name: "Y", col: "#3aa76a" },
                           { vec: [0, 1, 0], name: "Z", col: "#4a7be8", screenDir: diag },
                       ]
-                    : orthView === "side"
+                    : orthPlane() === "side"
                       ? [
                             { vec: [0, 0, 1], name: "Y", col: "#3aa76a" },
                             { vec: [0, 1, 0], name: "Z", col: "#4a7be8" },
@@ -1291,7 +1287,7 @@
         c.restore();
     }
     function drawFloorPlanOverlay(c) {
-        if (orthView !== "top" && orthView !== "side" && orthView !== "front") return;
+        if (orthPlane() !== "top" && orthPlane() !== "side" && orthPlane() !== "front") return;
         const h = floorPlanHandles(),
             r = 9 / Z;
         c.save();
@@ -1310,7 +1306,7 @@
                       ]
                     : null,
                 corners = pathBounds
-                    ? orthView === "top"
+                    ? orthPlane() === "top"
                         ? [
                               [pathBounds.lo[0], boundsCenter[1], pathBounds.lo[2]],
                               [pathBounds.hi[0], boundsCenter[1], pathBounds.lo[2]],
@@ -1318,7 +1314,7 @@
                               [pathBounds.lo[0], boundsCenter[1], pathBounds.hi[2]],
                               [pathBounds.lo[0], boundsCenter[1], pathBounds.lo[2]],
                           ]
-                        : orthView === "side"
+                        : orthPlane() === "side"
                           ? [
                                 [boundsCenter[0], pathBounds.lo[1], pathBounds.lo[2]],
                                 [boundsCenter[0], pathBounds.lo[1], pathBounds.hi[2]],
@@ -1357,7 +1353,7 @@
             });
             c.stroke();
             c.setLineDash([]);
-            if (orthView === "side" && z1 > z0 && !pathBounds) {
+            if (orthPlane() === "side" && z1 > z0 && !pathBounds) {
                 const baseCorners = [
                     [-o.ra, -o.rb],
                     [o.ra, -o.rb],
@@ -1381,7 +1377,7 @@
                     }
                 });
                 c.stroke();
-            } else if (orthView === "front" && !pathBounds) {
+            } else if (orthPlane() === "front" && !pathBounds) {
                 const frontCorners =
                     o.type === "asset" && o.asset === "sign"
                         ? [L2W(o, -o.ra, 0, z0), L2W(o, o.ra, 0, z0), L2W(o, o.ra, 0, z1), L2W(o, -o.ra, 0, z1)]
@@ -1447,10 +1443,10 @@
             half = Math.atan(18 / Math.max(12, Number(P.lens) || 38)),
             body = k.sBody,
             target = k.sTarget,
-            cameraY = orthView === "side" || orthView === "front" ? P.ch - 1 : -1,
+            cameraY = orthPlane() === "side" || orthPlane() === "front" ? P.ch - 1 : -1,
             horiz = Math.cos(k.pitch),
             coneY =
-                orthView === "side" || orthView === "front" ? cameraY + Math.sin(k.pitch) * FLOOR_CAMERA_RAY : cameraY,
+                orthPlane() === "side" || orthPlane() === "front" ? cameraY + Math.sin(k.pitch) * FLOOR_CAMERA_RAY : cameraY,
             left = scrW([
                 P.cx - Math.sin(k.yaw - half) * FLOOR_CAMERA_RAY * horiz,
                 coneY,
@@ -1519,9 +1515,9 @@
         const dockStatus = el("floorPlanDockStatus");
         if (dockStatus) {
             const cameraHint =
-                orthView === "side"
+                orthPlane() === "side"
                     ? "真横：カメラ本体＝位置・高さ　／　先端の丸＝上下の傾き"
-                    : orthView === "front"
+                    : orthPlane() === "front"
                       ? "正面：カメラ本体＝X位置・高さ　／　先端の丸＝上下の傾き"
                       : "カメラ本体：位置　／　先端の丸＝向き";
             dockStatus.innerHTML = `${text}<small>幅・奥行ハンドルは反対側の面を固定　／　${cameraHint}</small>`;
@@ -1800,17 +1796,9 @@
         HU.push(S);
         RD = [];
         snapHit = null;
-        let delta, axes;
-        if (orthView === "side") {
-            delta = [0, dz, dx];
-            axes = [1, 2];
-        } else if (orthView === "front") {
-            delta = [dx, dz, 0];
-            axes = [0, 1];
-        } else {
-            delta = [dx, 0, dz];
-            axes = [0, 2];
-        }
+        // 矢印は画面の方向に対応。裏／左／下では各ワールド軸の符号が逆になる。
+        const basis=orthBasis(), delta=basis.right.map((v,i)=>v*dx-basis.up[i]*dz),
+            axes=basis.right.map((v,i)=>(Math.abs(v)+Math.abs(basis.up[i])>1e-9)?i:-1).filter(i=>i>=0);
         const setup = snapSetupGroup(objects, objectAnchorWorld(o)),
             q = $("snp")?.checked
                 ? snapShift(setup.bb, delta, axes, setup.targets, setup.tau)
@@ -1905,6 +1893,7 @@
         e.stopImmediatePropagation();
         floorPlanDrag = { kind: "boxPending", pointerId: e.pointerId };
         armBoxPending(p, e.pointerId, "floor", {
+            raw0: rawOf(e.clientX, e.clientY),
             center0: [...(window.cityFloorPlanCenter || [0, 0])],
             tapClear: true,
         });
@@ -1923,6 +1912,9 @@
         "pointerdown",
         (e) => {
             if (!(window.cityFloorPlanActive && e.target === cv)) return;
+            // タッチはギズモの判定より先に全指を登録する。先に回転リングが指を
+            // 奪うと2本目まで別々の経路に入り、ピンチを認識できない。
+            if (floorTouchDown(e)) return;
             // 回転ギズモ（Blender 風の輪）を掴んだときは、間取りの操作より先に
             // ギズモの回転を優先する。間取りビューでも3Dと同じように回せるようにするため
             // （ビューによって編集できる項目が変わらない、という決めごと）。
@@ -1950,10 +1942,9 @@
             if (!window.cityFloorPlanActive) return;
             // 回転ギズモを掴んだ操作は engine-input.js 側で処理する（ここでは何もしない）。
             if (e.__cityGizmoTakes) return;
-            if (floorTouchDown(e)) return;
             const p = pos(e),
                 panGesture = e.button === 1 || e.button === 2 || e.altKey || floorPlanPanMode;
-            if (panGesture && (orthView === "top" || orthView === "side" || orthView === "front")) {
+            if (panGesture && (orthPlane() === "top" || orthPlane() === "side" || orthPlane() === "front")) {
                 beginFloorPan(e, p);
                 return;
             }
@@ -2030,7 +2021,7 @@
             // ただし寸法ハンドル（白い四角）や移動矢印の方が押した点に近いときは
             // そちらを優先する。以前は必ず回転が勝つ順序だったため、
             // 幅＋−を押すと回転してしまい、寸法が変えられなかった。
-            if (sel && (orthView === "front" || orthView === "side")) {
+            if (sel && (orthPlane() === "front" || orthPlane() === "side")) {
                 const turn = floorPlanHandles(),
                     turnLimit = 24 / Z,
                     turnDist = turn.object?.s?.ok
@@ -2072,7 +2063,7 @@
                     (!moveNear || Math.hypot(resize.h.s.x - p.x, resize.h.s.y - p.y) <= moveNear.d + 2 / Z);
             // 7 前も9 上・8 横と同じ面編集ハンドルを先に受け取る。
             // ここから漏れると、ハンドルを押してもオブジェクト移動として処理される。
-            if (resizeWins && (orthView === "top" || orthView === "side" || orthView === "front")) {
+            if (resizeWins && (orthPlane() === "top" || orthPlane() === "side" || orthPlane() === "front")) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 floorPlanDrag = {
@@ -2089,7 +2080,7 @@
             }
             const moveHandle = floorMoveHandleAt(p),
                 moveObject = floorPlanObject();
-            if (moveHandle && moveObject && (orthView === "top" || orthView === "side" || orthView === "front")) {
+            if (moveHandle && moveObject && (orthPlane() === "top" || orthPlane() === "side" || orthPlane() === "front")) {
                 const base = objectAnchorWorld(moveObject),
                     group = moveObject.attachment?.verticalOnly ? [moveObject] : selectedObjects(),
                     snap = snapSetupGroup(group, base);
@@ -2112,10 +2103,10 @@
                 capturePointer(e.pointerId);
                 return;
             }
-            if (orthView === "side" || orthView === "front") {
+            if (orthPlane() === "side" || orthPlane() === "front") {
                 const verticalHandles = floorPlanHandles(),
                     verticalLim = 22 / Z,
-                    verticalAxis = orthView === "side" ? "side" : "front";
+                    verticalAxis = orthPlane() === "side" ? "side" : "front";
                 if (
                     verticalHandles.camera &&
                     Math.hypot(verticalHandles.camera.sTarget.x - p.x, verticalHandles.camera.sTarget.y - p.y) <
@@ -2139,15 +2130,15 @@
                         kind: "cameraSide",
                         axis: verticalAxis,
                         pointerId: e.pointerId,
-                        dx: orthView === "front" ? P.cx - w.x : 0,
-                        dz: orthView === "side" ? P.cz - w.z : 0,
+                        dx: orthPlane() === "front" ? P.cx - w.x : 0,
+                        dz: orthPlane() === "side" ? P.cz - w.z : 0,
                         dy: P.ch - 1 - w.y,
                     };
                     capturePointer(e.pointerId);
                     return;
                 }
             }
-            if (orthView === "side" || orthView === "front") {
+            if (orthPlane() === "side" || orthPlane() === "front") {
                 const hit = floorPlanItemAtSide(p) || floorPlanAnchorAtSide(p);
                 if (hit) {
                     const multi = e.shiftKey || e.metaKey || e.ctrlKey,
@@ -2172,7 +2163,7 @@
                     e.stopImmediatePropagation();
                     floorPlanDrag = {
                         kind: "itemVertical",
-                        axis: orthView === "side" ? "side" : "front",
+                        axis: orthPlane() === "side" ? "side" : "front",
                         pointerId: e.pointerId,
                         id: hit.id,
                         o0: { ...hit, off: [...(hit.off || [0, 0, 0])] },
@@ -2181,8 +2172,8 @@
                         bb: snap.bb,
                         targets: snap.targets,
                         tau: snap.tau,
-                        dx: orthView === "front" ? base[0] - w.x : 0,
-                        dz: orthView === "side" ? base[2] - w.z : 0,
+                        dx: orthPlane() === "front" ? base[0] - w.x : 0,
+                        dz: orthPlane() === "side" ? base[2] - w.z : 0,
                         dy: base[1] - w.y,
                         started: false,
                     };
@@ -2229,7 +2220,7 @@
                 return;
             }
             if (
-                orthView === "top" &&
+                orthPlane() === "top" &&
                 h.camera &&
                 h.camera.sLens &&
                 Math.hypot(h.camera.sLens.x - p.x, h.camera.sLens.y - p.y) < lim

@@ -1476,3 +1476,7 @@ body.cameraLocked #cv {
         padding: 6px;
     }
 }
+
+/* 名前は一覧の鉛筆から編集。空欄で元の名前に戻せます。 */
+.objectRename { flex:none; width:23px; height:23px; padding:0 !important; font-size:14px; }
+.objectNameInput { width:100%; min-width:45px; padding:2px 4px; font-size:16px; color:var(--tx); background:#1d2c33; border:1px solid var(--mint); border-radius:4px; }

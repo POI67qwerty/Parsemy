@@ -1695,6 +1695,10 @@ body.cameraLocked #cv {
     }
 }
 
+/* 名前は一覧の鉛筆から編集。空欄で元の名前に戻せます。 */
+.objectRename { flex:none; width:23px; height:23px; padding:0 !important; font-size:14px; }
+.objectNameInput { width:100%; min-width:45px; padding:2px 4px; font-size:16px; color:var(--tx); background:#1d2c33; border:1px solid var(--mint); border-radius:4px; }
+
 </style>
     </head>
     <body>
@@ -1753,11 +1757,17 @@ body.cameraLocked #cv {
                         <span class="lockText">カメラ固定</span>
                     </button>
                 </div>
+                <div class="barGroup" id="visibilityTools">
+                    <button id="isolateSelection" class="toolBtn" aria-pressed="false" title="選択以外を一時的に非表示。もう一度押すと元の表示状態に戻します">選択以外を非表示</button>
+                </div>
                 <div class="barGroup" id="standardViews">
-                    <button id="floorViewCenter" title="前／横／上の表示位置だけを、選択中のオブジェクトの中央へ寄せます（カメラ＝3D視点は動かしません）">表示中央へ</button
+                    <button id="floorViewCenter" title="前／後／上／下／右／左の表示位置だけを、選択中のオブジェクトの中央へ寄せます（カメラ＝3D視点は動かしません）">表示中央へ</button
                     ><button id="viewFloorFront" title="7：間取り（正面）">7 前</button
-                    ><button id="viewFloorSide" title="8：間取り（真横）">8 横</button
-                    ><button id="viewFloorTop" title="9：間取り（真上）">9 上</button
+                    ><button id="viewFloorBack" title="後ろから見る">後ろ</button
+                    ><button id="viewFloorTop" title="9：上から見る">9 上</button
+                    ><button id="viewFloorBottom" title="下から見る">下</button
+                    ><button id="viewFloorSide" title="8：右から見る">8 右</button
+                    ><button id="viewFloorLeft" title="左から見る">左</button
                     ><button id="viewHome" title="0：元の視点">0 3D</button>
                 </div>
                 <span class="barGrow"></span>
@@ -2348,7 +2358,7 @@ function leaveOrthView(changedKey) {
     // 間取り中は左パネルのカメラ値を変更しても正投影を解除しない。
     // 0=3Dで現在の魚眼画角・レンズ・位置・高さ・回転・傾きをそのまま引き継ぐ。
     if (window.cityFloorPlanActive) return;
-    if (orthView === "top" && changedKey !== "pitch") {
+    if (orthPlane() === "top" && changedKey !== "pitch") {
         P.pitch = -75;
         const pitchInput = $("pitch");
         if (pitchInput) pitchInput.value = -75;
@@ -2653,21 +2663,36 @@ function markF(c) {
 
 // ===== 8. 線画の保存と再投影：画面の点→ワールドの向き(単位ベクトル)で持つので、視点を変えても追従する =====
 // カメラ座標→ワールド（camの逆変換）
+// 視線の逆変換は魚眼の隠面判定で数万回呼ばれる。同じカメラ角では三角関数を共有する。
+let wldAngles = null, wldTrig = null;
 function wld(v) {
-    const th = P.yaw * DG,
-        ph = P.pitch * DG,
-        ro = (T === "f" ? P.roll : 0) * DG;
-    const x1 = v[0] * Math.cos(ro) + v[1] * Math.sin(ro),
-        y2 = -v[0] * Math.sin(ro) + v[1] * Math.cos(ro);
-    const y1 = y2 * Math.cos(ph) + v[2] * Math.sin(ph),
-        z1 = -y2 * Math.sin(ph) + v[2] * Math.cos(ph);
-    return [x1 * Math.cos(th) - z1 * Math.sin(th), y1, x1 * Math.sin(th) + z1 * Math.cos(th)];
+    const yaw = P.yaw, pitch = P.pitch, roll = T === "f" ? P.roll : 0;
+    if (!wldAngles || !Object.is(wldAngles[0], yaw) || !Object.is(wldAngles[1], pitch) || !Object.is(wldAngles[2], roll)) {
+        const th = yaw * DG, ph = pitch * DG, ro = roll * DG;
+        wldAngles = [yaw, pitch, roll];
+        wldTrig = [Math.cos(th), Math.sin(th), Math.cos(ph), Math.sin(ph), Math.cos(ro), Math.sin(ro)];
+    }
+    const ct=wldTrig[0], st=wldTrig[1], cp=wldTrig[2], sp=wldTrig[3], cr=wldTrig[4], sr=wldTrig[5];
+    const x1 = v[0] * cr + v[1] * sr,
+        y2 = -v[0] * sr + v[1] * cr;
+    const y1 = y2 * cp + v[2] * sp,
+        z1 = -y2 * sp + v[2] * cp;
+    return [x1 * ct - z1 * st, y1, x1 * st + z1 * ct];
 }
 // Blender風の正投影ビュー。正面=X/Y、真横=Z/Y、真上=X/Zを画面へ置く。
 // depthはカメラから遠いほど大きくなり、書き出し時の隠れ線判定にも使う。
+// 互換の side は「右」から見る正投影。反対側は視線と画面左右を反転。
+function orthPlane() {
+    return orthView === "top" || orthView === "bottom" ? "top" :
+        orthView === "side" || orthView === "right" || orthView === "left" ? "side" :
+        orthView === "front" || orthView === "back" ? "front" : null;
+}
 function orthBasis() {
-    if (orthView === "side") return { right: [0, 0, 1], up: [0, 1, 0], depth: [-1, 0, 0] };
+    if (orthView === "side" || orthView === "right") return { right: [0, 0, 1], up: [0, 1, 0], depth: [-1, 0, 0] };
+    if (orthView === "left") return { right: [0, 0, -1], up: [0, 1, 0], depth: [1, 0, 0] };
     if (orthView === "top") return { right: [1, 0, 0], up: [0, 0, 1], depth: [0, -1, 0] };
+    if (orthView === "bottom") return { right: [1, 0, 0], up: [0, 0, -1], depth: [0, 1, 0] };
+    if (orthView === "back") return { right: [-1, 0, 0], up: [0, 1, 0], depth: [0, 0, -1] };
     return { right: [1, 0, 0], up: [0, 1, 0], depth: [0, 0, 1] };
 }
 const ZERO2 = [0, 0];
@@ -2694,30 +2719,21 @@ const orthScale = () =>
 // 変わらない間ずっと同じ。以前は点1つごとに orthBasis() / orthScale() /
 // orthPlanCenter() を呼び、配列を3つずつ作っていたので、線の点数が多いほど
 // 無駄が増えていた。ここでは署名が同じ間だけ計算結果を使い回す。
-let orthSetupKey = "",
+let orthSetupKey = null,
     orthSetupVal = null;
 function orthSetup() {
     const sc = orthScale(),
         active = true, // 自動フィットの中心・倍率は間取りモード以外でも使う
-        pc = orthPlanCenter(),
-        key =
-            orthView + "|" + sc + "|" + W + "|" + H + "|" +
-            (active ? 1 : 0) + "|" + pc[0] + "|" + pc[1] + "|" + P.cx + "|" + P.cz + "|" + P.ch;
-    if (orthSetupVal && key === orthSetupKey) return orthSetupVal;
+        pc = orthPlanCenter();
+    // 点ごとに文字列を連結せず、実際の入力だけ比較する。
+    const k = orthSetupKey;
+    if (orthSetupVal && k && k[0] === orthView && k[1] === sc && k[2] === W && k[3] === H &&
+        k[4] === pc[0] && k[5] === pc[1] && k[6] === P.cx && k[7] === P.cz && k[8] === P.ch) return orthSetupVal;
     const b = orthBasis();
     // scrW() は先にカメラ原点へ移すため、正投影では表示軸だけワールド原点へ戻す。
-    let sx = 0,
-        sy = 0;
-    if (active && orthView === "top") {
-        sx = P.cx;
-        sy = P.cz;
-    } else if (active && orthView === "side") {
-        sx = P.cz;
-        sy = P.ch - 1;
-    } else if (active && orthView === "front") {
-        sx = P.cx;
-        sy = P.ch - 1;
-    }
+    const camera = [P.cx, P.ch - 1, P.cz],
+        sx = active ? dot3(camera, b.right) : 0,
+        sy = active ? dot3(camera, b.up) : 0;
     // x = ax + dot(v,right)*sc / y = ay - dot(v,up)*sc
     orthSetupVal = {
         right: b.right,
@@ -2727,7 +2743,7 @@ function orthSetup() {
         ax: W / 2 + (sx - pc[0]) * sc,
         ay: H / 2 - (sy - pc[1]) * sc,
     };
-    orthSetupKey = key;
+    orthSetupKey = [orthView, sc, W, H, pc[0], pc[1], P.cx, P.cz, P.ch];
     return orthSetupVal;
 }
 function orthPoint(v) {
@@ -3430,7 +3446,7 @@ function groupMemberIds(id) {
 function normalizeSelection() {
     if (sel && !selIds.has(sel)) selIds.add(sel);
     [...selIds].forEach((id) => {
-        if (!obOf(id)) selIds.delete(id);
+        if (!obOf(id) || !objectVisible(obOf(id))) selIds.delete(id);
     });
     // ロック中のオブジェクトは選択に残さない（後からロックした場合もここで外れる）。
     [...selIds].forEach((id) => {
@@ -3440,10 +3456,10 @@ function normalizeSelection() {
     // ただしロック中のメンバーは加えない。
     [...selIds].forEach((id) =>
         groupMemberIds(id).forEach((member) => {
-            if (!obLocked(obOf(member))) selIds.add(member);
+            if (!obLocked(obOf(member)) && objectVisible(obOf(member))) selIds.add(member);
         }),
     );
-    if (sel && !obOf(sel)) sel = null;
+    if (sel && (!obOf(sel) || !objectVisible(obOf(sel)))) sel = null;
     if (sel && obLocked(obOf(sel))) sel = null;
     if (!sel && selIds.size) sel = [...selIds][selIds.size - 1];
     if (sel && !selIds.has(sel) && !obLocked(obOf(sel))) selIds.add(sel);
@@ -3454,6 +3470,7 @@ function setSelection(id, add = false) {
         if (typeof window.flashHint === "function") window.flashHint("ロック中のオブジェクトです（一覧の鍵で解除）");
         return false;
     }
+    if (id && !objectVisible(obOf(id))) return false;
     const members = id ? groupMemberIds(id) : [];
     if (!add) selIds.clear();
     if (id) {
@@ -3955,6 +3972,7 @@ function duplicateSelected(mode) {
     const idMap = new Map(objects.map((o) => [o.id, uid()]));
     const clones = objects.map((o) => {
         let n = { ...o, id: idMap.get(o.id), off: [...(o.off || [0, 0, 0])] };
+        delete n._cityIsolationBefore; // 表示切替中に作った複製は新規物体
         if (o.attachment?.parentId && idMap.has(o.attachment.parentId))
             n.attachment = { ...o.attachment, parentId: idMap.get(o.attachment.parentId) };
         if (o.type === "compound") n = { ...n, ...moveBy(o, [shift, 0, 0]) };
@@ -4062,7 +4080,7 @@ const wrap180 = (a) => ((((a + 180) % 360) + 360) % 360) - 180;
 const hiddenHandleGap = () => Math.max(30 / Z, 42 / Z);
 // 画面上で向きが読めないハンドル（真上から見た高さ方向など）を逃がす向き。
 // 真上ビューでは斜め左下へ、それ以外は左やや下へ逃がすと、本体の線に重なりにくい。
-const hiddenHandleDir = () => (orthView === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 });
+const hiddenHandleDir = () => (orthPlane() === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 });
 // つぶれた向きのときの倍率（px/単位）。正投影は px/単位が分かるのでそれを使う。
 const hiddenHandleScale = () => Math.max(24, orthView ? orthScale() : 24);
 const segd = (p, a, b) => {
@@ -5877,7 +5895,7 @@ function pathPipeGizmo(o) {
             Number.isFinite(rdy) &&
             Number.isFinite(rLength),
         radiusHidden = !radiusProjected || rLength <= 0.5 / Z,
-        radiusFallback = orthView === "top" ? { x: 0, y: 1 } : { x: -1, y: 0 },
+        radiusFallback = orthPlane() === "top" ? { x: 0, y: 1 } : { x: -1, y: 0 },
         radiusGap = Math.max(34 / Z, Math.min(58 / Z, 0.38 * Math.max(1, Number(orthScale()) || 1))),
         radiusDisplay = radiusHidden
             ? {
@@ -10837,6 +10855,18 @@ function exportSurfaceTriangles(o) {
     return out;
 }
 function exportPoint(v, tf) {
+    // 透視の深度ラスタは頂点ごとに逆変換用の配列と cam() を2回作っていた。
+    // scr3 と同じ「先に正規化してから回転」の演算順を保ちつつ、深度も一緒に求める。
+    if (!orthView && T !== "f") {
+        const rx = v[0] * 1 + (-P.cx) * 1, ry = v[1] * 1 + (1 - P.ch) * 1, rz = v[2] * 1 + (-P.cz) * 1,
+            len = Math.hypot(rx, ry, rz) || 1, x = rx / len, y = ry / len, z = rz / len,
+            m = camMatrix(), qx = m[0] * x + m[1] * y + m[2] * z,
+            qy = m[3] * x + m[4] * y + m[5] * z, qz = m[6] * x + m[7] * y + m[8] * z;
+        if (qz <= 0.02) return null;
+        const f = (W * P.lens) / 36,
+            sx = W / 2 + (f * qx) / qz, sy = (H * P.hz) / 100 - (f * qy) / qz;
+        return { x: sx * tf[0] + tf[4], y: sy * tf[3] + tf[5], depth: m[6] * rx + m[7] * ry + m[8] * rz };
+    }
     const rel = V.add(v, CO()),
         q = scr3(rel);
     if (!q.ok) return null;
@@ -10987,7 +11017,18 @@ function rasterizeDepthInto(buf, own, ownerMap, list, cw, ch, tf, used, face) {
                         }
                     }
                 }
-                if (covered) return;
+                if (covered) {
+                    // 格子点だけでは、その間の小さな穴や細い隙間を見落とす。
+                    // 省略する前に外接矩形の全画素が確実に手前にあることを確認する。
+                    // 三角形の外も含む保守的な判定なので、穴があれば通常通り塗る。
+                    for (let y = by0; y <= by1 && covered; y++) {
+                        const end = y * cw + bx1;
+                        for (let i = y * cw + bx0; i <= end; i++) {
+                            if (!(buf[i] < near - 0.02)) { covered = false; break; }
+                        }
+                    }
+                    if (covered) return;
+                }
             }
         }
         const y0 = Math.max(0, Math.floor(minY)),
@@ -11639,14 +11680,18 @@ function prepareFishLineOccluders() {
     fishLineOccluders={root:fishBvhCache.root,cam};
     fishOcclusionEpoch++;
 }
-const fishBvhStack=[];
+const fishBvhStack=[], fishRayInverse=[0,0,0];
 function fishPointOccluded(e) {
     if (e.fishEpoch === fishOcclusionEpoch) return e.fishBlocked;
     e.fishEpoch = fishOcclusionEpoch;
     const set=fishLineOccluders;
     if (!set || !set.root) return (e.fishBlocked=false);
     const dir=unscr({x:e.sx,y:e.sy}), dx=dir[0],dy=dir[1],dz=dir[2], limit=e.depth - Math.max(0.008, Math.abs(e.depth)*0.0002),
-        ds=[dx,dy,dz], inv=ds.map(v=>Math.abs(v)<1e-14?Infinity:1/v), cam=set.cam;
+        inv=fishRayInverse, cam=set.cam;
+    // 走査は同期的なので逆方向の配列を再利用し、点ごとの小配列を作らない。
+    inv[0]=Math.abs(dx)<1e-14?Infinity:1/dx;
+    inv[1]=Math.abs(dy)<1e-14?Infinity:1/dy;
+    inv[2]=Math.abs(dz)<1e-14?Infinity:1/dz;
     fishBvhStack.length=0;fishBvhStack.push(set.root);
     while(fishBvhStack.length) {
         const node=fishBvhStack.pop();let near=0,far=limit,hit=true;
@@ -11682,6 +11727,41 @@ function fishPointOccluded(e) {
         }
     }
     return (e.fishBlocked=false);
+}
+// 正投影は視点が点ではなく平行光線。ポール上端や灯器・標識の細い縁を
+// 実面で判定し、重なっている部分が深度許容で透けるのを防ぐ。
+function signalOrthOccluded(e, allowance = 0.008) {
+    if (e.poleEpoch === fishOcclusionEpoch) return e.poleBlocked;
+    e.poleEpoch = fishOcclusionEpoch;
+    const root=fishLineOccluders?.root;
+    if (!root) return (e.poleBlocked=false);
+    const dir=orthBasis().depth, base=orthWorldAt({x:e.sx,y:e.sy},camPos()),
+        point=base.map((v,i)=>v+dir[i]*e.depth),
+        distance=2+Math.hypot(...root.lo.map((v,i)=>Math.max(Math.abs(v-point[i]),Math.abs(root.hi[i]-point[i])))),
+        origin=point.map((v,i)=>v-dir[i]*distance),
+        inv=dir.map(v=>Math.abs(v)<1e-14?Infinity:1/v),limit=distance-allowance;
+    const stack=[root];
+    while(stack.length){
+        const node=stack.pop();let near=0,far=limit,hit=true;
+        for(let i=0;i<3;i++){
+            if(!Number.isFinite(inv[i])){if(origin[i]<node.lo[i]||origin[i]>node.hi[i]){hit=false;break;}continue;}
+            const a=(node.lo[i]-origin[i])*inv[i],b=(node.hi[i]-origin[i])*inv[i];
+            near=Math.max(near,Math.min(a,b));far=Math.min(far,Math.max(a,b));if(far<near){hit=false;break;}
+        }
+        if(!hit)continue;
+        if(!node.items){if(node.left)stack.push(node.left);if(node.right)stack.push(node.right);continue;}
+        for(const r of node.items){
+            const h=V.crs(dir,r.e2),det=V.dot(r.e1,h);
+            if(Math.abs(det)<1e-10)continue;
+            const t=V.add(origin,r.a,1,-1),invDet=1/det,u=V.dot(t,h)*invDet;
+            if(u< -1e-8||u>1+1e-8)continue;
+            const q=V.crs(t,r.e1),v=V.dot(dir,q)*invDet;
+            if(v< -1e-8||u+v>1+1e-8)continue;
+            const hitDistance=V.dot(r.e2,q)*invDet;
+            if(hitDistance>0.0001&&hitDistance<limit)return(e.poleBlocked=true);
+        }
+    }
+    return(e.poleBlocked=false);
 }
 // 面内線を消す場合だけ、線の周囲が本当に同じ平面なのか光線でも確かめる。
 // 魚眼の直線三角形ラスタでは、実際には角の外側にある点も面内に見えるため。
@@ -11760,7 +11840,10 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     // 面の上へ描くことを目的にした線まで消えると、窓の枚数を変えても
     // 何も描かれない（実測：凹窓階層建物の窓間仕切りが全部消えていた）。
     // 生成側が onFace を立てた線だけ、面の内側判定を通す。
-    const onFace = !!s.onFace;
+    const onFace = !!s.onFace,
+        preciseSignalEdge = (s.signalPoleTopRing && !window.__legacyPoleRay) || (s.signalSmoothSide && !window.__legacySignalSmoothRay),
+        poleTip = s.signalPoleSide && !window.__legacyPoleRay && s.p?.length ? projPoint(s.p[s.p.length-1], tf) : null,
+        preciseSignalAt = e => preciseSignalEdge || !!(poleTip?.ok && Math.hypot(e.x-poleTip.x,e.y-poleTip.y) < 24*Math.max(1,Math.abs(tf[0] || 1)));
     // 線全体を数点だけ見て省略すると、試験点の間にある開口や遮蔽物の切れ目で
     // 見える区間まで丸ごと消える。面の内側・背面は下の点ごとの判定で除去する。
     const okx = tf[0] || 1,
@@ -11779,6 +11862,8 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     const definitelyOccluded = (e) => {
         // 実面への光線交差で遮蔽が確定した点は、短い隙間として橋渡ししない。
         if (fishLineOccluders && e.accordionEpoch === fishOcclusionEpoch && e.accordionBlocked === true) return true;
+        if (fishLineOccluders && preciseSignalAt(e) &&
+            (orthView ? signalOrthOccluded(e, s.signalSmoothSide ? 0.004 : 0.008) : T !== "f" && exactPerspectiveOccluded(e))) return true;
         const x = Math.round(e.x), y = Math.round(e.y);
         if (x < 0 || x >= cw || y < 0 || y >= ch) return false;
         if (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) return fishPointOccluded(e);
@@ -11837,6 +11922,8 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
                 faceCullAround(cw, ch, x, y, depthFace[i1], myOwner) && fishFaceInterior(e, s.ob.id, tf)) return false;
             return true;
         }
+        if (fishLineOccluders && preciseSignalAt(e))
+            return !(orthView ? signalOrthOccluded(e, s.signalSmoothSide ? 0.004 : 0.008) : exactPerspectiveOccluded(e));
         // 小さな灯器や自販機の前後ベベルは、細い曲面の隣で深度近似だけでは
         // 背面の線が漏れることがある。面より奥の候補だけ実光線で再判定する。
         if (!orthView && T !== "f" && s.depthBevelEdge && fishLineOccluders && !window.__legacyDepthBevelRay &&
@@ -11942,7 +12029,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     // それが「点線状の切れ端」として残る（実測：建物の稜線が 6px おきの点線に見えた）。
     // 短すぎる区間（--minRun px 未満）は、まわりが隠れているなら捨てる。
     // 線そのものが短いとき（--shortLine px 未満）は捨てない（小物の線が消えないように）。
-    const minRun = !orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines ? 0 :
+    const minRun = preciseSignalEdge || (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) ? 0 :
             window.__minRun === undefined ? 4 : Number(window.__minRun) * Math.max(1, Math.abs(tf[0] || 1)),
         shortLine = 10 * Math.max(1, Math.abs(tf[0] || 1));
     let run = [],
@@ -12085,7 +12172,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
                     for (let j = 1; j < n; j++) emit(at(j / n));
                 } else {
                     const worldN = Math.ceil(Math.hypot(v[0] - a[0], v[1] - a[1], v[2] - a[2]) * 10),
-                        pixelN = !orthView && T === "f" && ea.ok && eb.ok ? Math.ceil(4 * Math.hypot(eb.x - ea.x, eb.y - ea.y)) : 0,
+                        pixelN = ((!orthView && T === "f") || (preciseSignalEdge && fishLineOccluders)) && ea.ok && eb.ok ? Math.ceil(4 * Math.hypot(eb.x - ea.x, eb.y - ea.y)) : 0,
                         n = Math.max(!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines ? 8 : 1, worldN, pixelN);
                     for (let j = 1; j < n; j++) put(V.add(a, v, 1 - j / n, j / n));
                 }
@@ -12255,7 +12342,7 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
         fishVisiblePixels=fishBlockedPixels ? new Int32Array(cw*ch) : null;
     } else {
         fishBlockedPixels = null; fishVisiblePixels = null;
-        if (hiddenDepth && !orthView && T !== "f" && S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge)))) prepareFishLineOccluders();
+        if (hiddenDepth && S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyPoleRay && s.signalPoleTopRing) || (!window.__legacySignalSmoothRay && s.signalSmoothSide) || (!orthView && T !== "f" && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge)))))) prepareFishLineOccluders();
         else fishLineOccluders = null;
     }
     // ベベルの縦線は「角ごとに輪郭の1本」だけ描く（面ONのとき）。
@@ -12441,7 +12528,7 @@ function orthGuides(c) {
         // 画面に入る本数だけ引く（中心から ±20本では、拡大したときに足りなくなる）。
         nx = Math.ceil(W / Math.max(1, sc)) + 1,
         ny = Math.ceil(H / Math.max(1, sc)) + 1;
-    if (orthView === "top") {
+    if (orthPlane() === "top") {
         for (let i = -nx; i <= nx; i++) {
             const x = cx + i * sc;
             draw(x, 0, x, H, col[0]);
@@ -12453,7 +12540,7 @@ function orthGuides(c) {
     } else {
         for (let i = -nx; i <= nx; i++) {
             const x = cx + i * sc;
-            draw(x, 0, x, H, col[orthView === "front" ? 0 : 1]);
+            draw(x, 0, x, H, col[orthPlane() === "front" ? 0 : 1]);
         }
         for (let i = -ny; i <= ny; i++) {
             const y = cy + i * sc;
@@ -13054,7 +13141,7 @@ function render() {
     // sigNow()は描画1回につき一度だけ計算する。以前は線ごとに再計算していたため、
     // アセットや線が多いシーンほど不要な文字列計算が増えていた。
     const currentSignature = sigNow();
-    if (S.some((s) => s.ob && s.cs !== currentSignature)) regenObjects();
+    if (S.some((s) => s.ob && (s.cs !== currentSignature || (s.signalPoleTopRing && s.signalPoleContourView !== (orthView || "3d"))))) regenObjects();
     syncSel();
     T === "f" ? calcF() : calc();
     const c = ctx;
@@ -13225,7 +13312,11 @@ cv.addEventListener(
 function multiStart() {
     cancelBoxPending();
     boxSelect = null;
-    if (drag) {
+    if (drag?.kind === "orthPan") {
+        // 正投影の1本指パンには3Dカメラ値がない。カメラをundefinedで
+        // 上書きせず、2本目までに動いた表示中心だけを戻す。
+        window.cityFloorPlanCenter = [...drag.center];
+    } else if (drag) {
         setP("yaw", drag.yaw);
         setP("pitch", drag.pitch);
         setP("cx", drag.cx);
@@ -13419,6 +13510,7 @@ function updateBoxPending(p, pointerId) {
             kind: "pan",
             pointerId,
             p0: { ...pending.start },
+            raw0: pending.raw0 || { x: pending.start.x * Z + viewShift()[0], y: pending.start.y * Z + viewShift()[1] },
             center0: [...(pending.center0 || window.cityFloorPlanCenter || [0, 0])],
             tapClear: true,
             moved: true,
@@ -14437,14 +14529,18 @@ function unpack(d) {
     {
         const st = d.S.map((s) => (s.ob ? { ...s, ob: fixOb(s.ob) } : s)),
             seen = new Set(),
-            gen = []; // 前の版の図形（向きで保存）は、3Dで作り直す
+            gen = [], // 前の版の図形（向きで保存）は、3Dで作り直す
+            needsPedUpdate = o => !!o && (o.asset === "pedSignal" || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsPedUpdate))),
+            regenerate = s => !!s.ob && (!s.d3 || needsPedUpdate(s.ob));
+        // 旧プロジェクトの歩行者信号は保存された3D線にも人型が残っている。
+        // 定義から再生成して消し、他の図形や手描き線はそのまま維持する。
         st.forEach((s) => {
-            if (s.ob && !s.d3 && !seen.has(s.ob.id)) {
+            if (regenerate(s) && !seen.has(s.ob.id)) {
                 seen.add(s.ob.id);
                 gen.push(...genShape(s.ob));
             }
         });
-        S = [...st.filter((s) => !(s.ob && !s.d3)), ...gen];
+        S = [...st.filter(s => !regenerate(s)), ...gen];
     }
     CR = d.cr || null;
     HU = [];
@@ -19175,18 +19271,27 @@ const ASSET_KIT = (function () {
         // 円柱（smooth）は全頂点に縦線を出すと筒が縞になる。輪だけ描き、
         // 縦線は verts 本（0 なら無し）だけを等間隔で足す。
         if (part.smooth) {
-            const n = Math.max(0, Math.round(part.verts || 0));
-            for (let k = 0; k < n; k++) {
-                const [u, v] = path[Math.round((k * path.length) / n) % path.length];
+            const n = Math.max(0, Math.round(part.verts || 0)),
+                indices = Array.isArray(part.verticals) ? part.verticals : Array.from({length:n}, (_,k) => Math.round((k * path.length) / n) % path.length);
+            for (const idx of indices) {
+                const [u, v] = path[((Math.round(idx) % path.length) + path.length) % path.length];
                 out.push([toP3(axis, u, v, part.z0), toP3(axis, u, v, part.z1)]);
             }
             return out;
         }
-        for (const [u, v] of path) out.push([toP3(axis, u, v, part.z0), toP3(axis, u, v, part.z1)]);
+        const sideIndices = Array.isArray(part.sideVerticals) ? part.sideVerticals : path.map((_, i) => i);
+        for (const index of sideIndices) {
+            const [u,v]=path[((index % path.length)+path.length)%path.length];
+            out.push([toP3(axis, u, v, part.z0), toP3(axis, u, v, part.z1)]);
+        }
         if (part.holeSides)
-            (part.holes || []).forEach((h) => {
+            (part.holes || []).forEach((h, hi) => {
                 if (!Array.isArray(h) || h.length < 3) return;
-                for (const [u, v] of h) out.push([toP3(axis, u, v, part.z0), toP3(axis, u, v, part.z1)]);
+                const indices=Array.isArray(part.holeSideVerticals?.[hi]) ? part.holeSideVerticals[hi] : h.map((_, i)=>i);
+                for (const index of indices) {
+                    const [u,v]=h[((index % h.length)+h.length)%h.length];
+                    out.push([toP3(axis, u, v, part.z0), toP3(axis, u, v, part.z1)]);
+                }
             });
         return out;
     }
@@ -19489,8 +19594,16 @@ const ASSET_KIT = (function () {
             for (const part of parts) {
                 const color = part.color || ctx.c,
                     width = part.width || ctx.o.w;
+                let edgeIndex = 0;
                 for (const seg of partEdges(part)) {
                     const line=lineA(ctx.o, seg, color, width);
+                    if (part.signalPoleTopRing && edgeIndex === 1) {
+                        line.signalPoleTopRing = true;
+                        line.signalPoleContourView = orthView || "3d";
+                    }
+                    if (part.signalPoleTopRing && edgeIndex >= 2) line.signalPoleSide = true;
+                    edgeIndex++;
+                    if (part.signalSmoothSide) line.signalSmoothSide = true;
                     if(part.depthBevelEdge) line.depthBevelEdge=true;
                     ctx.out.push(line);
                 }
@@ -20296,7 +20409,60 @@ ASSET_KIT.define(
 // 4種はどれも「台座＋ポール＋頭（信号機／標識板）」の同じ骨格で、違うのは頭の中身だけ。
 // 寸法は signalGeometry()（engine-gizmo.js）と共有する。画面の「ポール」ハンドルが動かすのは
 // アセットの高さ h そのものなので、ハンドルの値と描かれる形が食い違わない。
-function signalPoleParts(K, g) {
+// 円筒・円錐台の見える側面と背面の境目を、実際の面と視点から選ぶ。
+// 固定の0番・半周の縦線では横から見たときに2本が中央に重なり、輪郭が消える。
+function signalPoleContour(part, o) {
+    if (!o) return part;
+    const rings = part.rings || [{path:part.path,w:part.z0},{path:part.path,w:part.z1}];
+    if (rings.length < 2 || !rings[0].path || !rings[1].path) return part;
+    const a=rings[0], b=rings[rings.length-1], n=Math.min(a.path.length,b.path.length);
+    const sub=(x,y)=>x.map((v,i)=>v-y[i]), dot=(x,y)=>x.reduce((v,w,i)=>v+w*y[i],0),
+        cross=(x,y)=>[x[1]*y[2]-x[2]*y[1],x[2]*y[0]-x[0]*y[2],x[0]*y[1]-x[1]*y[0]],
+        p=(r,i)=>L2W(o,r.path[i][0],r.path[i][1],r.w),
+        center=L2W(o,0,0,a.w),
+        toward=orthView ? orthBasis().depth.map(v=>-v) : null,
+        faces=[];
+    for(let i=0;i<n;i++) {
+        const A=p(a,i),B=p(a,(i+1)%n),D=p(b,i),normal=cross(sub(B,A),sub(D,A)),
+            radial=sub(A,center), direction=toward || sub(camPos(),A);
+        if(dot(normal,radial)<0) for(let j=0;j<3;j++)normal[j]=-normal[j];
+        faces.push(dot(normal,direction)>1e-12);
+    }
+    const edges=[];
+    for(let i=0;i<n;i++)if(faces[(i+n-1)%n]!==faces[i])edges.push(i);
+    part.verticals=edges.length===2 ? edges : [0,Math.floor(n/2)];
+    return part;
+}
+// 灯器の丸角や円形標識は多角形で面を作っているが、分割ごとの縦線は
+// 本来の縞模様ではない。前後の輪は維持し、奥行き方向は輪郭の2本だけ。
+function signalSmoothSides(part, o, K) {
+    if (!o || window.__legacySignalSmooth || !part?.path || part.path.length <= 4) return part;
+    const axis=part.axis || "z", sub=(a,b)=>a.map((v,i)=>v-b[i]),
+        dot=(a,b)=>a.reduce((v,w,i)=>v+w*b[i],0),
+        // L2Wは回転・移動のアフィン変換なので、断面2軸だけを一度求める。
+        // 断面の各点にL2Wを3回ずつ呼ぶと、標識を大量に置いた時に重くなる。
+        origin=L2W(o,0,0,0),
+        uv=axis === "y" ? [[1,0,0],[0,0,1]] : axis === "x" ? [[0,1,0],[0,0,1]] : [[1,0,0],[0,1,0]],
+        u=sub(L2W(o,...uv[0]),origin),v=sub(L2W(o,...uv[1]),origin),
+        eye=orthView ? orthBasis().depth.map(x=>-x) : sub(camPos(),origin),
+        eu=dot(eye,u),ev=dot(eye,v);
+    const contour=path=>{
+        const n=path.length, faces=[],
+            winding=path.reduce((a,p,i)=>a+p[0]*path[(i+1)%n][1]-path[(i+1)%n][0]*p[1],0) >= 0 ? 1 : -1;
+        for(let i=0;i<n;i++){
+            const a=path[i],b=path[(i+1)%n],du=b[0]-a[0],dv=b[1]-a[1],
+                cu=orthView ? eu : eu-a[0],cv=orthView ? ev : ev-a[1];
+            faces.push(winding*(dv*cu-du*cv)>1e-12);
+        }
+        const indices=[];for(let i=0;i<n;i++)if(faces[(i+n-1)%n]!==faces[i])indices.push(i);
+        return indices.length===2 ? indices : [0,Math.floor(n/2)];
+    };
+    part.sideVerticals=contour(part.path);
+    if(part.holeSides)part.holeSideVerticals=(part.holes||[]).map(h=>h.length>4 ? contour(h) : h.map((_,i)=>i));
+    part.signalSmoothSide=true;
+    return part;
+}
+function signalPoleParts(K, g, o) {
     // 台座は「平たい底板＋すぼまる首」の2段。首を十分な高さにしないと、
     // 線画ではポールの下に小さな三角が付いただけに見えて形が読めない。
     const plateH = Math.max(0.02, g.baseH * 0.28),
@@ -20304,13 +20470,12 @@ function signalPoleParts(K, g) {
         poleR = g.poleR,
         collarTop = plateH + collarH;
     return [
-        // 底板：平たい円盤。縦線を2本入れて厚みを見せる。
-        K.cylinder(g.baseR, 0, plateH, { seg: 14, verts: 2 }),
+        // 底板：平たい円盤。視点から見た輪郭2本で厚みを見せる。
+        signalPoleContour(K.cylinder(g.baseR, 0, plateH, { seg: 14, verts: 2 }), o),
         // 首：底板からポールへすぼまる円錐台。
-        // 回転体（loft）は verts を受け取らないので、縦線は verticals に
-        // 向かい合う2点（14角の 0 と 7）を指定して出す。これが無いと
-        // 「輪だけ」になって、線画では小さな椀にしか見えない。
-        Object.assign(
+        // 首の両側は実際の円錐台の面と視点から輪郭を選ぶ。
+        // 視点が正面で固定されていない場合も、輪だけの形にしない。
+        signalPoleContour(Object.assign(
             K.revolution(
                 [
                     [g.baseR * 0.76, plateH],
@@ -20319,29 +20484,10 @@ function signalPoleParts(K, g) {
                 { seg: 14 },
             ),
             { verticals: [0, 7] },
-        ),
-        // ポール：首の中から頭のすぐ下まで。縦線は左右2本（断面12角の 0 と 6）に置くと、
-        // どの向きから見ても「2本の輪郭線」になり、1本線の棒に見えない。
-        K.cylinder(poleR, collarTop - 0.01, g.headBottom + 0.02, { seg: 12, verts: 2 }),
+        ), o),
+        // ポール：首の中から頭のすぐ下まで。視点から見た実際の左右の縁を使う。
+        signalPoleContour(Object.assign(K.cylinder(poleR, collarTop - 0.01, g.headBottom + 0.02, { seg: 12, verts: 2 }), {signalPoleTopRing:true}), o),
     ];
-}
-
-// 灯器の中の絵（止まれ／進め）。細い板を並べた人型で、灯（lamp）の大きさに対する割合で作る。
-// 小さく描かれるので、腕は省いて「頭＋胴＋脚」だけにし、灯の内側 6 割に収める。
-function signalWalkerParts(K, cx, cz, L, frontY, walking) {
-    // 先に中心へ置いてから回す（原点のまま回すと位置が飛ぶ）
-    const bar = (w, h, dx, dz, deg = 0) => {
-            const u = cx + dx,
-                v = cz + dz;
-            // 灯の板より確実に手前へ出す（板の中に埋めると隠れ線として消える）
-            return K.box(K.rotatePath(K.offsetPath(K.rectPath(w, h), u, v), deg, u, v), frontY, frontY + 0.01, { axis: "y" });
-        },
-        head = K.cylinder(L * 0.11, frontY, frontY + 0.01, { axis: "y", seg: 12, cx, cy: cz + L * 0.36 }),
-        torso = bar(L * 0.2, L * 0.28, 0, L * 0.14, 0),
-        legs = walking
-            ? [bar(L * 0.16, L * 0.32, -L * 0.075, -L * 0.13, 20), bar(L * 0.16, L * 0.32, L * 0.07, -L * 0.12, -16)]
-            : [bar(L * 0.15, L * 0.32, -L * 0.055, -L * 0.13, 0), bar(L * 0.15, L * 0.32, L * 0.055, -L * 0.13, 0)];
-    return [head, torso, ...legs];
 }
 
 // --- 1) 車両用信号機（横3灯）---
@@ -20368,9 +20514,9 @@ ASSET_KIT.define(
             front = -g.headD / 2,
             lampR = Math.max(0.02, K.param(o, "tsLampR", 0.125)),
             hood = Math.max(0, K.param(o, "tsHood", 0.1)),
-            parts = signalPoleParts(K, g);
+            parts = signalPoleParts(K, g, o);
         // 灯器：角を丸めた横長の箱
-        parts.push(K.depthBeveledBox(g.headW, g.headD, g.headH, K.param(o, "spDepthBevel", 0.05), {seg: 3, z0: g.headBottom}));
+        parts.push(signalSmoothSides(K.depthBeveledBox(g.headW, g.headD, g.headH, K.param(o, "spDepthBevel", 0.05), {seg: 3, z0: g.headBottom}), o, K));
         // 灯（青・黄・赤）と、灯のまわりのひさし
         [-1, 0, 1].forEach((i) => {
             const x = i * g.headW * 0.3;
@@ -20412,9 +20558,9 @@ ASSET_KIT.define(
             // 上=止まれ（赤）／下=進め（青）。灯の中心の高さ。
             topCz = g.headBottom + g.headH * 0.72,
             bottomCz = g.headBottom + g.headH * 0.27,
-            parts = signalPoleParts(K, g),
-            lens = (cz) => K.box(K.offsetPath(K.roundRectPath(lamp, lamp, Math.min(0.03, lamp * 0.16), 2), 0, cz), front - 0.022, front - 0.008, { axis: "y" });
-        parts.push(K.depthBeveledBox(g.headW, g.headD, g.headH, K.param(o, "spDepthBevel", 0.05), {seg: 3, z0: g.headBottom}));
+            parts = signalPoleParts(K, g, o),
+            lens = (cz) => signalSmoothSides(K.box(K.offsetPath(K.roundRectPath(lamp, lamp, Math.min(0.03, lamp * 0.16), 2), 0, cz), front - 0.022, front - 0.008, { axis: "y" }), o, K);
+        parts.push(signalSmoothSides(K.depthBeveledBox(g.headW, g.headD, g.headH, K.param(o, "spDepthBevel", 0.05), {seg: 3, z0: g.headBottom}), o, K));
         parts.push(lens(topCz), lens(bottomCz));
         // ひさし（四角い枠）：灯のまわりの帯を手前へ張り出す。
         // 車両用と同じく「外側の枠＋内側の穴」にして、線画でも枠として見えるようにする。
@@ -20422,7 +20568,7 @@ ASSET_KIT.define(
         if (hood > 0.01)
             [topCz, bottomCz].forEach((cz) =>
                 parts.push(
-                    K.box(
+                    signalSmoothSides(K.box(
                         K.offsetPath(K.roundRectPath(lamp * 1.2, lamp * 1.2, Math.min(0.03, lamp * 0.16), 2), 0, cz),
                         front - 0.01 - hood,
                         front + 0.004,
@@ -20431,12 +20577,9 @@ ASSET_KIT.define(
                             holes: [K.offsetPath(K.roundRectPath(lamp * 1.02, lamp * 1.02, Math.min(0.02, lamp * 0.1), 2), 0, cz)],
                             holeSides: true,
                         },
-                    ),
+                    ), o, K),
                 ),
             );
-        // 絵：上は「止まれ」の立ち姿、下は「進め」の歩く姿
-        parts.push(...signalWalkerParts(K, 0, topCz, lamp, front - 0.045, false));
-        parts.push(...signalWalkerParts(K, 0, bottomCz, lamp, front - 0.045, true));
         return parts;
     },
 );
@@ -20444,7 +20587,7 @@ ASSET_KIT.define(
 // --- 3) 丸標識（地下鉄の丸い看板）＋ 形と枚数を選べる仲間 ---
 // 標識の板は「形（丸・逆三角形・四角・ひし形）」×「枚数（1枚・2枚）」で作れる。
 // 2枚のときは頭の高さを2枚で分け、上の板の形は signShape2 で別に選べる。
-function signPlateParts(K, opts) {
+function signPlateParts(K, opts, o) {
     const { cx, cz, w, h, shape, t, ring, band } = opts,
         y0 = -t / 2,
         y1 = t / 2,
@@ -20469,9 +20612,11 @@ function signPlateParts(K, opts) {
         },
         parts = [];
     // 1) 板本体（薄い板）
-    parts.push(K.box(outline(w, h), y0, y1, { axis: "y" }));
+    const plate = K.box(outline(w, h), y0, y1, { axis: "y" });
+    parts.push(shape === "circle" || shape === "rect" ? signalSmoothSides(plate, o, K) : plate);
     // 2) 内側の縁：少し小さくして手前へ出す（縁の線が面の内側の線として消えない）
-    parts.push(K.box(outline(w * ring, h * ring), front - 0.02, front - 0.006, { axis: "y" }));
+    const inset = K.box(outline(w * ring, h * ring), front - 0.02, front - 0.006, { axis: "y" });
+    parts.push(shape === "circle" || shape === "rect" ? signalSmoothSides(inset, o, K) : inset);
     // 3) 丸標識だけ、横に通る帯を付ける
     if (band && shape === "circle")
         parts.push(
@@ -20504,9 +20649,9 @@ function signParts(o, K) {
         plateH = count === 2 ? Math.max(0.08, (g.headH - gap) / 2) : g.headH,
         cz1 = g.headBottom + plateH / 2,
         cz2 = g.headBottom + plateH + gap + plateH / 2,
-        parts = signalPoleParts(K, g);
-    parts.push(...signPlateParts(K, { cx: 0, cz: cz1, w: g.headW, h: plateH, shape: shape1, t, ring, band }));
-    if (count === 2) parts.push(...signPlateParts(K, { cx: 0, cz: cz2, w: g.headW, h: plateH, shape: shape2, t, ring, band }));
+        parts = signalPoleParts(K, g, o);
+    parts.push(...signPlateParts(K, { cx: 0, cz: cz1, w: g.headW, h: plateH, shape: shape1, t, ring, band }, o));
+    if (count === 2) parts.push(...signPlateParts(K, { cx: 0, cz: cz2, w: g.headW, h: plateH, shape: shape2, t, ring, band }, o));
     return parts;
 }
 
@@ -20646,9 +20791,9 @@ ASSET_KIT.define(
             // 板の対角いっぱいにすると角から飛び出すので、少し短くする
             len = Math.min(g.headW, g.headH) * 1.16,
             plate = K.roundRectPath(g.headW, g.headH, Math.min(0.06, g.headH * 0.14), 2),
-            parts = signalPoleParts(K, g);
+            parts = signalPoleParts(K, g, o);
         // 下地の板
-        parts.push(K.box(K.offsetPath(plate, 0, g.headCz), front + 0.005, front + g.headD, { axis: "y" }));
+        parts.push(signalSmoothSides(K.box(K.offsetPath(plate, 0, g.headCz), front + 0.005, front + g.headD, { axis: "y" }), o, K));
         // X：細長い板を±45°に回して前に重ねる
         [45, -45].forEach((deg) =>
             parts.push(
@@ -22608,10 +22753,10 @@ window.cityGridInstallAssetUI = function (bridge) {
 
     <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　7 前　8 横　9 上　0 3D　／　詳細操作は「？」</div>
     <div class="sceneTitle">シーン内オブジェクト</div>
-    <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneLockSel" title="選択中のオブジェクトをロック／解除（⌘/Ctrl+L）">選択をロック</button><button id="sceneUnlockAll" title="ロック中のオブジェクトをすべて解除">全ロック解除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button><button id="sceneCombineSel">結合</button><button id="sceneSeparateSel">結合解除</button></div>
+    <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneInvertSel">選択を反転</button><button id="sceneHideSel">選択中を非表示</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneLockSel" title="選択中のオブジェクトをロック／解除（⌘/Ctrl+L）">選択をロック</button><button id="sceneUnlockAll" title="ロック中のオブジェクトをすべて解除">全ロック解除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button><button id="sceneCombineSel">結合</button><button id="sceneSeparateSel">結合解除</button></div>
     <div class="alignTools"><button id="centerOnScreenSel" title="選択中のオブジェクト（接着した子パーツ・グループを含む）を、いま見ている画面の中央へ移動">画面中央へ</button><button id="centerChildSel" title="テント付き建物・看板付き建物のテント／看板を、建物の左右（X方向）の中央へすぐ戻す。1個を選ぶだけで使えます">テント・看板を中央へ</button></div>
     <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Z軸（高さ）</option><option value=2>Y軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
-    <div class="sceneNote">行のチェックで複数選択。「画面中央へ」は1個でも動きます（看板付き建物・テント付き建物は建物本体の中心を画面中央へ合わせます）。整列は2個以上を選んでください。グループ化は後から解除できます。結合は複数の定義を一つの複合オブジェクトにまとめ、結合解除まで一体として扱います。</div>
+    <div class="sceneNote">行のチェックで複数選択、✎で名前変更（空欄で標準名）。「選択中を非表示」は一覧の○から再表示。「画面中央へ」は1個でも動きます（看板付き建物・テント付き建物は建物本体の中心を画面中央へ合わせます）。整列は2個以上を選んでください。グループ化は後から解除できます。結合は複数の定義を一つの複合オブジェクトにまとめ、結合解除まで一体として扱います。</div>
     <div id="objectList"><div class="emptyList">まだオブジェクトがありません</div></div>`;
     side.insertBefore(quick, side.firstChild);
     const humanInput = el("humanHeight");
@@ -22857,7 +23002,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         // 正面・横は「地面の高さ」より下を塗る（実際の床の見え方に合わせる）。
         let horizon;
         if (orthView) {
-            if (orthView === "top") return;
+            if (orthPlane() === "top") return;
             const g = projPoint([0, -1, 0], [1, 0, 0, 1, 0, 0]);
             horizon = g && g.ok ? clamp(g.y, 0, H) : H;
         } else horizon = T === "f" ? H * 0.5 : clamp(AX.hy, 0, H);
@@ -22943,6 +23088,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 const q = JSON.parse(JSON.stringify(source));
                 q.id = uid();
                 delete q.groupId;
+                delete q._cityIsolationBefore; // 結合後は新しい物体として扱う
                 parts.push(q);
             });
         });
@@ -22999,6 +23145,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 const q = JSON.parse(JSON.stringify(source));
                 q.id = uid();
                 delete q.groupId;
+                delete q._cityIsolationBefore; // 結合後は新しい物体として扱う
                 parts.push(q);
             }),
         );
@@ -23047,12 +23194,87 @@ window.cityGridInstallAssetUI = function (bridge) {
         }
         render();
     }
+    function hideSelectedScene() {
+        normalizeSelection();
+        const ids = new Set();
+        for (const id of selIds) for (const member of linkedMemberIds(id)) ids.add(member);
+        const targets = sceneObjects().filter(o => ids.has(o.id) && objectVisible(o));
+        if (!targets.length) { flashHint("表示中のオブジェクトを選択してください"); return; }
+        HU.push(S); RD = [];
+        rewriteObjectDefs(targets.map(o => o.id), {visible:false});
+        ids.forEach(id => selIds.delete(id));
+        if (ids.has(sel)) sel = [...selIds].pop() || null;
+        normalizeSelection(); syncSel(); render();
+        flashHint(`${targets.length}個を非表示にしました（一覧の○で再表示）`);
+    }
+    // 元の表示状態をオブジェクト定義に保存することで、Undo/Redo・
+    // プロジェクト保存／読込後もボタンと復元先が一致する。
+    const isolationKey = "_cityIsolationBefore";
+    const isolated = objects => objects.some(o => o[isolationKey] && typeof o[isolationKey] === "object");
+    function syncIsolationButton(objects) {
+        const button = el("isolateSelection"), on = isolated(objects);
+        if (!button) return;
+        button.classList.toggle("on", on);
+        button.setAttribute("aria-pressed", String(on));
+        button.textContent = on ? "表示を元に戻す" : "選択以外を非表示";
+    }
+    function toggleIsolation() {
+        normalizeSelection();
+        const objects = sceneObjects(), on = isolated(objects);
+        if (!on && !objects.some(o => selIds.has(o.id) && objectVisible(o))) {
+            flashHint("表示するオブジェクトを選択してください"); return;
+        }
+        HU.push(S); RD = [];
+        const updates = new Map();
+        for (const o of objects) {
+            const n = {...o};
+            if (on) {
+                const state = n[isolationKey];
+                if (!state || typeof state !== "object") continue; // 実行中に新規作成した物はそのまま
+                if (state.hadVisible) n.visible = state.visible;
+                else delete n.visible;
+                delete n[isolationKey];
+            } else {
+                n[isolationKey] = {hadVisible:Object.prototype.hasOwnProperty.call(o, "visible"), visible:o.visible};
+                if (!selIds.has(o.id) && objectVisible(o)) n.visible = false;
+            }
+            updates.set(o.id, n);
+        }
+        S = S.map(s => s?.ob && updates.has(s.ob.id) ? {...s, ob:updates.get(s.ob.id)} : s);
+        normalizeSelection(); syncSel(); render();
+        flashHint(on ? "元の表示状態に戻しました" : "選択以外を一時的に非表示にしました");
+    }
+    el("isolateSelection").onclick = toggleIsolation;
     // シーン一覧（アウトライナー）を現在のSから再構築する。
     // 表示切替・選択・グループ操作の入口もここで各行へ接続する。
+    const escapeObjectText = value => String(value).replace(/[&<>"']/g, c => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[c]));
+    const objectDisplayName = o => typeof o.displayName === "string" && o.displayName.trim() ? o.displayName.trim() : assetLabel(o);
+    let outlinerKey = null, outlinerRows = new Map(), outlinerSelection = new Set(), outlinerActive = null;
     function updateOutliner() {
         if (!list) return;
         normalizeSelection();
-        const objects = sceneObjects();
+        const objects = sceneObjects(),
+            key = JSON.stringify(objects.map(o=>[o.id, assetLabel(o), objectDisplayName(o), assetGlyph(o), o.type, o.asset,
+                o.groupId || "", o.type === "compound" ? (o.parts?.length || 0) : null,
+                o.asset === "person" ? Number(o.h).toFixed(2) : null, objectVisible(o), obLocked(o)]));
+        syncIsolationButton(objects);
+        if (!window.__legacyOutlinerRebuild && key === outlinerKey) {
+            // 一覧の内容が同じならDOMを破棄せず、選択が変わった行だけ更新。
+            // カメラの移動・オブジェクトドラッグ中に数百行を毎回再構築しない。
+            const changed = new Set([...outlinerSelection, ...selIds]);
+            if (outlinerActive) changed.add(outlinerActive);
+            if (sel) changed.add(sel);
+            for (const id of changed) {
+                const row=outlinerRows.get(id);if(!row)continue;
+                const selected=selIds.has(id);
+                row.classList.toggle("selected",selected);
+                row.classList.toggle("activeObject",sel===id);
+                const check=row.querySelector(".objectCheck");if(check)check.checked=selected;
+            }
+            outlinerSelection=new Set(selIds);outlinerActive=sel;
+            syncGroupActions();
+            return;
+        }
         list.innerHTML = objects.length
             ? objects
                   .map((o, i) => {
@@ -23073,10 +23295,13 @@ window.cityGridInstallAssetUI = function (bridge) {
                       const visible = objectVisible(o),
                           locked = obLocked(o);
                       // 鍵ボタンは「ロック中でも押せる」唯一の入口。ここから解除できる。
-                      return `<div class="objectRow ${selIds.has(o.id) ? "selected" : ""} ${sel === o.id ? "activeObject" : ""} ${visible ? "" : "hiddenObject"} ${locked ? "lockedObject" : ""}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? "オブジェクトを非表示" : "オブジェクトを表示"}" aria-label="${visible ? "非表示" : "表示"}">${visible ? "◉" : "○"}</button><button type="button" class="objectLock ${locked ? "isLocked" : ""}" data-object-lock="${o.id}" title="${locked ? "ロックを解除（⌘/Ctrl+L）" : "ロックする（⌘/Ctrl+L）"}" aria-label="${locked ? "ロック解除" : "ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked ? "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" : "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1} ${group}<small>${detail}</small></span></div>`;
+                      return `<div class="objectRow ${selIds.has(o.id) ? "selected" : ""} ${sel === o.id ? "activeObject" : ""} ${visible ? "" : "hiddenObject"} ${locked ? "lockedObject" : ""}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? "オブジェクトを非表示" : "オブジェクトを表示"}" aria-label="${visible ? "非表示" : "表示"}">${visible ? "◉" : "○"}</button><button type="button" class="objectLock ${locked ? "isLocked" : ""}" data-object-lock="${o.id}" title="${locked ? "ロックを解除（⌘/Ctrl+L）" : "ロックする（⌘/Ctrl+L）"}" aria-label="${locked ? "ロック解除" : "ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked ? "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" : "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="${escapeObjectText(objectDisplayName(o))}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta"><span class="objectName">${escapeObjectText(objectDisplayName(o))}${typeof o.displayName === "string" && o.displayName.trim() ? "" : ` ${i + 1}`}</span> ${group}<small>${detail}</small></span><button type="button" class="objectRename" data-object-rename="${o.id}" title="名前を変更" aria-label="${escapeObjectText(objectDisplayName(o))}の名前を変更">✎</button></div>`;
                   })
                   .join("")
             : '<div class="emptyList">まだオブジェクトがありません</div>';
+        outlinerKey=key;
+        outlinerRows=new Map([...list.querySelectorAll("[data-object]")].map(row=>[row.dataset.object,row]));
+        outlinerSelection=new Set(selIds);outlinerActive=sel;
         syncGroupActions();
     }
     function deleteSelectedScene() {
@@ -23148,15 +23373,15 @@ window.cityGridInstallAssetUI = function (bridge) {
     // 接着中の子パーツ（テント・看板）は親と同じ量だけ動かし、位置関係を崩さない。
     function screenCenterTarget(worldCenter) {
         const mid = { x: W / 2, y: H / 2 };
-        if (orthView === "front") {
+        if (orthPlane() === "front") {
             const w = SH.floorPlanFrontWorldAt(mid);
             return w ? [w.x, w.y, worldCenter[2]] : null;
         }
-        if (orthView === "side") {
+        if (orthPlane() === "side") {
             const w = SH.floorPlanSideWorldAt(mid);
             return w ? [worldCenter[0], w.y, w.z] : null;
         }
-        if (orthView === "top") {
+        if (orthPlane() === "top") {
             const w = SH.floorPlanWorldAt(mid);
             return w ? [w.x, worldCenter[1], w.z] : null;
         }
@@ -23256,7 +23481,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         window.cityFloorPlanCenter = next;
         render();
         flashHint(
-            `${orthView === "top" ? "真上" : orthView === "side" ? "真横" : "正面"}の表示位置を選択中のオブジェクトへ移動しました（カメラ＝3D視点は動かしていません）`,
+            `${{top:"上",bottom:"下",front:"前",back:"後",side:"右",left:"左"}[orthView] || "正投影"}の表示位置を選択中のオブジェクトへ移動しました（カメラ＝3D視点は動かしていません）`,
         );
     }
     if (el("floorViewCenter")) el("floorViewCenter").onclick = centerFloorViewOnSelection;
@@ -23306,6 +23531,32 @@ window.cityGridInstallAssetUI = function (bridge) {
         if (!b) return;
         const id = b.dataset.object,
             chosen = obOf(id);
+        if (e.target.closest("[data-object-rename]")) {
+            e.preventDefault(); e.stopPropagation();
+            if (!chosen || b.querySelector(".objectNameInput")) return;
+            const label = b.querySelector(".objectName"), input = document.createElement("input");
+            input.className = "objectNameInput"; input.type = "text"; input.maxLength = 100;
+            input.value = typeof chosen.displayName === "string" ? chosen.displayName : "";
+            input.placeholder = assetLabel(chosen); input.setAttribute("aria-label", "オブジェクト名（空欄で標準名）");
+            label.replaceWith(input); input.focus(); input.select();
+            input.addEventListener("click", ev => ev.stopPropagation());
+            input.addEventListener("keydown", ev => {
+                ev.stopPropagation();
+                if (ev.isComposing || ev.keyCode === 229) return; // 日本語変換の確定中は編集を閉じない
+                if (ev.key === "Enter") { ev.preventDefault(); input.blur(); }
+                if (ev.key === "Escape") { ev.preventDefault(); input.dataset.cancel = "1"; input.blur(); }
+            });
+            input.addEventListener("blur", () => {
+                const current = obOf(id), name = input.value.trim();
+                if (input.dataset.cancel !== "1" && current && name !== (current.displayName || "")) {
+                    HU.push(S); RD = [];
+                    rewriteObjectDefs([id], {displayName: name});
+                }
+                // 入力欄を一覧表示に戻す。キャンセル・同じ名前でも再描画する。
+                outlinerKey = null; render();
+            }, {once:true});
+            return;
+        }
         if (e.target.closest("[data-object-visibility]")) {
             e.preventDefault();
             setObjectVisibility(id, !objectVisible(chosen));
@@ -23370,10 +23621,28 @@ window.cityGridInstallAssetUI = function (bridge) {
         syncSel();
         render();
     };
+    el("sceneInvertSel").onclick = () => {
+        normalizeSelection();
+        const objects = sceneObjects().filter(o => objectVisible(o) && !obLocked(o));
+        // 通常グループは一体、接続アセットだけのグループは個別選択。
+        const grouped = new Set(objects.filter(o => o.groupId && !o.linkedAsset && !o.attachment?.parentId).map(o => o.groupId));
+        const units = new Map();
+        for (const o of objects) {
+            const key = o.groupId && grouped.has(o.groupId) ? "group:" + o.groupId : "object:" + o.id;
+            if (!units.has(key)) units.set(key, []);
+            units.get(key).push(o.id);
+        }
+        const next = new Set();
+        for (const ids of units.values()) if (!ids.some(id => selIds.has(id))) ids.forEach(id => next.add(id));
+        selIds.clear(); next.forEach(id => selIds.add(id));
+        sel = [...selIds].pop() || null;
+        normalizeSelection(); tool = "edit"; setMode("draw"); syncSel(); render();
+    };
     el("sceneClearSel").onclick = () => {
         clearSelection();
         render();
     };
+    el("sceneHideSel").onclick = hideSelectedScene;
     el("sceneDeleteSel").onclick = deleteSelectedScene;
     el("sceneLockSel").onclick = () => {
         toggleSelectionLock();
@@ -25259,6 +25528,16 @@ window.cityGridInstallAssetUI = function (bridge) {
     // Wrap render so the outliner follows undo/redo, opening files, and camera changes.
     // ===== 4. 描画フックと視点プリセット =====
     // エンジンのrenderを退避し、UIオーバーレイや選択状態を描いた後に呼び出す。
+    let lastStandardView;
+    function syncStandardViewButtons() {
+        if(lastStandardView===orthView)return;
+        lastStandardView=orthView;
+        for(const [id,v] of [["viewFloorFront","front"],["viewFloorBack","back"],["viewFloorTop","top"],["viewFloorBottom","bottom"],["viewFloorSide","side"],["viewFloorLeft","left"],["viewHome",null]]) {
+            const b=el(id);if(!b)continue;const on=orthView===v;b.classList.toggle("on",on);b.setAttribute("aria-pressed",String(on));
+        }
+        const status=el("floorPlanStatus"),name={front:"前",back:"後",top:"上",bottom:"下",side:"右",left:"左"}[orthView];
+        if(status&&window.cityFloorPlanActive&&name)status.textContent=`間取りモード中：${name}（表示面内でオブジェクトを移動・編集できます）`;
+    }
     const baseRender = render;
     render = function () {
         sanitizeScene();
@@ -25266,6 +25545,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         updateOutliner();
         syncAssetControls();
         syncGenericAssetEditor();
+        syncStandardViewButtons();
         syncSignPanel();
         syncBuildingPanel();
         syncWallSideSignPanel();
@@ -25420,7 +25700,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         standardApplying = true;
         // 正面・横・上は表示用の正投影だけを切り替える。
         // yaw／pitch／高さ／位置／レンズ／魚眼画角／ロールは一切変更しない。
-        orthView = kind === "front" || kind === "side" || kind === "top" ? kind : null;
+        orthView = ["front","back","top","bottom","side","right","left"].includes(kind) ? (kind === "right" ? "side" : kind) : null;
         if (kind === "home" && !orthView) {
             try {
                 fitPerspectiveHome();
@@ -25449,7 +25729,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         // 正投影はorthViewだけで切り替える。グリッド種類、魚眼画角、
         // レンズ、カメラ位置、高さ、回転、傾き、ロールは変更しない。
         standardApplying = true;
-        orthView = kind === "side" ? "side" : kind === "front" ? "front" : "top";
+        orthView = ["front","back","top","bottom","side","right","left"].includes(kind) ? (kind === "right" ? "side" : kind) : "top";
         focusLinkedBuildingParentForOrtho();
         standardApplying = false;
         sync();
@@ -25466,6 +25746,9 @@ window.cityGridInstallAssetUI = function (bridge) {
         enterFloorPlan(kind);
     }
     el("viewFloorFront").onclick = () => showFloorPlan("front");
+    el("viewFloorBack").onclick = () => showFloorPlan("back");
+    el("viewFloorLeft").onclick = () => showFloorPlan("left");
+    el("viewFloorBottom").onclick = () => showFloorPlan("bottom");
     el("viewFloorSide").onclick = () => showFloorPlan("side");
     el("viewFloorTop").onclick = () => showFloorPlan("top");
     el("viewHome").onclick = () => (window.cityFloorPlanActive ? exitFloorPlan(true) : applyStandardView("home"));
@@ -25524,10 +25807,10 @@ window.cityGridInstallAssetUI = function (bridge) {
             tx = P.cx - Math.sin(fyaw) * SH.FLOOR_CAMERA_RAY * fhoriz,
             tz = P.cz + Math.cos(fyaw) * SH.FLOOR_CAMERA_RAY * fhoriz,
             ty = P.ch - 1 + Math.sin(fpitch) * SH.FLOOR_CAMERA_RAY;
-        if (orthView === "side") {
+        if (orthPlane() === "side") {
             // 真横は画面の左右がワールドZ、上下がワールドY。共有カメラの高さ・傾きも含めて自動フィットする。
             if (!bounds.length) {
-                window.cityFloorPlanCenter = [P.cz, P.ch - 1];
+                window.cityFloorPlanCenter = [orthView === "left" ? -P.cz : P.cz, P.ch - 1];
                 window.cityFloorPlanScale = Math.min(W, H) / 7.2;
                 return;
             }
@@ -25539,14 +25822,14 @@ window.cityGridInstallAssetUI = function (bridge) {
                 spanY = Math.max(0.1, maxY - minY),
                 pad = Math.max(1, Math.max(spanZ, spanY) * 0.16);
             const fitScale = Math.min((W * 0.82) / (spanZ + pad * 2), (H * 0.82) / (spanY + pad * 2));
-            window.cityFloorPlanCenter = [(minZ + maxZ) / 2, (minY + maxY) / 2];
+            window.cityFloorPlanCenter = [(orthView === "left" ? -1 : 1) * (minZ + maxZ) / 2, (minY + maxY) / 2];
             window.cityFloorPlanScale = Math.max(planMinScale(), Math.min(220, fitScale));
             return;
         }
-        if (orthView === "front") {
+        if (orthPlane() === "front") {
             // 正面は画面の左右がワールドX、上下がワールドY。
             if (!bounds.length) {
-                window.cityFloorPlanCenter = [P.cx, P.ch - 1];
+                window.cityFloorPlanCenter = [orthView === "back" ? -P.cx : P.cx, P.ch - 1];
                 window.cityFloorPlanScale = Math.min(W, H) / 7.2;
                 return;
             }
@@ -25558,12 +25841,12 @@ window.cityGridInstallAssetUI = function (bridge) {
                 spanY = Math.max(0.1, maxY - minY),
                 pad = Math.max(1, Math.max(spanX, spanY) * 0.16);
             const fitScale = Math.min((W * 0.82) / (spanX + pad * 2), (H * 0.82) / (spanY + pad * 2));
-            window.cityFloorPlanCenter = [(minX + maxX) / 2, (minY + maxY) / 2];
+            window.cityFloorPlanCenter = [(orthView === "back" ? -1 : 1) * (minX + maxX) / 2, (minY + maxY) / 2];
             window.cityFloorPlanScale = Math.max(planMinScale(), Math.min(220, fitScale));
             return;
         }
         if (!bounds.length) {
-            window.cityFloorPlanCenter = [P.cx, P.cz];
+            window.cityFloorPlanCenter = [P.cx, orthView === "bottom" ? -P.cz : P.cz];
             window.cityFloorPlanScale = Math.min(W, H) / 7.2;
             return;
         }
@@ -25575,7 +25858,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             spanZ = Math.max(0.1, maxZ - minZ),
             pad = Math.max(1, Math.max(spanX, spanZ) * 0.16);
         const fitScale = Math.min((W * 0.82) / (spanX + pad * 2), (H * 0.82) / (spanZ + pad * 2));
-        window.cityFloorPlanCenter = [(minX + maxX) / 2, (minZ + maxZ) / 2];
+        window.cityFloorPlanCenter = [(minX + maxX) / 2, (orthView === "bottom" ? -1 : 1) * (minZ + maxZ) / 2];
         window.cityFloorPlanScale = Math.max(planMinScale(), Math.min(220, fitScale));
     }
     // 間取りモードへ入り、正投影・編集ツール・専用ドックを有効にする。
@@ -25605,7 +25888,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         setMode("draw");
         const status = el("floorPlanStatus");
         if (status)
-            status.textContent = `間取りモード中：${kind === "side" ? "真横" : kind === "front" ? "正面" : "真上"}（表示面内でオブジェクトを移動・編集できます）`;
+            status.textContent = `間取りモード中：${{front:"前",back:"後",side:"右",right:"右",left:"左",top:"上",bottom:"下"}[kind] || "上"}（表示面内でオブジェクトを移動・編集できます）`;
         render();
     }
     function exitFloorPlan(restore = true) {
@@ -25838,7 +26121,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         }
         sync();
         if (d.floorActive) {
-            window.cityFloorPlanEnter?.(orthView === "side" ? "side" : orthView === "front" ? "front" : "top");
+            window.cityFloorPlanEnter?.(orthView || "top");
             if (Array.isArray(d.floorCenter)) window.cityFloorPlanCenter = [...d.floorCenter];
             if (Number.isFinite(d.floorScale)) window.cityFloorPlanScale = d.floorScale;
             if (d.ui?.workspace === "floorplan") {
@@ -26297,7 +26580,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         const s = floorTouchIds.get(e.pointerId);
         if (Math.hypot(e.clientX - s.sx, e.clientY - s.sy) > 12) floorTouchMoved = true;
         floorTouchIds.delete(e.pointerId);
-        if (floorTouchIds.size) return true;
+        if (floorTouchIds.size) return floorTouchMax >= 2;
         const count = floorTouchMax,
             moved = floorTouchMoved,
             quick = Date.now() - floorTouchT0 < 650;
@@ -26310,7 +26593,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             else if (count === 3) redo();
             else if (count >= 4 && window.cityPrimitiveMenuToggle) window.cityPrimitiveMenuToggle();
         }
-        return true;
+        return count >= 2;
     }
     // Safariで画面遷移やサイドパネル操作がpointerupを欠落させても、
     // 次の指操作を古い本数として扱わない。
@@ -26349,21 +26632,17 @@ window.cityGridInstallAssetUI = function (bridge) {
     // 真横ビューは画面の左右がZ、上下がYなので、床面との交差ではなく
     // 正投影の表示中心・倍率から直接ワールドのZ/Yへ戻す。
     function floorPlanSideWorldAt(p) {
-        if (orthView !== "side") return null;
-        if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
-        const sc = Math.max(1, Number(orthScale()) || 1),
-            pc = window.cityFloorPlanCenter || [0, 0];
-        return { z: (p.x - W / 2) / sc + pc[0], y: -(p.y - H / 2) / sc + pc[1] };
+        if (orthPlane() !== "side") return null;
+        const q=orthWorldAt(p, [0,0,0]);
+        return {z:q[2],y:q[1]};
     }
     function floorPlanFrontWorldAt(p) {
-        if (orthView !== "front") return null;
-        if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
-        const sc = Math.max(1, Number(orthScale()) || 1),
-            pc = window.cityFloorPlanCenter || [0, 0];
-        return { x: (p.x - W / 2) / sc + pc[0], y: -(p.y - H / 2) / sc + pc[1] };
+        if (orthPlane() !== "front") return null;
+        const q=orthWorldAt(p, [0,0,0]);
+        return {x:q[0],y:q[1]};
     }
     function floorPlanVerticalWorldAt(p) {
-        return orthView === "side" ? floorPlanSideWorldAt(p) : orthView === "front" ? floorPlanFrontWorldAt(p) : null;
+        return orthPlane() === "side" ? floorPlanSideWorldAt(p) : orthPlane() === "front" ? floorPlanFrontWorldAt(p) : null;
     }
     function floorPlanObjectZRange(o) {
         const h = Math.max(0, Number(o?.h) || 0);
@@ -26381,9 +26660,9 @@ window.cityGridInstallAssetUI = function (bridge) {
                     dist = Math.max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], 0.6) * 0.5 + 0.42;
                 out.object = { o, base, center: scrW(base), world: { x: base[0], z: base[2] + dist } };
                 out.object.s =
-                    orthView === "front"
+                    orthPlane() === "front"
                         ? scrW([base[0] + dist, base[1], base[2]])
-                        : scrW([base[0], orthView === "side" ? base[1] : -1, base[2] + dist]);
+                        : scrW([base[0], orthPlane() === "side" ? base[1] : -1, base[2] + dist]);
             } else {
                 const [z0, z1] = floorPlanObjectZRange(o),
                     bounds = obBounds(o),
@@ -26407,25 +26686,25 @@ window.cityGridInstallAssetUI = function (bridge) {
                     world: { x: base[0] - Math.sin(a) * dist, z: base[2] + Math.cos(a) * dist },
                 };
                 out.object.s =
-                    orthView === "front"
+                    orthPlane() === "front"
                         ? scrW([base[0] + Math.cos(a) * dist, base[1], base[2]])
-                        : scrW([out.object.world.x, orthView === "side" ? base[1] : -1, out.object.world.z]);
+                        : scrW([out.object.world.x, orthPlane() === "side" ? base[1] : -1, out.object.world.z]);
             }
         }
         const yaw = Number(P.yaw || 0) * DG,
             pitch = Number(P.pitch || 0) * DG,
             body = { x: P.cx, z: P.cz },
-            cameraY = orthView === "side" || orthView === "front" ? P.ch - 1 : -1,
+            cameraY = orthPlane() === "side" || orthPlane() === "front" ? P.ch - 1 : -1,
             horiz = Math.cos(pitch),
             target = {
                 x: P.cx - Math.sin(yaw) * FLOOR_CAMERA_RAY * horiz,
                 z: P.cz + Math.cos(yaw) * FLOOR_CAMERA_RAY * horiz,
             },
             targetY =
-                orthView === "side" || orthView === "front" ? cameraY + Math.sin(pitch) * FLOOR_CAMERA_RAY : cameraY,
+                orthPlane() === "side" || orthPlane() === "front" ? cameraY + Math.sin(pitch) * FLOOR_CAMERA_RAY : cameraY,
             half = Math.atan(18 / Math.max(12, Number(P.lens) || 38)),
             lensWorld =
-                orthView === "top"
+                orthPlane() === "top"
                     ? [
                           P.cx - Math.sin(yaw - half) * FLOOR_CAMERA_RAY * horiz,
                           cameraY,
@@ -26549,7 +26828,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 side: 1,
                 screen: true,
             });
-        if (orthView === "top") {
+        if (orthPlane() === "top") {
             add(
                 "w",
                 "幅＋",
@@ -26594,7 +26873,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 { x: 0, y: 1 },
                 Math.max(0, b.hi[1] - b.lo[1]),
             );
-        } else if (orthView === "side") {
+        } else if (orthPlane() === "side") {
             add(
                 "d",
                 "奥行＋",
@@ -26634,7 +26913,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     -1,
                 );
             } else addScreen("h", "高さ", { x: center.x, y: center.y - 52 / Z, ok: true }, { x: 0, y: -1 }, 0);
-        } else if (orthView === "front") {
+        } else if (orthPlane() === "front") {
             add(
                 "w",
                 "幅＋",
@@ -26703,7 +26982,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             zMax = Math.max(0, g.h),
             yMin = -g.d / 2,
             yMax = g.d / 2;
-        if (orthView === "top") {
+        if (orthPlane() === "top") {
             const gap = orthHandleGap(Math.max(g.w, g.d, 0.6));
             out.push({
                 kind: "awningEdgeZ",
@@ -26742,7 +27021,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         // 前縁（手前の上辺）は上下だけでなく手前奥へも動かせる。
         // 2本目の軸を同じハンドルへ持たせ、斜めに引いても両方いっぺんに変わる。
         // 上から見た図では上下（高さ）が見えないので、2軸目は出さない。
-        if (orthView === "front") {
+        if (orthPlane() === "front") {
             // 正面図では手前奥が画面に出ない（真横から見ているため）。
             // 「前後」ハンドルと同じ約束で、画面の横方向を手前奥へ割り当てる。
             const edgeZHandle = out.find((q) => q.kind === "awningEdgeZ");
@@ -26753,7 +27032,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 edgeZHandle.min2 = yMin;
                 edgeZHandle.max2 = yMax;
             }
-        } else if (orthView !== "top") {
+        } else if (orthPlane() !== "top") {
             const qy2 = scrW(L2W(o, hx, g.edgeY + 0.1, g.edgeZ)),
                 edgeZHandle = out.find((q) => q.kind === "awningEdgeZ");
             if (qy2.ok && edgeZHandle) {
@@ -26846,7 +27125,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 inner: true,
             });
         };
-        if (orthView === "top") {
+        if (orthPlane() === "top") {
             [near, far].forEach((yy, idx) => {
                 add(
                     "buildingOpeningW",
@@ -26876,7 +27155,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 -g.d / 2 + 0.025,
                 g.d / 2 - 0.025,
             );
-        } else if (orthView === "front") {
+        } else if (orthPlane() === "front") {
             add(
                 "buildingOpeningW",
                 "開口W",
@@ -26915,7 +27194,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     inner: true,
                     screen: true,
                 });
-        } else if (orthView === "side") {
+        } else if (orthPlane() === "side") {
             [near, far].forEach((yy, idx) =>
                 add(
                     "buildingOpeningH",
@@ -27053,7 +27332,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     rb: { x: center.x, y: center.y - gap },
                     h: { x: center.x - gap, y: center.y },
                 },
-            }[orthView] || {};
+            }[orthPlane()] || {};
         [
             ["ra", "幅"],
             ["rb", "高さ"],
@@ -27134,7 +27413,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             if (px < 0.01) return;
             handles.push({ kind, label, s, dir: { x: dx / px, y: dy / px }, scale: px / 0.1, start, min, side });
         };
-        if (orthView === "top") {
+        if (orthPlane() === "top") {
             // 幅・奥行はプラス側とマイナス側の両面にハンドルを出す。
             add("w", "幅＋", L2W(o, o.ra, 0, 0), L2W(o, o.ra + 0.1, 0, 0), Math.abs(o.ra) * 2, 0.01, 1);
             add("w", "幅−", L2W(o, -o.ra, 0, 0), L2W(o, -o.ra - 0.1, 0, 0), Math.abs(o.ra) * 2, 0.01, -1);
@@ -27161,7 +27440,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 min: 0,
                 screen: true,
             });
-        } else if (orthView === "side") {
+        } else if (orthPlane() === "side") {
             add("d", "奥行＋", L2W(o, 0, o.rb, zc), L2W(o, 0, o.rb + 0.1, zc), Math.abs(o.rb) * 2, 0.01, 1);
             add("d", "奥行−", L2W(o, 0, -o.rb, zc), L2W(o, 0, -o.rb - 0.1, zc), Math.abs(o.rb) * 2, 0.01, -1);
             // 真横ビューは黒い外枠の上端・下端へ高さハンドルを置く。
@@ -27184,7 +27463,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 add("h", "上端", L2W(o, 0, 0, z1), L2W(o, 0, 0, z1 + 0.1), Math.max(0, Number(o.h) || 0), 0, 1);
                 add("h", "下端", L2W(o, 0, 0, z0), L2W(o, 0, 0, z0 - 0.1), Math.max(0, Number(o.h) || 0), 0, -1);
             }
-        } else if (orthView === "front") {
+        } else if (orthPlane() === "front") {
             // 正面では幅と高さを直接編集し、見えない奥行きは画面上へ逃がしたハンドルで編集する。
             // 正面の幅ハンドルも、看板では黒い外枠の下端へ置く。
             // 全高の底面 z=0 に置くと、看板の外枠から下へ浮いてしまう。
@@ -27294,13 +27573,13 @@ window.cityGridInstallAssetUI = function (bridge) {
         // 斜め右下へ逃がして必ず掴めるようにする。
         const diag = { x: Math.SQRT1_2, y: Math.SQRT1_2 },
             defs =
-                orthView === "top"
+                orthPlane() === "top"
                     ? [
                           { vec: [1, 0, 0], name: "X", col: "#e8743d" },
                           { vec: [0, 0, 1], name: "Y", col: "#3aa76a" },
                           { vec: [0, 1, 0], name: "Z", col: "#4a7be8", screenDir: diag },
                       ]
-                    : orthView === "side"
+                    : orthPlane() === "side"
                       ? [
                             { vec: [0, 0, 1], name: "Y", col: "#3aa76a" },
                             { vec: [0, 1, 0], name: "Z", col: "#4a7be8" },
@@ -27446,7 +27725,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         c.restore();
     }
     function drawFloorPlanOverlay(c) {
-        if (orthView !== "top" && orthView !== "side" && orthView !== "front") return;
+        if (orthPlane() !== "top" && orthPlane() !== "side" && orthPlane() !== "front") return;
         const h = floorPlanHandles(),
             r = 9 / Z;
         c.save();
@@ -27465,7 +27744,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                       ]
                     : null,
                 corners = pathBounds
-                    ? orthView === "top"
+                    ? orthPlane() === "top"
                         ? [
                               [pathBounds.lo[0], boundsCenter[1], pathBounds.lo[2]],
                               [pathBounds.hi[0], boundsCenter[1], pathBounds.lo[2]],
@@ -27473,7 +27752,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                               [pathBounds.lo[0], boundsCenter[1], pathBounds.hi[2]],
                               [pathBounds.lo[0], boundsCenter[1], pathBounds.lo[2]],
                           ]
-                        : orthView === "side"
+                        : orthPlane() === "side"
                           ? [
                                 [boundsCenter[0], pathBounds.lo[1], pathBounds.lo[2]],
                                 [boundsCenter[0], pathBounds.lo[1], pathBounds.hi[2]],
@@ -27512,7 +27791,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             });
             c.stroke();
             c.setLineDash([]);
-            if (orthView === "side" && z1 > z0 && !pathBounds) {
+            if (orthPlane() === "side" && z1 > z0 && !pathBounds) {
                 const baseCorners = [
                     [-o.ra, -o.rb],
                     [o.ra, -o.rb],
@@ -27536,7 +27815,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     }
                 });
                 c.stroke();
-            } else if (orthView === "front" && !pathBounds) {
+            } else if (orthPlane() === "front" && !pathBounds) {
                 const frontCorners =
                     o.type === "asset" && o.asset === "sign"
                         ? [L2W(o, -o.ra, 0, z0), L2W(o, o.ra, 0, z0), L2W(o, o.ra, 0, z1), L2W(o, -o.ra, 0, z1)]
@@ -27602,10 +27881,10 @@ window.cityGridInstallAssetUI = function (bridge) {
             half = Math.atan(18 / Math.max(12, Number(P.lens) || 38)),
             body = k.sBody,
             target = k.sTarget,
-            cameraY = orthView === "side" || orthView === "front" ? P.ch - 1 : -1,
+            cameraY = orthPlane() === "side" || orthPlane() === "front" ? P.ch - 1 : -1,
             horiz = Math.cos(k.pitch),
             coneY =
-                orthView === "side" || orthView === "front" ? cameraY + Math.sin(k.pitch) * FLOOR_CAMERA_RAY : cameraY,
+                orthPlane() === "side" || orthPlane() === "front" ? cameraY + Math.sin(k.pitch) * FLOOR_CAMERA_RAY : cameraY,
             left = scrW([
                 P.cx - Math.sin(k.yaw - half) * FLOOR_CAMERA_RAY * horiz,
                 coneY,
@@ -27674,9 +27953,9 @@ window.cityGridInstallAssetUI = function (bridge) {
         const dockStatus = el("floorPlanDockStatus");
         if (dockStatus) {
             const cameraHint =
-                orthView === "side"
+                orthPlane() === "side"
                     ? "真横：カメラ本体＝位置・高さ　／　先端の丸＝上下の傾き"
-                    : orthView === "front"
+                    : orthPlane() === "front"
                       ? "正面：カメラ本体＝X位置・高さ　／　先端の丸＝上下の傾き"
                       : "カメラ本体：位置　／　先端の丸＝向き";
             dockStatus.innerHTML = `${text}<small>幅・奥行ハンドルは反対側の面を固定　／　${cameraHint}</small>`;
@@ -27955,17 +28234,9 @@ window.cityGridInstallAssetUI = function (bridge) {
         HU.push(S);
         RD = [];
         snapHit = null;
-        let delta, axes;
-        if (orthView === "side") {
-            delta = [0, dz, dx];
-            axes = [1, 2];
-        } else if (orthView === "front") {
-            delta = [dx, dz, 0];
-            axes = [0, 1];
-        } else {
-            delta = [dx, 0, dz];
-            axes = [0, 2];
-        }
+        // 矢印は画面の方向に対応。裏／左／下では各ワールド軸の符号が逆になる。
+        const basis=orthBasis(), delta=basis.right.map((v,i)=>v*dx-basis.up[i]*dz),
+            axes=basis.right.map((v,i)=>(Math.abs(v)+Math.abs(basis.up[i])>1e-9)?i:-1).filter(i=>i>=0);
         const setup = snapSetupGroup(objects, objectAnchorWorld(o)),
             q = $("snp")?.checked
                 ? snapShift(setup.bb, delta, axes, setup.targets, setup.tau)
@@ -28060,6 +28331,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         e.stopImmediatePropagation();
         floorPlanDrag = { kind: "boxPending", pointerId: e.pointerId };
         armBoxPending(p, e.pointerId, "floor", {
+            raw0: rawOf(e.clientX, e.clientY),
             center0: [...(window.cityFloorPlanCenter || [0, 0])],
             tapClear: true,
         });
@@ -28078,6 +28350,9 @@ window.cityGridInstallAssetUI = function (bridge) {
         "pointerdown",
         (e) => {
             if (!(window.cityFloorPlanActive && e.target === cv)) return;
+            // タッチはギズモの判定より先に全指を登録する。先に回転リングが指を
+            // 奪うと2本目まで別々の経路に入り、ピンチを認識できない。
+            if (floorTouchDown(e)) return;
             // 回転ギズモ（Blender 風の輪）を掴んだときは、間取りの操作より先に
             // ギズモの回転を優先する。間取りビューでも3Dと同じように回せるようにするため
             // （ビューによって編集できる項目が変わらない、という決めごと）。
@@ -28105,10 +28380,9 @@ window.cityGridInstallAssetUI = function (bridge) {
             if (!window.cityFloorPlanActive) return;
             // 回転ギズモを掴んだ操作は engine-input.js 側で処理する（ここでは何もしない）。
             if (e.__cityGizmoTakes) return;
-            if (floorTouchDown(e)) return;
             const p = pos(e),
                 panGesture = e.button === 1 || e.button === 2 || e.altKey || floorPlanPanMode;
-            if (panGesture && (orthView === "top" || orthView === "side" || orthView === "front")) {
+            if (panGesture && (orthPlane() === "top" || orthPlane() === "side" || orthPlane() === "front")) {
                 beginFloorPan(e, p);
                 return;
             }
@@ -28185,7 +28459,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             // ただし寸法ハンドル（白い四角）や移動矢印の方が押した点に近いときは
             // そちらを優先する。以前は必ず回転が勝つ順序だったため、
             // 幅＋−を押すと回転してしまい、寸法が変えられなかった。
-            if (sel && (orthView === "front" || orthView === "side")) {
+            if (sel && (orthPlane() === "front" || orthPlane() === "side")) {
                 const turn = floorPlanHandles(),
                     turnLimit = 24 / Z,
                     turnDist = turn.object?.s?.ok
@@ -28227,7 +28501,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     (!moveNear || Math.hypot(resize.h.s.x - p.x, resize.h.s.y - p.y) <= moveNear.d + 2 / Z);
             // 7 前も9 上・8 横と同じ面編集ハンドルを先に受け取る。
             // ここから漏れると、ハンドルを押してもオブジェクト移動として処理される。
-            if (resizeWins && (orthView === "top" || orthView === "side" || orthView === "front")) {
+            if (resizeWins && (orthPlane() === "top" || orthPlane() === "side" || orthPlane() === "front")) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 floorPlanDrag = {
@@ -28244,7 +28518,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             }
             const moveHandle = floorMoveHandleAt(p),
                 moveObject = floorPlanObject();
-            if (moveHandle && moveObject && (orthView === "top" || orthView === "side" || orthView === "front")) {
+            if (moveHandle && moveObject && (orthPlane() === "top" || orthPlane() === "side" || orthPlane() === "front")) {
                 const base = objectAnchorWorld(moveObject),
                     group = moveObject.attachment?.verticalOnly ? [moveObject] : selectedObjects(),
                     snap = snapSetupGroup(group, base);
@@ -28267,10 +28541,10 @@ window.cityGridInstallAssetUI = function (bridge) {
                 capturePointer(e.pointerId);
                 return;
             }
-            if (orthView === "side" || orthView === "front") {
+            if (orthPlane() === "side" || orthPlane() === "front") {
                 const verticalHandles = floorPlanHandles(),
                     verticalLim = 22 / Z,
-                    verticalAxis = orthView === "side" ? "side" : "front";
+                    verticalAxis = orthPlane() === "side" ? "side" : "front";
                 if (
                     verticalHandles.camera &&
                     Math.hypot(verticalHandles.camera.sTarget.x - p.x, verticalHandles.camera.sTarget.y - p.y) <
@@ -28294,15 +28568,15 @@ window.cityGridInstallAssetUI = function (bridge) {
                         kind: "cameraSide",
                         axis: verticalAxis,
                         pointerId: e.pointerId,
-                        dx: orthView === "front" ? P.cx - w.x : 0,
-                        dz: orthView === "side" ? P.cz - w.z : 0,
+                        dx: orthPlane() === "front" ? P.cx - w.x : 0,
+                        dz: orthPlane() === "side" ? P.cz - w.z : 0,
                         dy: P.ch - 1 - w.y,
                     };
                     capturePointer(e.pointerId);
                     return;
                 }
             }
-            if (orthView === "side" || orthView === "front") {
+            if (orthPlane() === "side" || orthPlane() === "front") {
                 const hit = floorPlanItemAtSide(p) || floorPlanAnchorAtSide(p);
                 if (hit) {
                     const multi = e.shiftKey || e.metaKey || e.ctrlKey,
@@ -28327,7 +28601,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     e.stopImmediatePropagation();
                     floorPlanDrag = {
                         kind: "itemVertical",
-                        axis: orthView === "side" ? "side" : "front",
+                        axis: orthPlane() === "side" ? "side" : "front",
                         pointerId: e.pointerId,
                         id: hit.id,
                         o0: { ...hit, off: [...(hit.off || [0, 0, 0])] },
@@ -28336,8 +28610,8 @@ window.cityGridInstallAssetUI = function (bridge) {
                         bb: snap.bb,
                         targets: snap.targets,
                         tau: snap.tau,
-                        dx: orthView === "front" ? base[0] - w.x : 0,
-                        dz: orthView === "side" ? base[2] - w.z : 0,
+                        dx: orthPlane() === "front" ? base[0] - w.x : 0,
+                        dz: orthPlane() === "side" ? base[2] - w.z : 0,
                         dy: base[1] - w.y,
                         started: false,
                     };
@@ -28384,7 +28658,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 return;
             }
             if (
-                orthView === "top" &&
+                orthPlane() === "top" &&
                 h.camera &&
                 h.camera.sLens &&
                 Math.hypot(h.camera.sLens.x - p.x, h.camera.sLens.y - p.y) < lim

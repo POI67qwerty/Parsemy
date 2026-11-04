@@ -30,7 +30,7 @@ const wrap180 = (a) => ((((a + 180) % 360) + 360) % 360) - 180;
 const hiddenHandleGap = () => Math.max(30 / Z, 42 / Z);
 // 画面上で向きが読めないハンドル（真上から見た高さ方向など）を逃がす向き。
 // 真上ビューでは斜め左下へ、それ以外は左やや下へ逃がすと、本体の線に重なりにくい。
-const hiddenHandleDir = () => (orthView === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 });
+const hiddenHandleDir = () => (orthPlane() === "top" ? { x: -Math.SQRT1_2, y: -Math.SQRT1_2 } : { x: -1, y: -0.35 });
 // つぶれた向きのときの倍率（px/単位）。正投影は px/単位が分かるのでそれを使う。
 const hiddenHandleScale = () => Math.max(24, orthView ? orthScale() : 24);
 const segd = (p, a, b) => {
@@ -1845,7 +1845,7 @@ function pathPipeGizmo(o) {
             Number.isFinite(rdy) &&
             Number.isFinite(rLength),
         radiusHidden = !radiusProjected || rLength <= 0.5 / Z,
-        radiusFallback = orthView === "top" ? { x: 0, y: 1 } : { x: -1, y: 0 },
+        radiusFallback = orthPlane() === "top" ? { x: 0, y: 1 } : { x: -1, y: 0 },
         radiusGap = Math.max(34 / Z, Math.min(58 / Z, 0.38 * Math.max(1, Number(orthScale()) || 1))),
         radiusDisplay = radiusHidden
             ? {

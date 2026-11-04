@@ -907,6 +907,18 @@ function exportSurfaceTriangles(o) {
     return out;
 }
 function exportPoint(v, tf) {
+    // 透視の深度ラスタは頂点ごとに逆変換用の配列と cam() を2回作っていた。
+    // scr3 と同じ「先に正規化してから回転」の演算順を保ちつつ、深度も一緒に求める。
+    if (!orthView && T !== "f") {
+        const rx = v[0] * 1 + (-P.cx) * 1, ry = v[1] * 1 + (1 - P.ch) * 1, rz = v[2] * 1 + (-P.cz) * 1,
+            len = Math.hypot(rx, ry, rz) || 1, x = rx / len, y = ry / len, z = rz / len,
+            m = camMatrix(), qx = m[0] * x + m[1] * y + m[2] * z,
+            qy = m[3] * x + m[4] * y + m[5] * z, qz = m[6] * x + m[7] * y + m[8] * z;
+        if (qz <= 0.02) return null;
+        const f = (W * P.lens) / 36,
+            sx = W / 2 + (f * qx) / qz, sy = (H * P.hz) / 100 - (f * qy) / qz;
+        return { x: sx * tf[0] + tf[4], y: sy * tf[3] + tf[5], depth: m[6] * rx + m[7] * ry + m[8] * rz };
+    }
     const rel = V.add(v, CO()),
         q = scr3(rel);
     if (!q.ok) return null;
@@ -1057,7 +1069,18 @@ function rasterizeDepthInto(buf, own, ownerMap, list, cw, ch, tf, used, face) {
                         }
                     }
                 }
-                if (covered) return;
+                if (covered) {
+                    // 格子点だけでは、その間の小さな穴や細い隙間を見落とす。
+                    // 省略する前に外接矩形の全画素が確実に手前にあることを確認する。
+                    // 三角形の外も含む保守的な判定なので、穴があれば通常通り塗る。
+                    for (let y = by0; y <= by1 && covered; y++) {
+                        const end = y * cw + bx1;
+                        for (let i = y * cw + bx0; i <= end; i++) {
+                            if (!(buf[i] < near - 0.02)) { covered = false; break; }
+                        }
+                    }
+                    if (covered) return;
+                }
             }
         }
         const y0 = Math.max(0, Math.floor(minY)),
@@ -1709,14 +1732,18 @@ function prepareFishLineOccluders() {
     fishLineOccluders={root:fishBvhCache.root,cam};
     fishOcclusionEpoch++;
 }
-const fishBvhStack=[];
+const fishBvhStack=[], fishRayInverse=[0,0,0];
 function fishPointOccluded(e) {
     if (e.fishEpoch === fishOcclusionEpoch) return e.fishBlocked;
     e.fishEpoch = fishOcclusionEpoch;
     const set=fishLineOccluders;
     if (!set || !set.root) return (e.fishBlocked=false);
     const dir=unscr({x:e.sx,y:e.sy}), dx=dir[0],dy=dir[1],dz=dir[2], limit=e.depth - Math.max(0.008, Math.abs(e.depth)*0.0002),
-        ds=[dx,dy,dz], inv=ds.map(v=>Math.abs(v)<1e-14?Infinity:1/v), cam=set.cam;
+        inv=fishRayInverse, cam=set.cam;
+    // 走査は同期的なので逆方向の配列を再利用し、点ごとの小配列を作らない。
+    inv[0]=Math.abs(dx)<1e-14?Infinity:1/dx;
+    inv[1]=Math.abs(dy)<1e-14?Infinity:1/dy;
+    inv[2]=Math.abs(dz)<1e-14?Infinity:1/dz;
     fishBvhStack.length=0;fishBvhStack.push(set.root);
     while(fishBvhStack.length) {
         const node=fishBvhStack.pop();let near=0,far=limit,hit=true;
@@ -1752,6 +1779,41 @@ function fishPointOccluded(e) {
         }
     }
     return (e.fishBlocked=false);
+}
+// 正投影は視点が点ではなく平行光線。ポール上端や灯器・標識の細い縁を
+// 実面で判定し、重なっている部分が深度許容で透けるのを防ぐ。
+function signalOrthOccluded(e, allowance = 0.008) {
+    if (e.poleEpoch === fishOcclusionEpoch) return e.poleBlocked;
+    e.poleEpoch = fishOcclusionEpoch;
+    const root=fishLineOccluders?.root;
+    if (!root) return (e.poleBlocked=false);
+    const dir=orthBasis().depth, base=orthWorldAt({x:e.sx,y:e.sy},camPos()),
+        point=base.map((v,i)=>v+dir[i]*e.depth),
+        distance=2+Math.hypot(...root.lo.map((v,i)=>Math.max(Math.abs(v-point[i]),Math.abs(root.hi[i]-point[i])))),
+        origin=point.map((v,i)=>v-dir[i]*distance),
+        inv=dir.map(v=>Math.abs(v)<1e-14?Infinity:1/v),limit=distance-allowance;
+    const stack=[root];
+    while(stack.length){
+        const node=stack.pop();let near=0,far=limit,hit=true;
+        for(let i=0;i<3;i++){
+            if(!Number.isFinite(inv[i])){if(origin[i]<node.lo[i]||origin[i]>node.hi[i]){hit=false;break;}continue;}
+            const a=(node.lo[i]-origin[i])*inv[i],b=(node.hi[i]-origin[i])*inv[i];
+            near=Math.max(near,Math.min(a,b));far=Math.min(far,Math.max(a,b));if(far<near){hit=false;break;}
+        }
+        if(!hit)continue;
+        if(!node.items){if(node.left)stack.push(node.left);if(node.right)stack.push(node.right);continue;}
+        for(const r of node.items){
+            const h=V.crs(dir,r.e2),det=V.dot(r.e1,h);
+            if(Math.abs(det)<1e-10)continue;
+            const t=V.add(origin,r.a,1,-1),invDet=1/det,u=V.dot(t,h)*invDet;
+            if(u< -1e-8||u>1+1e-8)continue;
+            const q=V.crs(t,r.e1),v=V.dot(dir,q)*invDet;
+            if(v< -1e-8||u+v>1+1e-8)continue;
+            const hitDistance=V.dot(r.e2,q)*invDet;
+            if(hitDistance>0.0001&&hitDistance<limit)return(e.poleBlocked=true);
+        }
+    }
+    return(e.poleBlocked=false);
 }
 // 面内線を消す場合だけ、線の周囲が本当に同じ平面なのか光線でも確かめる。
 // 魚眼の直線三角形ラスタでは、実際には角の外側にある点も面内に見えるため。
@@ -1830,7 +1892,10 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     // 面の上へ描くことを目的にした線まで消えると、窓の枚数を変えても
     // 何も描かれない（実測：凹窓階層建物の窓間仕切りが全部消えていた）。
     // 生成側が onFace を立てた線だけ、面の内側判定を通す。
-    const onFace = !!s.onFace;
+    const onFace = !!s.onFace,
+        preciseSignalEdge = (s.signalPoleTopRing && !window.__legacyPoleRay) || (s.signalSmoothSide && !window.__legacySignalSmoothRay),
+        poleTip = s.signalPoleSide && !window.__legacyPoleRay && s.p?.length ? projPoint(s.p[s.p.length-1], tf) : null,
+        preciseSignalAt = e => preciseSignalEdge || !!(poleTip?.ok && Math.hypot(e.x-poleTip.x,e.y-poleTip.y) < 24*Math.max(1,Math.abs(tf[0] || 1)));
     // 線全体を数点だけ見て省略すると、試験点の間にある開口や遮蔽物の切れ目で
     // 見える区間まで丸ごと消える。面の内側・背面は下の点ごとの判定で除去する。
     const okx = tf[0] || 1,
@@ -1849,6 +1914,8 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     const definitelyOccluded = (e) => {
         // 実面への光線交差で遮蔽が確定した点は、短い隙間として橋渡ししない。
         if (fishLineOccluders && e.accordionEpoch === fishOcclusionEpoch && e.accordionBlocked === true) return true;
+        if (fishLineOccluders && preciseSignalAt(e) &&
+            (orthView ? signalOrthOccluded(e, s.signalSmoothSide ? 0.004 : 0.008) : T !== "f" && exactPerspectiveOccluded(e))) return true;
         const x = Math.round(e.x), y = Math.round(e.y);
         if (x < 0 || x >= cw || y < 0 || y >= ch) return false;
         if (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) return fishPointOccluded(e);
@@ -1907,6 +1974,8 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
                 faceCullAround(cw, ch, x, y, depthFace[i1], myOwner) && fishFaceInterior(e, s.ob.id, tf)) return false;
             return true;
         }
+        if (fishLineOccluders && preciseSignalAt(e))
+            return !(orthView ? signalOrthOccluded(e, s.signalSmoothSide ? 0.004 : 0.008) : exactPerspectiveOccluded(e));
         // 小さな灯器や自販機の前後ベベルは、細い曲面の隣で深度近似だけでは
         // 背面の線が漏れることがある。面より奥の候補だけ実光線で再判定する。
         if (!orthView && T !== "f" && s.depthBevelEdge && fishLineOccluders && !window.__legacyDepthBevelRay &&
@@ -2012,7 +2081,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     // それが「点線状の切れ端」として残る（実測：建物の稜線が 6px おきの点線に見えた）。
     // 短すぎる区間（--minRun px 未満）は、まわりが隠れているなら捨てる。
     // 線そのものが短いとき（--shortLine px 未満）は捨てない（小物の線が消えないように）。
-    const minRun = !orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines ? 0 :
+    const minRun = preciseSignalEdge || (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) ? 0 :
             window.__minRun === undefined ? 4 : Number(window.__minRun) * Math.max(1, Math.abs(tf[0] || 1)),
         shortLine = 10 * Math.max(1, Math.abs(tf[0] || 1));
     let run = [],
@@ -2155,7 +2224,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
                     for (let j = 1; j < n; j++) emit(at(j / n));
                 } else {
                     const worldN = Math.ceil(Math.hypot(v[0] - a[0], v[1] - a[1], v[2] - a[2]) * 10),
-                        pixelN = !orthView && T === "f" && ea.ok && eb.ok ? Math.ceil(4 * Math.hypot(eb.x - ea.x, eb.y - ea.y)) : 0,
+                        pixelN = ((!orthView && T === "f") || (preciseSignalEdge && fishLineOccluders)) && ea.ok && eb.ok ? Math.ceil(4 * Math.hypot(eb.x - ea.x, eb.y - ea.y)) : 0,
                         n = Math.max(!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines ? 8 : 1, worldN, pixelN);
                     for (let j = 1; j < n; j++) put(V.add(a, v, 1 - j / n, j / n));
                 }
@@ -2325,7 +2394,7 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
         fishVisiblePixels=fishBlockedPixels ? new Int32Array(cw*ch) : null;
     } else {
         fishBlockedPixels = null; fishVisiblePixels = null;
-        if (hiddenDepth && !orthView && T !== "f" && S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge)))) prepareFishLineOccluders();
+        if (hiddenDepth && S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyPoleRay && s.signalPoleTopRing) || (!window.__legacySignalSmoothRay && s.signalSmoothSide) || (!orthView && T !== "f" && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge)))))) prepareFishLineOccluders();
         else fishLineOccluders = null;
     }
     // ベベルの縦線は「角ごとに輪郭の1本」だけ描く（面ONのとき）。
@@ -2511,7 +2580,7 @@ function orthGuides(c) {
         // 画面に入る本数だけ引く（中心から ±20本では、拡大したときに足りなくなる）。
         nx = Math.ceil(W / Math.max(1, sc)) + 1,
         ny = Math.ceil(H / Math.max(1, sc)) + 1;
-    if (orthView === "top") {
+    if (orthPlane() === "top") {
         for (let i = -nx; i <= nx; i++) {
             const x = cx + i * sc;
             draw(x, 0, x, H, col[0]);
@@ -2523,7 +2592,7 @@ function orthGuides(c) {
     } else {
         for (let i = -nx; i <= nx; i++) {
             const x = cx + i * sc;
-            draw(x, 0, x, H, col[orthView === "front" ? 0 : 1]);
+            draw(x, 0, x, H, col[orthPlane() === "front" ? 0 : 1]);
         }
         for (let i = -ny; i <= ny; i++) {
             const y = cy + i * sc;
@@ -3124,7 +3193,7 @@ function render() {
     // sigNow()は描画1回につき一度だけ計算する。以前は線ごとに再計算していたため、
     // アセットや線が多いシーンほど不要な文字列計算が増えていた。
     const currentSignature = sigNow();
-    if (S.some((s) => s.ob && s.cs !== currentSignature)) regenObjects();
+    if (S.some((s) => s.ob && (s.cs !== currentSignature || (s.signalPoleTopRing && s.signalPoleContourView !== (orthView || "3d"))))) regenObjects();
     syncSel();
     T === "f" ? calcF() : calc();
     const c = ctx;

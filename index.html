@@ -64,11 +64,17 @@
                         <span class="lockText">カメラ固定</span>
                     </button>
                 </div>
+                <div class="barGroup" id="visibilityTools">
+                    <button id="isolateSelection" class="toolBtn" aria-pressed="false" title="選択以外を一時的に非表示。もう一度押すと元の表示状態に戻します">選択以外を非表示</button>
+                </div>
                 <div class="barGroup" id="standardViews">
-                    <button id="floorViewCenter" title="前／横／上の表示位置だけを、選択中のオブジェクトの中央へ寄せます（カメラ＝3D視点は動かしません）">表示中央へ</button
+                    <button id="floorViewCenter" title="前／後／上／下／右／左の表示位置だけを、選択中のオブジェクトの中央へ寄せます（カメラ＝3D視点は動かしません）">表示中央へ</button
                     ><button id="viewFloorFront" title="7：間取り（正面）">7 前</button
-                    ><button id="viewFloorSide" title="8：間取り（真横）">8 横</button
-                    ><button id="viewFloorTop" title="9：間取り（真上）">9 上</button
+                    ><button id="viewFloorBack" title="後ろから見る">後ろ</button
+                    ><button id="viewFloorTop" title="9：上から見る">9 上</button
+                    ><button id="viewFloorBottom" title="下から見る">下</button
+                    ><button id="viewFloorSide" title="8：右から見る">8 右</button
+                    ><button id="viewFloorLeft" title="左から見る">左</button
                     ><button id="viewHome" title="0：元の視点">0 3D</button>
                 </div>
                 <span class="barGrow"></span>

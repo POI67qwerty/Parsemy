@@ -66,7 +66,11 @@ cv.addEventListener(
 function multiStart() {
     cancelBoxPending();
     boxSelect = null;
-    if (drag) {
+    if (drag?.kind === "orthPan") {
+        // 正投影の1本指パンには3Dカメラ値がない。カメラをundefinedで
+        // 上書きせず、2本目までに動いた表示中心だけを戻す。
+        window.cityFloorPlanCenter = [...drag.center];
+    } else if (drag) {
         setP("yaw", drag.yaw);
         setP("pitch", drag.pitch);
         setP("cx", drag.cx);
@@ -260,6 +264,7 @@ function updateBoxPending(p, pointerId) {
             kind: "pan",
             pointerId,
             p0: { ...pending.start },
+            raw0: pending.raw0 || { x: pending.start.x * Z + viewShift()[0], y: pending.start.y * Z + viewShift()[1] },
             center0: [...(pending.center0 || window.cityFloorPlanCenter || [0, 0])],
             tapClear: true,
             moved: true,

@@ -431,18 +431,27 @@ const ASSET_KIT = (function () {
         // 円柱（smooth）は全頂点に縦線を出すと筒が縞になる。輪だけ描き、
         // 縦線は verts 本（0 なら無し）だけを等間隔で足す。
         if (part.smooth) {
-            const n = Math.max(0, Math.round(part.verts || 0));
-            for (let k = 0; k < n; k++) {
-                const [u, v] = path[Math.round((k * path.length) / n) % path.length];
+            const n = Math.max(0, Math.round(part.verts || 0)),
+                indices = Array.isArray(part.verticals) ? part.verticals : Array.from({length:n}, (_,k) => Math.round((k * path.length) / n) % path.length);
+            for (const idx of indices) {
+                const [u, v] = path[((Math.round(idx) % path.length) + path.length) % path.length];
                 out.push([toP3(axis, u, v, part.z0), toP3(axis, u, v, part.z1)]);
             }
             return out;
         }
-        for (const [u, v] of path) out.push([toP3(axis, u, v, part.z0), toP3(axis, u, v, part.z1)]);
+        const sideIndices = Array.isArray(part.sideVerticals) ? part.sideVerticals : path.map((_, i) => i);
+        for (const index of sideIndices) {
+            const [u,v]=path[((index % path.length)+path.length)%path.length];
+            out.push([toP3(axis, u, v, part.z0), toP3(axis, u, v, part.z1)]);
+        }
         if (part.holeSides)
-            (part.holes || []).forEach((h) => {
+            (part.holes || []).forEach((h, hi) => {
                 if (!Array.isArray(h) || h.length < 3) return;
-                for (const [u, v] of h) out.push([toP3(axis, u, v, part.z0), toP3(axis, u, v, part.z1)]);
+                const indices=Array.isArray(part.holeSideVerticals?.[hi]) ? part.holeSideVerticals[hi] : h.map((_, i)=>i);
+                for (const index of indices) {
+                    const [u,v]=h[((index % h.length)+h.length)%h.length];
+                    out.push([toP3(axis, u, v, part.z0), toP3(axis, u, v, part.z1)]);
+                }
             });
         return out;
     }
@@ -745,8 +754,16 @@ const ASSET_KIT = (function () {
             for (const part of parts) {
                 const color = part.color || ctx.c,
                     width = part.width || ctx.o.w;
+                let edgeIndex = 0;
                 for (const seg of partEdges(part)) {
                     const line=lineA(ctx.o, seg, color, width);
+                    if (part.signalPoleTopRing && edgeIndex === 1) {
+                        line.signalPoleTopRing = true;
+                        line.signalPoleContourView = orthView || "3d";
+                    }
+                    if (part.signalPoleTopRing && edgeIndex >= 2) line.signalPoleSide = true;
+                    edgeIndex++;
+                    if (part.signalSmoothSide) line.signalSmoothSide = true;
                     if(part.depthBevelEdge) line.depthBevelEdge=true;
                     ctx.out.push(line);
                 }

@@ -124,10 +124,10 @@
 
     <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　7 前　8 横　9 上　0 3D　／　詳細操作は「？」</div>
     <div class="sceneTitle">シーン内オブジェクト</div>
-    <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneLockSel" title="選択中のオブジェクトをロック／解除（⌘/Ctrl+L）">選択をロック</button><button id="sceneUnlockAll" title="ロック中のオブジェクトをすべて解除">全ロック解除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button><button id="sceneCombineSel">結合</button><button id="sceneSeparateSel">結合解除</button></div>
+    <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneInvertSel">選択を反転</button><button id="sceneHideSel">選択中を非表示</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneLockSel" title="選択中のオブジェクトをロック／解除（⌘/Ctrl+L）">選択をロック</button><button id="sceneUnlockAll" title="ロック中のオブジェクトをすべて解除">全ロック解除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button><button id="sceneCombineSel">結合</button><button id="sceneSeparateSel">結合解除</button></div>
     <div class="alignTools"><button id="centerOnScreenSel" title="選択中のオブジェクト（接着した子パーツ・グループを含む）を、いま見ている画面の中央へ移動">画面中央へ</button><button id="centerChildSel" title="テント付き建物・看板付き建物のテント／看板を、建物の左右（X方向）の中央へすぐ戻す。1個を選ぶだけで使えます">テント・看板を中央へ</button></div>
     <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Z軸（高さ）</option><option value=2>Y軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
-    <div class="sceneNote">行のチェックで複数選択。「画面中央へ」は1個でも動きます（看板付き建物・テント付き建物は建物本体の中心を画面中央へ合わせます）。整列は2個以上を選んでください。グループ化は後から解除できます。結合は複数の定義を一つの複合オブジェクトにまとめ、結合解除まで一体として扱います。</div>
+    <div class="sceneNote">行のチェックで複数選択、✎で名前変更（空欄で標準名）。「選択中を非表示」は一覧の○から再表示。「画面中央へ」は1個でも動きます（看板付き建物・テント付き建物は建物本体の中心を画面中央へ合わせます）。整列は2個以上を選んでください。グループ化は後から解除できます。結合は複数の定義を一つの複合オブジェクトにまとめ、結合解除まで一体として扱います。</div>
     <div id="objectList"><div class="emptyList">まだオブジェクトがありません</div></div>`;
     side.insertBefore(quick, side.firstChild);
     const humanInput = el("humanHeight");
@@ -373,7 +373,7 @@
         // 正面・横は「地面の高さ」より下を塗る（実際の床の見え方に合わせる）。
         let horizon;
         if (orthView) {
-            if (orthView === "top") return;
+            if (orthPlane() === "top") return;
             const g = projPoint([0, -1, 0], [1, 0, 0, 1, 0, 0]);
             horizon = g && g.ok ? clamp(g.y, 0, H) : H;
         } else horizon = T === "f" ? H * 0.5 : clamp(AX.hy, 0, H);
@@ -459,6 +459,7 @@
                 const q = JSON.parse(JSON.stringify(source));
                 q.id = uid();
                 delete q.groupId;
+                delete q._cityIsolationBefore; // 結合後は新しい物体として扱う
                 parts.push(q);
             });
         });
@@ -515,6 +516,7 @@
                 const q = JSON.parse(JSON.stringify(source));
                 q.id = uid();
                 delete q.groupId;
+                delete q._cityIsolationBefore; // 結合後は新しい物体として扱う
                 parts.push(q);
             }),
         );
@@ -563,12 +565,87 @@
         }
         render();
     }
+    function hideSelectedScene() {
+        normalizeSelection();
+        const ids = new Set();
+        for (const id of selIds) for (const member of linkedMemberIds(id)) ids.add(member);
+        const targets = sceneObjects().filter(o => ids.has(o.id) && objectVisible(o));
+        if (!targets.length) { flashHint("表示中のオブジェクトを選択してください"); return; }
+        HU.push(S); RD = [];
+        rewriteObjectDefs(targets.map(o => o.id), {visible:false});
+        ids.forEach(id => selIds.delete(id));
+        if (ids.has(sel)) sel = [...selIds].pop() || null;
+        normalizeSelection(); syncSel(); render();
+        flashHint(`${targets.length}個を非表示にしました（一覧の○で再表示）`);
+    }
+    // 元の表示状態をオブジェクト定義に保存することで、Undo/Redo・
+    // プロジェクト保存／読込後もボタンと復元先が一致する。
+    const isolationKey = "_cityIsolationBefore";
+    const isolated = objects => objects.some(o => o[isolationKey] && typeof o[isolationKey] === "object");
+    function syncIsolationButton(objects) {
+        const button = el("isolateSelection"), on = isolated(objects);
+        if (!button) return;
+        button.classList.toggle("on", on);
+        button.setAttribute("aria-pressed", String(on));
+        button.textContent = on ? "表示を元に戻す" : "選択以外を非表示";
+    }
+    function toggleIsolation() {
+        normalizeSelection();
+        const objects = sceneObjects(), on = isolated(objects);
+        if (!on && !objects.some(o => selIds.has(o.id) && objectVisible(o))) {
+            flashHint("表示するオブジェクトを選択してください"); return;
+        }
+        HU.push(S); RD = [];
+        const updates = new Map();
+        for (const o of objects) {
+            const n = {...o};
+            if (on) {
+                const state = n[isolationKey];
+                if (!state || typeof state !== "object") continue; // 実行中に新規作成した物はそのまま
+                if (state.hadVisible) n.visible = state.visible;
+                else delete n.visible;
+                delete n[isolationKey];
+            } else {
+                n[isolationKey] = {hadVisible:Object.prototype.hasOwnProperty.call(o, "visible"), visible:o.visible};
+                if (!selIds.has(o.id) && objectVisible(o)) n.visible = false;
+            }
+            updates.set(o.id, n);
+        }
+        S = S.map(s => s?.ob && updates.has(s.ob.id) ? {...s, ob:updates.get(s.ob.id)} : s);
+        normalizeSelection(); syncSel(); render();
+        flashHint(on ? "元の表示状態に戻しました" : "選択以外を一時的に非表示にしました");
+    }
+    el("isolateSelection").onclick = toggleIsolation;
     // シーン一覧（アウトライナー）を現在のSから再構築する。
     // 表示切替・選択・グループ操作の入口もここで各行へ接続する。
+    const escapeObjectText = value => String(value).replace(/[&<>"']/g, c => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[c]));
+    const objectDisplayName = o => typeof o.displayName === "string" && o.displayName.trim() ? o.displayName.trim() : assetLabel(o);
+    let outlinerKey = null, outlinerRows = new Map(), outlinerSelection = new Set(), outlinerActive = null;
     function updateOutliner() {
         if (!list) return;
         normalizeSelection();
-        const objects = sceneObjects();
+        const objects = sceneObjects(),
+            key = JSON.stringify(objects.map(o=>[o.id, assetLabel(o), objectDisplayName(o), assetGlyph(o), o.type, o.asset,
+                o.groupId || "", o.type === "compound" ? (o.parts?.length || 0) : null,
+                o.asset === "person" ? Number(o.h).toFixed(2) : null, objectVisible(o), obLocked(o)]));
+        syncIsolationButton(objects);
+        if (!window.__legacyOutlinerRebuild && key === outlinerKey) {
+            // 一覧の内容が同じならDOMを破棄せず、選択が変わった行だけ更新。
+            // カメラの移動・オブジェクトドラッグ中に数百行を毎回再構築しない。
+            const changed = new Set([...outlinerSelection, ...selIds]);
+            if (outlinerActive) changed.add(outlinerActive);
+            if (sel) changed.add(sel);
+            for (const id of changed) {
+                const row=outlinerRows.get(id);if(!row)continue;
+                const selected=selIds.has(id);
+                row.classList.toggle("selected",selected);
+                row.classList.toggle("activeObject",sel===id);
+                const check=row.querySelector(".objectCheck");if(check)check.checked=selected;
+            }
+            outlinerSelection=new Set(selIds);outlinerActive=sel;
+            syncGroupActions();
+            return;
+        }
         list.innerHTML = objects.length
             ? objects
                   .map((o, i) => {
@@ -589,10 +666,13 @@
                       const visible = objectVisible(o),
                           locked = obLocked(o);
                       // 鍵ボタンは「ロック中でも押せる」唯一の入口。ここから解除できる。
-                      return `<div class="objectRow ${selIds.has(o.id) ? "selected" : ""} ${sel === o.id ? "activeObject" : ""} ${visible ? "" : "hiddenObject"} ${locked ? "lockedObject" : ""}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? "オブジェクトを非表示" : "オブジェクトを表示"}" aria-label="${visible ? "非表示" : "表示"}">${visible ? "◉" : "○"}</button><button type="button" class="objectLock ${locked ? "isLocked" : ""}" data-object-lock="${o.id}" title="${locked ? "ロックを解除（⌘/Ctrl+L）" : "ロックする（⌘/Ctrl+L）"}" aria-label="${locked ? "ロック解除" : "ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked ? "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" : "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="${assetLabel(o)}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta">${assetLabel(o)} ${i + 1} ${group}<small>${detail}</small></span></div>`;
+                      return `<div class="objectRow ${selIds.has(o.id) ? "selected" : ""} ${sel === o.id ? "activeObject" : ""} ${visible ? "" : "hiddenObject"} ${locked ? "lockedObject" : ""}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? "オブジェクトを非表示" : "オブジェクトを表示"}" aria-label="${visible ? "非表示" : "表示"}">${visible ? "◉" : "○"}</button><button type="button" class="objectLock ${locked ? "isLocked" : ""}" data-object-lock="${o.id}" title="${locked ? "ロックを解除（⌘/Ctrl+L）" : "ロックする（⌘/Ctrl+L）"}" aria-label="${locked ? "ロック解除" : "ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked ? "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" : "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="${escapeObjectText(objectDisplayName(o))}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta"><span class="objectName">${escapeObjectText(objectDisplayName(o))}${typeof o.displayName === "string" && o.displayName.trim() ? "" : ` ${i + 1}`}</span> ${group}<small>${detail}</small></span><button type="button" class="objectRename" data-object-rename="${o.id}" title="名前を変更" aria-label="${escapeObjectText(objectDisplayName(o))}の名前を変更">✎</button></div>`;
                   })
                   .join("")
             : '<div class="emptyList">まだオブジェクトがありません</div>';
+        outlinerKey=key;
+        outlinerRows=new Map([...list.querySelectorAll("[data-object]")].map(row=>[row.dataset.object,row]));
+        outlinerSelection=new Set(selIds);outlinerActive=sel;
         syncGroupActions();
     }
     function deleteSelectedScene() {
@@ -664,15 +744,15 @@
     // 接着中の子パーツ（テント・看板）は親と同じ量だけ動かし、位置関係を崩さない。
     function screenCenterTarget(worldCenter) {
         const mid = { x: W / 2, y: H / 2 };
-        if (orthView === "front") {
+        if (orthPlane() === "front") {
             const w = SH.floorPlanFrontWorldAt(mid);
             return w ? [w.x, w.y, worldCenter[2]] : null;
         }
-        if (orthView === "side") {
+        if (orthPlane() === "side") {
             const w = SH.floorPlanSideWorldAt(mid);
             return w ? [worldCenter[0], w.y, w.z] : null;
         }
-        if (orthView === "top") {
+        if (orthPlane() === "top") {
             const w = SH.floorPlanWorldAt(mid);
             return w ? [w.x, worldCenter[1], w.z] : null;
         }
@@ -772,7 +852,7 @@
         window.cityFloorPlanCenter = next;
         render();
         flashHint(
-            `${orthView === "top" ? "真上" : orthView === "side" ? "真横" : "正面"}の表示位置を選択中のオブジェクトへ移動しました（カメラ＝3D視点は動かしていません）`,
+            `${{top:"上",bottom:"下",front:"前",back:"後",side:"右",left:"左"}[orthView] || "正投影"}の表示位置を選択中のオブジェクトへ移動しました（カメラ＝3D視点は動かしていません）`,
         );
     }
     if (el("floorViewCenter")) el("floorViewCenter").onclick = centerFloorViewOnSelection;
@@ -822,6 +902,32 @@
         if (!b) return;
         const id = b.dataset.object,
             chosen = obOf(id);
+        if (e.target.closest("[data-object-rename]")) {
+            e.preventDefault(); e.stopPropagation();
+            if (!chosen || b.querySelector(".objectNameInput")) return;
+            const label = b.querySelector(".objectName"), input = document.createElement("input");
+            input.className = "objectNameInput"; input.type = "text"; input.maxLength = 100;
+            input.value = typeof chosen.displayName === "string" ? chosen.displayName : "";
+            input.placeholder = assetLabel(chosen); input.setAttribute("aria-label", "オブジェクト名（空欄で標準名）");
+            label.replaceWith(input); input.focus(); input.select();
+            input.addEventListener("click", ev => ev.stopPropagation());
+            input.addEventListener("keydown", ev => {
+                ev.stopPropagation();
+                if (ev.isComposing || ev.keyCode === 229) return; // 日本語変換の確定中は編集を閉じない
+                if (ev.key === "Enter") { ev.preventDefault(); input.blur(); }
+                if (ev.key === "Escape") { ev.preventDefault(); input.dataset.cancel = "1"; input.blur(); }
+            });
+            input.addEventListener("blur", () => {
+                const current = obOf(id), name = input.value.trim();
+                if (input.dataset.cancel !== "1" && current && name !== (current.displayName || "")) {
+                    HU.push(S); RD = [];
+                    rewriteObjectDefs([id], {displayName: name});
+                }
+                // 入力欄を一覧表示に戻す。キャンセル・同じ名前でも再描画する。
+                outlinerKey = null; render();
+            }, {once:true});
+            return;
+        }
         if (e.target.closest("[data-object-visibility]")) {
             e.preventDefault();
             setObjectVisibility(id, !objectVisible(chosen));
@@ -886,10 +992,28 @@
         syncSel();
         render();
     };
+    el("sceneInvertSel").onclick = () => {
+        normalizeSelection();
+        const objects = sceneObjects().filter(o => objectVisible(o) && !obLocked(o));
+        // 通常グループは一体、接続アセットだけのグループは個別選択。
+        const grouped = new Set(objects.filter(o => o.groupId && !o.linkedAsset && !o.attachment?.parentId).map(o => o.groupId));
+        const units = new Map();
+        for (const o of objects) {
+            const key = o.groupId && grouped.has(o.groupId) ? "group:" + o.groupId : "object:" + o.id;
+            if (!units.has(key)) units.set(key, []);
+            units.get(key).push(o.id);
+        }
+        const next = new Set();
+        for (const ids of units.values()) if (!ids.some(id => selIds.has(id))) ids.forEach(id => next.add(id));
+        selIds.clear(); next.forEach(id => selIds.add(id));
+        sel = [...selIds].pop() || null;
+        normalizeSelection(); tool = "edit"; setMode("draw"); syncSel(); render();
+    };
     el("sceneClearSel").onclick = () => {
         clearSelection();
         render();
     };
+    el("sceneHideSel").onclick = hideSelectedScene;
     el("sceneDeleteSel").onclick = deleteSelectedScene;
     el("sceneLockSel").onclick = () => {
         toggleSelectionLock();
@@ -2775,6 +2899,16 @@
     // Wrap render so the outliner follows undo/redo, opening files, and camera changes.
     // ===== 4. 描画フックと視点プリセット =====
     // エンジンのrenderを退避し、UIオーバーレイや選択状態を描いた後に呼び出す。
+    let lastStandardView;
+    function syncStandardViewButtons() {
+        if(lastStandardView===orthView)return;
+        lastStandardView=orthView;
+        for(const [id,v] of [["viewFloorFront","front"],["viewFloorBack","back"],["viewFloorTop","top"],["viewFloorBottom","bottom"],["viewFloorSide","side"],["viewFloorLeft","left"],["viewHome",null]]) {
+            const b=el(id);if(!b)continue;const on=orthView===v;b.classList.toggle("on",on);b.setAttribute("aria-pressed",String(on));
+        }
+        const status=el("floorPlanStatus"),name={front:"前",back:"後",top:"上",bottom:"下",side:"右",left:"左"}[orthView];
+        if(status&&window.cityFloorPlanActive&&name)status.textContent=`間取りモード中：${name}（表示面内でオブジェクトを移動・編集できます）`;
+    }
     const baseRender = render;
     render = function () {
         sanitizeScene();
@@ -2782,6 +2916,7 @@
         updateOutliner();
         syncAssetControls();
         syncGenericAssetEditor();
+        syncStandardViewButtons();
         syncSignPanel();
         syncBuildingPanel();
         syncWallSideSignPanel();
@@ -2936,7 +3071,7 @@
         standardApplying = true;
         // 正面・横・上は表示用の正投影だけを切り替える。
         // yaw／pitch／高さ／位置／レンズ／魚眼画角／ロールは一切変更しない。
-        orthView = kind === "front" || kind === "side" || kind === "top" ? kind : null;
+        orthView = ["front","back","top","bottom","side","right","left"].includes(kind) ? (kind === "right" ? "side" : kind) : null;
         if (kind === "home" && !orthView) {
             try {
                 fitPerspectiveHome();
@@ -2965,7 +3100,7 @@
         // 正投影はorthViewだけで切り替える。グリッド種類、魚眼画角、
         // レンズ、カメラ位置、高さ、回転、傾き、ロールは変更しない。
         standardApplying = true;
-        orthView = kind === "side" ? "side" : kind === "front" ? "front" : "top";
+        orthView = ["front","back","top","bottom","side","right","left"].includes(kind) ? (kind === "right" ? "side" : kind) : "top";
         focusLinkedBuildingParentForOrtho();
         standardApplying = false;
         sync();
@@ -2982,6 +3117,9 @@
         enterFloorPlan(kind);
     }
     el("viewFloorFront").onclick = () => showFloorPlan("front");
+    el("viewFloorBack").onclick = () => showFloorPlan("back");
+    el("viewFloorLeft").onclick = () => showFloorPlan("left");
+    el("viewFloorBottom").onclick = () => showFloorPlan("bottom");
     el("viewFloorSide").onclick = () => showFloorPlan("side");
     el("viewFloorTop").onclick = () => showFloorPlan("top");
     el("viewHome").onclick = () => (window.cityFloorPlanActive ? exitFloorPlan(true) : applyStandardView("home"));
@@ -3040,10 +3178,10 @@
             tx = P.cx - Math.sin(fyaw) * SH.FLOOR_CAMERA_RAY * fhoriz,
             tz = P.cz + Math.cos(fyaw) * SH.FLOOR_CAMERA_RAY * fhoriz,
             ty = P.ch - 1 + Math.sin(fpitch) * SH.FLOOR_CAMERA_RAY;
-        if (orthView === "side") {
+        if (orthPlane() === "side") {
             // 真横は画面の左右がワールドZ、上下がワールドY。共有カメラの高さ・傾きも含めて自動フィットする。
             if (!bounds.length) {
-                window.cityFloorPlanCenter = [P.cz, P.ch - 1];
+                window.cityFloorPlanCenter = [orthView === "left" ? -P.cz : P.cz, P.ch - 1];
                 window.cityFloorPlanScale = Math.min(W, H) / 7.2;
                 return;
             }
@@ -3055,14 +3193,14 @@
                 spanY = Math.max(0.1, maxY - minY),
                 pad = Math.max(1, Math.max(spanZ, spanY) * 0.16);
             const fitScale = Math.min((W * 0.82) / (spanZ + pad * 2), (H * 0.82) / (spanY + pad * 2));
-            window.cityFloorPlanCenter = [(minZ + maxZ) / 2, (minY + maxY) / 2];
+            window.cityFloorPlanCenter = [(orthView === "left" ? -1 : 1) * (minZ + maxZ) / 2, (minY + maxY) / 2];
             window.cityFloorPlanScale = Math.max(planMinScale(), Math.min(220, fitScale));
             return;
         }
-        if (orthView === "front") {
+        if (orthPlane() === "front") {
             // 正面は画面の左右がワールドX、上下がワールドY。
             if (!bounds.length) {
-                window.cityFloorPlanCenter = [P.cx, P.ch - 1];
+                window.cityFloorPlanCenter = [orthView === "back" ? -P.cx : P.cx, P.ch - 1];
                 window.cityFloorPlanScale = Math.min(W, H) / 7.2;
                 return;
             }
@@ -3074,12 +3212,12 @@
                 spanY = Math.max(0.1, maxY - minY),
                 pad = Math.max(1, Math.max(spanX, spanY) * 0.16);
             const fitScale = Math.min((W * 0.82) / (spanX + pad * 2), (H * 0.82) / (spanY + pad * 2));
-            window.cityFloorPlanCenter = [(minX + maxX) / 2, (minY + maxY) / 2];
+            window.cityFloorPlanCenter = [(orthView === "back" ? -1 : 1) * (minX + maxX) / 2, (minY + maxY) / 2];
             window.cityFloorPlanScale = Math.max(planMinScale(), Math.min(220, fitScale));
             return;
         }
         if (!bounds.length) {
-            window.cityFloorPlanCenter = [P.cx, P.cz];
+            window.cityFloorPlanCenter = [P.cx, orthView === "bottom" ? -P.cz : P.cz];
             window.cityFloorPlanScale = Math.min(W, H) / 7.2;
             return;
         }
@@ -3091,7 +3229,7 @@
             spanZ = Math.max(0.1, maxZ - minZ),
             pad = Math.max(1, Math.max(spanX, spanZ) * 0.16);
         const fitScale = Math.min((W * 0.82) / (spanX + pad * 2), (H * 0.82) / (spanZ + pad * 2));
-        window.cityFloorPlanCenter = [(minX + maxX) / 2, (minZ + maxZ) / 2];
+        window.cityFloorPlanCenter = [(minX + maxX) / 2, (orthView === "bottom" ? -1 : 1) * (minZ + maxZ) / 2];
         window.cityFloorPlanScale = Math.max(planMinScale(), Math.min(220, fitScale));
     }
     // 間取りモードへ入り、正投影・編集ツール・専用ドックを有効にする。
@@ -3121,7 +3259,7 @@
         setMode("draw");
         const status = el("floorPlanStatus");
         if (status)
-            status.textContent = `間取りモード中：${kind === "side" ? "真横" : kind === "front" ? "正面" : "真上"}（表示面内でオブジェクトを移動・編集できます）`;
+            status.textContent = `間取りモード中：${{front:"前",back:"後",side:"右",right:"右",left:"左",top:"上",bottom:"下"}[kind] || "上"}（表示面内でオブジェクトを移動・編集できます）`;
         render();
     }
     function exitFloorPlan(restore = true) {
@@ -3354,7 +3492,7 @@
         }
         sync();
         if (d.floorActive) {
-            window.cityFloorPlanEnter?.(orthView === "side" ? "side" : orthView === "front" ? "front" : "top");
+            window.cityFloorPlanEnter?.(orthView || "top");
             if (Array.isArray(d.floorCenter)) window.cityFloorPlanCenter = [...d.floorCenter];
             if (Number.isFinite(d.floorScale)) window.cityFloorPlanScale = d.floorScale;
             if (d.ui?.workspace === "floorplan") {

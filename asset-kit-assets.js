@@ -474,7 +474,60 @@ ASSET_KIT.define(
 // 4種はどれも「台座＋ポール＋頭（信号機／標識板）」の同じ骨格で、違うのは頭の中身だけ。
 // 寸法は signalGeometry()（engine-gizmo.js）と共有する。画面の「ポール」ハンドルが動かすのは
 // アセットの高さ h そのものなので、ハンドルの値と描かれる形が食い違わない。
-function signalPoleParts(K, g) {
+// 円筒・円錐台の見える側面と背面の境目を、実際の面と視点から選ぶ。
+// 固定の0番・半周の縦線では横から見たときに2本が中央に重なり、輪郭が消える。
+function signalPoleContour(part, o) {
+    if (!o) return part;
+    const rings = part.rings || [{path:part.path,w:part.z0},{path:part.path,w:part.z1}];
+    if (rings.length < 2 || !rings[0].path || !rings[1].path) return part;
+    const a=rings[0], b=rings[rings.length-1], n=Math.min(a.path.length,b.path.length);
+    const sub=(x,y)=>x.map((v,i)=>v-y[i]), dot=(x,y)=>x.reduce((v,w,i)=>v+w*y[i],0),
+        cross=(x,y)=>[x[1]*y[2]-x[2]*y[1],x[2]*y[0]-x[0]*y[2],x[0]*y[1]-x[1]*y[0]],
+        p=(r,i)=>L2W(o,r.path[i][0],r.path[i][1],r.w),
+        center=L2W(o,0,0,a.w),
+        toward=orthView ? orthBasis().depth.map(v=>-v) : null,
+        faces=[];
+    for(let i=0;i<n;i++) {
+        const A=p(a,i),B=p(a,(i+1)%n),D=p(b,i),normal=cross(sub(B,A),sub(D,A)),
+            radial=sub(A,center), direction=toward || sub(camPos(),A);
+        if(dot(normal,radial)<0) for(let j=0;j<3;j++)normal[j]=-normal[j];
+        faces.push(dot(normal,direction)>1e-12);
+    }
+    const edges=[];
+    for(let i=0;i<n;i++)if(faces[(i+n-1)%n]!==faces[i])edges.push(i);
+    part.verticals=edges.length===2 ? edges : [0,Math.floor(n/2)];
+    return part;
+}
+// 灯器の丸角や円形標識は多角形で面を作っているが、分割ごとの縦線は
+// 本来の縞模様ではない。前後の輪は維持し、奥行き方向は輪郭の2本だけ。
+function signalSmoothSides(part, o, K) {
+    if (!o || window.__legacySignalSmooth || !part?.path || part.path.length <= 4) return part;
+    const axis=part.axis || "z", sub=(a,b)=>a.map((v,i)=>v-b[i]),
+        dot=(a,b)=>a.reduce((v,w,i)=>v+w*b[i],0),
+        // L2Wは回転・移動のアフィン変換なので、断面2軸だけを一度求める。
+        // 断面の各点にL2Wを3回ずつ呼ぶと、標識を大量に置いた時に重くなる。
+        origin=L2W(o,0,0,0),
+        uv=axis === "y" ? [[1,0,0],[0,0,1]] : axis === "x" ? [[0,1,0],[0,0,1]] : [[1,0,0],[0,1,0]],
+        u=sub(L2W(o,...uv[0]),origin),v=sub(L2W(o,...uv[1]),origin),
+        eye=orthView ? orthBasis().depth.map(x=>-x) : sub(camPos(),origin),
+        eu=dot(eye,u),ev=dot(eye,v);
+    const contour=path=>{
+        const n=path.length, faces=[],
+            winding=path.reduce((a,p,i)=>a+p[0]*path[(i+1)%n][1]-path[(i+1)%n][0]*p[1],0) >= 0 ? 1 : -1;
+        for(let i=0;i<n;i++){
+            const a=path[i],b=path[(i+1)%n],du=b[0]-a[0],dv=b[1]-a[1],
+                cu=orthView ? eu : eu-a[0],cv=orthView ? ev : ev-a[1];
+            faces.push(winding*(dv*cu-du*cv)>1e-12);
+        }
+        const indices=[];for(let i=0;i<n;i++)if(faces[(i+n-1)%n]!==faces[i])indices.push(i);
+        return indices.length===2 ? indices : [0,Math.floor(n/2)];
+    };
+    part.sideVerticals=contour(part.path);
+    if(part.holeSides)part.holeSideVerticals=(part.holes||[]).map(h=>h.length>4 ? contour(h) : h.map((_,i)=>i));
+    part.signalSmoothSide=true;
+    return part;
+}
+function signalPoleParts(K, g, o) {
     // 台座は「平たい底板＋すぼまる首」の2段。首を十分な高さにしないと、
     // 線画ではポールの下に小さな三角が付いただけに見えて形が読めない。
     const plateH = Math.max(0.02, g.baseH * 0.28),
@@ -482,13 +535,12 @@ function signalPoleParts(K, g) {
         poleR = g.poleR,
         collarTop = plateH + collarH;
     return [
-        // 底板：平たい円盤。縦線を2本入れて厚みを見せる。
-        K.cylinder(g.baseR, 0, plateH, { seg: 14, verts: 2 }),
+        // 底板：平たい円盤。視点から見た輪郭2本で厚みを見せる。
+        signalPoleContour(K.cylinder(g.baseR, 0, plateH, { seg: 14, verts: 2 }), o),
         // 首：底板からポールへすぼまる円錐台。
-        // 回転体（loft）は verts を受け取らないので、縦線は verticals に
-        // 向かい合う2点（14角の 0 と 7）を指定して出す。これが無いと
-        // 「輪だけ」になって、線画では小さな椀にしか見えない。
-        Object.assign(
+        // 首の両側は実際の円錐台の面と視点から輪郭を選ぶ。
+        // 視点が正面で固定されていない場合も、輪だけの形にしない。
+        signalPoleContour(Object.assign(
             K.revolution(
                 [
                     [g.baseR * 0.76, plateH],
@@ -497,29 +549,10 @@ function signalPoleParts(K, g) {
                 { seg: 14 },
             ),
             { verticals: [0, 7] },
-        ),
-        // ポール：首の中から頭のすぐ下まで。縦線は左右2本（断面12角の 0 と 6）に置くと、
-        // どの向きから見ても「2本の輪郭線」になり、1本線の棒に見えない。
-        K.cylinder(poleR, collarTop - 0.01, g.headBottom + 0.02, { seg: 12, verts: 2 }),
+        ), o),
+        // ポール：首の中から頭のすぐ下まで。視点から見た実際の左右の縁を使う。
+        signalPoleContour(Object.assign(K.cylinder(poleR, collarTop - 0.01, g.headBottom + 0.02, { seg: 12, verts: 2 }), {signalPoleTopRing:true}), o),
     ];
-}
-
-// 灯器の中の絵（止まれ／進め）。細い板を並べた人型で、灯（lamp）の大きさに対する割合で作る。
-// 小さく描かれるので、腕は省いて「頭＋胴＋脚」だけにし、灯の内側 6 割に収める。
-function signalWalkerParts(K, cx, cz, L, frontY, walking) {
-    // 先に中心へ置いてから回す（原点のまま回すと位置が飛ぶ）
-    const bar = (w, h, dx, dz, deg = 0) => {
-            const u = cx + dx,
-                v = cz + dz;
-            // 灯の板より確実に手前へ出す（板の中に埋めると隠れ線として消える）
-            return K.box(K.rotatePath(K.offsetPath(K.rectPath(w, h), u, v), deg, u, v), frontY, frontY + 0.01, { axis: "y" });
-        },
-        head = K.cylinder(L * 0.11, frontY, frontY + 0.01, { axis: "y", seg: 12, cx, cy: cz + L * 0.36 }),
-        torso = bar(L * 0.2, L * 0.28, 0, L * 0.14, 0),
-        legs = walking
-            ? [bar(L * 0.16, L * 0.32, -L * 0.075, -L * 0.13, 20), bar(L * 0.16, L * 0.32, L * 0.07, -L * 0.12, -16)]
-            : [bar(L * 0.15, L * 0.32, -L * 0.055, -L * 0.13, 0), bar(L * 0.15, L * 0.32, L * 0.055, -L * 0.13, 0)];
-    return [head, torso, ...legs];
 }
 
 // --- 1) 車両用信号機（横3灯）---
@@ -546,9 +579,9 @@ ASSET_KIT.define(
             front = -g.headD / 2,
             lampR = Math.max(0.02, K.param(o, "tsLampR", 0.125)),
             hood = Math.max(0, K.param(o, "tsHood", 0.1)),
-            parts = signalPoleParts(K, g);
+            parts = signalPoleParts(K, g, o);
         // 灯器：角を丸めた横長の箱
-        parts.push(K.depthBeveledBox(g.headW, g.headD, g.headH, K.param(o, "spDepthBevel", 0.05), {seg: 3, z0: g.headBottom}));
+        parts.push(signalSmoothSides(K.depthBeveledBox(g.headW, g.headD, g.headH, K.param(o, "spDepthBevel", 0.05), {seg: 3, z0: g.headBottom}), o, K));
         // 灯（青・黄・赤）と、灯のまわりのひさし
         [-1, 0, 1].forEach((i) => {
             const x = i * g.headW * 0.3;
@@ -590,9 +623,9 @@ ASSET_KIT.define(
             // 上=止まれ（赤）／下=進め（青）。灯の中心の高さ。
             topCz = g.headBottom + g.headH * 0.72,
             bottomCz = g.headBottom + g.headH * 0.27,
-            parts = signalPoleParts(K, g),
-            lens = (cz) => K.box(K.offsetPath(K.roundRectPath(lamp, lamp, Math.min(0.03, lamp * 0.16), 2), 0, cz), front - 0.022, front - 0.008, { axis: "y" });
-        parts.push(K.depthBeveledBox(g.headW, g.headD, g.headH, K.param(o, "spDepthBevel", 0.05), {seg: 3, z0: g.headBottom}));
+            parts = signalPoleParts(K, g, o),
+            lens = (cz) => signalSmoothSides(K.box(K.offsetPath(K.roundRectPath(lamp, lamp, Math.min(0.03, lamp * 0.16), 2), 0, cz), front - 0.022, front - 0.008, { axis: "y" }), o, K);
+        parts.push(signalSmoothSides(K.depthBeveledBox(g.headW, g.headD, g.headH, K.param(o, "spDepthBevel", 0.05), {seg: 3, z0: g.headBottom}), o, K));
         parts.push(lens(topCz), lens(bottomCz));
         // ひさし（四角い枠）：灯のまわりの帯を手前へ張り出す。
         // 車両用と同じく「外側の枠＋内側の穴」にして、線画でも枠として見えるようにする。
@@ -600,7 +633,7 @@ ASSET_KIT.define(
         if (hood > 0.01)
             [topCz, bottomCz].forEach((cz) =>
                 parts.push(
-                    K.box(
+                    signalSmoothSides(K.box(
                         K.offsetPath(K.roundRectPath(lamp * 1.2, lamp * 1.2, Math.min(0.03, lamp * 0.16), 2), 0, cz),
                         front - 0.01 - hood,
                         front + 0.004,
@@ -609,12 +642,9 @@ ASSET_KIT.define(
                             holes: [K.offsetPath(K.roundRectPath(lamp * 1.02, lamp * 1.02, Math.min(0.02, lamp * 0.1), 2), 0, cz)],
                             holeSides: true,
                         },
-                    ),
+                    ), o, K),
                 ),
             );
-        // 絵：上は「止まれ」の立ち姿、下は「進め」の歩く姿
-        parts.push(...signalWalkerParts(K, 0, topCz, lamp, front - 0.045, false));
-        parts.push(...signalWalkerParts(K, 0, bottomCz, lamp, front - 0.045, true));
         return parts;
     },
 );
@@ -622,7 +652,7 @@ ASSET_KIT.define(
 // --- 3) 丸標識（地下鉄の丸い看板）＋ 形と枚数を選べる仲間 ---
 // 標識の板は「形（丸・逆三角形・四角・ひし形）」×「枚数（1枚・2枚）」で作れる。
 // 2枚のときは頭の高さを2枚で分け、上の板の形は signShape2 で別に選べる。
-function signPlateParts(K, opts) {
+function signPlateParts(K, opts, o) {
     const { cx, cz, w, h, shape, t, ring, band } = opts,
         y0 = -t / 2,
         y1 = t / 2,
@@ -647,9 +677,11 @@ function signPlateParts(K, opts) {
         },
         parts = [];
     // 1) 板本体（薄い板）
-    parts.push(K.box(outline(w, h), y0, y1, { axis: "y" }));
+    const plate = K.box(outline(w, h), y0, y1, { axis: "y" });
+    parts.push(shape === "circle" || shape === "rect" ? signalSmoothSides(plate, o, K) : plate);
     // 2) 内側の縁：少し小さくして手前へ出す（縁の線が面の内側の線として消えない）
-    parts.push(K.box(outline(w * ring, h * ring), front - 0.02, front - 0.006, { axis: "y" }));
+    const inset = K.box(outline(w * ring, h * ring), front - 0.02, front - 0.006, { axis: "y" });
+    parts.push(shape === "circle" || shape === "rect" ? signalSmoothSides(inset, o, K) : inset);
     // 3) 丸標識だけ、横に通る帯を付ける
     if (band && shape === "circle")
         parts.push(
@@ -682,9 +714,9 @@ function signParts(o, K) {
         plateH = count === 2 ? Math.max(0.08, (g.headH - gap) / 2) : g.headH,
         cz1 = g.headBottom + plateH / 2,
         cz2 = g.headBottom + plateH + gap + plateH / 2,
-        parts = signalPoleParts(K, g);
-    parts.push(...signPlateParts(K, { cx: 0, cz: cz1, w: g.headW, h: plateH, shape: shape1, t, ring, band }));
-    if (count === 2) parts.push(...signPlateParts(K, { cx: 0, cz: cz2, w: g.headW, h: plateH, shape: shape2, t, ring, band }));
+        parts = signalPoleParts(K, g, o);
+    parts.push(...signPlateParts(K, { cx: 0, cz: cz1, w: g.headW, h: plateH, shape: shape1, t, ring, band }, o));
+    if (count === 2) parts.push(...signPlateParts(K, { cx: 0, cz: cz2, w: g.headW, h: plateH, shape: shape2, t, ring, band }, o));
     return parts;
 }
 
@@ -824,9 +856,9 @@ ASSET_KIT.define(
             // 板の対角いっぱいにすると角から飛び出すので、少し短くする
             len = Math.min(g.headW, g.headH) * 1.16,
             plate = K.roundRectPath(g.headW, g.headH, Math.min(0.06, g.headH * 0.14), 2),
-            parts = signalPoleParts(K, g);
+            parts = signalPoleParts(K, g, o);
         // 下地の板
-        parts.push(K.box(K.offsetPath(plate, 0, g.headCz), front + 0.005, front + g.headD, { axis: "y" }));
+        parts.push(signalSmoothSides(K.box(K.offsetPath(plate, 0, g.headCz), front + 0.005, front + g.headD, { axis: "y" }), o, K));
         // X：細長い板を±45°に回して前に重ねる
         [45, -45].forEach((deg) =>
             parts.push(

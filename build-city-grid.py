@@ -123,6 +123,25 @@ def main() -> None:
 
     # 単体HTMLは、engineとstudio-uiの2ブロックへ同じソースを埋め込む。
     html = read("cyberpunk-city-studio.html")
+    # 標準ビューのボタンは開発版 index.html を正本とし、配布版にも同期する。
+    # 旧ビルドはHTML本体を保持するため、新しいボタンだけ置き去りになる。
+    marker = '<div class="barGroup" id="standardViews">'
+    source = read("index.html")
+    source_start, target_start = source.index(marker), html.index(marker)
+    source_end, target_end = source.index("</div>", source_start) + 6, html.index("</div>", target_start) + 6
+    html = html[:target_start] + source[source_start:source_end] + html[target_end:]
+    # 上部の表示切替ボタンも開発版を正本にする（初回はビューの前へ挿入）。
+    marker = '<div class="barGroup" id="visibilityTools">'
+    source_start = source.index(marker)
+    source_end = source.index("</div>", source_start) + 6
+    block = source[source_start:source_end]
+    if marker in html:
+        target_start = html.index(marker)
+        target_end = html.index("</div>", target_start) + 6
+        html = html[:target_start] + block + html[target_end:]
+    else:
+        target_start = html.index('<div class="barGroup" id="standardViews">')
+        html = html[:target_start] + block + "\n                " + html[target_start:]
     # CSSも単体HTMLへ埋め込む。以前は手で貼っていたため、studio.css を直しても
     # 配布用HTMLだけ古い見た目のまま、という食い違いが起きた。
     html = inject_style(html, "<style>", read("style.css"))

@@ -421,7 +421,7 @@ function leaveOrthView(changedKey) {
     // 間取り中は左パネルのカメラ値を変更しても正投影を解除しない。
     // 0=3Dで現在の魚眼画角・レンズ・位置・高さ・回転・傾きをそのまま引き継ぐ。
     if (window.cityFloorPlanActive) return;
-    if (orthView === "top" && changedKey !== "pitch") {
+    if (orthPlane() === "top" && changedKey !== "pitch") {
         P.pitch = -75;
         const pitchInput = $("pitch");
         if (pitchInput) pitchInput.value = -75;
@@ -726,21 +726,36 @@ function markF(c) {
 
 // ===== 8. 線画の保存と再投影：画面の点→ワールドの向き(単位ベクトル)で持つので、視点を変えても追従する =====
 // カメラ座標→ワールド（camの逆変換）
+// 視線の逆変換は魚眼の隠面判定で数万回呼ばれる。同じカメラ角では三角関数を共有する。
+let wldAngles = null, wldTrig = null;
 function wld(v) {
-    const th = P.yaw * DG,
-        ph = P.pitch * DG,
-        ro = (T === "f" ? P.roll : 0) * DG;
-    const x1 = v[0] * Math.cos(ro) + v[1] * Math.sin(ro),
-        y2 = -v[0] * Math.sin(ro) + v[1] * Math.cos(ro);
-    const y1 = y2 * Math.cos(ph) + v[2] * Math.sin(ph),
-        z1 = -y2 * Math.sin(ph) + v[2] * Math.cos(ph);
-    return [x1 * Math.cos(th) - z1 * Math.sin(th), y1, x1 * Math.sin(th) + z1 * Math.cos(th)];
+    const yaw = P.yaw, pitch = P.pitch, roll = T === "f" ? P.roll : 0;
+    if (!wldAngles || !Object.is(wldAngles[0], yaw) || !Object.is(wldAngles[1], pitch) || !Object.is(wldAngles[2], roll)) {
+        const th = yaw * DG, ph = pitch * DG, ro = roll * DG;
+        wldAngles = [yaw, pitch, roll];
+        wldTrig = [Math.cos(th), Math.sin(th), Math.cos(ph), Math.sin(ph), Math.cos(ro), Math.sin(ro)];
+    }
+    const ct=wldTrig[0], st=wldTrig[1], cp=wldTrig[2], sp=wldTrig[3], cr=wldTrig[4], sr=wldTrig[5];
+    const x1 = v[0] * cr + v[1] * sr,
+        y2 = -v[0] * sr + v[1] * cr;
+    const y1 = y2 * cp + v[2] * sp,
+        z1 = -y2 * sp + v[2] * cp;
+    return [x1 * ct - z1 * st, y1, x1 * st + z1 * ct];
 }
 // Blender風の正投影ビュー。正面=X/Y、真横=Z/Y、真上=X/Zを画面へ置く。
 // depthはカメラから遠いほど大きくなり、書き出し時の隠れ線判定にも使う。
+// 互換の side は「右」から見る正投影。反対側は視線と画面左右を反転。
+function orthPlane() {
+    return orthView === "top" || orthView === "bottom" ? "top" :
+        orthView === "side" || orthView === "right" || orthView === "left" ? "side" :
+        orthView === "front" || orthView === "back" ? "front" : null;
+}
 function orthBasis() {
-    if (orthView === "side") return { right: [0, 0, 1], up: [0, 1, 0], depth: [-1, 0, 0] };
+    if (orthView === "side" || orthView === "right") return { right: [0, 0, 1], up: [0, 1, 0], depth: [-1, 0, 0] };
+    if (orthView === "left") return { right: [0, 0, -1], up: [0, 1, 0], depth: [1, 0, 0] };
     if (orthView === "top") return { right: [1, 0, 0], up: [0, 0, 1], depth: [0, -1, 0] };
+    if (orthView === "bottom") return { right: [1, 0, 0], up: [0, 0, -1], depth: [0, 1, 0] };
+    if (orthView === "back") return { right: [-1, 0, 0], up: [0, 1, 0], depth: [0, 0, -1] };
     return { right: [1, 0, 0], up: [0, 1, 0], depth: [0, 0, 1] };
 }
 const ZERO2 = [0, 0];
@@ -767,30 +782,21 @@ const orthScale = () =>
 // 変わらない間ずっと同じ。以前は点1つごとに orthBasis() / orthScale() /
 // orthPlanCenter() を呼び、配列を3つずつ作っていたので、線の点数が多いほど
 // 無駄が増えていた。ここでは署名が同じ間だけ計算結果を使い回す。
-let orthSetupKey = "",
+let orthSetupKey = null,
     orthSetupVal = null;
 function orthSetup() {
     const sc = orthScale(),
         active = true, // 自動フィットの中心・倍率は間取りモード以外でも使う
-        pc = orthPlanCenter(),
-        key =
-            orthView + "|" + sc + "|" + W + "|" + H + "|" +
-            (active ? 1 : 0) + "|" + pc[0] + "|" + pc[1] + "|" + P.cx + "|" + P.cz + "|" + P.ch;
-    if (orthSetupVal && key === orthSetupKey) return orthSetupVal;
+        pc = orthPlanCenter();
+    // 点ごとに文字列を連結せず、実際の入力だけ比較する。
+    const k = orthSetupKey;
+    if (orthSetupVal && k && k[0] === orthView && k[1] === sc && k[2] === W && k[3] === H &&
+        k[4] === pc[0] && k[5] === pc[1] && k[6] === P.cx && k[7] === P.cz && k[8] === P.ch) return orthSetupVal;
     const b = orthBasis();
     // scrW() は先にカメラ原点へ移すため、正投影では表示軸だけワールド原点へ戻す。
-    let sx = 0,
-        sy = 0;
-    if (active && orthView === "top") {
-        sx = P.cx;
-        sy = P.cz;
-    } else if (active && orthView === "side") {
-        sx = P.cz;
-        sy = P.ch - 1;
-    } else if (active && orthView === "front") {
-        sx = P.cx;
-        sy = P.ch - 1;
-    }
+    const camera = [P.cx, P.ch - 1, P.cz],
+        sx = active ? dot3(camera, b.right) : 0,
+        sy = active ? dot3(camera, b.up) : 0;
     // x = ax + dot(v,right)*sc / y = ay - dot(v,up)*sc
     orthSetupVal = {
         right: b.right,
@@ -800,7 +806,7 @@ function orthSetup() {
         ax: W / 2 + (sx - pc[0]) * sc,
         ay: H / 2 - (sy - pc[1]) * sc,
     };
-    orthSetupKey = key;
+    orthSetupKey = [orthView, sc, W, H, pc[0], pc[1], P.cx, P.cz, P.ch];
     return orthSetupVal;
 }
 function orthPoint(v) {
@@ -1503,7 +1509,7 @@ function groupMemberIds(id) {
 function normalizeSelection() {
     if (sel && !selIds.has(sel)) selIds.add(sel);
     [...selIds].forEach((id) => {
-        if (!obOf(id)) selIds.delete(id);
+        if (!obOf(id) || !objectVisible(obOf(id))) selIds.delete(id);
     });
     // ロック中のオブジェクトは選択に残さない（後からロックした場合もここで外れる）。
     [...selIds].forEach((id) => {
@@ -1513,10 +1519,10 @@ function normalizeSelection() {
     // ただしロック中のメンバーは加えない。
     [...selIds].forEach((id) =>
         groupMemberIds(id).forEach((member) => {
-            if (!obLocked(obOf(member))) selIds.add(member);
+            if (!obLocked(obOf(member)) && objectVisible(obOf(member))) selIds.add(member);
         }),
     );
-    if (sel && !obOf(sel)) sel = null;
+    if (sel && (!obOf(sel) || !objectVisible(obOf(sel)))) sel = null;
     if (sel && obLocked(obOf(sel))) sel = null;
     if (!sel && selIds.size) sel = [...selIds][selIds.size - 1];
     if (sel && !selIds.has(sel) && !obLocked(obOf(sel))) selIds.add(sel);
@@ -1527,6 +1533,7 @@ function setSelection(id, add = false) {
         if (typeof window.flashHint === "function") window.flashHint("ロック中のオブジェクトです（一覧の鍵で解除）");
         return false;
     }
+    if (id && !objectVisible(obOf(id))) return false;
     const members = id ? groupMemberIds(id) : [];
     if (!add) selIds.clear();
     if (id) {
@@ -2028,6 +2035,7 @@ function duplicateSelected(mode) {
     const idMap = new Map(objects.map((o) => [o.id, uid()]));
     const clones = objects.map((o) => {
         let n = { ...o, id: idMap.get(o.id), off: [...(o.off || [0, 0, 0])] };
+        delete n._cityIsolationBefore; // 表示切替中に作った複製は新規物体
         if (o.attachment?.parentId && idMap.has(o.attachment.parentId))
             n.attachment = { ...o.attachment, parentId: idMap.get(o.attachment.parentId) };
         if (o.type === "compound") n = { ...n, ...moveBy(o, [shift, 0, 0]) };
