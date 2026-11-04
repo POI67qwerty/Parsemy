@@ -223,18 +223,7 @@ function exportSurfaceTrianglesBase(o) {
         }
     };
     const boxAt = (cx, cy, bw, bd, z0, z1) => {
-        const x = bw / 2,
-            y = bd / 2,
-            v = [
-                [cx - x, cy - y, z0],
-                [cx + x, cy - y, z0],
-                [cx + x, cy + y, z0],
-                [cx - x, cy + y, z0],
-                [cx - x, cy - y, z1],
-                [cx + x, cy - y, z1],
-                [cx + x, cy + y, z1],
-                [cx - x, cy + y, z1],
-            ],
+        const v = boxCornerPoints(cx, cy, bw, bd, z0, z1),
             f = [
                 [0, 1, 2, 3],
                 [4, 7, 6, 5],
@@ -1810,7 +1799,10 @@ function signalOrthOccluded(e, allowance = 0.008) {
         distance=2+Math.hypot(...root.lo.map((v,i)=>Math.max(Math.abs(v-point[i]),Math.abs(root.hi[i]-point[i])))),
         origin=point.map((v,i)=>v-dir[i]*distance),
         inv=dir.map(v=>Math.abs(v)<1e-14?Infinity:1/v),limit=distance-allowance;
-    const stack=[root];
+    // 魚眼と同じ同期走査スタックを再利用。三角面ごとの一時ベクトルを作らず、
+    // 以前の外積・内積と同じ順序でスカラー演算する。
+    const stack=fishBvhStack, dx=dir[0],dy=dir[1],dz=dir[2];
+    stack.length=0;stack.push(root);
     while(stack.length){
         const node=stack.pop();let near=0,far=limit,hit=true;
         for(let i=0;i<3;i++){
@@ -1821,13 +1813,16 @@ function signalOrthOccluded(e, allowance = 0.008) {
         if(!hit)continue;
         if(!node.items){if(node.left)stack.push(node.left);if(node.right)stack.push(node.right);continue;}
         for(const r of node.items){
-            const h=V.crs(dir,r.e2),det=V.dot(r.e1,h);
+            const h0=dy*r.e2[2]-dz*r.e2[1],h1=dz*r.e2[0]-dx*r.e2[2],h2=dx*r.e2[1]-dy*r.e2[0],
+                det=r.e1[0]*h0+r.e1[1]*h1+r.e1[2]*h2;
             if(Math.abs(det)<1e-10)continue;
-            const t=V.add(origin,r.a,1,-1),invDet=1/det,u=V.dot(t,h)*invDet;
+            const t0=origin[0]*1+r.a[0]*-1,t1=origin[1]*1+r.a[1]*-1,t2=origin[2]*1+r.a[2]*-1,
+                invDet=1/det,u=(t0*h0+t1*h1+t2*h2)*invDet;
             if(u< -1e-8||u>1+1e-8)continue;
-            const q=V.crs(t,r.e1),v=V.dot(dir,q)*invDet;
+            const q0=t1*r.e1[2]-t2*r.e1[1],q1=t2*r.e1[0]-t0*r.e1[2],q2=t0*r.e1[1]-t1*r.e1[0],
+                v=(dx*q0+dy*q1+dz*q2)*invDet;
             if(v< -1e-8||u+v>1+1e-8)continue;
-            const hitDistance=V.dot(r.e2,q)*invDet;
+            const hitDistance=(r.e2[0]*q0+r.e2[1]*q1+r.e2[2]*q2)*invDet;
             if(hitDistance>0.0001&&hitDistance<limit)return(e.poleBlocked=true);
         }
     }

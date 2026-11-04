@@ -1016,21 +1016,24 @@ function recessedStackedBuildingLines(o) {
     });
     return out;
 }
+// 面と線が同じ8頂点から作られるよう、旧アセットの直方体頂点を共通化する。
+function boxCornerPoints(cx, cy, w, d, z0, z1) {
+    const x = w / 2, y = d / 2;
+    return [
+        [cx - x, cy - y, z0],
+        [cx + x, cy - y, z0],
+        [cx + x, cy + y, z0],
+        [cx - x, cy + y, z0],
+        [cx - x, cy - y, z1],
+        [cx + x, cy - y, z1],
+        [cx + x, cy + y, z1],
+        [cx - x, cy + y, z1],
+    ];
+}
 // ベランダや小部品用の「ワイヤー直方体」。
 // 中心(cx,cy)をずらして、1つのアセット内に複数部品を配置する。
 function wireBoxA(o, cx, cy, w, d, z0, z1, color = o.c || "#e7fff4") {
-    const x = w / 2,
-        y = d / 2,
-        v = [
-            [cx - x, cy - y, z0],
-            [cx + x, cy - y, z0],
-            [cx + x, cy + y, z0],
-            [cx - x, cy + y, z0],
-            [cx - x, cy - y, z1],
-            [cx + x, cy - y, z1],
-            [cx + x, cy + y, z1],
-            [cx - x, cy + y, z1],
-        ],
+    const v = boxCornerPoints(cx, cy, w, d, z0, z1),
         out = [
             polyA(o, [v[0], v[1], v[2], v[3]], color),
             polyA(o, [v[4], v[5], v[6], v[7]], color),
