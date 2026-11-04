@@ -161,13 +161,22 @@ function surfaceTriangles(o) {
     if (spec && spec.count > 1 && base.length) {
         for (let i = 1; i < spec.count; i++) {
             const shift = arrayModifierShift(spec, i);
-            for (const tri of base) tris.push(tri.map(p => p.map((v, j) => v + shift[j])));
+            for (const tri of base) {
+                const copy = tri.map(p => p.map((v, j) => v + shift[j]));
+                if (tri.surfaceColor) copy.surfaceColor = tri.surfaceColor;
+                tris.push(copy);
+            }
         }
     }
     surfaceTriCache.set(o, { key, tris });
     return tris;
 }
 function exportSurfaceTriangles(o) {
+    const out = exportSurfaceTrianglesBase(o);
+    if (typeof buildingDoorTriangles === "function") out.push(...buildingDoorTriangles(o));
+    return out;
+}
+function exportSurfaceTrianglesBase(o) {
     const out = [];
     if (o?.type === "compound") {
         compoundPartsAt(o).forEach((part) => out.push(...surfaceTriangles(part)));
@@ -285,19 +294,20 @@ function exportSurfaceTriangles(o) {
             ow = clamp(Number(opening.openingW) || bw * 0.56, 0.1, Math.max(0.1, bw - 0.1)),
             oh = clamp(Number(opening.openingH) || (z1 - z0) * 0.66, 0.1, Math.max(0.1, z1 - z0 - 0.01)),
             panelY = clamp(Number(opening.openingBack), -y + 0.025, y - 0.025),
-            q = (a, b, c, d) => quad(a, b, c, d);
+            dx = opening.openingOffset || 0,
+            q = (a, b, c, d) => quad(...[a,b,c,d].map(p => [p[0]+cx,p[1]+cy,p[2]]));
         q([-x, -y, z0], [x, -y, z0], [x, y, z0], [-x, y, z0]);
         q([-x, -y, z1], [-x, y, z1], [x, y, z1], [x, -y, z1]);
         q([-x, -y, z0], [-x, -y, z1], [-x, y, z1], [-x, y, z0]);
         q([x, -y, z0], [x, y, z0], [x, y, z1], [x, -y, z1]);
         q([-x, y, z0], [-x, y, z1], [x, y, z1], [x, y, z0]);
-        q([-x, -y, z0], [-ow / 2, -y, z0], [-ow / 2, -y, z1], [-x, -y, z1]);
-        q([ow / 2, -y, z0], [x, -y, z0], [x, -y, z1], [ow / 2, -y, z1]);
-        q([-ow / 2, -y, oh + z0], [ow / 2, -y, oh + z0], [ow / 2, -y, z1], [-ow / 2, -y, z1]);
-        q([-ow / 2, -y, z0], [-ow / 2, panelY, z0], [-ow / 2, panelY, oh + z0], [-ow / 2, -y, oh + z0]);
-        q([ow / 2, -y, z0], [ow / 2, -y, oh + z0], [ow / 2, panelY, oh + z0], [ow / 2, panelY, z0]);
-        q([-ow / 2, -y, oh + z0], [-ow / 2, panelY, oh + z0], [ow / 2, panelY, oh + z0], [ow / 2, -y, oh + z0]);
-        q([-ow / 2, panelY, z0], [ow / 2, panelY, z0], [ow / 2, panelY, oh + z0], [-ow / 2, panelY, oh + z0]);
+        q([-x, -y, z0], [dx - ow / 2, -y, z0], [dx - ow / 2, -y, z1], [-x, -y, z1]);
+        q([dx + ow / 2, -y, z0], [x, -y, z0], [x, -y, z1], [dx + ow / 2, -y, z1]);
+        q([dx - ow / 2, -y, oh + z0], [dx + ow / 2, -y, oh + z0], [dx + ow / 2, -y, z1], [dx - ow / 2, -y, z1]);
+        q([dx - ow / 2, -y, z0], [dx - ow / 2, panelY, z0], [dx - ow / 2, panelY, oh + z0], [dx - ow / 2, -y, oh + z0]);
+        q([dx + ow / 2, -y, z0], [dx + ow / 2, -y, oh + z0], [dx + ow / 2, panelY, oh + z0], [dx + ow / 2, panelY, z0]);
+        q([dx - ow / 2, -y, oh + z0], [dx - ow / 2, panelY, oh + z0], [dx + ow / 2, panelY, oh + z0], [dx + ow / 2, -y, oh + z0]);
+        q([dx - ow / 2, panelY, z0], [dx + ow / 2, panelY, z0], [dx + ow / 2, panelY, oh + z0], [dx - ow / 2, panelY, oh + z0]);
     };
     const beveledOpeningAt = (cx, cy, bw, bd, z0, z1, offset, segments, opening) => {
         const footprint = beveledBoxFootprint(bw, bd, offset, segments),
@@ -306,6 +316,7 @@ function exportSurfaceTriangles(o) {
             ow = clamp(Number(opening.openingW) || bw * 0.56, 0.1, Math.max(0.1, bw - 0.1)),
             oh = clamp(Number(opening.openingH) || (z1 - z0) * 0.66, 0.1, Math.max(0.1, z1 - z0 - 0.01)),
             panelY = clamp(Number(opening.openingBack), -y + 0.025, y - 0.025),
+            dx = opening.openingOffset || 0,
             bottom = [cx, cy, z0],
             top = [cx, cy, z1];
         for (let i = 0; i < footprint.length; i++) {
@@ -326,34 +337,34 @@ function exportSurfaceTriangles(o) {
                             r = Math.min(hi, xb + cx);
                         if (r > l + 1e-5) quad([l, cy - y, za], [r, cy - y, za], [r, cy - y, zb], [l, cy - y, zb]);
                     };
-                wall(-x, -ow / 2, z0, z1);
-                wall(ow / 2, x, z0, z1);
-                wall(-ow / 2, ow / 2, oh + z0, z1);
+                wall(-x, dx - ow / 2, z0, z1);
+                wall(dx + ow / 2, x, z0, z1);
+                wall(dx - ow / 2, dx + ow / 2, oh + z0, z1);
             }
         }
         quad(
-            [cx - ow / 2, cy - y, z0],
-            [cx - ow / 2, cy + panelY, z0],
-            [cx - ow / 2, cy + panelY, oh + z0],
-            [cx - ow / 2, cy - y, oh + z0],
+            [cx + dx - ow / 2, cy - y, z0],
+            [cx + dx - ow / 2, cy + panelY, z0],
+            [cx + dx - ow / 2, cy + panelY, oh + z0],
+            [cx + dx - ow / 2, cy - y, oh + z0],
         );
         quad(
-            [cx + ow / 2, cy - y, z0],
-            [cx + ow / 2, cy - y, oh + z0],
-            [cx + ow / 2, cy + panelY, oh + z0],
-            [cx + ow / 2, cy + panelY, z0],
+            [cx + dx + ow / 2, cy - y, z0],
+            [cx + dx + ow / 2, cy - y, oh + z0],
+            [cx + dx + ow / 2, cy + panelY, oh + z0],
+            [cx + dx + ow / 2, cy + panelY, z0],
         );
         quad(
-            [cx - ow / 2, cy - y, oh + z0],
-            [cx - ow / 2, cy + panelY, oh + z0],
-            [cx + ow / 2, cy + panelY, oh + z0],
-            [cx + ow / 2, cy - y, oh + z0],
+            [cx + dx - ow / 2, cy - y, oh + z0],
+            [cx + dx - ow / 2, cy + panelY, oh + z0],
+            [cx + dx + ow / 2, cy + panelY, oh + z0],
+            [cx + dx + ow / 2, cy - y, oh + z0],
         );
         quad(
-            [cx - ow / 2, cy + panelY, z0],
-            [cx + ow / 2, cy + panelY, z0],
-            [cx + ow / 2, cy + panelY, oh + z0],
-            [cx - ow / 2, cy + panelY, oh + z0],
+            [cx + dx - ow / 2, cy + panelY, z0],
+            [cx + dx + ow / 2, cy + panelY, z0],
+            [cx + dx + ow / 2, cy + panelY, oh + z0],
+            [cx + dx - ow / 2, cy + panelY, oh + z0],
         );
     };
     const ellipsoid = (cx, cy, cz, rx, ry, rz, lat = 8, lon = 12) => {
@@ -594,7 +605,7 @@ function exportSurfaceTriangles(o) {
             if (kind === "cornerCutStackedBuilding") {
                 // 階ごとの隅切り面は既存の隅切り直方体を共用し、親の回転を保って位置をずらす。
                 const base=customPt(o,0,0,0), dest=customPt(o,fx,fy,fz), shift=dest.map((v,j)=>v-base[j]),
-                    part={...o,asset:"cornerCutBox",ra:fw/2,rb:fd/2,h:fh,facadeEnabled:false,cornerCutOpeningEnabled:!!opening,
+                    part={...o,asset:"cornerCutBox",ra:fw/2,rb:fd/2,h:fh,facadeEnabled:false,doorEnabled:false,arrayEnabled:false,cornerCutOpeningEnabled:!!opening,
                         cornerCutOpeningW:opening?.openingW,cornerCutOpeningH:opening?.openingH,cornerCutOpeningDepth:opening?.openingBack},
                     append=tris=>tris.forEach(t=>out.push(t.map(p=>p.map((v,j)=>v+shift[j]))));
                 append(surfaceTriangles(part));
@@ -653,18 +664,18 @@ function exportSurfaceTriangles(o) {
             return out;
         }
         const g = buildingGeometry(o),
-            side = Math.max(0.05, (g.w - g.openingW) / 2),
-            cx = (g.openingW + side) / 2,
+            leftEdge = g.openingOffset - g.openingW / 2, rightEdge = g.openingOffset + g.openingW / 2,
+            leftW = leftEdge + g.w / 2, rightW = g.w / 2 - rightEdge,
             panelY = g.backY;
-        boxAt(-cx, 0, side, g.d, 0, g.h);
-        boxAt(cx, 0, side, g.d, 0, g.h);
+        boxAt((-g.w / 2 + leftEdge) / 2, 0, leftW, g.d, 0, g.h);
+        boxAt((rightEdge + g.w / 2) / 2, 0, rightW, g.d, 0, g.h);
         boxAt(0, 0, g.w, g.d, g.openingH, g.h);
         // 開口はトンネルではなく、奥側に閉じた内壁を持つ。外側の奥行きと同じ位置へ置く。
         quad(
-            [-g.openingW / 2, panelY, 0],
-            [g.openingW / 2, panelY, 0],
-            [g.openingW / 2, panelY, g.openingH],
-            [-g.openingW / 2, panelY, g.openingH],
+            [leftEdge, panelY, 0],
+            [rightEdge, panelY, 0],
+            [rightEdge, panelY, g.openingH],
+            [leftEdge, panelY, g.openingH],
         );
         return out;
     }

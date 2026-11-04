@@ -1260,6 +1260,52 @@
         if (bevel && document.activeElement !== bevel) bevel.value = bevelValue.toFixed(2);
         syncWallSideSignFloorSelect(parent, children, scopeValue);
     }
+    function doorPanelObject() {
+        const selected = sel && obOf(sel), candidate = linkedBuildingParent(selected) || selected;
+        return buildingDoorSupported(candidate) || (candidate?.type === "compound" && candidate.parts?.some(buildingDoorSupported)) ? candidate : null;
+    }
+    function doorPanelParts(o) {
+        return (o?.type === "compound" ? o.parts || [] : [o]).filter(p => buildingDoorSupported(p) && buildingDoorOpening(p));
+    }
+    function syncBuildingDoorPanel() {
+        const o = doorPanelObject(), panel = el("buildingDoorP");
+        panel.style.display = o ? "" : "none";
+        if (!o) return;
+        const parts = doorPanelParts(o), hasOpening = parts.length > 0, check = el("buildingDoorEnabled"), row = el("buildingDoorTypeRow"),
+            enabledCount = parts.filter(p => p.doorEnabled === true).length, first = parts[0] || o;
+        const position = hasOpening && o.type !== "compound" ? buildingOpeningPosition(first) : null,
+            offsetInput = el("buildingOpeningOffset");
+        el("buildingOpeningPositionRow").style.display = position ? "" : "none";
+        el("buildingDoorCenter").disabled = !hasOpening;
+        if (position) {
+            offsetInput.min = String(-position.limit); offsetInput.max = String(position.limit);
+            if (document.activeElement !== offsetInput) offsetInput.value = String(+position.value.toFixed(4));
+        }
+        check.checked = hasOpening && enabledCount === parts.length;
+        check.indeterminate = enabledCount > 0 && enabledCount < parts.length;
+        check.disabled = !hasOpening;
+        row.style.display = hasOpening && enabledCount ? "" : "none";
+        if (document.activeElement !== el("buildingDoorType"))
+            el("buildingDoorType").value = ["shutter", "double", "convenience"].includes(first.doorType) ? first.doorType : "shutter";
+        el("buildingDoorNote").textContent = hasOpening
+            ? "扉は閉じた状態で、開口の幅・高さに合わせて作られます。" + (first.doorType === "convenience" && enabledCount ? " ガラス風の着色で、透過はしません。" : "") + (o.type === "compound" ? " 結合体内の開口に一括適用します。" : "")
+            : "先に建物の開口をONにしてください。";
+    }
+    function applyBuildingDoor(patch) {
+        const o = doorPanelObject(); if (!o || !doorPanelParts(o).length) return;
+        HU.push(S); RD = [];
+        if (o.type === "compound") setOb(o.id, { parts: o.parts.map(p => buildingDoorOpening(p) ? { ...p, ...patch } : p) });
+        else setOb(o.id, patch);
+        render();
+    }
+    el("buildingDoorEnabled").onchange = e => applyBuildingDoor({ doorEnabled: e.target.checked });
+    el("buildingDoorType").onchange = e => applyBuildingDoor({ doorType: e.target.value });
+    el("buildingDoorCenter").onclick = () => applyBuildingDoor({ openingOffset: 0 });
+    el("buildingOpeningOffset").onchange = e => {
+        const o = doorPanelObject(), p = o && buildingOpeningPosition(o), value = Number(e.target.value);
+        if (p && e.target.value.trim() && Number.isFinite(value)) applyBuildingDoor({ openingOffset: clamp(value, -p.limit, p.limit) });
+        else render();
+    };
     // 建物・階層建物・開口設定の入力欄を、選択中オブジェクトへ同期する。
     function syncBuildingPanel() {
         const panel = el("buildingP"),
@@ -2855,7 +2901,7 @@
     let genericAssetPanelKind=null, genericAssetPanelId=null, genericAssetEditSession=false;
     function syncGenericAssetEditor() {
         const panel=el("assetEditorP"), fields=el("assetEditorFields"), o=sel && obOf(sel),
-            controls=o?assetEditorControls(o):[];
+            controls=o?assetEditorControls(o).filter(c => !c.handleOnly):[];
         if(!panel || !fields)return;
         panel.style.display=controls.length?"":"none";
         if(!controls.length){genericAssetPanelKind=null;genericAssetPanelId=null;genericAssetEditSession=false;return;}
@@ -2931,6 +2977,7 @@
         syncGenericAssetEditor();
         syncStandardViewButtons();
         syncSignPanel();
+        syncBuildingDoorPanel();
         syncBuildingPanel();
         syncWallSideSignPanel();
         syncBalconyPanel();

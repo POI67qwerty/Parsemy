@@ -612,16 +612,16 @@ function cornerCutOpeningParams(o) {
             0.1,
             maxHeight,
         ),
-        maxDepth = Math.max(0.025, cornerCutOpeningRayDistance(midpoint, inward, footprint) - 0.025),
+        offsetLimit = Math.max(0, (cutLength - openingW) / 2 - 0.04),
+        openingOffset = clamp(Number(o?.openingOffset) || 0, -offsetLimit, offsetLimit),
+        openingMidpoint = [midpoint[0] + tangent[0] * openingOffset, midpoint[1] + tangent[1] * openingOffset],
+        frontA = [openingMidpoint[0] - tangent[0] * openingW * 0.5, openingMidpoint[1] - tangent[1] * openingW * 0.5],
+        frontB = [openingMidpoint[0] + tangent[0] * openingW * 0.5, openingMidpoint[1] + tangent[1] * openingW * 0.5],
+        maxDepth = Math.max(0.025, (openingOffset === 0 ? cornerCutOpeningRayDistance(midpoint, inward, footprint) : Math.min(cornerCutOpeningRayDistance(frontA, inward, footprint), cornerCutOpeningRayDistance(frontB, inward, footprint))) - 0.025),
         openingDepth = clamp(
-            Number.isFinite(Number(o?.cornerCutOpeningDepth))
-                ? Number(o.cornerCutOpeningDepth)
-                : Math.min(0.8, maxDepth * 0.45),
-            0.025,
-            maxDepth,
+            Number.isFinite(Number(o?.cornerCutOpeningDepth)) ? Number(o.cornerCutOpeningDepth) : Math.min(0.8, maxDepth * 0.45),
+            0.025, maxDepth,
         ),
-        frontA = [midpoint[0] - tangent[0] * openingW * 0.5, midpoint[1] - tangent[1] * openingW * 0.5],
-        frontB = [midpoint[0] + tangent[0] * openingW * 0.5, midpoint[1] + tangent[1] * openingW * 0.5],
         backA = [frontA[0] + inward[0] * openingDepth, frontA[1] + inward[1] * openingDepth],
         backB = [frontB[0] + inward[0] * openingDepth, frontB[1] + inward[1] * openingDepth];
     return {
@@ -632,6 +632,9 @@ function cornerCutOpeningParams(o) {
         cutLength,
         tangent,
         midpoint,
+        openingMidpoint,
+        openingOffset,
+        offsetLimit,
         inward,
         maxWidth,
         maxHeight,
@@ -653,7 +656,7 @@ function stackedOpeningParams(o, f = o?.floors?.[0]) {
         const h=Math.max(.1,Number(f?.h)||2.2), w=Math.max(.1,Number(f?.w)||4),d=Math.max(.1,Number(f?.d)||3),
             part={...o,ra:w/2,rb:d/2,h,cornerCutOpeningW:o.openingW,cornerCutOpeningH:o.openingH,cornerCutOpeningDepth:o.openingBack},
             c=cornerCutOpeningParams(part), rimHeight=clamp(Number(f?.rimHeight)||.16,.01,h);
-        return {w,d,h,rimHeight,openingW:c.openingW,openingH:Math.min(c.openingH,Math.max(.1,h-rimHeight-.01)),openingBack:c.openingDepth,corner:c};
+        return {w,d,h,rimHeight,openingW:c.openingW,openingH:Math.min(c.openingH,Math.max(.1,h-rimHeight-.01)),openingBack:c.openingDepth,openingOffset:c.openingOffset,offsetLimit:c.offsetLimit,corner:c};
     }
     const w = Math.max(0.05, Math.abs(Number(f?.w) || Number(o?.ra || 2) * 2)),
         d = Math.max(0.05, Math.abs(Number(f?.d) || Number(o?.rb || 1.5) * 2)),
@@ -662,13 +665,17 @@ function stackedOpeningParams(o, f = o?.floors?.[0]) {
         maxW = Math.max(0.1, w - 0.1),
         maxH = Math.max(0.1, h - rimHeight - 0.01),
         openingW = clamp(Number(o?.openingW) || w * 0.56, 0.1, maxW),
+        bevelRaw = Number.isFinite(Number(f?.bevelOffset)) ? Number(f.bevelOffset) : Number(o?.bevelOffset) || 0.28,
+        bevel = o?.asset === "beveledStackedBuilding" ? Math.max(0, Math.min(bevelRaw, Math.min(w,d)/2 - 0.001)) : 0,
+        offsetLimit = Math.max(0, (w - openingW) / 2 - bevel - 0.05),
+        openingOffset = clamp(Number(o?.openingOffset) || 0, -offsetLimit, offsetLimit),
         openingH = clamp(Number(o?.openingH) || h * 0.66, 0.1, maxH),
         openingBack = clamp(
             Number.isFinite(Number(o?.openingBack)) ? Number(o.openingBack) : d * 0.5 - 0.025,
             -d * 0.5 + 0.025,
             d * 0.5 - 0.025,
         );
-    return { w, d, h, rimHeight, openingW, openingH, openingBack };
+    return { w, d, h, rimHeight, openingW, openingH, openingBack, openingOffset, offsetLimit };
 }
 // 階層建物の各階に共通する寸法。線画と面は同じ階・開口・縁の定義を使う。
 // 欠落した旧データの代替値は呼び出し元の従来値を受け取り、既存形状を変えない。
@@ -1431,6 +1438,8 @@ function windowRectHitsOpening(rect, opening) {
         cz = (rect.z0 + rect.z1) * 0.5,
         hw = Math.max(0, finiteNumber(opening.w, 0) * 0.5),
         oh = Math.max(0, finiteNumber(opening.h, 0));
+    const dx = finiteNumber(opening.offset, 0);
+    if (dx !== 0) return rect.x1 > dx - hw && rect.x0 < dx + hw && rect.z1 > 0 && rect.z0 < oh;
     return Math.abs(cx) <= hw && cz >= 0 && cz <= oh;
 }
 function appendFacadeWindows(o, out, w, d, h, color, opening) {
@@ -1985,6 +1994,14 @@ function latticePanelA(o, opt = {}) {
 function assetEditorControls(o) {
     const base = ASSETS[o?.asset]?.controls;
     const list = [...(Array.isArray(base) ? base : []), ...(typeof window.accordionControls === "function" ? window.accordionControls(o) : [])];
+    const spec = buildingOpeningPosition(o);
+    if (spec) list.push({ key: "openingOffset", label: "開口の左右", unit: "m", handleOnly: true,
+        min: p => -buildingOpeningPosition(p).limit, max: p => buildingOpeningPosition(p).limit,
+        get: p => buildingOpeningPosition(p).value,
+        handle: p => { const q = buildingOpeningPosition(p), a = q.origin, t = q.tangent;
+            return {anchor:[a[0],a[1],a[2]+q.height*.5], sample:[a[0],a[1],a[2]+q.height*.5],
+                probe:[a[0]+t[0],a[1]+t[1],a[2]+q.height*.5], color:"#ffd56b", fallback:{x:1,y:0}}; }
+    });
     return list.filter(c => c && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(c.key || "") && ["number","boolean","range"].includes(c.type || "number"));
 }
 function assetControlLimit(value, o, fallback) {
@@ -2367,6 +2384,7 @@ function linesStackedBuilding(ctx) {
             panelY = opening.openingBack,
             ow = opening.openingW,
             oh = opening.openingH,
+            dx = opening.openingOffset || 0,
             toWorld = (p) => [p[0] + ox, p[1] + oy, p[2] + oz],
             line = (points, color = a, width = 1.1) => out.push(customLineA(o, points.map(toWorld), color, width));
         // 開口を持つ1Fの外周・開口枠・内側底辺／奥面を、既存の開口建物と同じ順で描く。
@@ -2379,70 +2397,70 @@ function linesStackedBuilding(ctx) {
             [w / 2, far, h],
         ]);
         line([
-            [-ow / 2, near, 0],
-            [-ow / 2, near, oh],
-            [ow / 2, near, oh],
-            [ow / 2, near, 0],
+            [dx - ow / 2, near, 0],
+            [dx - ow / 2, near, oh],
+            [dx + ow / 2, near, oh],
+            [dx + ow / 2, near, 0],
         ]);
         line([
-            [-ow / 2, far, 0],
-            [-ow / 2, far, oh],
-            [ow / 2, far, oh],
-            [ow / 2, far, 0],
+            [dx - ow / 2, far, 0],
+            [dx - ow / 2, far, oh],
+            [dx + ow / 2, far, oh],
+            [dx + ow / 2, far, 0],
         ]);
         if (Math.abs(panelY - far) > 0.01)
             line([
-                [-ow / 2, panelY, 0],
-                [-ow / 2, panelY, oh],
-                [ow / 2, panelY, oh],
-                [ow / 2, panelY, 0],
+                [dx - ow / 2, panelY, 0],
+                [dx - ow / 2, panelY, oh],
+                [dx + ow / 2, panelY, oh],
+                [dx + ow / 2, panelY, 0],
             ]);
         // 開口の床面／奥面の下辺は省略しない。正面側と閉じた内壁側の両方へ描く。
         line(
             [
-                [-ow / 2, near, 0.012],
-                [ow / 2, near, 0.012],
+                [dx - ow / 2, near, 0.012],
+                [dx + ow / 2, near, 0.012],
             ],
             a,
             1.05,
         );
         line(
             [
-                [-ow / 2, panelY, 0.012],
-                [ow / 2, panelY, 0.012],
+                [dx - ow / 2, panelY, 0.012],
+                [dx + ow / 2, panelY, 0.012],
             ],
             a,
             1.15,
         );
         line(
             [
-                [-ow / 2, near, 0],
-                [-ow / 2, panelY, 0],
-                [-ow / 2, panelY, oh],
-                [-ow / 2, near, oh],
-                [-ow / 2, near, 0],
+                [dx - ow / 2, near, 0],
+                [dx - ow / 2, panelY, 0],
+                [dx - ow / 2, panelY, oh],
+                [dx - ow / 2, near, oh],
+                [dx - ow / 2, near, 0],
             ],
             a,
             1.0,
         );
         line(
             [
-                [ow / 2, near, 0],
-                [ow / 2, near, oh],
-                [ow / 2, panelY, oh],
-                [ow / 2, panelY, 0],
-                [ow / 2, near, 0],
+                [dx + ow / 2, near, 0],
+                [dx + ow / 2, near, oh],
+                [dx + ow / 2, panelY, oh],
+                [dx + ow / 2, panelY, 0],
+                [dx + ow / 2, near, 0],
             ],
             a,
             1.0,
         );
         line(
             [
-                [-ow / 2, near, oh],
-                [ow / 2, near, oh],
-                [ow / 2, panelY, oh],
-                [-ow / 2, panelY, oh],
-                [-ow / 2, near, oh],
+                [dx - ow / 2, near, oh],
+                [dx + ow / 2, near, oh],
+                [dx + ow / 2, panelY, oh],
+                [dx - ow / 2, panelY, oh],
+                [dx - ow / 2, near, oh],
             ],
             a,
             1.0,
@@ -3317,8 +3335,7 @@ function linesBuilding(ctx) {
         ow = bp.openingW,
         oh = bp.openingH,
         backY = bp.backY,
-        side = bp.sideT,
-        centerX = (ow + side) / 2;
+        dx = buildingGeometry(o).openingOffset;
     const outerFront = [
             [-w / 2, -d / 2, 0],
             [w / 2, -d / 2, 0],
@@ -3334,22 +3351,22 @@ function linesBuilding(ctx) {
     out.push(polyA(o, outerFront, c));
     out.push(polyA(o, outerBack, c));
     const innerFront = [
-            [-ow / 2, -d / 2, 0],
-            [-ow / 2, -d / 2, oh],
-            [ow / 2, -d / 2, oh],
-            [ow / 2, -d / 2, 0],
+            [dx - ow / 2, -d / 2, 0],
+            [dx - ow / 2, -d / 2, oh],
+            [dx + ow / 2, -d / 2, oh],
+            [dx + ow / 2, -d / 2, 0],
         ],
         innerBack = [
-            [-ow / 2, d / 2, 0],
-            [-ow / 2, d / 2, oh],
-            [ow / 2, d / 2, oh],
-            [ow / 2, d / 2, 0],
+            [dx - ow / 2, d / 2, 0],
+            [dx - ow / 2, d / 2, oh],
+            [dx + ow / 2, d / 2, oh],
+            [dx + ow / 2, d / 2, 0],
         ],
         innerPanel = [
-            [-ow / 2, backY, 0],
-            [-ow / 2, backY, oh],
-            [ow / 2, backY, oh],
-            [ow / 2, backY, 0],
+            [dx - ow / 2, backY, 0],
+            [dx - ow / 2, backY, oh],
+            [dx + ow / 2, backY, oh],
+            [dx + ow / 2, backY, 0],
         ];
     out.push(lineA(o, innerFront, a, 1.1));
     out.push(lineA(o, innerBack, a, 1.1));
@@ -3359,8 +3376,8 @@ function linesBuilding(ctx) {
         lineA(
             o,
             [
-                [-ow / 2, backY, 0.012],
-                [ow / 2, backY, 0.012],
+                [dx - ow / 2, backY, 0.012],
+                [dx + ow / 2, backY, 0.012],
             ],
             a,
             1.15,
@@ -3375,14 +3392,14 @@ function linesBuilding(ctx) {
         [-w / 2, d / 2, h],
         [w / 2, -d / 2, h],
         [w / 2, d / 2, h],
-        [-ow / 2, -d / 2, 0],
-        [-ow / 2, d / 2, 0],
-        [ow / 2, -d / 2, 0],
-        [ow / 2, d / 2, 0],
-        [-ow / 2, -d / 2, oh],
-        [-ow / 2, d / 2, oh],
-        [ow / 2, -d / 2, oh],
-        [ow / 2, d / 2, oh],
+        [dx - ow / 2, -d / 2, 0],
+        [dx - ow / 2, d / 2, 0],
+        [dx + ow / 2, -d / 2, 0],
+        [dx + ow / 2, d / 2, 0],
+        [dx - ow / 2, -d / 2, oh],
+        [dx - ow / 2, d / 2, oh],
+        [dx + ow / 2, -d / 2, oh],
+        [dx + ow / 2, d / 2, oh],
     ].forEach((p, i, arr) => {
         if (i % 2 === 0) out.push(lineA(o, [p, arr[i + 1]], a, 1.0));
     });
@@ -3391,10 +3408,10 @@ function linesBuilding(ctx) {
         polyA(
             o,
             [
-                [-ow / 2, -d / 2, 0],
-                [-ow / 2, d / 2, 0],
-                [-ow / 2, d / 2, oh],
-                [-ow / 2, -d / 2, oh],
+                [dx - ow / 2, -d / 2, 0],
+                [dx - ow / 2, d / 2, 0],
+                [dx - ow / 2, d / 2, oh],
+                [dx - ow / 2, -d / 2, oh],
             ],
             a,
             1.0,
@@ -3404,10 +3421,10 @@ function linesBuilding(ctx) {
         polyA(
             o,
             [
-                [ow / 2, -d / 2, 0],
-                [ow / 2, -d / 2, oh],
-                [ow / 2, d / 2, oh],
-                [ow / 2, d / 2, 0],
+                [dx + ow / 2, -d / 2, 0],
+                [dx + ow / 2, -d / 2, oh],
+                [dx + ow / 2, d / 2, oh],
+                [dx + ow / 2, d / 2, 0],
             ],
             a,
             1.0,
@@ -3417,16 +3434,16 @@ function linesBuilding(ctx) {
         polyA(
             o,
             [
-                [-ow / 2, -d / 2, oh],
-                [ow / 2, -d / 2, oh],
-                [ow / 2, d / 2, oh],
-                [-ow / 2, d / 2, oh],
+                [dx - ow / 2, -d / 2, oh],
+                [dx + ow / 2, -d / 2, oh],
+                [dx + ow / 2, d / 2, oh],
+                [dx - ow / 2, d / 2, oh],
             ],
             a,
             1.0,
         ),
     );
-    appendFacadeWindows(o, out, w, d, h, a, { w: ow, h: oh });
+    appendFacadeWindows(o, out, w, d, h, a, { w: ow, h: oh, offset: dx });
     appendBuildingFascia(o,out);
 }
 
@@ -3876,10 +3893,115 @@ function normalizedAsset(o) {
     }
     return q;
 }
+// 建物の入口を一つの共通座標系にまとめる。xは入口の左右、yは壁の内側、zは高さ。
+function buildingDoorSupported(o) {
+    return !!o && o.type === "asset" && (o.asset === "building" || o.asset === "cornerCutBox" || isStackedBuildingAsset(o));
+}
+function buildingDoorOpening(o) {
+    if (!buildingDoorSupported(o)) return null;
+    let w, h, origin, tangent = [1, 0], inward = [0, 1];
+    if (o.asset === "building") {
+        if (o.openingEnabled === false) return null;
+        const g = buildingGeometry(o); w = g.openingW; h = g.openingH; origin = [g.openingOffset, -g.d / 2, 0];
+    } else if (o.asset === "cornerCutBox") {
+        const g = cornerCutOpeningParams(o); if (!g.enabled) return null;
+        w = g.openingW; h = g.openingH; origin = [g.openingMidpoint[0], g.openingMidpoint[1], 0]; tangent = g.tangent; inward = g.inward;
+    } else {
+        if (!stackedOpeningEnabled(o)) return null;
+        const f = o.floors?.[0] || { w: (Number(o.ra) || 2) * 2, d: (Number(o.rb) || 1.5) * 2, h: 2.2 },
+            g = stackedOpeningParams(o, f), fx = Number(f.x) || 0, fy = Number(f.y) || 0, fz = Number(f.z) || 0;
+        w = g.openingW; h = g.openingH;
+        if (g.corner) {
+            origin = [fx + g.corner.openingMidpoint[0], fy + g.corner.openingMidpoint[1], fz];
+            tangent = g.corner.tangent; inward = g.corner.inward;
+        } else origin = [fx + g.openingOffset, fy - g.d / 2, fz];
+    }
+    const gap = Math.min(0.025, w * 0.035, h * 0.025), width = Math.max(0.01, w - 2 * gap), height = Math.max(0.01, h - gap);
+    return { width, height, origin, tangent, inward, gap };
+}
+function buildingOpeningParamsForPosition(o) {
+    if (!buildingDoorSupported(o)) return null;
+    if (o.asset === "building") return buildingGeometry(o);
+    if (o.asset === "cornerCutBox") return cornerCutOpeningParams(o);
+    return stackedOpeningParams(o, o.floors?.[0]);
+}
+function buildingOpeningPosition(o) {
+    const door = buildingDoorOpening(o); if (!door) return null;
+    const p = buildingOpeningParamsForPosition(o);
+    return { origin: door.origin, tangent: door.tangent, height: door.height, value: p.openingOffset, limit: p.offsetLimit };
+}
+function buildingOpeningEditConstraint(next, previous, patch) {
+    if (next?.openingOffset == null || !buildingDoorSupported(next)) return next;
+    const old = buildingOpeningParamsForPosition(previous), offset = Math.abs(old?.openingOffset || 0),
+        widthKey = next.asset === "cornerCutBox" ? "cornerCutOpeningW" : "openingW";
+    if (offset > 1e-9 && Object.prototype.hasOwnProperty.call(patch, widthKey)) {
+        let maxWidth;
+        if (previous.asset === "cornerCutBox" || previous.asset === "cornerCutStackedBuilding")
+            maxWidth = (old.corner || old).maxWidth - 2 * offset;
+        else {
+            const bevel = previous.asset === "beveledStackedBuilding" ? Math.max(0, (old.w - old.openingW) / 2 - old.offsetLimit - .05) : 0;
+            maxWidth = old.w - .1 - 2 * (offset + bevel);
+        }
+        next[widthKey] = clamp(Number(next[widthKey]) || 0.1, 0.1, Math.max(0.1, maxWidth));
+    }
+    next.openingOffset = buildingOpeningParamsForPosition(next).openingOffset;
+    return next;
+}
+function buildingDoorPoint(spec, x, depth, z) {
+    return [spec.origin[0] + spec.tangent[0] * x + spec.inward[0] * depth,
+            spec.origin[1] + spec.tangent[1] * x + spec.inward[1] * depth, spec.origin[2] + z];
+}
+function buildingDoorLines(o) {
+    if (o?.doorEnabled !== true) return [];
+    const g = buildingDoorOpening(o); if (!g) return [];
+    const w = g.width, h = g.height, x = w / 2, base = g.gap, depth = .006,
+        type = ["shutter", "double", "convenience"].includes(o.doorType) ? o.doorType : "shutter",
+        col = o.c || "#222222", out = [],
+        line = points => out.push({ ...customLineA(o, points.map(p => buildingDoorPoint(g, p[0], depth, base + p[1])), col, 1.15), onFace: true, preciseTubeEdge: true, tubeContourView: orthView || "3d", doorGeometry: true }),
+        rect = (x0,z0,x1,z1) => line([[x0,z0],[x1,z0],[x1,z1],[x0,z1],[x0,z0]]);
+    rect(-x, 0, x, h);
+    if (type === "shutter") {
+        const n = clamp(Math.round(h / .18), 4, 24);
+        for (let i = 1; i < n; i++) line([[-x, h * i / n], [x, h * i / n]]);
+        const handle = Math.min(.16, w * .17), z = h * .12;
+        line([[-handle,z],[handle,z]]);
+    } else {
+        line([[0,0],[0,h]]);
+        const frame = Math.min(.055, w * .06, h * .06);
+        for (const side of [-1,1]) {
+            const a = side < 0 ? -x + frame : frame, b = side < 0 ? -frame : x - frame;
+            if (b <= a) continue;
+            if (type === "double") {
+                rect(a, h * .14, b, h * .46); rect(a, h * .55, b, h * .88);
+                const hx = side * Math.min(w * .07, .09), hz = h * .5;
+                line([[hx,hz-.045*h],[hx,hz+.045*h]]);
+            } else {
+                rect(a, frame, b, h - frame);
+                const hx = side * Math.min(w * .065, .09);
+                line([[hx,h*.36],[hx,h*.58]]);
+                const span = b - a;
+                line([[a+span*.18,h*.72],[a+span*.37,h*.84]]);
+                line([[a+span*.18,h*.65],[a+span*.30,h*.73]]);
+            }
+        }
+    }
+    return out;
+}
+function buildingDoorTriangles(o) {
+    if (o?.doorEnabled !== true) return [];
+    const g = buildingDoorOpening(o); if (!g) return [];
+    const x = g.width / 2, z0 = g.gap, z1 = z0 + g.height,
+        local = [[-x,z0],[x,z0],[x,z1],[-x,z1]].map(p => buildingDoorPoint(g,p[0],.008,p[1])),
+        p = local.map(q => customPt(o,...q)), type = o.doorType || "shutter",
+        color = type === "double" ? "#a38b76" : type === "convenience" ? "#9ec4cc" : "#aab4bd",
+        tris = [[p[0],p[1],p[2]],[p[0],p[2],p[3]]];
+    tris.forEach(t => { t.surfaceColor = color; });
+    return tris;
+}
 // 正規化済みアセットを線画へ変換する入口。
 function genAsset(o) {
     const q = normalizedAsset(o);
-    return assetLines(q).map((s) => ({ ...s, ob: q, d3: true, cs: sigNow() }));
+    return [...assetLines(q), ...buildingDoorLines(q)].map((s) => ({ ...s, ob: q, d3: true, cs: sigNow() }));
 }
 
 // ===== 9. 既存エンジンへの接続 =====

@@ -153,6 +153,13 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>方向</span><select id=arrayAxis><option value=x>X（左右）</option><option value=y>Y（地面の奥行き）</option><option value=z>Z（高さ）</option></select></label>
 <div class=note>間隔は中心から中心までの距離。マイナスで反対方向に並びます。方向はギズモと同じワールド軸です（位置欄のY・Zとは表記が異なります）。複数選択した場合は全てに適用します。複雑な形状や多数のコピーは表示が重くなる場合があります。</div>
 </div></div>
+<div id=buildingDoorP style="display:none"><h3>開口の扉</h3>
+<label id=buildingOpeningPositionRow><span>開口の左右</span><input type=number id=buildingOpeningOffset step=0.05 style="width:100px"><span class=un>m</span></label>
+<button id=buildingDoorCenter type=button>扉を中央へ</button>
+<label><input type=checkbox id=buildingDoorEnabled> 扉をつける</label>
+<label id=buildingDoorTypeRow style="display:none"><span>扉の種類</span><select id=buildingDoorType><option value=shutter>ガレージシャッター</option><option value=double>両開きドア</option><option value=convenience>コンビニ風のガラスドア</option></select></label>
+<div id=buildingDoorNote class=note>扉は閉じた状態で、開口の幅・高さに合わせて作られます。</div>
+</div>
 <div id=stairsP style="display:none"><h3>階段1</h3>
 <label><span>段数</span><input type=number id=stairsSteps min=2 max=24 step=1 value=6 style="width:100px"><span class=un>段</span></label>
 <label><input id=stairsRail type=checkbox> 手すりをつける</label>
@@ -1623,6 +1630,8 @@ function setOb(id, patch) {
         return false;
     }
     let next = { ...o, ...patch };
+    // 開口幅の編集では、すでに動かした開口の中心を可能な限り固定する。
+    if (typeof buildingOpeningEditConstraint === "function") next = buildingOpeningEditConstraint(next, o, patch || {});
     // 登録アセットが寸法の安全範囲を宣言した場合、数値欄とギズモの双方で守る。
     const assetMeta = next.type === "asset" && typeof ASSETS !== "undefined" ? ASSETS[next.asset] : null;
     if (typeof assetMeta?.constrainEdit === "function") next = assetMeta.constrainEdit(next, o, patch || {}) || next;
