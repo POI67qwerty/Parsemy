@@ -152,18 +152,25 @@ function surfaceTriangles(o) {
     if (!o || typeof o !== "object") return exportSurfaceTriangles(o);
     // 親へ接着しているパーツは、親の移動・回転が o 側の基準（wallSideBasis）へ
     // 反映されてから値を見る。反映前のキーで照合すると古い面が残る。
-    if (o.attachment && typeof syncAttachedPart === "function") syncAttachedPart(o);
-    const key = surfaceCacheKey(o),
+    const source = o.attachment && typeof syncAttachedPart === "function" ? syncAttachedPart(o) : o,
+        key = surfaceCacheKey(source),
         hit = surfaceTriCache.get(o);
     if (hit && hit.key === key) return hit.tris;
-    const tris = exportSurfaceTriangles(o);
+    const base = exportSurfaceTriangles(source), spec = arrayModifierSpec(source), tris = spec && spec.count > 1 ? [...base] : base;
+    // 面の遮蔽も各コピーに存在する。線と同じワールド軸・同じ間隔で展開する。
+    if (spec && spec.count > 1 && base.length) {
+        for (let i = 1; i < spec.count; i++) {
+            const shift = arrayModifierShift(spec, i);
+            for (const tri of base) tris.push(tri.map(p => p.map((v, j) => v + shift[j])));
+        }
+    }
     surfaceTriCache.set(o, { key, tris });
     return tris;
 }
 function exportSurfaceTriangles(o) {
     const out = [];
     if (o?.type === "compound") {
-        compoundPartsAt(o).forEach((part) => out.push(...exportSurfaceTriangles(part)));
+        compoundPartsAt(o).forEach((part) => out.push(...surfaceTriangles(part)));
         return out;
     }
     // ASSET_KIT（asset-kit.js）で作ったアセットは、形の記述が1か所にある。
@@ -1659,7 +1666,7 @@ function updateSeamPicks(depth, cw, ch, tf) {
         // 左右の角で、前側の縦線が丸ごと欠けた）。
         const sc = seamEdgeScore(a, b, depth, cw, ch),
             score = sc.edge * 0.6 + sc.vis * 0.4,
-            key = (s.ob.id || "") + ":" + s.seam,
+            key = (s.ob.id || "") + ":" + (s.arraySeamKey ? s.arraySeamKey + ":" : "") + s.seam,
             cur = best.get(key);
         if (!cur || score > cur.score) best.set(key, { score, vis: sc.vis, s, mz: (a.depth + b.depth) / 2 });
     }
@@ -1893,7 +1900,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     // 何も描かれない（実測：凹窓階層建物の窓間仕切りが全部消えていた）。
     // 生成側が onFace を立てた線だけ、面の内側判定を通す。
     const onFace = !!s.onFace,
-        preciseSignalEdge = (s.signalPoleTopRing && !window.__legacyPoleRay) || (s.signalSmoothSide && !window.__legacySignalSmoothRay) || !!s.preciseTubeEdge,
+        preciseSignalEdge = (s.signalPoleTopRing && !window.__legacyPoleRay) || (s.signalSmoothSide && !window.__legacySignalSmoothRay) || !!s.preciseTubeEdge || !!s.arrayGeometry,
         poleTip = s.signalPoleSide && !window.__legacyPoleRay && s.p?.length ? projPoint(s.p[s.p.length-1], tf) : null,
         preciseSignalAt = e => preciseSignalEdge || !!(poleTip?.ok && Math.hypot(e.x-poleTip.x,e.y-poleTip.y) < 24*Math.max(1,Math.abs(tf[0] || 1)));
     // 線全体を数点だけ見て省略すると、試験点の間にある開口や遮蔽物の切れ目で
@@ -2397,7 +2404,7 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
         fishVisiblePixels=fishBlockedPixels ? new Int32Array(cw*ch) : null;
     } else {
         fishBlockedPixels = null; fishVisiblePixels = null;
-        if (hiddenDepth && S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyPoleRay && s.signalPoleTopRing) || (!window.__legacySignalSmoothRay && s.signalSmoothSide) || s.preciseTubeEdge || (!orthView && T !== "f" && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge)))))) prepareFishLineOccluders();
+        if (hiddenDepth && S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyPoleRay && s.signalPoleTopRing) || (!window.__legacySignalSmoothRay && s.signalSmoothSide) || s.preciseTubeEdge || s.arrayGeometry || (!orthView && T !== "f" && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge)))))) prepareFishLineOccluders();
         else fishLineOccluders = null;
     }
     // ベベルの縦線は「角ごとに輪郭の1本」だけ描く（面ONのとき）。

@@ -294,7 +294,23 @@
                 .reverse()
                 .find((o) => {
                     if (!o || !objectVisible(o)) return false;
-                    const b = obBounds(o);
+                    const b = obBounds(o), spec = arrayModifierSpec(o);
+                    // 配列はコピーごとに当たり判定する。隙間では選択しない。
+                    if (spec && spec.count > 1) {
+                        const generic = o.type === "compound" || o.k !== 1 || (o.type === "asset" && o.asset === "pathPipe") || o.attachment?.wallSideSign,
+                            baseBounds = generic ? boundsWithoutArray(o) : null,
+                            base = generic ? null : L2W(o, 0, 0, 0), a = (Number(o.rot) || 0) * DG;
+                        for (let i = 0; i < spec.count; i++) {
+                            const shift = arrayModifierShift(spec, i), x = w.x - shift[0], z = w.z - shift[2];
+                            if (generic) {
+                                if (x >= baseBounds.lo[0] - .08 && x <= baseBounds.hi[0] + .08 && z >= baseBounds.lo[2] - .08 && z <= baseBounds.hi[2] + .08) return true;
+                            } else {
+                                const dx = x - base[0], dz = z - base[2], cx = dx * Math.cos(a) + dz * Math.sin(a), cz = -dx * Math.sin(a) + dz * Math.cos(a);
+                                if (Math.abs(cx) <= Math.abs(Number(o.ra) || .25) + .08 && Math.abs(cz) <= Math.abs(Number(o.rb) || .25) + .08) return true;
+                            }
+                        }
+                        return false;
+                    }
                     // パスパイプは折れ線＋半径で外接範囲が決まるため、
                     // ra/rbの初期矩形ではなく実メッシュの範囲でヒット判定する。
                     if (
@@ -331,20 +347,26 @@
                 .reverse()
                 .find((o) => {
                     if (!o || !objectVisible(o)) return false;
-                    const b = obBounds(o),
-                        pts = [];
-                    for (const x of [b.lo[0], b.hi[0]])
-                        for (const y of [b.lo[1], b.hi[1]])
-                            for (const z of [b.lo[2], b.hi[2]]) {
-                                const q = scrW([x, y, z]);
-                                if (q.ok) pts.push(q);
-                            }
-                    if (!pts.length) return false;
-                    const x0 = Math.min(...pts.map((q) => q.x)) - 14 / Z,
-                        x1 = Math.max(...pts.map((q) => q.x)) + 14 / Z,
-                        y0 = Math.min(...pts.map((q) => q.y)) - 14 / Z,
-                        y1 = Math.max(...pts.map((q) => q.y)) + 14 / Z;
-                    return p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
+                    const spec = arrayModifierSpec(o),
+                        b = spec && spec.count > 1 ? boundsWithoutArray(o) : obBounds(o),
+                        count = spec && spec.count > 1 ? spec.count : 1;
+                    // 正面・横でも一つの大きな外接箱ではなく、各コピーを個別に判定する。
+                    for (let i = 0; i < count; i++) {
+                        const d = count > 1 ? arrayModifierShift(spec, i) : [0, 0, 0], pts = [];
+                        for (const x of [b.lo[0], b.hi[0]])
+                            for (const y of [b.lo[1], b.hi[1]])
+                                for (const z of [b.lo[2], b.hi[2]]) {
+                                    const q = scrW([x + d[0], y + d[1], z + d[2]]);
+                                    if (q.ok) pts.push(q);
+                                }
+                        if (!pts.length) continue;
+                        const x0 = Math.min(...pts.map((q) => q.x)) - 14 / Z,
+                            x1 = Math.max(...pts.map((q) => q.x)) + 14 / Z,
+                            y0 = Math.min(...pts.map((q) => q.y)) - 14 / Z,
+                            y1 = Math.max(...pts.map((q) => q.y)) + 14 / Z;
+                        if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1) return true;
+                    }
+                    return false;
                 }) || null
         );
     }
@@ -1297,7 +1319,7 @@
         if (h.object) {
             const o = h.object.o,
                 [z0, z1] = floorPlanObjectZRange(o),
-                pathBounds = o.type === "asset" && o.asset === "pathPipe" ? obBounds(o) : null,
+                pathBounds = (o.type === "asset" && o.asset === "pathPipe") || arrayModifierSpec(o)?.count > 1 ? obBounds(o) : null,
                 boundsCenter = pathBounds
                     ? [
                           (pathBounds.lo[0] + pathBounds.hi[0]) / 2,

@@ -316,7 +316,7 @@ canvas {
     color: #effffb !important;
     box-shadow: 0 2px 9px rgba(0, 0, 0, 0.18);
 }
-.workspaceScreen[hidden] {
+.workspaceScreen[hidden], #activeReferenceAction[hidden] {
     display: none !important;
 }
 .screenLead {

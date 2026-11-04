@@ -3887,7 +3887,7 @@ function genAsset(o) {
 // assetだけをgenAssetへ振り分ける。通常のrect/box/circは従来処理のまま。
 const baseGenShape = genShape;
 genShape = function (o) {
-    return o && o.type === "asset" ? genAsset(o) : baseGenShape(o);
+    return arrayModifierLines(o, q => q && q.type === "asset" ? genAsset(q) : baseGenShape(q));
 };
 // アセットの外接範囲もここで計算する。
 // 選択枠、間取りのヒット判定、ボックス選択、移動ギズモが同じ範囲を使う。
@@ -4013,6 +4013,40 @@ obBounds = function (o) {
         }),
     );
     return { lo, hi };
+};
+// 配列全体の範囲を、選択・フィット・スナップ・出力範囲に反映する。
+const boundsWithoutArray = obBounds, arrayBoundsCache = new WeakMap();
+obBounds = function (o) {
+    const b = boundsWithoutArray(o), spec = arrayModifierSpec(o);
+    if (!b || !spec || spec.count < 2) return b;
+    const objectKey = surfaceCacheKey(o), key = objectKey + "|" + sigNow() + "|" + orthoProjectionKey(), cached = arrayBoundsCache.get(o);
+    if (cached && cached.key === key && cached.scene === S) return cached.bounds;
+    const shift = arrayModifierShift(spec, spec.count - 1),
+        bounds = { lo: b.lo.map((v, i) => v + Math.min(0, shift[i])), hi: b.hi.map((v, i) => v + Math.max(0, shift[i])) };
+    // 既存の形状範囲が薄い面の厚さ等を含まない場合も、配列全体の面を収める。
+    for (const tri of surfaceTriangles(o)) for (const p of tri) for (let j = 0; j < 3; j++) {
+        bounds.lo[j] = Math.min(bounds.lo[j], p[j]);
+        bounds.hi[j] = Math.max(bounds.hi[j], p[j]);
+    }
+    // 円の線は面の離散頂点より外へ出ることがあるので、連続円の極値で補う。
+    if (o.type === "circ") for (const z of [0, Math.max(0, Number(o.h) || 0)]) {
+        const c = L2W(o, 0, 0, z), a = L2W(o, o.ra, 0, z), d = L2W(o, 0, o.rb, z);
+        for (let j = 0; j < 3; j++) {
+            const radius = Math.hypot(a[j] - c[j], d[j] - c[j]);
+            bounds.lo[j] = Math.min(bounds.lo[j], c[j] - radius + Math.min(0, shift[j]));
+            bounds.hi[j] = Math.max(bounds.hi[j], c[j] + radius + Math.max(0, shift[j]));
+        }
+    }
+    // 面より外へ出る補助輪郭（人物の身長線、球の表示輪郭など）も収める。
+    // 現在の生成線があれば再利用し、仮の定義にはその定義から線を作る。
+    const first = S.find(s => s.ob?.id === o.id),
+        lines = first && surfaceCacheKey(first.ob) === objectKey ? S.filter(s => s.ob?.id === o.id) : genShape(o);
+    for (const line of lines) for (const p of line.p || []) for (let j = 0; j < 3; j++) {
+        bounds.lo[j] = Math.min(bounds.lo[j], p[j]);
+        bounds.hi[j] = Math.max(bounds.hi[j], p[j]);
+    }
+    arrayBoundsCache.set(o, { key, bounds, scene: S });
+    return bounds;
 };
 // ===== 10. 初期化 =====
 // すでに自動保存されているオブジェクトも、今回の円柱・球・看板の新しい線画へ更新する。

@@ -144,6 +144,19 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>位置 X(赤)</span><input type=number class=nv id=ov_px step=0.05 style="width:100px"></label>
 <label><span>位置 Y(高さ)</span><input type=number class=nv id=ov_py step=0.05 style="width:100px"></label>
 <label><span>位置 Z(緑)</span><input type=number class=nv id=ov_pz step=0.05 style="width:100px"></label>
+<div id=arrayModifierP>
+<h3>配列</h3>
+<label><input type=checkbox id=arrayEnabled> 配列を適用</label>
+<div id=arrayModifierFields style="display:none">
+<label><span>個数（元を含む）</span><input type=number id=arrayCount min=1 max=100 step=1 value=3 style="width:100px"></label>
+<label><span>間隔</span><input type=number id=arraySpacing min=-100 max=100 step=0.1 value=1.5 style="width:100px"><span class=un>m</span></label>
+<label><span>方向</span><select id=arrayAxis><option value=x>X（左右）</option><option value=y>Y（地面の奥行き）</option><option value=z>Z（高さ）</option></select></label>
+<div class=note>間隔は中心から中心までの距離。マイナスで反対方向に並びます。方向はギズモと同じワールド軸です（位置欄のY・Zとは表記が異なります）。複数選択した場合は全てに適用します。複雑な形状や多数のコピーは表示が重くなる場合があります。</div>
+</div></div>
+<div id=stairsP style="display:none"><h3>階段1</h3>
+<label><span>段数</span><input type=number id=stairsSteps min=2 max=24 step=1 value=6 style="width:100px"><span class=un>段</span></label>
+<label><input id=stairsRail type=checkbox> 手すりをつける</label>
+</div>
 <div id=signShapeP style="display:none"><h3>標識の形</h3>
 <label><span>板の枚数</span><select id=signCountSel><option value="1">1枚</option><option value="2">2枚</option></select></label>
 <label><span>板の形</span><select id=signShapeSel><option value="circle">丸</option><option value="triangle">逆三角形</option><option value="rect">四角</option><option value="diamond">ひし形</option></select></label>
@@ -333,11 +346,6 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <h3>消しゴム（上の「消しゴム」ボタンでON/OFF）</h3>
 <label><span>方式</span><select id=em><option value=part>部分消し<option value=all>線ごと消す</select></label>
 ${R("ew", "大きさ", 4, 150, 1, "px")}
-<h3>参考写真</h3>
-<label><input type=file id=ph accept="image/*"></label>
-${R("pa", "写真の濃さ", 0, 1, 0.05)}
-<label><button id=phx>写真を外す</button></label>
-<div class="note">貼り付け(Ctrl+V)・ドロップも可</div>
 <h3>保存</h3>
 <div class="note">上の「保存」で今の状態（視点・設定・線画・写真）をファイルに保存し、「開く」で続きから再開できます。<br>このブラウザには3秒ごとに自動保存され、次に開いたとき自動で復元されます。</div>
 <label><button id=rst>自動保存を消して初期化</button></label>
@@ -355,7 +363,6 @@ ${R("pa", "写真の濃さ", 0, 1, 0.05)}
             "編集・スナップ",
             "書き出し範囲",
             "消しゴム",
-            "参考写真",
             "保存",
             "読み取り",
         ];
@@ -1023,6 +1030,7 @@ function translateDefinition(o, vec) {
         };
     }
     const q = { ...o, off: [...(o.off || [0, 0, 0])] };
+    if (o.wallSideBasis?.origin) q.wallSideBasis = { ...o.wallSideBasis, origin: o.wallSideBasis.origin.map((v, i) => v + vec[i]) };
     // 回転中心も同じ量だけ動かす（形と中心が一緒に動くので、回しても軸がずれない）。
     const sp = o.spinPivot;
     if (sp && Number.isFinite(sp[0])) q.spinPivot = [sp[0] + vec[0], sp[1] + vec[1], sp[2] + vec[2]];
@@ -1055,9 +1063,36 @@ function compoundPartsAt(o) {
 // ここでも同じ入口を通す。以前は genShapeCore を直接呼んでいたため、
 // アセットの部品だけ線が出ず、アセットだけの結合体は丸ごと消えていた（旧JSONで発生）。
 // 重複よけの印は、部品をまたいで付けたいので呼び出し元の genShape でまとめて行う。
+// 配列は、元を含む個数と隣同士の実寸間隔で指定する。軸はBlenderに合わせ
+// X=左右、Y=地面上の奥行き、Z=高さ（内部座標ではYとZが入れ替わる）。
+function arrayModifierSpec(o) {
+    if (!o || o.arrayEnabled !== true) return null;
+    const count = clamp(Math.round(Number.isFinite(Number(o.arrayCount)) ? Number(o.arrayCount) : 3), 1, 100),
+        spacing = clamp(Number.isFinite(Number(o.arraySpacing)) ? Number(o.arraySpacing) : 1.5, -100, 100),
+        axis = ["x", "y", "z"].includes(o.arrayAxis) ? o.arrayAxis : "x",
+        vector = axis === "x" ? [1, 0, 0] : axis === "y" ? [0, 0, 1] : [0, 1, 0];
+    return { count, spacing, axis, vector };
+}
+function arrayModifierShift(spec, index) {
+    return spec.vector.map(v => v * spec.spacing * index);
+}
+// 各コピーはカメラに対する輪郭をそれぞれ生成する（元の画面線の単純平行移動ではない）。
+// 定義IDは元に揃え、どのコピーを選んでも一つの編集可能な配列として扱う。
+function arrayModifierLines(o, generate) {
+    const source = o?.attachment ? syncAttachedPart(o) : o,
+        base = generate(source), spec = arrayModifierSpec(source);
+    if (!spec || spec.count < 2 || !base.length) return base;
+    const seamKey = (line, i) => `${o.id || "part"}#${i}/${line.arraySeamKey || ""}`,
+        out = base.map(line => ({ ...line, arrayGeometry: true, arraySeamKey: seamKey(line, 0) })), master = base[0].ob || o;
+    for (let i = 1; i < spec.count; i++) {
+        const shifted = detachPart(translateDefinition(source, arrayModifierShift(spec, i)));
+        shifted.arrayEnabled = false;
+        for (const line of generate(shifted)) out.push({ ...line, ob: master, arrayGeometry: true, arrayCopyIndex: i, arraySeamKey: seamKey(line, i) });
+    }
+    return out;
+}
 function partShape(part) {
-    if (part && part.type === "asset" && typeof genAsset === "function") return genAsset(part);
-    return genShapeCore(part);
+    return arrayModifierLines(part, p => p && p.type === "asset" && typeof genAsset === "function" ? genAsset(p) : genShapeCore(p));
 }
 function genCompoundShape(ob) {
     const out = [];
@@ -1893,6 +1928,33 @@ function syncSel() {
         if (n && document.activeElement !== n) n.value = +(+v).toFixed(3);
         if (r && document.activeElement !== r) r.value = v;
     });
+    const enabled = o.arrayEnabled === true;
+    $("arrayEnabled").checked = enabled;
+    $("arrayModifierFields").style.display = enabled ? "" : "none";
+    const cfg = arrayModifierSpec({ ...o, arrayEnabled: true });
+    for (const [id, value] of [["arrayCount", cfg.count], ["arraySpacing", cfg.spacing], ["arrayAxis", cfg.axis]])
+        if (document.activeElement !== $(id)) $(id).value = String(value);
+}
+let arrayEditSession = false;
+function applyArrayModifier(patch, continuous = false) {
+    const objects = selectedObjects();
+    if (!objects.length) return;
+    if (!continuous || !arrayEditSession) { HU.push(S); RD = []; }
+    arrayEditSession = continuous;
+    objects.forEach(o => setOb(o.id, patch));
+    render();
+}
+$("arrayEnabled").onchange = e => { arrayEditSession = false; applyArrayModifier({ arrayEnabled: e.target.checked }); };
+$("arrayAxis").onchange = e => { arrayEditSession = false; applyArrayModifier({ arrayAxis: e.target.value }); };
+for (const [id, key, lo, hi, integer] of [["arrayCount", "arrayCount", 1, 100, true], ["arraySpacing", "arraySpacing", -100, 100, false]]) {
+    const input = $(id);
+    input.oninput = () => {
+        if (input.value.trim() === "" || !Number.isFinite(Number(input.value))) return;
+        const n = Number(input.value), value = clamp(integer ? Math.round(n) : n, lo, hi);
+        applyArrayModifier({ [key]: value }, true);
+    };
+    input.onchange = () => { arrayEditSession = false; syncSel(); };
+    input.onblur = () => { arrayEditSession = false; };
 }
 // パネルの数値 → 図形の変更内容
 // 左パネルの幅・奥行き・高さ・回転などを、オブジェクト別の差分へ変換する。

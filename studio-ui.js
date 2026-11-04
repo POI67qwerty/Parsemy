@@ -110,12 +110,9 @@
       </div>
       <label><span>保存済み</span><select id="studioPresetSelect"><option value="">まだありません</option></select></label>
       <div class="sceneNote">カメラ・魚眼画角・レンズ・グリッド種類・補助線・表示設定などを保存します。オブジェクトと描画線は保存・変更しません。</div>
-      <div class="quickField"><span>階段の段数</span><input id="stairsSteps" type="number" min="2" max="24" step="1" value="6"><em>段</em></div>
-      <label class="quickCheck"><input id="stairsRail" type="checkbox"> 階段に手すりをつける</label>
-      <div class="quickRow"><button id="applyStairs" class="primary">選択中の階段に反映</button></div>
       <div class="quickField"><span>アセット配置距離（最小）</span><input id="assetDepth" type="number" min="1" max="80" step="0.5" value="5"><em>m</em></div>
       <div class="quickField"><span>生成方向</span><select id="assetAxis"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select><em></em></div>
-      <div class="quickRow" style="margin-top:7px"><button id="sampleRef">サンプル参照を表示</button><button id="clearRef">参照を外す</button></div>
+      <div class="quickRow" id="activeReferenceAction" hidden><button id="clearRef">表示中の参照を外す</button></div>
       <div class="floorTintBox"><label class="quickCheck"><input id="floorTint" type="checkbox"> 床に透明色をつける</label>
         <div class="quickField"><span>床の色</span><input id="floorTintColor" type="color" value="#7fa8d8"><em></em></div>
         <div class="quickField"><span>透明度</span><input id="floorTintA" type="range" min="0" max="0.60" step="0.01" value="0.16"><output id="floorTintAO">0.16</output></div>
@@ -511,15 +508,27 @@
         if (!objects.length) return;
         const wanted = new Set(objects.map((o) => o.id)),
             parts = [];
-        objects.forEach((o) =>
+        objects.forEach((o) => {
+            const outer = arrayModifierSpec(o);
             compoundPartsAt(o).forEach((source) => {
-                const q = JSON.parse(JSON.stringify(source));
-                q.id = uid();
-                delete q.groupId;
-                delete q._cityIsolationBefore; // 結合後は新しい物体として扱う
-                parts.push(q);
-            }),
-        );
+                const inner = arrayModifierSpec(source),
+                    nested = outer && outer.count > 1 && inner && inner.count > 1,
+                    repeats = nested ? outer.count : 1;
+                for (let i = 0; i < repeats; i++) {
+                    const q = JSON.parse(JSON.stringify(nested ? translateDefinition(source, arrayModifierShift(outer, i)) : source));
+                    q.id = uid();
+                    if (outer && !nested) {
+                        q.arrayEnabled = true;
+                        q.arrayCount = outer.count;
+                        q.arraySpacing = outer.spacing;
+                        q.arrayAxis = outer.axis;
+                    }
+                    delete q.groupId;
+                    delete q._cityIsolationBefore;
+                    parts.push(q);
+                }
+            });
+        });
         const lines = parts.flatMap((part) => genShape(part));
         HU.push(S);
         RD = [];
@@ -2892,8 +2901,10 @@
         el("assetEditorFields").addEventListener("change",()=>{genericAssetEditSession=false;});
     }
     function syncAssetControls() {
-        const o = sel && obOf(sel);
-        if (o && o.type === "asset" && o.asset === "stairs") {
+        const o = sel && obOf(sel), stairs = o && o.type === "asset" && o.asset === "stairs";
+        el("stairsP").style.display = stairs ? "" : "none";
+        el("activeReferenceAction").hidden = !IMG;
+        if (stairs) {
             if (document.activeElement !== el("stairsSteps")) el("stairsSteps").value = o.steps || 6;
             el("stairsRail").checked = o.handrail === true;
         }
@@ -3574,33 +3585,28 @@
         sync();
         render();
     };
-    el("applyStairs").onclick = () => {
+    // 階段1固有の設定は選択中のオブジェクト欄に置き、変更をすぐ反映する。
+    let stairStepEditingId = null;
+    el("stairsSteps").oninput = () => {
+        const o = sel && obOf(sel), input = el("stairsSteps");
+        if (!o || o.type !== "asset" || o.asset !== "stairs" || !input.value.trim() || !Number.isFinite(Number(input.value))) return;
+        const steps = clamp(Math.round(Number(input.value)), 2, 24);
+        if (stairStepEditingId !== o.id) { HU.push(S); RD = []; stairStepEditingId = o.id; }
+        setOb(o.id, { steps });
+        render();
+    };
+    el("stairsSteps").onchange = el("stairsSteps").onblur = () => { stairStepEditingId = null; syncAssetControls(); };
+    el("stairsRail").onchange = (e) => {
         const o = sel && obOf(sel);
-        if (!o || o.type !== "asset" || o.asset !== "stairs") {
-            alert("先に編集モードで階段を選択してください");
-            return;
-        }
-        const steps = Math.max(2, Math.min(24, Math.round(Number(el("stairsSteps").value) || 6))),
-            handrail = !!el("stairsRail").checked;
-        HU.push(S);
-        RD = [];
-        setOb(o.id, { steps, handrail });
+        if (!o || o.type !== "asset" || o.asset !== "stairs") return;
+        stairStepEditingId = null;
+        HU.push(S); RD = [];
+        setOb(o.id, { handrail: e.target.checked });
         render();
     };
 
-    // Reference image convenience. The supplied image is copied beside this HTML as reference-cyberpunk.jpg.
-    el("sampleRef").onclick = () => {
-        const im = new Image();
-        im.onload = () => {
-            IMG = im;
-            IMGsrc = null;
-            render();
-        };
-        im.onerror = () =>
-            alert("reference-cyberpunk.jpg が見つかりません。左の「参考写真」から画像を選んでください。");
-        im.src = "reference-cyberpunk.jpg";
-    };
-    el("clearRef").onclick = () => el("phx").click();
+    // 欄は表示しないが、旧保存や貼り付けで表示された参照だけは外せる。
+    el("clearRef").onclick = () => { IMG = null; IMGsrc = null; render(); };
 
     // ===== 5.4 書き出し・ヘルプのUI =====
     el("exportToggle").onclick = (e) => {

@@ -128,12 +128,6 @@ function loadImg(f) {
     };
     o.src = URL.createObjectURL(f);
 }
-$("ph").onchange = (e) => e.target.files[0] && loadImg(e.target.files[0]);
-$("phx").onclick = () => {
-    IMG = null;
-    IMGsrc = null;
-    render();
-};
 addEventListener("paste", (e) => {
     const f = [...e.clipboardData.files].find((f) => f.type.startsWith("image/"));
     f && loadImg(f);
@@ -233,7 +227,7 @@ function unpack(d) {
         const st = d.S.map((s) => (s.ob ? { ...s, ob: fixOb(s.ob) } : s)),
             seen = new Set(),
             out = [],
-            needsAssetUpdate = o => !!o && (["trafficSignal", "pedSignal", "railing", "streetMailbox", "streetParcel", "streetPlantBox", "squareStool", "shopWardrobe", "shopWardrobe2", "pictureStairs", "guardPoleHalf"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsAssetUpdate))),
+            needsAssetUpdate = o => !!o && (o.arrayEnabled === true || ["trafficSignal", "pedSignal", "railing", "streetMailbox", "streetParcel", "streetPlantBox", "squareStool", "shopWardrobe", "shopWardrobe2", "pictureStairs", "guardPoleHalf"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsAssetUpdate))),
             regenerate = s => !!s.ob && (!s.d3 || needsAssetUpdate(s.ob));
         // 形を更新した既存アセットの保存線を新しい形へ作り直す。
         // 元の最初の線の位置へ挿入し、他の物体や手描き線との並び順も保つ。

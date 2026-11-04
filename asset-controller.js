@@ -388,8 +388,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             cornerRadius: kind === "pathPipe" ? 0.55 : undefined,
             cornerSteps: kind === "pathPipe" ? 6 : undefined,
             pipeSides: kind === "pathPipe" ? 10 : undefined,
-            steps: kind === "stairs" ? Math.round(Number(el("stairsSteps")?.value) || 6) : undefined,
-            handrail: kind === "stairs" ? !!el("stairsRail")?.checked : undefined,
+            steps: kind === "stairs" ? 6 : undefined,
+            handrail: kind === "stairs" ? false : undefined,
             stripes: kind === "crosswalk" ? 7 : undefined,
         };
     }

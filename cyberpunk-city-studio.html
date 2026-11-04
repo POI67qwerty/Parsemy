@@ -534,7 +534,7 @@ canvas {
     color: #effffb !important;
     box-shadow: 0 2px 9px rgba(0, 0, 0, 0.18);
 }
-.workspaceScreen[hidden] {
+.workspaceScreen[hidden], #activeReferenceAction[hidden] {
     display: none !important;
 }
 .screenLead {
@@ -2086,6 +2086,19 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>位置 X(赤)</span><input type=number class=nv id=ov_px step=0.05 style="width:100px"></label>
 <label><span>位置 Y(高さ)</span><input type=number class=nv id=ov_py step=0.05 style="width:100px"></label>
 <label><span>位置 Z(緑)</span><input type=number class=nv id=ov_pz step=0.05 style="width:100px"></label>
+<div id=arrayModifierP>
+<h3>配列</h3>
+<label><input type=checkbox id=arrayEnabled> 配列を適用</label>
+<div id=arrayModifierFields style="display:none">
+<label><span>個数（元を含む）</span><input type=number id=arrayCount min=1 max=100 step=1 value=3 style="width:100px"></label>
+<label><span>間隔</span><input type=number id=arraySpacing min=-100 max=100 step=0.1 value=1.5 style="width:100px"><span class=un>m</span></label>
+<label><span>方向</span><select id=arrayAxis><option value=x>X（左右）</option><option value=y>Y（地面の奥行き）</option><option value=z>Z（高さ）</option></select></label>
+<div class=note>間隔は中心から中心までの距離。マイナスで反対方向に並びます。方向はギズモと同じワールド軸です（位置欄のY・Zとは表記が異なります）。複数選択した場合は全てに適用します。複雑な形状や多数のコピーは表示が重くなる場合があります。</div>
+</div></div>
+<div id=stairsP style="display:none"><h3>階段1</h3>
+<label><span>段数</span><input type=number id=stairsSteps min=2 max=24 step=1 value=6 style="width:100px"><span class=un>段</span></label>
+<label><input id=stairsRail type=checkbox> 手すりをつける</label>
+</div>
 <div id=signShapeP style="display:none"><h3>標識の形</h3>
 <label><span>板の枚数</span><select id=signCountSel><option value="1">1枚</option><option value="2">2枚</option></select></label>
 <label><span>板の形</span><select id=signShapeSel><option value="circle">丸</option><option value="triangle">逆三角形</option><option value="rect">四角</option><option value="diamond">ひし形</option></select></label>
@@ -2275,11 +2288,6 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <h3>消しゴム（上の「消しゴム」ボタンでON/OFF）</h3>
 <label><span>方式</span><select id=em><option value=part>部分消し<option value=all>線ごと消す</select></label>
 ${R("ew", "大きさ", 4, 150, 1, "px")}
-<h3>参考写真</h3>
-<label><input type=file id=ph accept="image/*"></label>
-${R("pa", "写真の濃さ", 0, 1, 0.05)}
-<label><button id=phx>写真を外す</button></label>
-<div class="note">貼り付け(Ctrl+V)・ドロップも可</div>
 <h3>保存</h3>
 <div class="note">上の「保存」で今の状態（視点・設定・線画・写真）をファイルに保存し、「開く」で続きから再開できます。<br>このブラウザには3秒ごとに自動保存され、次に開いたとき自動で復元されます。</div>
 <label><button id=rst>自動保存を消して初期化</button></label>
@@ -2297,7 +2305,6 @@ ${R("pa", "写真の濃さ", 0, 1, 0.05)}
             "編集・スナップ",
             "書き出し範囲",
             "消しゴム",
-            "参考写真",
             "保存",
             "読み取り",
         ];
@@ -2965,6 +2972,7 @@ function translateDefinition(o, vec) {
         };
     }
     const q = { ...o, off: [...(o.off || [0, 0, 0])] };
+    if (o.wallSideBasis?.origin) q.wallSideBasis = { ...o.wallSideBasis, origin: o.wallSideBasis.origin.map((v, i) => v + vec[i]) };
     // 回転中心も同じ量だけ動かす（形と中心が一緒に動くので、回しても軸がずれない）。
     const sp = o.spinPivot;
     if (sp && Number.isFinite(sp[0])) q.spinPivot = [sp[0] + vec[0], sp[1] + vec[1], sp[2] + vec[2]];
@@ -2997,9 +3005,36 @@ function compoundPartsAt(o) {
 // ここでも同じ入口を通す。以前は genShapeCore を直接呼んでいたため、
 // アセットの部品だけ線が出ず、アセットだけの結合体は丸ごと消えていた（旧JSONで発生）。
 // 重複よけの印は、部品をまたいで付けたいので呼び出し元の genShape でまとめて行う。
+// 配列は、元を含む個数と隣同士の実寸間隔で指定する。軸はBlenderに合わせ
+// X=左右、Y=地面上の奥行き、Z=高さ（内部座標ではYとZが入れ替わる）。
+function arrayModifierSpec(o) {
+    if (!o || o.arrayEnabled !== true) return null;
+    const count = clamp(Math.round(Number.isFinite(Number(o.arrayCount)) ? Number(o.arrayCount) : 3), 1, 100),
+        spacing = clamp(Number.isFinite(Number(o.arraySpacing)) ? Number(o.arraySpacing) : 1.5, -100, 100),
+        axis = ["x", "y", "z"].includes(o.arrayAxis) ? o.arrayAxis : "x",
+        vector = axis === "x" ? [1, 0, 0] : axis === "y" ? [0, 0, 1] : [0, 1, 0];
+    return { count, spacing, axis, vector };
+}
+function arrayModifierShift(spec, index) {
+    return spec.vector.map(v => v * spec.spacing * index);
+}
+// 各コピーはカメラに対する輪郭をそれぞれ生成する（元の画面線の単純平行移動ではない）。
+// 定義IDは元に揃え、どのコピーを選んでも一つの編集可能な配列として扱う。
+function arrayModifierLines(o, generate) {
+    const source = o?.attachment ? syncAttachedPart(o) : o,
+        base = generate(source), spec = arrayModifierSpec(source);
+    if (!spec || spec.count < 2 || !base.length) return base;
+    const seamKey = (line, i) => `${o.id || "part"}#${i}/${line.arraySeamKey || ""}`,
+        out = base.map(line => ({ ...line, arrayGeometry: true, arraySeamKey: seamKey(line, 0) })), master = base[0].ob || o;
+    for (let i = 1; i < spec.count; i++) {
+        const shifted = detachPart(translateDefinition(source, arrayModifierShift(spec, i)));
+        shifted.arrayEnabled = false;
+        for (const line of generate(shifted)) out.push({ ...line, ob: master, arrayGeometry: true, arrayCopyIndex: i, arraySeamKey: seamKey(line, i) });
+    }
+    return out;
+}
 function partShape(part) {
-    if (part && part.type === "asset" && typeof genAsset === "function") return genAsset(part);
-    return genShapeCore(part);
+    return arrayModifierLines(part, p => p && p.type === "asset" && typeof genAsset === "function" ? genAsset(p) : genShapeCore(p));
 }
 function genCompoundShape(ob) {
     const out = [];
@@ -3835,6 +3870,33 @@ function syncSel() {
         if (n && document.activeElement !== n) n.value = +(+v).toFixed(3);
         if (r && document.activeElement !== r) r.value = v;
     });
+    const enabled = o.arrayEnabled === true;
+    $("arrayEnabled").checked = enabled;
+    $("arrayModifierFields").style.display = enabled ? "" : "none";
+    const cfg = arrayModifierSpec({ ...o, arrayEnabled: true });
+    for (const [id, value] of [["arrayCount", cfg.count], ["arraySpacing", cfg.spacing], ["arrayAxis", cfg.axis]])
+        if (document.activeElement !== $(id)) $(id).value = String(value);
+}
+let arrayEditSession = false;
+function applyArrayModifier(patch, continuous = false) {
+    const objects = selectedObjects();
+    if (!objects.length) return;
+    if (!continuous || !arrayEditSession) { HU.push(S); RD = []; }
+    arrayEditSession = continuous;
+    objects.forEach(o => setOb(o.id, patch));
+    render();
+}
+$("arrayEnabled").onchange = e => { arrayEditSession = false; applyArrayModifier({ arrayEnabled: e.target.checked }); };
+$("arrayAxis").onchange = e => { arrayEditSession = false; applyArrayModifier({ arrayAxis: e.target.value }); };
+for (const [id, key, lo, hi, integer] of [["arrayCount", "arrayCount", 1, 100, true], ["arraySpacing", "arraySpacing", -100, 100, false]]) {
+    const input = $(id);
+    input.oninput = () => {
+        if (input.value.trim() === "" || !Number.isFinite(Number(input.value))) return;
+        const n = Number(input.value), value = clamp(integer ? Math.round(n) : n, lo, hi);
+        applyArrayModifier({ [key]: value }, true);
+    };
+    input.onchange = () => { arrayEditSession = false; syncSel(); };
+    input.onblur = () => { arrayEditSession = false; };
 }
 // パネルの数値 → 図形の変更内容
 // 左パネルの幅・奥行き・高さ・回転などを、オブジェクト別の差分へ変換する。
@@ -10144,18 +10206,25 @@ function surfaceTriangles(o) {
     if (!o || typeof o !== "object") return exportSurfaceTriangles(o);
     // 親へ接着しているパーツは、親の移動・回転が o 側の基準（wallSideBasis）へ
     // 反映されてから値を見る。反映前のキーで照合すると古い面が残る。
-    if (o.attachment && typeof syncAttachedPart === "function") syncAttachedPart(o);
-    const key = surfaceCacheKey(o),
+    const source = o.attachment && typeof syncAttachedPart === "function" ? syncAttachedPart(o) : o,
+        key = surfaceCacheKey(source),
         hit = surfaceTriCache.get(o);
     if (hit && hit.key === key) return hit.tris;
-    const tris = exportSurfaceTriangles(o);
+    const base = exportSurfaceTriangles(source), spec = arrayModifierSpec(source), tris = spec && spec.count > 1 ? [...base] : base;
+    // 面の遮蔽も各コピーに存在する。線と同じワールド軸・同じ間隔で展開する。
+    if (spec && spec.count > 1 && base.length) {
+        for (let i = 1; i < spec.count; i++) {
+            const shift = arrayModifierShift(spec, i);
+            for (const tri of base) tris.push(tri.map(p => p.map((v, j) => v + shift[j])));
+        }
+    }
     surfaceTriCache.set(o, { key, tris });
     return tris;
 }
 function exportSurfaceTriangles(o) {
     const out = [];
     if (o?.type === "compound") {
-        compoundPartsAt(o).forEach((part) => out.push(...exportSurfaceTriangles(part)));
+        compoundPartsAt(o).forEach((part) => out.push(...surfaceTriangles(part)));
         return out;
     }
     // ASSET_KIT（asset-kit.js）で作ったアセットは、形の記述が1か所にある。
@@ -11651,7 +11720,7 @@ function updateSeamPicks(depth, cw, ch, tf) {
         // 左右の角で、前側の縦線が丸ごと欠けた）。
         const sc = seamEdgeScore(a, b, depth, cw, ch),
             score = sc.edge * 0.6 + sc.vis * 0.4,
-            key = (s.ob.id || "") + ":" + s.seam,
+            key = (s.ob.id || "") + ":" + (s.arraySeamKey ? s.arraySeamKey + ":" : "") + s.seam,
             cur = best.get(key);
         if (!cur || score > cur.score) best.set(key, { score, vis: sc.vis, s, mz: (a.depth + b.depth) / 2 });
     }
@@ -11885,7 +11954,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     // 何も描かれない（実測：凹窓階層建物の窓間仕切りが全部消えていた）。
     // 生成側が onFace を立てた線だけ、面の内側判定を通す。
     const onFace = !!s.onFace,
-        preciseSignalEdge = (s.signalPoleTopRing && !window.__legacyPoleRay) || (s.signalSmoothSide && !window.__legacySignalSmoothRay) || !!s.preciseTubeEdge,
+        preciseSignalEdge = (s.signalPoleTopRing && !window.__legacyPoleRay) || (s.signalSmoothSide && !window.__legacySignalSmoothRay) || !!s.preciseTubeEdge || !!s.arrayGeometry,
         poleTip = s.signalPoleSide && !window.__legacyPoleRay && s.p?.length ? projPoint(s.p[s.p.length-1], tf) : null,
         preciseSignalAt = e => preciseSignalEdge || !!(poleTip?.ok && Math.hypot(e.x-poleTip.x,e.y-poleTip.y) < 24*Math.max(1,Math.abs(tf[0] || 1)));
     // 線全体を数点だけ見て省略すると、試験点の間にある開口や遮蔽物の切れ目で
@@ -12389,7 +12458,7 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
         fishVisiblePixels=fishBlockedPixels ? new Int32Array(cw*ch) : null;
     } else {
         fishBlockedPixels = null; fishVisiblePixels = null;
-        if (hiddenDepth && S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyPoleRay && s.signalPoleTopRing) || (!window.__legacySignalSmoothRay && s.signalSmoothSide) || s.preciseTubeEdge || (!orthView && T !== "f" && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge)))))) prepareFishLineOccluders();
+        if (hiddenDepth && S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyPoleRay && s.signalPoleTopRing) || (!window.__legacySignalSmoothRay && s.signalSmoothSide) || s.preciseTubeEdge || s.arrayGeometry || (!orthView && T !== "f" && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge)))))) prepareFishLineOccluders();
         else fishLineOccluders = null;
     }
     // ベベルの縦線は「角ごとに輪郭の1本」だけ描く（面ONのとき）。
@@ -14472,12 +14541,6 @@ function loadImg(f) {
     };
     o.src = URL.createObjectURL(f);
 }
-$("ph").onchange = (e) => e.target.files[0] && loadImg(e.target.files[0]);
-$("phx").onclick = () => {
-    IMG = null;
-    IMGsrc = null;
-    render();
-};
 addEventListener("paste", (e) => {
     const f = [...e.clipboardData.files].find((f) => f.type.startsWith("image/"));
     f && loadImg(f);
@@ -14577,7 +14640,7 @@ function unpack(d) {
         const st = d.S.map((s) => (s.ob ? { ...s, ob: fixOb(s.ob) } : s)),
             seen = new Set(),
             out = [],
-            needsAssetUpdate = o => !!o && (["trafficSignal", "pedSignal", "railing", "streetMailbox", "streetParcel", "streetPlantBox", "squareStool", "shopWardrobe", "shopWardrobe2", "pictureStairs", "guardPoleHalf"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsAssetUpdate))),
+            needsAssetUpdate = o => !!o && (o.arrayEnabled === true || ["trafficSignal", "pedSignal", "railing", "streetMailbox", "streetParcel", "streetPlantBox", "squareStool", "shopWardrobe", "shopWardrobe2", "pictureStairs", "guardPoleHalf"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsAssetUpdate))),
             regenerate = s => !!s.ob && (!s.d3 || needsAssetUpdate(s.ob));
         // 形を更新した既存アセットの保存線を新しい形へ作り直す。
         // 元の最初の線の位置へ挿入し、他の物体や手描き線との並び順も保つ。
@@ -18766,7 +18829,7 @@ function genAsset(o) {
 // assetだけをgenAssetへ振り分ける。通常のrect/box/circは従来処理のまま。
 const baseGenShape = genShape;
 genShape = function (o) {
-    return o && o.type === "asset" ? genAsset(o) : baseGenShape(o);
+    return arrayModifierLines(o, q => q && q.type === "asset" ? genAsset(q) : baseGenShape(q));
 };
 // アセットの外接範囲もここで計算する。
 // 選択枠、間取りのヒット判定、ボックス選択、移動ギズモが同じ範囲を使う。
@@ -18892,6 +18955,40 @@ obBounds = function (o) {
         }),
     );
     return { lo, hi };
+};
+// 配列全体の範囲を、選択・フィット・スナップ・出力範囲に反映する。
+const boundsWithoutArray = obBounds, arrayBoundsCache = new WeakMap();
+obBounds = function (o) {
+    const b = boundsWithoutArray(o), spec = arrayModifierSpec(o);
+    if (!b || !spec || spec.count < 2) return b;
+    const objectKey = surfaceCacheKey(o), key = objectKey + "|" + sigNow() + "|" + orthoProjectionKey(), cached = arrayBoundsCache.get(o);
+    if (cached && cached.key === key && cached.scene === S) return cached.bounds;
+    const shift = arrayModifierShift(spec, spec.count - 1),
+        bounds = { lo: b.lo.map((v, i) => v + Math.min(0, shift[i])), hi: b.hi.map((v, i) => v + Math.max(0, shift[i])) };
+    // 既存の形状範囲が薄い面の厚さ等を含まない場合も、配列全体の面を収める。
+    for (const tri of surfaceTriangles(o)) for (const p of tri) for (let j = 0; j < 3; j++) {
+        bounds.lo[j] = Math.min(bounds.lo[j], p[j]);
+        bounds.hi[j] = Math.max(bounds.hi[j], p[j]);
+    }
+    // 円の線は面の離散頂点より外へ出ることがあるので、連続円の極値で補う。
+    if (o.type === "circ") for (const z of [0, Math.max(0, Number(o.h) || 0)]) {
+        const c = L2W(o, 0, 0, z), a = L2W(o, o.ra, 0, z), d = L2W(o, 0, o.rb, z);
+        for (let j = 0; j < 3; j++) {
+            const radius = Math.hypot(a[j] - c[j], d[j] - c[j]);
+            bounds.lo[j] = Math.min(bounds.lo[j], c[j] - radius + Math.min(0, shift[j]));
+            bounds.hi[j] = Math.max(bounds.hi[j], c[j] + radius + Math.max(0, shift[j]));
+        }
+    }
+    // 面より外へ出る補助輪郭（人物の身長線、球の表示輪郭など）も収める。
+    // 現在の生成線があれば再利用し、仮の定義にはその定義から線を作る。
+    const first = S.find(s => s.ob?.id === o.id),
+        lines = first && surfaceCacheKey(first.ob) === objectKey ? S.filter(s => s.ob?.id === o.id) : genShape(o);
+    for (const line of lines) for (const p of line.p || []) for (let j = 0; j < 3; j++) {
+        bounds.lo[j] = Math.min(bounds.lo[j], p[j]);
+        bounds.hi[j] = Math.max(bounds.hi[j], p[j]);
+    }
+    arrayBoundsCache.set(o, { key, bounds, scene: S });
+    return bounds;
 };
 // ===== 10. 初期化 =====
 // すでに自動保存されているオブジェクトも、今回の円柱・球・看板の新しい線画へ更新する。
@@ -22053,8 +22150,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             cornerRadius: kind === "pathPipe" ? 0.55 : undefined,
             cornerSteps: kind === "pathPipe" ? 6 : undefined,
             pipeSides: kind === "pathPipe" ? 10 : undefined,
-            steps: kind === "stairs" ? Math.round(Number(el("stairsSteps")?.value) || 6) : undefined,
-            handrail: kind === "stairs" ? !!el("stairsRail")?.checked : undefined,
+            steps: kind === "stairs" ? 6 : undefined,
+            handrail: kind === "stairs" ? false : undefined,
             stripes: kind === "crosswalk" ? 7 : undefined,
         };
     }
@@ -23187,12 +23284,9 @@ window.cityGridInstallAssetUI = function (bridge) {
       </div>
       <label><span>保存済み</span><select id="studioPresetSelect"><option value="">まだありません</option></select></label>
       <div class="sceneNote">カメラ・魚眼画角・レンズ・グリッド種類・補助線・表示設定などを保存します。オブジェクトと描画線は保存・変更しません。</div>
-      <div class="quickField"><span>階段の段数</span><input id="stairsSteps" type="number" min="2" max="24" step="1" value="6"><em>段</em></div>
-      <label class="quickCheck"><input id="stairsRail" type="checkbox"> 階段に手すりをつける</label>
-      <div class="quickRow"><button id="applyStairs" class="primary">選択中の階段に反映</button></div>
       <div class="quickField"><span>アセット配置距離（最小）</span><input id="assetDepth" type="number" min="1" max="80" step="0.5" value="5"><em>m</em></div>
       <div class="quickField"><span>生成方向</span><select id="assetAxis"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select><em></em></div>
-      <div class="quickRow" style="margin-top:7px"><button id="sampleRef">サンプル参照を表示</button><button id="clearRef">参照を外す</button></div>
+      <div class="quickRow" id="activeReferenceAction" hidden><button id="clearRef">表示中の参照を外す</button></div>
       <div class="floorTintBox"><label class="quickCheck"><input id="floorTint" type="checkbox"> 床に透明色をつける</label>
         <div class="quickField"><span>床の色</span><input id="floorTintColor" type="color" value="#7fa8d8"><em></em></div>
         <div class="quickField"><span>透明度</span><input id="floorTintA" type="range" min="0" max="0.60" step="0.01" value="0.16"><output id="floorTintAO">0.16</output></div>
@@ -23588,15 +23682,27 @@ window.cityGridInstallAssetUI = function (bridge) {
         if (!objects.length) return;
         const wanted = new Set(objects.map((o) => o.id)),
             parts = [];
-        objects.forEach((o) =>
+        objects.forEach((o) => {
+            const outer = arrayModifierSpec(o);
             compoundPartsAt(o).forEach((source) => {
-                const q = JSON.parse(JSON.stringify(source));
-                q.id = uid();
-                delete q.groupId;
-                delete q._cityIsolationBefore; // 結合後は新しい物体として扱う
-                parts.push(q);
-            }),
-        );
+                const inner = arrayModifierSpec(source),
+                    nested = outer && outer.count > 1 && inner && inner.count > 1,
+                    repeats = nested ? outer.count : 1;
+                for (let i = 0; i < repeats; i++) {
+                    const q = JSON.parse(JSON.stringify(nested ? translateDefinition(source, arrayModifierShift(outer, i)) : source));
+                    q.id = uid();
+                    if (outer && !nested) {
+                        q.arrayEnabled = true;
+                        q.arrayCount = outer.count;
+                        q.arraySpacing = outer.spacing;
+                        q.arrayAxis = outer.axis;
+                    }
+                    delete q.groupId;
+                    delete q._cityIsolationBefore;
+                    parts.push(q);
+                }
+            });
+        });
         const lines = parts.flatMap((part) => genShape(part));
         HU.push(S);
         RD = [];
@@ -25969,8 +26075,10 @@ window.cityGridInstallAssetUI = function (bridge) {
         el("assetEditorFields").addEventListener("change",()=>{genericAssetEditSession=false;});
     }
     function syncAssetControls() {
-        const o = sel && obOf(sel);
-        if (o && o.type === "asset" && o.asset === "stairs") {
+        const o = sel && obOf(sel), stairs = o && o.type === "asset" && o.asset === "stairs";
+        el("stairsP").style.display = stairs ? "" : "none";
+        el("activeReferenceAction").hidden = !IMG;
+        if (stairs) {
             if (document.activeElement !== el("stairsSteps")) el("stairsSteps").value = o.steps || 6;
             el("stairsRail").checked = o.handrail === true;
         }
@@ -26651,33 +26759,28 @@ window.cityGridInstallAssetUI = function (bridge) {
         sync();
         render();
     };
-    el("applyStairs").onclick = () => {
+    // 階段1固有の設定は選択中のオブジェクト欄に置き、変更をすぐ反映する。
+    let stairStepEditingId = null;
+    el("stairsSteps").oninput = () => {
+        const o = sel && obOf(sel), input = el("stairsSteps");
+        if (!o || o.type !== "asset" || o.asset !== "stairs" || !input.value.trim() || !Number.isFinite(Number(input.value))) return;
+        const steps = clamp(Math.round(Number(input.value)), 2, 24);
+        if (stairStepEditingId !== o.id) { HU.push(S); RD = []; stairStepEditingId = o.id; }
+        setOb(o.id, { steps });
+        render();
+    };
+    el("stairsSteps").onchange = el("stairsSteps").onblur = () => { stairStepEditingId = null; syncAssetControls(); };
+    el("stairsRail").onchange = (e) => {
         const o = sel && obOf(sel);
-        if (!o || o.type !== "asset" || o.asset !== "stairs") {
-            alert("先に編集モードで階段を選択してください");
-            return;
-        }
-        const steps = Math.max(2, Math.min(24, Math.round(Number(el("stairsSteps").value) || 6))),
-            handrail = !!el("stairsRail").checked;
-        HU.push(S);
-        RD = [];
-        setOb(o.id, { steps, handrail });
+        if (!o || o.type !== "asset" || o.asset !== "stairs") return;
+        stairStepEditingId = null;
+        HU.push(S); RD = [];
+        setOb(o.id, { handrail: e.target.checked });
         render();
     };
 
-    // Reference image convenience. The supplied image is copied beside this HTML as reference-cyberpunk.jpg.
-    el("sampleRef").onclick = () => {
-        const im = new Image();
-        im.onload = () => {
-            IMG = im;
-            IMGsrc = null;
-            render();
-        };
-        im.onerror = () =>
-            alert("reference-cyberpunk.jpg が見つかりません。左の「参考写真」から画像を選んでください。");
-        im.src = "reference-cyberpunk.jpg";
-    };
-    el("clearRef").onclick = () => el("phx").click();
+    // 欄は表示しないが、旧保存や貼り付けで表示された参照だけは外せる。
+    el("clearRef").onclick = () => { IMG = null; IMGsrc = null; render(); };
 
     // ===== 5.4 書き出し・ヘルプのUI =====
     el("exportToggle").onclick = (e) => {
@@ -27182,7 +27285,23 @@ window.cityGridInstallAssetUI = function (bridge) {
                 .reverse()
                 .find((o) => {
                     if (!o || !objectVisible(o)) return false;
-                    const b = obBounds(o);
+                    const b = obBounds(o), spec = arrayModifierSpec(o);
+                    // 配列はコピーごとに当たり判定する。隙間では選択しない。
+                    if (spec && spec.count > 1) {
+                        const generic = o.type === "compound" || o.k !== 1 || (o.type === "asset" && o.asset === "pathPipe") || o.attachment?.wallSideSign,
+                            baseBounds = generic ? boundsWithoutArray(o) : null,
+                            base = generic ? null : L2W(o, 0, 0, 0), a = (Number(o.rot) || 0) * DG;
+                        for (let i = 0; i < spec.count; i++) {
+                            const shift = arrayModifierShift(spec, i), x = w.x - shift[0], z = w.z - shift[2];
+                            if (generic) {
+                                if (x >= baseBounds.lo[0] - .08 && x <= baseBounds.hi[0] + .08 && z >= baseBounds.lo[2] - .08 && z <= baseBounds.hi[2] + .08) return true;
+                            } else {
+                                const dx = x - base[0], dz = z - base[2], cx = dx * Math.cos(a) + dz * Math.sin(a), cz = -dx * Math.sin(a) + dz * Math.cos(a);
+                                if (Math.abs(cx) <= Math.abs(Number(o.ra) || .25) + .08 && Math.abs(cz) <= Math.abs(Number(o.rb) || .25) + .08) return true;
+                            }
+                        }
+                        return false;
+                    }
                     // パスパイプは折れ線＋半径で外接範囲が決まるため、
                     // ra/rbの初期矩形ではなく実メッシュの範囲でヒット判定する。
                     if (
@@ -27219,20 +27338,26 @@ window.cityGridInstallAssetUI = function (bridge) {
                 .reverse()
                 .find((o) => {
                     if (!o || !objectVisible(o)) return false;
-                    const b = obBounds(o),
-                        pts = [];
-                    for (const x of [b.lo[0], b.hi[0]])
-                        for (const y of [b.lo[1], b.hi[1]])
-                            for (const z of [b.lo[2], b.hi[2]]) {
-                                const q = scrW([x, y, z]);
-                                if (q.ok) pts.push(q);
-                            }
-                    if (!pts.length) return false;
-                    const x0 = Math.min(...pts.map((q) => q.x)) - 14 / Z,
-                        x1 = Math.max(...pts.map((q) => q.x)) + 14 / Z,
-                        y0 = Math.min(...pts.map((q) => q.y)) - 14 / Z,
-                        y1 = Math.max(...pts.map((q) => q.y)) + 14 / Z;
-                    return p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
+                    const spec = arrayModifierSpec(o),
+                        b = spec && spec.count > 1 ? boundsWithoutArray(o) : obBounds(o),
+                        count = spec && spec.count > 1 ? spec.count : 1;
+                    // 正面・横でも一つの大きな外接箱ではなく、各コピーを個別に判定する。
+                    for (let i = 0; i < count; i++) {
+                        const d = count > 1 ? arrayModifierShift(spec, i) : [0, 0, 0], pts = [];
+                        for (const x of [b.lo[0], b.hi[0]])
+                            for (const y of [b.lo[1], b.hi[1]])
+                                for (const z of [b.lo[2], b.hi[2]]) {
+                                    const q = scrW([x + d[0], y + d[1], z + d[2]]);
+                                    if (q.ok) pts.push(q);
+                                }
+                        if (!pts.length) continue;
+                        const x0 = Math.min(...pts.map((q) => q.x)) - 14 / Z,
+                            x1 = Math.max(...pts.map((q) => q.x)) + 14 / Z,
+                            y0 = Math.min(...pts.map((q) => q.y)) - 14 / Z,
+                            y1 = Math.max(...pts.map((q) => q.y)) + 14 / Z;
+                        if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1) return true;
+                    }
+                    return false;
                 }) || null
         );
     }
@@ -28185,7 +28310,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         if (h.object) {
             const o = h.object.o,
                 [z0, z1] = floorPlanObjectZRange(o),
-                pathBounds = o.type === "asset" && o.asset === "pathPipe" ? obBounds(o) : null,
+                pathBounds = (o.type === "asset" && o.asset === "pathPipe") || arrayModifierSpec(o)?.count > 1 ? obBounds(o) : null,
                 boundsCenter = pathBounds
                     ? [
                           (pathBounds.lo[0] + pathBounds.hi[0]) / 2,
