@@ -306,7 +306,7 @@ ASSET_KIT.define(
 // 線は今の描き方（部材の選び方まで作り込んである）を残す。
 ASSET_KIT.define(
     "railing",
-    { label: "手すり" },
+    { label: "手すり", geometryBounds: () => !window.__legacyRailingBars }, 
     (o, K) => {
         const g = railingGeometry(o),
             zTop0 = Math.max(0, g.h - g.t),
@@ -328,7 +328,7 @@ ASSET_KIT.define(
             parts.push(K.box(K.rectPath(bw, bd, cx, cy), zTop0, g.h)); // 上の横桟
             if (zBot1 > g.bottom) parts.push(K.box(K.rectPath(bw, bd, cx, cy), g.bottom, zBot1)); // 下の横桟
             if (zTop0 - zBot1 > 0.001)
-                r.bars.forEach(([bx, by]) => parts.push(K.box(K.rectPath(g.barT, g.barT, bx, by), zBot1, zTop0))); // 縦棒
+                r.bars.forEach(([bx, by]) => parts.push(window.__legacyRailingBars ? K.box(K.rectPath(g.barT, g.barT, bx, by), zBot1, zTop0) : streetRoundPart(o,K,[[g.barT/2,g.barT/2,zBot1],[g.barT/2,g.barT/2,zTop0]],[],bx,by))); // 円柱の縦棒
         });
         return parts;
     },
@@ -379,6 +379,28 @@ ASSET_KIT.define(
         ];
     },
 );
+
+// 店先と同じカタログ部品を単体でも置けるようにする。
+// 店先そのものは旧JSON互換のため登録を残すが、棚には出さない。
+ASSET_KIT.define('shopAwning', {
+    label:'店先テント', glyph:'▰', group:'buildingParts', w:1.32, d:.66, h:.42, accent:'#d98b68',
+    minHalfWidth:()=>.05, minHalfDepth:()=>.03, minHeight:()=>.12
+}, (o,K)=>{
+    const w=Math.max(.1,Math.abs(2*o.ra)), depth=Math.max(.06,Math.abs(2*o.rb)), h=Math.max(.12,Math.abs(o.h)),
+        t=Math.min(.04,w*.1,depth*.18,h*(.04/.42));
+    return K.part('awning', {w,d:depth-t,z:h,drop:h*(.28/.42),valanceH:h*(.14/.42),
+        armBelow:h*(.055/.42),armAbove:h*(.01/.42),t,at:[0,t/2,0]})
+        .map(part=>({...part,onFace:true,preciseTubeEdge:true}));
+});
+ASSET_KIT.define('shopWindow', {
+    label:'店先の窓', glyph:'▣', group:'buildingParts', w:1.15, d:.12, h:.6, accent:'#9bbbc7',
+    // ガラス面より中央桟を手前に保ち、窓を薄くした際に桟が消えないようにする。
+    minHalfWidth:()=>.05, minHalfDepth:()=>.015, minHeight:()=>.1
+}, (o,K)=>{
+    const w=Math.max(.1,Math.abs(2*o.ra)), d=Math.max(.03,Math.abs(2*o.rb)), h=Math.max(.1,Math.abs(o.h));
+    return K.part('window', {w,h,d,mullion:true,at:[0,0,h/2]})
+        .map(part=>({...part,onFace:true,preciseTubeEdge:true}));
+});
 
 // ===== 室外機 =====
 // 参考写真のとおり「箱の胴＋前面の大きな丸いファン（同心のガード）＋側面のルーバー＋脚」。
@@ -1391,8 +1413,18 @@ function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
   for(let i=1;i*dy<d-1e-8;i++){const y=-d/2+i*dy;edges.push([[-w/2,y,z],[w/2,y,z]]);}
   return [K.box(K.rectPath(w,d),0,h),{meshTriangles:[],meshEdges:edges,onFace:true}];});
  ASSET_KIT.define('streetParcel',{...common,label:'段ボール箱',glyph:'▣',group:'streetObjects',w:.62,d:.46,h:.44,accent:'#cba475',minHeight:()=>.05,controls:[
-   {key:'parcelTapeWidth',label:'テープ幅',default:.09,min:.01,max:o=>Math.max(.01,Math.abs(o.ra)*1.7),step:.01,unit:'m',handle:(o,v)=>({anchor:[0,0,o.h+.001],sample:[v/2,0,o.h+.001],probe:[(v+1)/2,0,o.h+.001],fallback:{x:1,y:0}})}
- ]},(o,K)=>{const {w,d,h}=size(o),t=val(o,'parcelTapeWidth',.09,.01,w*.85),z=h+.001;return [K.box(K.rectPath(w,d),0,h),K.face3([[-t/2,-d/2,z],[t/2,-d/2,z],[t/2,d/2,z],[-t/2,d/2,z]],{onFace:true})];});
+   {key:'parcelTapeWidth',label:'テープ幅',default:.09,min:.01,max:o=>Math.max(.01,Math.abs(o.ra)*1.7),step:.01,unit:'m',handle:(o,v)=>({anchor:[0,0,o.h+.001],sample:[v/2,0,o.h+.001],probe:[(v+1)/2,0,o.h+.001],fallback:{x:1,y:0}})},
+   {key:'parcelOpen',label:'ふたの開き',type:'range',default:0,min:0,max:180,step:1,unit:'°',handle:(o,v)=>({anchor:[-o.ra,0,o.h+.1],sample:[-o.ra+.12+v*.002,0,o.h+.1],probe:[-o.ra+1.12+v*.002,0,o.h+.1],fallback:{x:1,y:0},pixelsPerUnit:1})}
+ ]},(o,K)=>{const {w,d,h}=size(o),t=val(o,'parcelTapeWidth',.09,.01,w*.85),z=h+.001,angle=val(o,'parcelOpen',0,0,180);
+ if(angle<.001)return [K.box(K.rectPath(w,d),0,h),K.face3([[-t/2,-d/2,z],[t/2,-d/2,z],[t/2,d/2,z],[-t/2,d/2,z]],{onFace:true})];
+ const th=Math.min(.014,w*.08,d*.08,h*.12),a=angle*Math.PI/180,c=Math.cos(a),s=Math.sin(a),flags={onFace:true,preciseTubeEdge:true},out=[K.box(K.rectPath(w,d),0,th,flags),
+ K.box(K.rectPath(th,d,-w/2+th/2,0),th,h,flags),K.box(K.rectPath(th,d,w/2-th/2,0),th,h,flags),
+ K.box(K.rectPath(w-2*th,th,0,-d/2+th/2),th,h,flags),K.box(K.rectPath(w-2*th,th,0,d/2-th/2),th,h,flags)];
+ for(const sign of [-1,1]){const x=sign*w/2,tip=sign*(w/2-c*w/2),tz=h+s*w/2;
+  out.push(K.face3([[x,-d/2,h],[x,d/2,h],[tip,d/2,tz],[tip,-d/2,tz]],flags));
+  const y=sign*d/2,ty=sign*(d/2-c*d/2),zz=h+s*d/2;
+  out.push(K.face3([[-w/2,y,h],[w/2,y,h],[w/2,ty,zz],[-w/2,ty,zz]],flags));}
+ return out;});
  ASSET_KIT.define('streetBin',{...common,label:'ふた付きごみ箱',glyph:'▤',group:'streetObjects',w:.55,d:.55,h:.78,accent:'#55a9c5',minHeight:()=>.15,controls:[
    {key:'binLidThickness',label:'ふたの厚さ',default:.07,min:.02,max:o=>Math.max(.02,o.h*.22),step:.01,unit:'m',handle:(o,v)=>{const z=o.h-Math.min(.08,o.h*.16),x=o.ra*.72;return {anchor:[x,0,z],sample:[x,0,z-v],probe:[x,0,z-v-1],fallback:{x:0,y:1}};}}
  ]},(o,K)=>{const {w,d,h}=size(o),t=val(o,'binLidThickness',.07,.02,h*.22),top=h-Math.min(.08,h*.16),z=top-t,handleTop=h,handleBottom=top,bar=Math.min(.035,h*.07),span=w*.35;
@@ -1400,10 +1432,14 @@ function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
  K.box(K.rectPath(bar,bar,-span/2,0),handleBottom,handleTop),K.box(K.rectPath(bar,bar,span/2,0),handleBottom,handleTop),K.box(K.rectPath(span+bar,bar),handleTop-bar,handleTop)];});
  ASSET_KIT.define('streetMailbox',{...common,label:'ポスト',glyph:'▣',group:'streetObjects',w:.5,d:.38,h:1.25,accent:'#d95c68',minHeight:o=>Math.max(.2,(Number(o.mailPostLength)||.42)+.16),controls:[
    {key:'mailPostLength',label:'ポールの長さ',default:.42,min:.05,max:2.5,step:.05,unit:'m',patch:(o,v)=>({mailPostLength:v,h:o.h+v-(Number(o.mailPostLength)||.42)}),handle:(o,v)=>vertical(o,v,0,-o.rb*.5)},
-   {key:'mailPostDiameter',label:'ポールの太さ',default:.1,min:.02,max:o=>Math.max(.02,Math.min(o.ra,o.rb)*1.3),step:.01,unit:'m',handle:(o,v)=>({anchor:[0,0,(Number(o.mailPostLength)||.42)*.5],sample:[v/2,0,(Number(o.mailPostLength)||.42)*.5],probe:[(v+1)/2,0,(Number(o.mailPostLength)||.42)*.5],fallback:{x:1,y:0}})}
- ]},(o,K)=>{const {w,d,h}=size(o),p=val(o,'mailPostLength',.42,.05,Math.max(.05,h-.16)),pd=val(o,'mailPostDiameter',.1,.02,Math.min(w,d)*.65),bh=h-p,y=-d/2-.001;
- return [streetRoundPart(o,K,[[pd/2,pd/2,0],[pd/2,pd/2,p]]),K.depthBeveledBox(w,d,bh,Math.min(.035,w*.08,bh*.08),{z0:p,seg:2}),
- K.face3([[-w*.38,y,p+bh*.38],[w*.38,y,p+bh*.38],[w*.38,y,p+bh*.76],[-w*.38,y,p+bh*.76]],{onFace:true}),K.face3([[-w*.32,y-.001,p+bh*.77],[w*.32,y-.001,p+bh*.77],[w*.32,y-.001,p+bh*.82],[-w*.32,y-.001,p+bh*.82]],{onFace:true})];});
+   {key:'mailPostDiameter',label:'ポールの太さ',default:.1,min:.02,max:o=>Math.max(.02,Math.min(o.ra,o.rb)*1.3),step:.01,unit:'m',handle:(o,v)=>({anchor:[0,0,(Number(o.mailPostLength)||.42)*.5],sample:[v/2,0,(Number(o.mailPostLength)||.42)*.5],probe:[(v+1)/2,0,(Number(o.mailPostLength)||.42)*.5],fallback:{x:1,y:0}})},
+   {key:'mailSlotHeight',label:'投入口の高さ',min:.04,max:o=>Math.max(.04,o.h-(Number(o.mailPostLength)||.42)-.04),step:.01,unit:'m',get:o=>Math.max(.04,Math.min(o.h-(Number(o.mailPostLength)||.42)-.04,Number.isFinite(Number(o.mailSlotHeight))?Number(o.mailSlotHeight):(o.h-(Number(o.mailPostLength)||.42))*.625)),handle:(o,v)=>vertical(o,v,-o.ra*.7,-o.rb,(Number(o.mailPostLength)||.42))}
+ ]},(o,K)=>{const {w,d,h}=size(o),p=val(o,'mailPostLength',.42,.05,Math.max(.05,h-.16)),pd=val(o,'mailPostDiameter',.1,.02,Math.min(w,d)*.65),bh=h-p,y=-d/2-.001,base=Math.min(.035,p*.15),slot=val(o,'mailSlotHeight',bh*.625,.04,Math.max(.04,bh-.04)),sh=Math.min(bh*.045,.03),flag={onFace:true,preciseTubeEdge:true};
+ // 画像の角張った本体と短い台座。表面の詳細は横長の投入口だけ。
+ return [K.box(K.rectPath(pd*1.6,pd*1.5),0,base),streetRoundPart(o,K,[[pd/2,pd/2,base],[pd/2,pd/2,p]]),
+ K.depthBeveledBox(w,d,bh,Math.min(.025,w*.05,bh*.05),{z0:p,seg:2}),
+ K.face3([[-w*.31,y,p+slot-sh],[w*.31,y,p+slot-sh],[w*.31,y,p+slot+sh],[-w*.31,y,p+slot+sh]],{onFace:true}),
+ K.face3([[-w*.26,y-.002,p+slot-sh/3],[w*.26,y-.002,p+slot-sh/3],[w*.26,y-.002,p+slot+sh/3],[-w*.26,y-.002,p+slot+sh/3]],flag)];});
  ASSET_KIT.define('streetPlant',{...common,label:'鉢植え',glyph:'♧',group:'streetObjects',w:.72,d:.72,h:.9,accent:'#79b974',minHeight:o=>Math.max(.15,(Number(o.plantPotHeight)||.25)+.12),controls:[
    {key:'plantPotHeight',label:'鉢の高さ',default:.25,min:.06,max:o=>Math.max(.06,o.h-.12),step:.01,unit:'m',handle:(o,v)=>vertical(o,v,o.ra*.48,0)}
  ]},(o,K)=>{const {w,d,h}=size(o),ph=val(o,'plantPotHeight',.25,.06,h-.12),out=[streetRoundPart(o,K,[[w*.19,d*.19,0],[w*.27,d*.27,ph*.86],[w*.29,d*.29,ph],[w*.24,d*.24,ph]],[1,2])];
@@ -1414,15 +1450,9 @@ function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
 })();
 
 // ===== 提灯（単体／3制御点の二次ベジェ紐） =====
-function lanternPoint(o,i) {
-    const defaults=[[-2,0,0],[0,0,-.6],[2,0,0]],names=['Start','Bend','End'],n=names[i],
-        get=(axis,k)=>Number.isFinite(Number(o['lantern'+n+axis]))?Number(o['lantern'+n+axis]):defaults[i][k];
-    return [get('X',0),get('Y',1),(Number(o.h)||0)+get('Z',2)];
-}
-function lanternCurvePoint(o,t) {
-    const a=lanternPoint(o,0),b=lanternPoint(o,1),c=lanternPoint(o,2),u=1-t;
-    return a.map((v,i)=>u*u*v+2*u*t*b[i]+t*t*c[i]);
-}
+const lanternBezier=ASSET_KIT.quadraticEditor('lantern');
+function lanternPoint(o,i) { return lanternBezier.point(o,i); }
+function lanternCurvePoint(o,t) { return lanternBezier.curve(o,t); }
 function lanternBody(o,K,cx,cy,z0,w,d,h) {
     const profile=[[.30,.30,0],[.44,.44,.12],[.50,.50,.40],[.50,.50,.60],[.44,.44,.88],[.30,.30,1]].map(([rx,ry,z])=>[w*rx,d*ry,z0+h*z]);
     return streetRoundPart(o,K,profile,[1,2,3,4],cx,cy);
@@ -1430,19 +1460,136 @@ function lanternBody(o,K,cx,cy,z0,w,d,h) {
 (function(){
     ASSET_KIT.define('paperLantern',{label:'提灯（単体）',glyph:'◉',group:'streetObjects',w:.34,d:.34,h:.48,accent:'#e0ad6d',minHeight:()=>.06,controls:[]},
         (o,K)=>[lanternBody(o,K,0,0,0,Math.max(.05,Math.abs(o.ra)*2),Math.max(.05,Math.abs(o.rb)*2),Math.max(.06,Number(o.h)||.48))]);
-    const pointControls=[];
-    ['Start','Bend','End'].forEach((name,i)=>['X','Y','Z'].forEach((axis,k)=>{
-        const defaults=[[-2,0,0],[0,0,-.6],[2,0,0]],label=['始点','曲げ点','終点'][i],fallback=k===2?{x:0,y:-1}:k===1?{x:0,y:1}:{x:1,y:0};
-        pointControls.push({key:'lantern'+name+axis,label:label+axis+(k===2?'（高さ差）':''),default:defaults[i][k],min:-30,max:30,step:.05,unit:'m',
-            handle:(o,v)=>{const p=lanternPoint(o,i),sample=[...p],probe=[...p];sample[k]+=.24;probe[k]+=1.24;return {anchor:p,sample,probe,fallback,color:['#e8743d','#3fa45b','#4a7be8'][k]};}});
-    }));
+    const pointControls=lanternBezier.controls;
     const count={key:'lanternCount',label:'提灯の個数',default:6,min:1,max:16,step:1,integer:true,unit:'個',handle:(o,v)=>{const p=lanternCurvePoint(o,.5);return {anchor:p,sample:[p[0]+.25,p[1],p[2]+.25],probe:[p[0]+1.25,p[1],p[2]+.25],fallback:{x:1,y:0},pixelsPerUnit:24};}},
         sz={key:'lanternSize',label:'提灯の大きさ',default:.42,min:.1,max:1.5,step:.05,unit:'m',handle:(o,v)=>{const n=Math.max(1,Math.round(Number(o.lanternCount)||6)),p=lanternCurvePoint(o,1/(n+1));return {anchor:p,sample:[p[0],p[1],p[2]-.06-v],probe:[p[0],p[1],p[2]-.06-v-1],fallback:{x:0,y:1}};}};
     ASSET_KIT.define('lanternString',{label:'提灯の紐',glyph:'⌒',group:'streetObjects',w:4,d:.3,h:2.5,accent:'#e0ad6d',minHeight:()=>.1,
-        controls:[...pointControls,count,sz],
-        constrainEdit:(next,old,patch)=>{if(Object.prototype.hasOwnProperty.call(patch,'ra')&&Math.abs(old.ra)>1e-6){const ratio=next.ra/old.ra;['Start','Bend','End'].forEach((n,i)=>{const k='lantern'+n+'X';if(!Object.prototype.hasOwnProperty.call(patch,k))next[k]=lanternPoint(old,i)[0]*ratio;});}return next;}
+        controls:[...pointControls,count,sz],bezierEditor:lanternBezier,
+        constrainEdit:lanternBezier.constrainWidth
     },(o,K)=>{const n=clamp(Math.round(Number(o.lanternCount)||6),1,16),h=clamp(Number(o.lanternSize)||.42,.1,1.5),curve=Array.from({length:25},(_,i)=>lanternCurvePoint(o,i/24)),edges=[curve],out=[];
         for(let i=0;i<n;i++){const p=lanternCurvePoint(o,(i+1)/(n+1));edges.push([p,[p[0],p[1],p[2]-.06]]);out.push(lanternBody(o,K,p[0],p[1],p[2]-.06-h,h*.72,h*.72,h));}
         return [{meshTriangles:[],meshEdges:edges},...out];
     });
 })();
+
+// ===== 暖簾：上辺はつながり、下側は指定枚数に分かれる =====
+ASSET_KIT.define('shopNoren',{
+    label:'暖簾',glyph:'▥',group:'streetObjects',w:1.5,d:.04,h:.48,accent:'#c25259',minHeight:()=>.08,
+    minHalfWidth:o=>{const n=Math.max(1,Math.min(16,Math.round(Number(o.norenPanels)||4))),gap=Math.max(0,Number(o.norenGap)||0);return Math.max(.025,n*.045/2,n*gap*2.5);},minHalfDepth:()=>.005,
+    controls:[
+        {key:'norenPanels',label:'布の枚数',default:4,min:1,max:o=>{const w=Math.abs(o.ra)*2,gap=Math.max(0,Number(o.norenGap)||0);return Math.max(1,Math.min(16,Math.floor(w/.045+1e-9),gap>0?Math.floor(w/(gap*5)+1e-9):16));},step:1,integer:true,unit:'枚',
+            handle:(o,v)=>({anchor:[0,0,o.h],sample:[0,0,o.h+.12],probe:[1,0,o.h+.12],fallback:{x:1,y:0},pixelsPerUnit:24})},
+        {key:'norenGap',label:'切れ目の幅',default:.012,min:0,max:o=>Math.max(0,Math.abs(o.ra)*2*.2/Math.max(1,Math.round(Number(o.norenPanels)||4))),step:.005,unit:'m',
+            handle:(o,v)=>({anchor:[-o.ra,0,o.h*.45],sample:[-o.ra+v,0,o.h*.45],probe:[-o.ra+v+1,0,o.h*.45],fallback:{x:1,y:0}})}
+    ]
+},(o,K)=>{
+    const w=Math.max(.05,Math.abs(o.ra)*2),d=Math.max(.01,Math.abs(o.rb)*2),h=Math.max(.08,Number(o.h)||.48),
+        n=Math.max(1,Math.min(16,Math.floor(w/.045),Math.round(Number(o.norenPanels)||4))),
+        gap=Math.max(0,Math.min(w*.2/n,Number.isFinite(Number(o.norenGap))?Number(o.norenGap):.012)),
+        header=Math.min(.045,h*.2),panelW=(w-gap*(n-1))/n,edgeFlags={onFace:true,preciseTubeEdge:true},parts=[K.box(K.rectPath(w,d),h-header,h,edgeFlags)];
+    for(let i=0;i<n;i++){const x=-w/2+panelW/2+i*(panelW+gap);parts.push(K.box(K.rectPath(panelW,d,x,0),0,h-header,edgeFlags));}
+    return parts;
+});
+
+// ===== 3点ベジェで編集できる丸断面のケーブル =====
+const cableBezier=ASSET_KIT.quadraticEditor('cable',[[-1.5,0,0],[0,0,-.45],[1.5,0,0]]);
+ASSET_KIT.define('bezierCable',{
+    label:'ベジェケーブル',glyph:'⌒',group:'street',w:3,d:.3,h:1.5,accent:'#b8c7c6',minHeight:()=>.1,
+    bezierEditor:cableBezier,constrainEdit:cableBezier.constrainWidth,
+    controls:[...cableBezier.controls,
+        {key:'cableDiameter',label:'ケーブルの太さ',default:.04,min:.005,max:1,step:.005,unit:'m',
+            handle:(o,v)=>{const p=cableBezier.curve(o,.5);return {anchor:p,sample:[p[0],p[1],p[2]-v/2],probe:[p[0],p[1],p[2]-(v+1)/2],fallback:{x:0,y:1}};}}
+    ]
+},(o,K)=>[K.quadraticTube(o,cableBezier.points(o),Math.max(.0025,Math.min(.5,(Number(o.cableDiameter)||.04)/2)),{steps:24,sides:10})]);
+
+// ===== 写真を基準にした追加小物 =====
+(function(){
+ const S=o=>({w:Math.max(.1,2*Math.abs(o.ra)),d:Math.max(.1,2*Math.abs(o.rb)),h:Math.max(.1,Number(o.h)||.1)}),
+  V=(o,k,f,lo,hi)=>Math.max(lo,Math.min(hi,Number.isFinite(Number(o[k]))?Number(o[k]):f)),
+  Z=(o,v,x=0,y=0)=>({anchor:[x,y,0],sample:[x,y,v],probe:[x,y,v+1],fallback:{x:0,y:-1}}),
+  flags={onFace:true,preciseTubeEdge:true};
+ ASSET_KIT.define('streetPlantBox',{label:'植栽2',glyph:'♧',group:'streetObjects',w:.9,d:.5,h:.3,accent:'#79b974',minHalfWidth:()=>.05,minHalfDepth:()=>.05,minHeight:()=>.06,controls:[]},(o,K)=>{
+  const {w,d}=S(o),h=Math.max(.06,Number(o.h)||.3),t=Math.min(.025,w*.1,d*.1,h*.2),out=[K.box(K.rectPath(w,d),0,t,flags),
+   K.box(K.rectPath(t,d,-w/2+t/2,0),t,h,flags),K.box(K.rectPath(t,d,w/2-t/2,0),t,h,flags),
+   K.box(K.rectPath(w-2*t,t,0,-d/2+t/2),t,h,flags),K.box(K.rectPath(w-2*t,t,0,d/2-t/2),t,h,flags)];
+  const edges=[];for(let i=1;i<8;i++){const x=-w/2+w*i/8;edges.push([[x,-d/2-.0001,0],[x,-d/2-.0001,h]]);}out.push({meshTriangles:[],meshEdges:edges,onFace:true});return out;
+ });
+ const chairBaseRaw=o=>V(o,'squareBaseHeight',.035,.01,Math.max(.01,o.h-.05)),
+  chairSeat=o=>V(o,'squareSeatThickness',.06,.02,Math.max(.02,o.h-chairBaseRaw(o)-.03)),
+  chairBase=o=>V(o,'squareBaseHeight',.035,.01,Math.max(.01,o.h-chairSeat(o)-.03)),
+  chairBaseRadius=o=>V(o,'squareBaseRadius',.124,.01,2),
+  chairPoleRadius=o=>V(o,'squarePoleRadius',.04,.005,2),
+  chairLeg=o=>Math.max(.03,o.h-chairSeat(o)-chairBase(o));
+ ASSET_KIT.define('squareStool',{label:'四角椅子',glyph:'▣',group:'streetObjects',w:.45,d:.4,h:.48,accent:'#c9a27a',geometryBounds:true,minHalfWidth:()=>.06,minHalfDepth:()=>.06,minHeight:o=>Math.max(.15,(Number(o.squareSeatThickness)||.06)+(Number(o.squareBaseHeight)||.035)+.03),controls:[
+  {key:'squareSeatWidth',label:'座面の横幅',min:.12,max:8,step:.05,unit:'m',get:o=>2*o.ra,patch:(o,v)=>({ra:v/2}),
+   handle:(o,v)=>({anchor:[0,0,o.h],sample:[v/2,0,o.h],probe:[(v+1)/2,0,o.h],fallback:{x:1,y:0}})},
+  {key:'squareSeatDepth',label:'座面の縦幅',min:.12,max:8,step:.05,unit:'m',get:o=>2*o.rb,patch:(o,v)=>({rb:v/2}),
+   handle:(o,v)=>({anchor:[0,0,o.h],sample:[0,v/2,o.h],probe:[0,(v+1)/2,o.h],fallback:{x:1,y:0}})},
+  {key:'squareSeatThickness',label:'座面の高さ',default:.06,min:.02,max:o=>Math.max(.02,o.h-chairBase(o)-.03),step:.01,unit:'m',
+   handle:(o,v)=>({anchor:[o.ra*.85,-o.rb*.85,o.h],sample:[o.ra*.85,-o.rb*.85,o.h-v],probe:[o.ra*.85,-o.rb*.85,o.h-v-1],fallback:{x:0,y:1}})},
+  {key:'squareLegLength',label:'支柱の長さ',min:.03,max:3,step:.05,unit:'m',get:chairLeg,patch:(o,v)=>({h:v+chairSeat(o)+chairBase(o)}),
+   handle:(o,v)=>({anchor:[-o.ra*.7,-o.rb*.7,chairBase(o)],sample:[-o.ra*.7,-o.rb*.7,chairBase(o)+v],probe:[-o.ra*.7,-o.rb*.7,chairBase(o)+v+1],fallback:{x:0,y:-1}})},
+  {key:'squareBaseHeight',label:'台座の高さ',default:.035,min:.01,max:o=>Math.max(.01,o.h-chairSeat(o)-.03),step:.01,unit:'m',
+   handle:(o,v)=>Z(o,v,-o.ra*.75,o.rb*.75)},
+  {key:'squarePoleRadius',label:'支柱の半径',default:.04,min:.005,max:2,step:.005,unit:'m',
+   handle:(o,v)=>({anchor:[0,0,o.h*.5],sample:[v,0,o.h*.5],probe:[v+1,0,o.h*.5],fallback:{x:1,y:0}})},
+  {key:'squareBaseRadius',label:'台座の半径',min:.01,max:2,step:.01,unit:'m',get:chairBaseRadius,
+   handle:(o,v)=>({anchor:[0,0,chairBase(o)],sample:[v,0,chairBase(o)],probe:[v+1,0,chairBase(o)],fallback:{x:1,y:0}})}
+ ]},(o,K)=>{const {w,d,h}=S(o),seat=chairSeat(o),bh=chairBase(o),br=chairBaseRadius(o),r=chairPoleRadius(o);return [K.box(K.rectPath(w,d),h-seat,h,flags),streetRoundPart(o,K,[[r,r,bh],[r,r,h-seat]]),streetRoundPart(o,K,[[br,br,0],[br,br,bh]])];});
+ const wardrobeRows=o=>Math.round(V(o,'wardrobeRows',2,1,8)),
+  wardrobeSplit=o=>V(o,'wardrobeSplit',48,15,85)/100,
+  wardrobeBoardMax=(o,full)=>{const {w,d,h}=S(o),n=wardrobeRows(o),r=wardrobeSplit(o),cell=full?1/n:Math.min(r/n,1-r);return Math.max(.004,Math.min(w*.12,d*.2,h*cell*.3));},
+  wardrobeBoard=(o,full)=>V(o,'wardrobeBoard',.035,.004,wardrobeBoardMax(o,full)),
+  wardrobeRecess=(o,full)=>V(o,'wardrobeRecess',.12,.01,Math.max(.01,2*o.rb-2*wardrobeBoard(o,full)));
+ function wardrobeControls(full){return [
+  {key:'wardrobeRows',label:'引き出しの段数',default:2,min:1,max:8,step:1,integer:true,unit:'段',handle:(o,v)=>({anchor:[-o.ra,-o.rb,o.h*.8],sample:[-o.ra+.18+v*.03,-o.rb,o.h*.8],probe:[.82-o.ra+v*.03,-o.rb,o.h*.8],fallback:{x:1,y:0},pixelsPerUnit:24})},
+  ...(!full?[{key:'wardrobeSplit',label:'上段の高さの割合',type:'range',default:48,min:15,max:85,step:1,unit:'%',handle:(o,v)=>({anchor:[-o.ra,-o.rb,0],sample:[-o.ra,-o.rb,o.h*(1-v/100)],probe:[-o.ra,-o.rb,o.h*(1-v/100)-1],fallback:{x:0,y:1},pixelsPerUnit:1.2})}]:[]),
+  {key:'wardrobeBoard',label:'板の幅',type:'range',default:.035,min:.004,max:o=>wardrobeBoardMax(o,full),step:.001,unit:'m',handle:(o,v)=>({anchor:[-o.ra,-o.rb,o.h*.48],sample:[-o.ra+v,-o.rb,o.h*.48],probe:[1-o.ra+v,-o.rb,o.h*.48],fallback:{x:1,y:0}})},
+  {key:'wardrobeRecess',label:'開口の奥行き',type:'range',default:.12,min:.01,max:o=>Math.max(.01,2*o.rb-2*wardrobeBoard(o,full)),step:.01,unit:'m',handle:(o,v)=>({anchor:[o.ra*.35,-o.rb,o.h*.68],sample:[o.ra*.35,-o.rb+v,o.h*.68],probe:[o.ra*.35,1-o.rb+v,o.h*.68],fallback:{x:1,y:0}})}
+ ];}
+ function wardrobeParts(o,K,full){const {w,d,h}=S(o),n=wardrobeRows(o),t=wardrobeBoard(o,full),recess=wardrobeRecess(o,full),y=-d/2,
+  lo=t,hi=h-t,split=lo+(hi-lo)*(1-wardrobeSplit(o)),inner=w-2*t,back=Math.min(d-t*.5,recess),out=[];
+  // 前面は実際に穴を空け、側面・棚板と奥面を独立した実体にする。
+  out.push(K.box(K.rectPath(t,d,-w/2+t/2,0),0,h,flags),K.box(K.rectPath(t,d,w/2-t/2,0),0,h,flags),
+   K.box(K.rectPath(inner,d),0,t,flags),K.box(K.rectPath(inner,d),h-t,h,flags),
+   K.box(K.rectPath(inner,t,0,y+back+t/2),lo,hi,flags),K.box(K.rectPath(inner,t,0,d/2-t/2),lo,hi,flags));
+  const beam=z=>out.push(K.box(K.rectPath(inner,d),z-t/2,z+t/2,flags)),vertical=(a,b)=>out.push(K.box(K.rectPath(t,d),a,b,flags));
+  if(full){vertical(lo,hi);for(let i=1;i<n;i++)beam(lo+(hi-lo)*i/n);}
+  else {beam(split);vertical(lo,split-t/2);for(let i=1;i<n;i++)beam(split+(hi-split)*i/n);}
+  return out;
+ }
+ ASSET_KIT.define('shopWardrobe',{label:'タンス',glyph:'▤',group:'streetObjects',w:1.1,d:.5,h:1.55,accent:'#8d624a',minHalfWidth:()=>.1,minHalfDepth:()=>.06,minHeight:()=>.25,controls:wardrobeControls(false)},(o,K)=>wardrobeParts(o,K,false));
+ ASSET_KIT.define('shopWardrobe2',{label:'タンス2',glyph:'▦',group:'streetObjects',w:1.1,d:.5,h:1.55,accent:'#8d624a',minHalfWidth:()=>.1,minHalfDepth:()=>.06,minHeight:()=>.25,controls:wardrobeControls(true)},(o,K)=>wardrobeParts(o,K,true));
+ ASSET_KIT.define('pictureStairs',{label:'階段2',glyph:'▰',group:'street',w:1.4,d:2.1,h:1.2,accent:'#c5a768',geometryBounds:true,minHalfWidth:()=>.12,minHalfDepth:()=>.12,minHeight:()=>.15,controls:[
+  {key:'pictureStairCount',label:'段数',default:7,min:2,max:20,step:1,integer:true,unit:'段',handle:(o,v)=>({anchor:[-o.ra,-o.rb,o.h*.4],sample:[-o.ra+.15+v*.025,-o.rb,o.h*.4],probe:[.85-o.ra+v*.025,-o.rb,o.h*.4],fallback:{x:1,y:0},pixelsPerUnit:24})},
+  {key:'stairSideWidth',label:'両脇枠の幅',default:.07,min:.01,max:o=>Math.max(.01,Math.min(.5,o.ra*.7)),step:.01,unit:'m',handle:(o,v)=>({anchor:[-o.ra,-o.rb,o.h*.18],sample:[-o.ra+v,-o.rb,o.h*.18],probe:[1-o.ra+v,-o.rb,o.h*.18],fallback:{x:1,y:0}})},
+  {key:'stairSideHeight',label:'両脇枠の追加高さ',default:0,min:0,max:3,step:.05,unit:'m',handle:(o,v)=>({anchor:[-o.ra,o.rb,o.h],sample:[-o.ra,o.rb,o.h+v],probe:[-o.ra,o.rb,o.h+v+1],fallback:{x:0,y:-1}})}
+ ]},(o,K)=>{const {w,d,h}=S(o),n=Math.round(V(o,'pictureStairCount',7,2,20)),edge=V(o,'stairSideWidth',.07,.01,Math.min(.5,w*.35)),extra=V(o,'stairSideHeight',0,0,3),inner=w-2*edge,landing=d*.18,run=(d-landing)/n,out=[];
+  for(let i=0;i<n;i++){const y=-d/2+(i+.5)*run;out.push(K.box(K.rectPath(inner,run,0,y),0,h*(i+1)/n,flags));}
+  out.push(K.box(K.rectPath(inner,landing,0,d/2-landing/2),0,h,flags));
+  const profile=[[-d/2,0],[d/2,0],[d/2,h+extra],[-d/2,Math.min(h*.15,.12)+extra]];
+  out.push(K.box(profile,-w/2,-w/2+edge,{axis:'x',...flags}),K.box(profile,w/2-edge,w/2,{axis:'x',...flags}));return out;});
+})();
+
+// 片側支柱と二段ループの車止め。左右反転はローカルXの符号を変え、回転では代用しない。
+ASSET_KIT.define('guardPoleHalf',{
+ label:'片側車止めポール',glyph:'♧',group:'traffic',w:.65,d:.22,h:.65,accent:'#e7b626',
+ minHalfWidth:()=>.08,minHalfDepth:()=>.05,minHeight:()=>.18,controls:[
+  {key:'halfPoleLength',label:'ポールの長さ',min:.18,max:4,step:.05,unit:'m',get:o=>o.h,patch:(o,v)=>({h:v}),
+   handle:(o,v)=>({anchor:[-o.ra*.72,-o.rb*.7,0],sample:[-o.ra*.72,-o.rb*.7,v],probe:[-o.ra*.72,-o.rb*.7,v+1],fallback:{x:0,y:-1}})},
+  {key:'halfPoleDiameter',label:'ポールの太さ',default:.05,min:.02,max:o=>Math.max(.02,Math.min(.18,o.ra*.45,o.rb*.8,o.h*.2)),step:.005,unit:'m',
+   handle:(o,v)=>({anchor:[o.ra*.65,0,o.h*.3],sample:[o.ra*.65+v/2,0,o.h*.3],probe:[o.ra*.65+(v+1)/2,0,o.h*.3],fallback:{x:1,y:0}})},
+  {key:'halfPoleMirror',label:'左右を鏡反転',type:'boolean',default:false}
+ ]
+},(o,K)=>{
+ const w=Math.max(.16,2*Math.abs(o.ra)),d=Math.max(.1,2*Math.abs(o.rb)),h=Math.max(.18,Number(o.h)||.65),
+ diam=Math.max(.02,Math.min(Number(o.halfPoleDiameter)||.05,.18,w*.225,d*.4,h*.2)),r=diam/2,sign=o.halfPoleMirror?-1:1,
+ xp=sign*(w/2-r),xl=-sign*(w/2-r*1.4),span=Math.max(.005,d/2-r*1.2),top=h-r,mid=Math.max(r*2,h*.5),
+ out=[streetRoundPart(o,K,[[r,r,0],[r,r,top]],[],xp,0)];
+ for(const z of [top,mid]){
+   const a=[xp,0,z],b=[xl,-span,z],c=[xl,span,z],q=(p,v,t)=>p.map((x,i)=>x*(1-t)+v[i]*t);
+   // 三つの短いベジェ管で、丸い先端と二本の腕を持つ水平ループを作る。
+   for(const pts of [[a,q(a,b,.55),b],[b,[xl-sign*r*.2,0,z],c],[c,q(c,a,.45),a]])out.push(K.quadraticTube(o,pts,r,{steps:4,sides:8}));
+ }
+ return out;
+});

@@ -35,7 +35,8 @@
             parts = [K.box(K.rectPath(w, h), -d / 2, d / 2, { axis, holes: [hole], holeSides: true })];
         if (o.glass !== false) parts.push(K.sheet(hole, -0.006, 0.006, { axis, color: o.glassColor, width: o.width }));
         // 幅があるときは縦の桟を1本入れる（ガラスが1枚板に見えないように）。
-        if (o.mullion !== false && w - 2 * t > 0.45) parts.push(K.box(K.rectPath(0.03, h - 2 * t), -d / 4, d / 4, { axis }));
+        if (o.mullion !== false && (o.mullion === true || w - 2 * t > 0.45))
+            parts.push(K.box(K.rectPath(Math.min(0.03, (w - 2 * t) * 0.25), h - 2 * t), -d / 4, d / 4, { axis }));
         return parts;
     });
 
@@ -114,6 +115,9 @@
             drop = num(o.drop, 0.28), // 手前へ行くほど下がる量
             t = num(o.t, 0.04),
             zBack = num(o.z, 0), // 壁側の上端の高さ
+            valanceH = num(o.valanceH, 0.14),
+            armBelow = num(o.armBelow, 0.055),
+            armAbove = num(o.armAbove, 0.01),
             zFront = zBack - drop,
             canopy = [
                 [-d / 2, zFront],
@@ -123,10 +127,10 @@
             ],
             parts = [K.box(canopy, -w / 2, w / 2, { axis: "x" })];
         // 手前の垂れ（幕）。板厚のぶんだけ手前へ出す。
-        parts.push(K.box(K.offsetPath(K.rectPath(w, 0.14), 0, zFront - 0.07), -d / 2 - t, -d / 2, { axis: "y" }));
+        parts.push(K.box(K.offsetPath(K.rectPath(w, valanceH), 0, zFront - valanceH / 2), -d / 2 - t, -d / 2, { axis: "y" }));
         // 腕（下からの支え）。
         [-w * 0.42, w * 0.42].forEach((x) =>
-            parts.push(...K.moveParts([K.box(K.rectPath(t, d), zFront - 0.055, zFront + 0.01)], x, 0, 0)),
+            parts.push(...K.moveParts([K.box(K.rectPath(t, d), zFront - armBelow, zFront + armAbove)], x, 0, 0)),
         );
         return parts;
     });

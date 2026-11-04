@@ -2098,6 +2098,9 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         } else {
             c.moveTo(run[0], run[1]);
             for (let i = 2; i < run.length; i += 2) c.lineTo(run[i], run[i + 1]);
+            // 実面レイで確認した輪郭が1点だけ残る場合も、moveToだけでは描画されない。
+            // 隠れた点はここへ入らないため、円柱などのサブピクセルの可視区間だけ点として残す。
+            if (s.railingRoundBar && run.length === 2) c.lineTo(run[0] + 0.001, run[1]);
             // 遮蔽された別の線と手前の可視線が重なった場合、可視線の二値化補完は
             // 禁止しない。描いた区間だけを線ID付きで記録する（同じ線の隠れは除外）。
             if (fishVisiblePixels && run.length >= 4) {

@@ -380,6 +380,9 @@ window.cityGridInstallAssetUI = function (bridge) {
             stoolLegRadius: kind === "stool" ? Math.min(info.w, info.d) * 0.11 : undefined,
             stoolBaseRadius: kind === "stool" ? Math.min(info.w, info.d) * 0.3 : undefined,
             stoolBaseHeight: kind === "stool" ? height * 0.09 : undefined,
+            squareBaseRadius: kind === "squareStool" ? 0.124 : undefined,
+            squarePoleRadius: kind === "squareStool" ? 0.04 : undefined,
+            mailSlotHeight: kind === "streetMailbox" ? (height - 0.42) * 0.625 : undefined,
             path: kind === "pathPipe" ? pathPipeDefaultPoints() : undefined,
             pipeRadius: kind === "pathPipe" ? 0.18 : undefined,
             cornerRadius: kind === "pathPipe" ? 0.55 : undefined,
@@ -1063,6 +1066,8 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "gableRoof",
                 "shedRoof",
                 "awning",
+                "shopAwning",
+                "shopWindow",
                 "balcony",
                 "uWall",
                 "railing",
@@ -1072,9 +1077,9 @@ window.cityGridInstallAssetUI = function (bridge) {
             ],
         },
         // 既存の street キーを保ち、以前のタブ選択もそのまま復元できる。
-        { key: "street", label: "街の設備", kinds: ["stairs", "ramp", "pathPipe", "wallSign", "windowGrid", "vendingMachine", "lightboxSign"] },
+        { key: "street", label: "街の設備", kinds: ["stairs", "pictureStairs", "ramp", "pathPipe", "wallSign", "windowGrid", "vendingMachine", "lightboxSign", "bezierCable"] },
         { key: "traffic", label: "交通・標識", kinds: ["crosswalk", "trafficSignal", "pedSignal", "signPost", "signPost2", "signTriangle", "signDiamond", "signCombo", "crossingSign", "guardPoleU", "guardPoleM", "streetCone", "streetPavement"] },
-        { key: "streetObjects", label: "小物・植栽", kinds: ["stool", "streetParcel", "streetBin", "streetMailbox", "streetPlant", "paperLantern", "lanternString"] },
+        { key: "streetObjects", label: "小物・植栽", kinds: ["stool", "squareStool", "streetParcel", "streetBin", "streetMailbox", "streetPlant", "streetPlantBox", "shopWardrobe", "shopWardrobe2", "paperLantern", "lanternString", "shopNoren"] },
         { key: "person", label: "人間", kinds: ["person"] },
         // 車（人物の隣）。キャブは五角形の立体、荷台は直方体、タイヤは円柱で作る。
         // 寸法はすべて画面上の専用ハンドルで変えられる（engine-gizmo.js の vehicleGizmo）。
@@ -1082,7 +1087,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     ];
     // 看板は「壁付け看板（単体）」へ統合した。asset=sign と asset=wallSideSign
     // （建物へ接着する専用形状）は既存JSONの読み込み・表示用に定義だけ残し、棚からは外す。
-    const trayKinds = Object.keys(ASSETS).filter((k) => k !== "sign" && k !== "wallSideSign");
+    const trayKinds = Object.keys(ASSETS).filter((k) => k !== "sign" && k !== "wallSideSign" && k !== "shopFront" && k !== "guardPoleHalf");
     ASSET_GROUPS.forEach((g) => {
         g.kinds = g.kinds.filter((k) => trayKinds.includes(k));
     });

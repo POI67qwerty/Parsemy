@@ -2508,7 +2508,7 @@ function specialGizmo(o) {
     if (o && typeof assetEditorControls === "function") {
         const registered=[];
         for(const c of assetEditorControls(o)) {
-            if((c.type||"number")!=="number" || typeof c.handle!=="function")continue;
+            if(!["number","range"].includes(c.type||"number") || typeof c.handle!=="function")continue;
             const value=assetControlValue(o,c), spec=c.handle(o,value);
             if(!spec || ![spec.anchor,spec.sample,spec.probe].every(v=>Array.isArray(v)&&v.length===3&&v.every(Number.isFinite)))continue;
             const h=screenHandle(o,"asset-param-"+c.key,spec.anchor,spec.sample,spec.probe,value,
@@ -3826,9 +3826,9 @@ function drawSpecialGizmo(c, o) {
         sq(sg.handle.s, "#ad9cff");
         gzLabel(c, "半径", sg.handle.s.x + 9 / Z, sg.handle.s.y - 8 / Z, "#d5ccff", 12);
     }
-    // 提灯のベジェは、実際の紐とは別に3制御点を破線で結び、曲げ点の役割を見せる。
-    if (sg.o.asset === "lanternString" && typeof lanternPoint === "function") {
-        const points = [0,1,2].map(i => scrW(pt(sg.o, ...lanternPoint(sg.o,i))));
+    // ベジェ共通編集：実際の紐とは別に3制御点を破線で結ぶ。
+    if (sg.o.type === "asset" && typeof ASSETS[sg.o.asset]?.bezierEditor?.points === "function") {
+        const points = ASSETS[sg.o.asset].bezierEditor.points(sg.o).map(p => scrW(pt(sg.o, ...p)));
         if (points.every(p => p?.ok)) {
             c.strokeStyle = "rgba(255,179,111,.85)";
             c.lineWidth = 1.2 / Z;

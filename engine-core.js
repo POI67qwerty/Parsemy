@@ -1595,6 +1595,8 @@ function setOb(id, patch) {
         next.h = Math.max(Number(assetMeta.minHeight(next)) || 0.005, Number(next.h) || 0);
     if (typeof assetMeta?.minHalfWidth === "function" && patch && Object.prototype.hasOwnProperty.call(patch, "ra"))
         next.ra = Math.max(Number(assetMeta.minHalfWidth(next)) || 0.005, Number(next.ra) || 0);
+    if (typeof assetMeta?.minHalfDepth === "function" && patch && Object.prototype.hasOwnProperty.call(patch, "rb"))
+        next.rb = Math.max(Number(assetMeta.minHalfDepth(next)) || 0.005, Number(next.rb) || 0);
     // トラック型の奥行き変更は直線部の長さを維持する。
     if (o.type === "asset" && o.asset === "track") {
         if (patch && Object.prototype.hasOwnProperty.call(patch,"rb") && !Object.prototype.hasOwnProperty.call(patch,"ra"))
@@ -1837,6 +1839,15 @@ function fixOb(o) {
                 awningBackBottom: 0,
             };
     }
+    // 旧小物の部品の実寸を固定し、寸法変更で投入口や椅子の台座が勝手に動かないようにする。
+    if (n?.asset === "streetMailbox" && n.mailSlotHeight == null)
+        n = { ...n, mailSlotHeight: Math.max(.04, (Number(n.h) - (Number(n.mailPostLength) || .42)) * .625) };
+    if (n?.asset === "squareStool" && n.squareBaseRadius == null)
+        n = { ...n, squareBaseRadius: Math.min(Math.abs(n.ra), Math.abs(n.rb)) * .62,
+            squarePoleRadius: Math.min(Math.abs(n.ra), Math.abs(n.rb)) * .2 };
+    // 葉を除去した植栽2は、旧データの鉢自体の高さを引き継ぐ。
+    if (n?.asset === "streetPlantBox" && n.plantPotHeight != null && !n.plantBoxOnly)
+        n = { ...n, h: Math.max(.06, Math.min(Number(n.h) || .3, Number(n.plantPotHeight) || .3)), plantBoxOnly: true };
     if (n?.asset === "sign") delete n.bevel;
     return n.off ? n : { ...n, off: [0, 0, 0] };
 }

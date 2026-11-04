@@ -1985,7 +1985,7 @@ function latticePanelA(o, opt = {}) {
 function assetEditorControls(o) {
     const base = ASSETS[o?.asset]?.controls;
     const list = [...(Array.isArray(base) ? base : []), ...(typeof window.accordionControls === "function" ? window.accordionControls(o) : [])];
-    return list.filter(c => c && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(c.key || "") && ["number","boolean"].includes(c.type || "number"));
+    return list.filter(c => c && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(c.key || "") && ["number","boolean","range"].includes(c.type || "number"));
 }
 function assetControlLimit(value, o, fallback) {
     const raw = typeof value === "function" ? value(o) : value;
@@ -2000,7 +2000,7 @@ function assetControlValue(o, control) {
 function assetControlDefaults(info) {
     const out={};
     for(const c of Array.isArray(info?.controls)?info.controls:[])
-        if(c && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(c.key||"") && ["number","boolean"].includes(c.type||"number") && c.default!==undefined)
+        if(c && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(c.key||"") && ["number","boolean","range"].includes(c.type||"number") && c.default!==undefined)
             out[c.key]=c.default;
     return out;
 }
@@ -2707,6 +2707,7 @@ function linesBalcony(ctx) {
 }
 function linesRailing(ctx) {
     const { o, c, out } = ctx,
+        first = out.length,
         g = railingGeometry(o),
         { h, t, post, bottom, barT, runs, posts } = g,
         zTop0 = Math.max(0, h - t), // 上の横桟の下端（＝縦の棒の上端）
@@ -2753,8 +2754,18 @@ function linesRailing(ctx) {
         // 縦の棒は上下の横桟の間だけ（横桟を突き抜けない）。
         // 縦の棒は上下の横桟に挟まれているので、上下の面は描かない（線画の本数を減らす）。
         if (zTop0 - zBot1 > 0.001)
-            r.bars.forEach(([bx, by]) => out.push(...wireBoxVA(o, bx, by, barT, barT, zBot1, zTop0, c)));
+            r.bars.forEach(([bx, by]) => {
+                if (window.__legacyRailingBars) { out.push(...wireBoxVA(o, bx, by, barT, barT, zBot1, zTop0, c)); return; }
+                const part=streetRoundPart(o,ASSET_KIT,[[barT/2,barT/2,zBot1],[barT/2,barT/2,zTop0]],[],bx,by);
+                for(const seg of ASSET_KIT.partEdges(part)) {
+                    const ln=lineA(o,seg,c);ln.preciseTubeEdge=true;ln.onFace=true;ln.railingRoundBar=true;ln.tubeContourView=orthView||'3d';out.push(ln);
+                }
+            });
     });
+    // 柱・横桟と円柱の縦棒が接する位置も、実面の奥行きで隠線を判定する。
+    if (!window.__legacyRailingBars) for (const ln of out.slice(first)) {
+        ln.onFace=true;ln.preciseTubeEdge=true;ln.tubeContourView=orthView||'3d';
+    }
 }
 
 // --- 階段 ---
@@ -3890,7 +3901,7 @@ obBounds = function (o) {
             if (Array.isArray(v) && v.length >= 3)
                 pts.push(customPt(q, Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0));
         });
-    } else if (ASSETS[q.asset]?.geometryBounds === true && typeof assetKitBoundsPoints === "function") {
+    } else if ((ASSETS[q.asset]?.geometryBounds === true || (typeof ASSETS[q.asset]?.geometryBounds === 'function' && ASSETS[q.asset].geometryBounds(q))) && typeof assetKitBoundsPoints === "function") {
         const vertices=assetKitBoundsPoints(q);
         if(vertices?.length) vertices.forEach(v=>pts.push(v));
         else [0,q.h].forEach(z=>[-q.ra,q.ra].forEach(x=>[-q.rb,q.rb].forEach(y=>pts.push(pt(q,x,y,z)))));

@@ -2854,9 +2854,10 @@
             genericAssetPanelKind=o.asset;genericAssetPanelId=o.id;genericAssetEditSession=false;fields.replaceChildren();
             controls.forEach(c=>{
                 const label=document.createElement("label"),input=document.createElement("input"),name=document.createElement("span");
-                name.textContent=c.label||c.key;input.type=c.type==="boolean"?"checkbox":"number";input.dataset.assetControl=c.key;
-                if(input.type==="number") {input.step=String(c.step ?? .05);input.style.width="100px";}
+                name.textContent=c.label||c.key;input.type=c.type==="boolean"?"checkbox":c.type==="range"?"range":"number";input.dataset.assetControl=c.key;
+                if(input.type==="number"||input.type==="range") {input.step=String(c.step ?? .05);input.style.width=input.type==="range"?"140px":"100px";}
                 label.append(name,input);
+                if(input.type==="range"){const value=document.createElement("output");value.dataset.assetRangeValue=c.key;label.append(value);}
                 if(c.unit){const unit=document.createElement("span");unit.className="un";unit.textContent=c.unit;label.append(unit);}
                 fields.append(label);
             });
@@ -2870,6 +2871,7 @@
                 if(Number.isFinite(min))input.min=String(min);else input.removeAttribute("min");
                 if(Number.isFinite(max))input.max=String(max);else input.removeAttribute("max");
                 if(document.activeElement!==input)input.value=String(+value.toFixed(4));
+                const rangeValue=fields.querySelector(`[data-asset-range-value="${c.key}"]`);if(rangeValue)rangeValue.textContent=String(+value.toFixed(4));
             }
         });
     }

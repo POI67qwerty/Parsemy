@@ -738,6 +738,68 @@ const ASSET_KIT = (function () {
         return parts;
     }
 
+    // ===== 共通の3点ベジェ編集と円形ケーブル =====
+    // Blender専用機能に依存せず、既存JSONに保存できる9つの数値を使う。
+    function quadraticPoint(points,t) {
+        const u=1-t; return points[0].map((v,i)=>u*u*v+2*u*t*points[1][i]+t*t*points[2][i]);
+    }
+    function quadraticEditor(prefix, defaults=[[-2,0,0],[0,0,-.6],[2,0,0]]) {
+        const names=['Start','Bend','End'], axes=['X','Y','Z'], colors=['#e8743d','#3fa45b','#4a7be8'], labels=['始点','曲げ点','終点'];
+        const point=(o,i)=>{
+            const name=names[i],get=(axis,k)=>Number.isFinite(Number(o[prefix+name+axis]))?Number(o[prefix+name+axis]):defaults[i][k];
+            return [get('X',0),get('Y',1),(Number(o.h)||0)+get('Z',2)];
+        }, points=o=>[0,1,2].map(i=>point(o,i)), curve=(o,t)=>quadraticPoint(points(o),t), controls=[];
+        names.forEach((name,i)=>axes.forEach((axis,k)=>{
+            const fallback=k===2?{x:0,y:-1}:k===1?{x:0,y:1}:{x:1,y:0};
+            controls.push({key:prefix+name+axis,label:labels[i]+axis+(k===2?'（高さ差）':''),default:defaults[i][k],min:-30,max:30,step:.05,unit:'m',
+                handle:(o,v)=>{const p=point(o,i),sample=[...p],probe=[...p],offset=(i===2&&k===0?-.24:.24);sample[k]+=offset;probe[k]+=offset+1;return {anchor:p,sample,probe,fallback,color:colors[k]};}});
+        }));
+        const constrainWidth=(next,old,patch)=>{
+            if(Object.prototype.hasOwnProperty.call(patch,'ra') && Math.abs(old.ra)>1e-6){
+                const ratio=next.ra/old.ra;
+                names.forEach((name,i)=>{const key=prefix+name+'X';if(!Object.prototype.hasOwnProperty.call(patch,key))next[key]=point(old,i)[0]*ratio;});
+            }
+            return next;
+        };
+        return {prefix,point,points,curve,controls,constrainWidth};
+    }
+    // ベジェを円断面で掃引する。隣接断面の法線を投影して回転を抑え、
+    // 実際の面から視点別の外輪郭を選ぶ。入力が重複しても例外を出さない。
+    function quadraticTube(o, points, radius, opts={}) {
+        const seg=Math.max(6,Math.min(20,Math.round(opts.sides||10))),steps=Math.max(4,Math.min(96,Math.round(opts.steps||24))),r=Math.max(.001,Math.abs(Number(radius)||.02)),
+            sub=(a,b)=>a.map((v,i)=>v-b[i]),add=(a,b)=>a.map((v,i)=>v+b[i]),mul=(a,k)=>a.map(v=>v*k),dot=(a,b)=>a.reduce((x,v,i)=>x+v*b[i],0),
+            cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],
+            norm=(a)=>{const n=Math.hypot(...a);return n>1e-10?mul(a,1/n):null;},samples=[];
+        for(let i=0;i<=steps;i++){const p=quadraticPoint(points,i/steps);if(!samples.length||Math.hypot(...sub(p,samples[samples.length-1]))>1e-8)samples.push(p);}
+        if(samples.length<2){const p=samples[0]||[0,0,0];return {meshTriangles:[],meshEdges:[[p,p]]};}
+        const rings=[],world=[],tangents=[];let prev=null;
+        for(let i=0;i<samples.length;i++){
+            const tangent=norm(sub(samples[Math.min(i+1,samples.length-1)],samples[Math.max(0,i-1)])) || tangents[tangents.length-1] || [1,0,0];tangents.push(tangent);
+            let u=prev&&norm(sub(prev,mul(tangent,dot(prev,tangent))));
+            if(!u){const ref=Math.abs(tangent[2])<.8?[0,0,1]:[0,1,0];u=norm(cross(tangent,ref))||[1,0,0];}
+            const v=norm(cross(tangent,u))||[0,0,1];prev=u;
+            const ring=Array.from({length:seg},(_,j)=>{const a=2*Math.PI*j/seg;return add(samples[i],add(mul(u,r*Math.cos(a)),mul(v,r*Math.sin(a))));});
+            rings.push(ring);world.push(ring.map(p=>L2W(o,...p)));
+        }
+        const triangles=[],edges=[],camera=camPos(),view=orthView?orthBasis().depth.map(v=>-v):null;
+        for(let i=0;i<rings.length-1;i++){
+            const facing=[],center=L2W(o,...mul(add(samples[i],samples[i+1]),.5));
+            for(let j=0;j<seg;j++){
+                const k=(j+1)%seg,a=rings[i][j],b=rings[i][k],c=rings[i+1][k],d=rings[i+1][j];triangles.push([a,b,c],[a,c,d]);
+                const A=world[i][j],B=world[i][k],D=world[i+1][j],n=cross(sub(B,A),sub(D,A)),radial=sub(A,center);
+                if(dot(n,radial)<0)for(let q=0;q<3;q++)n[q]=-n[q];
+                facing.push(dot(n,view||sub(camera,A))>1e-12);
+            }
+            const indexes=[];for(let j=0;j<seg;j++)if(facing[(j+seg-1)%seg]!==facing[j])indexes.push(j);
+            for(const j of (indexes.length===2?indexes:[0,Math.floor(seg/2)]))edges.push([rings[i][j],rings[i+1][j]]);
+        }
+        for(const idx of [0,rings.length-1]){
+            for(let j=0;j<seg;j++){const k=(j+1)%seg;triangles.push(idx===0?[samples[idx],rings[idx][k],rings[idx][j]]:[samples[idx],rings[idx][j],rings[idx][k]]);}
+            edges.push([...rings[idx],rings[idx][0]]);
+        }
+        return {meshTriangles:triangles,meshEdges:edges,preciseTubeEdge:true,onFace:true};
+    }
+
     // ===== 登録 =====
     // meta は ASSETS の初期値（w/d/h のほか、lightboxFrame などの固有値もそのまま入る）。
     // build(o, K) は部品の配列を返す。
@@ -847,6 +909,7 @@ const ASSET_KIT = (function () {
         textPart,
         glyphs: () => Object.keys(GLYPHS),
         axisHandle,
+        quadraticPoint, quadraticEditor, quadraticTube,
         // 検査用
         toP3,
         isConvex,
