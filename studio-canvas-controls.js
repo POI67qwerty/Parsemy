@@ -35,7 +35,7 @@ window.CityCanvasControls = (function () {
     function legacyLabel(kind,h) {
         if(kind.startsWith('building-') && kind.includes('OpeningW'))return '開口の幅';
         if(kind.startsWith('building-') && kind.includes('OpeningH'))return '開口の高さ';
-        if(kind==='building-backFace'||kind==='stacked-opening-back')return '開口の奥行き';
+        if(kind==='building-backFace'||kind==='stacked-opening-back'||kind==='cornerCut-opening-depth')return '開口の凹み';
         if(kind.startsWith('stacked-opening-w-'))return '開口の幅';
         if(kind==='stacked-opening-h')return '開口の高さ';
         if(kind==='awning-edgeZ')return '前縁の高さ';
@@ -65,7 +65,12 @@ window.CityCanvasControls = (function () {
             const kind=legacyType(o,h);if(!kind)continue;
             const id='handle:'+canonical(kind);
             if(seen.has(id))continue;
-            const value=asNumber(h.start,NaN);let min=asNumber(h.min,NaN),max=asNumber(h.max,NaN);
+            let value=asNumber(h.start,NaN),min=asNumber(h.min,NaN),max=asNumber(h.max,NaN),depthOffset=0;
+            // 直線の開口は内部で壁中心からの符号付き位置を使う。UIでは正面からの凹み量にする。
+            if(kind==='building-backFace'||kind==='stacked-opening-back'){
+                const g=kind==='building-backFace'?buildingGeometry(o):stackedOpeningParams(o,o.floors?.[0]);
+                depthOffset=g.d/2;value+=depthOffset;min+=depthOffset;max+=depthOffset;
+            }
             // 窓1枚は割付セルより大きくならない。ハンドルの上限は壁全体なので、
             // スライダーには実際に形が変化するセル上限を使う。
             if(kind==='window-grid-width'||kind==='window-grid-height'){
@@ -76,7 +81,7 @@ window.CityCanvasControls = (function () {
             }
             if(!Number.isFinite(value)||!Number.isFinite(min)||!Number.isFinite(max)||max<min)continue;
             const integer=!!h.integer||kind==='recessed-window-count';
-            result.push({id,label:legacyLabel(kind,h),value,min,max,step:integer?1:.01,integer,unit:integer?'':(kind.startsWith('person-')?'°':'m'),handle:h,kind});seen.add(id);
+            result.push({id,label:legacyLabel(kind,h),value,min,max,step:integer?1:.01,integer,unit:integer?'':(kind.startsWith('person-')?'°':'m'),handle:h,kind,depthOffset});seen.add(id);
             // 庇の前縁は1つの菱形に高さ・奥行きの2軸がある。スライダーでは独立させる。
             if(kind==='awning-edgeZ' && Number.isFinite(h.start2) && Number.isFinite(h.min2) && Number.isFinite(h.max2)){
                 result.push({id:'handle:awning-edgeY',label:'前縁の前後',value:h.start2,min:h.min2,max:h.max2,step:.01,unit:'m',kind:'awning-edgeY',handle:h});
@@ -100,7 +105,7 @@ window.CityCanvasControls = (function () {
         const oldEd=ed,oldSnap=snapHit;
         if(oldEd)return false;
         try{
-            ed={id:o.id,o0:o,t:item.kind,sign:{...item.handle,start:v,dir:{x:1,y:0},scale:1,dir2:null},p0:{x:0,y:0},started:true};
+            ed={id:o.id,o0:o,t:item.kind,sign:{...item.handle,start:v-(item.depthOffset||0),dir:{x:1,y:0},scale:1,dir2:null},p0:{x:0,y:0},started:true};
             dragEdit({x:0,y:0});
             return true;
         } finally { ed=oldEd;snapHit=oldSnap; }

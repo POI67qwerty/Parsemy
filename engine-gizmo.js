@@ -550,6 +550,7 @@ function buildingBackY(o, d) {
     const half = Math.max(0.025, d * 0.5),
         stored = Number(o?.openingBack);
     if (Number.isFinite(stored)) return clamp(stored, -half + 0.025, half - 0.025);
+    if (o?.doorEnabled === true) return half - 0.025; // 旧扉データはカメラ位置に依存させない
     const far = -buildingFaceDepth(o);
     return far >= 0 ? half - 0.025 : -half + 0.025;
 }

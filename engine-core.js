@@ -1629,6 +1629,9 @@ function setOb(id, patch) {
         if (typeof window.flashHint === "function") window.flashHint("ロック中のオブジェクトは編集できません");
         return false;
     }
+    // 扉のONでは、未保存だった奥壁の現在位置を保存してから扉へ置き換える。
+    if (patch?.doorEnabled === true && patch.openingBack == null && o.asset === "building" && o.openingBack == null && typeof buildingGeometry === "function")
+        patch = { ...patch, openingBack: buildingGeometry(o).backY };
     let next = { ...o, ...patch };
     // 開口幅の編集では、すでに動かした開口の中心を可能な限り固定する。
     if (typeof buildingOpeningEditConstraint === "function") next = buildingOpeningEditConstraint(next, o, patch || {});

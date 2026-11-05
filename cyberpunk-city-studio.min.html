@@ -1164,10 +1164,10 @@ body.cameraLocked #cv {
     opacity: 0.42;
     cursor: default;
 }
-.assetCard[hidden] {
+.assetCard[hidden], .trainPreset[hidden] {
     display: none !important;
 }
-.assetCard {
+.assetCard, .trainPreset {
     flex: 0 0 auto;
     display: flex;
     align-items: center;
@@ -1181,7 +1181,7 @@ body.cameraLocked #cv {
     text-align: left;
     cursor: pointer;
 }
-.assetCard:hover {
+.assetCard:hover, .trainPreset:hover {
     border-color: var(--mint) !important;
     background: #243b42 !important;
 }
@@ -1194,7 +1194,7 @@ body.cameraLocked #cv {
     background: linear-gradient(135deg, #2b625f, #394e86);
     font-size: 16px;
 }
-.assetCard span:last-child {
+.assetCard span:last-child, .trainPreset span:last-child {
     font-size: 11px;
     line-height: 1.2;
 }
@@ -1698,6 +1698,7 @@ body.cameraLocked #cv {
 #floorPlanDock .floorPlanDockStatus { display:none; }
 #floorPlanDock .dockHint { display:none; }
 #floorPlanDock .floorPlanDockInner > button { flex:0 0 auto; white-space:nowrap; }
+.trainPreset { border-color: #497e79 !important; background: #21413e !important; }
 </style>
     </head>
     <body>
@@ -3306,6 +3307,8 @@ function setOb(id, patch) {
         if (typeof window.flashHint === "function") window.flashHint("ロック中のオブジェクトは編集できません");
         return false;
     }
+    if (patch?.doorEnabled === true && patch.openingBack == null && o.asset === "building" && o.openingBack == null && typeof buildingGeometry === "function")
+        patch = { ...patch, openingBack: buildingGeometry(o).backY };
     let next = { ...o, ...patch };
     if (typeof buildingOpeningEditConstraint === "function") next = buildingOpeningEditConstraint(next, o, patch || {});
     const assetMeta = next.type === "asset" && typeof ASSETS !== "undefined" ? ASSETS[next.asset] : null;
@@ -4273,6 +4276,7 @@ function buildingBackY(o, d) {
     const half = Math.max(0.025, d * 0.5),
         stored = Number(o?.openingBack);
     if (Number.isFinite(stored)) return clamp(stored, -half + 0.025, half - 0.025);
+    if (o?.doorEnabled === true) return half - 0.025;
     const far = -buildingFaceDepth(o);
     return far >= 0 ? half - 0.025 : -half + 0.025;
 }
@@ -9357,7 +9361,7 @@ function exportSurfaceTrianglesBase(o) {
         quad(point(frontA, z0), point(backA, z0), point(backA, openingH), point(frontA, openingH));
         quad(point(frontB, z0), point(frontB, openingH), point(backB, openingH), point(backB, z0));
         quad(point(frontA, openingH), point(backA, openingH), point(backB, openingH), point(frontB, openingH));
-        quad(point(backA, z0), point(backB, z0), point(backB, openingH), point(backA, openingH));
+        if (!o.doorEnabled && !o.omitOpeningBack) quad(point(backA, z0), point(backB, z0), point(backB, openingH), point(backA, openingH));
     };
     const openingBoxAt = (cx, cy, bw, bd, z0, z1, opening) => {
         const x = bw / 2,
@@ -9378,7 +9382,7 @@ function exportSurfaceTrianglesBase(o) {
         q([dx - ow / 2, -y, z0], [dx - ow / 2, panelY, z0], [dx - ow / 2, panelY, oh + z0], [dx - ow / 2, -y, oh + z0]);
         q([dx + ow / 2, -y, z0], [dx + ow / 2, -y, oh + z0], [dx + ow / 2, panelY, oh + z0], [dx + ow / 2, panelY, z0]);
         q([dx - ow / 2, -y, oh + z0], [dx - ow / 2, panelY, oh + z0], [dx + ow / 2, panelY, oh + z0], [dx + ow / 2, -y, oh + z0]);
-        q([dx - ow / 2, panelY, z0], [dx + ow / 2, panelY, z0], [dx + ow / 2, panelY, oh + z0], [dx - ow / 2, panelY, oh + z0]);
+        if (!o.doorEnabled) q([dx - ow / 2, panelY, z0], [dx + ow / 2, panelY, z0], [dx + ow / 2, panelY, oh + z0], [dx - ow / 2, panelY, oh + z0]);
     };
     const beveledOpeningAt = (cx, cy, bw, bd, z0, z1, offset, segments, opening) => {
         const footprint = beveledBoxFootprint(bw, bd, offset, segments),
@@ -9431,7 +9435,7 @@ function exportSurfaceTrianglesBase(o) {
             [cx + dx + ow / 2, cy + panelY, oh + z0],
             [cx + dx + ow / 2, cy - y, oh + z0],
         );
-        quad(
+        if (!o.doorEnabled) quad(
             [cx + dx - ow / 2, cy + panelY, z0],
             [cx + dx + ow / 2, cy + panelY, z0],
             [cx + dx + ow / 2, cy + panelY, oh + z0],
@@ -9658,7 +9662,7 @@ function exportSurfaceTrianglesBase(o) {
                 bevelOffset=floor.bevelOffset,bevelSegments=floor.bevelSegments,opening=floor.opening;
             if (kind === "cornerCutStackedBuilding") {
                 const base=customPt(o,0,0,0), dest=customPt(o,fx,fy,fz), shift=dest.map((v,j)=>v-base[j]),
-                    part={...o,asset:"cornerCutBox",ra:fw/2,rb:fd/2,h:fh,facadeEnabled:false,doorEnabled:false,arrayEnabled:false,cornerCutOpeningEnabled:!!opening,
+                    part={...o,asset:"cornerCutBox",ra:fw/2,rb:fd/2,h:fh,facadeEnabled:false,doorEnabled:false,omitOpeningBack:!!opening && o.doorEnabled===true,arrayEnabled:false,cornerCutOpeningEnabled:!!opening,
                         cornerCutOpeningW:opening?.openingW,cornerCutOpeningH:opening?.openingH,cornerCutOpeningDepth:opening?.openingBack},
                     append=tris=>tris.forEach(t=>out.push(t.map(p=>p.map((v,j)=>v+shift[j]))));
                 append(surfaceTriangles(part));
@@ -9716,7 +9720,7 @@ function exportSurfaceTrianglesBase(o) {
         boxAt((-g.w / 2 + leftEdge) / 2, 0, leftW, g.d, 0, g.h);
         boxAt((rightEdge + g.w / 2) / 2, 0, rightW, g.d, 0, g.h);
         boxAt(0, 0, g.w, g.d, g.openingH, g.h);
-        quad(
+        if (!o.doorEnabled) quad(
             [leftEdge, panelY, 0],
             [rightEdge, panelY, 0],
             [rightEdge, panelY, g.openingH],
@@ -10873,7 +10877,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         } else {
             c.moveTo(run[0], run[1]);
             for (let i = 2; i < run.length; i += 2) c.lineTo(run[i], run[i + 1]);
-            if (s.railingRoundBar && run.length === 2) c.lineTo(run[0] + 0.001, run[1]);
+            if ((s.railingRoundBar || s.preciseTinyGaps) && run.length === 2) c.lineTo(run[0] + 0.001, run[1]);
             if (fishVisiblePixels && run.length >= 4) {
                 for (let i = 0; i < run.length; i += 2) {
                     const x = Math.round(tf[0]*run[i] + tf[2]*run[i+1] + tf[4]),
@@ -10975,7 +10979,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
                                 depth: 1 / (ia + (ib - ia) * t),
                             };
                         };
-                    const n = Math.max(1, Math.ceil(len / 2));
+                    const n = Math.max(1, Math.ceil(s.preciseTinyGaps ? len * 2 : len / 2));
                     for (let j = 1; j < n; j++) emit(at(j / n));
                 } else {
                     const worldN = Math.ceil(Math.hypot(v[0] - a[0], v[1] - a[1], v[2] - a[2]) * 10),
@@ -16553,6 +16557,10 @@ function linesWindowGrid(ctx) {
 }
 function normalizedAsset(o) {
     let q = o?.attachment ? syncAttachedPart(o) : o;
+    if (q?.asset === "building" && q.doorEnabled === true && q.openingBack == null) {
+        const d=Math.max(.05,Math.abs(Number(q.rb)||.5)*2);
+        q={...q,openingBack:buildingBackY(q,d)};
+    }
     if (q && q.asset === "cornerCutBox") {
         const params = cornerCutOpeningParams(q);
         return {
@@ -16762,13 +16770,13 @@ function buildingDoorSupported(o) {
 }
 function buildingDoorOpening(o) {
     if (!buildingDoorSupported(o)) return null;
-    let w, h, origin, tangent = [1, 0], inward = [0, 1];
+    let w, h, depth, origin, tangent = [1, 0], inward = [0, 1];
     if (o.asset === "building") {
         if (o.openingEnabled === false) return null;
-        const g = buildingGeometry(o); w = g.openingW; h = g.openingH; origin = [g.openingOffset, -g.d / 2, 0];
+        const g = buildingGeometry(o); w = g.openingW; h = g.openingH; depth = g.backY + g.d / 2; origin = [g.openingOffset, -g.d / 2, 0];
     } else if (o.asset === "cornerCutBox") {
         const g = cornerCutOpeningParams(o); if (!g.enabled) return null;
-        w = g.openingW; h = g.openingH; origin = [g.openingMidpoint[0], g.openingMidpoint[1], 0]; tangent = g.tangent; inward = g.inward;
+        w = g.openingW; h = g.openingH; depth = g.openingDepth; origin = [g.openingMidpoint[0], g.openingMidpoint[1], 0]; tangent = g.tangent; inward = g.inward;
     } else {
         if (!stackedOpeningEnabled(o)) return null;
         const f = o.floors?.[0] || { w: (Number(o.ra) || 2) * 2, d: (Number(o.rb) || 1.5) * 2, h: 2.2 },
@@ -16776,11 +16784,11 @@ function buildingDoorOpening(o) {
         w = g.openingW; h = g.openingH;
         if (g.corner) {
             origin = [fx + g.corner.openingMidpoint[0], fy + g.corner.openingMidpoint[1], fz];
-            tangent = g.corner.tangent; inward = g.corner.inward;
-        } else origin = [fx + g.openingOffset, fy - g.d / 2, fz];
+            tangent = g.corner.tangent; inward = g.corner.inward; depth = g.corner.openingDepth;
+        } else { origin = [fx + g.openingOffset, fy - g.d / 2, fz]; depth = g.openingBack + g.d / 2; }
     }
     const gap = Math.min(0.025, w * 0.035, h * 0.025), width = Math.max(0.01, w - 2 * gap), height = Math.max(0.01, h - gap);
-    return { width, height, origin, tangent, inward, gap };
+    return { width, height, openingWidth:w, openingHeight:h, origin, tangent, inward, gap, depth };
 }
 function buildingOpeningParamsForPosition(o) {
     if (!buildingDoorSupported(o)) return null;
@@ -16817,7 +16825,7 @@ function buildingDoorPoint(spec, x, depth, z) {
 function buildingDoorLines(o) {
     if (o?.doorEnabled !== true) return [];
     const g = buildingDoorOpening(o); if (!g) return [];
-    const w = g.width, h = g.height, x = w / 2, base = g.gap, depth = .006,
+    const w = g.width, h = g.height, x = w / 2, base = g.gap, depth = Math.max(0, g.depth - .002),
         type = ["shutter", "double", "convenience"].includes(o.doorType) ? o.doorType : "shutter",
         col = o.c || "#222222", out = [],
         line = points => out.push({ ...customLineA(o, points.map(p => buildingDoorPoint(g, p[0], depth, base + p[1])), col, 1.15), onFace: true, preciseTubeEdge: true, tubeContourView: orthView || "3d", doorGeometry: true }),
@@ -16853,8 +16861,8 @@ function buildingDoorLines(o) {
 function buildingDoorTriangles(o) {
     if (o?.doorEnabled !== true) return [];
     const g = buildingDoorOpening(o); if (!g) return [];
-    const x = g.width / 2, z0 = g.gap, z1 = z0 + g.height,
-        local = [[-x,z0],[x,z0],[x,z1],[-x,z1]].map(p => buildingDoorPoint(g,p[0],.008,p[1])),
+    const x = g.openingWidth / 2, z0 = 0, z1 = g.openingHeight,
+        local = [[-x,z0],[x,z0],[x,z1],[-x,z1]].map(p => buildingDoorPoint(g,p[0],g.depth,p[1])),
         p = local.map(q => customPt(o,...q)), type = o.doorType || "shutter",
         color = type === "double" ? "#a38b76" : type === "convenience" ? "#9ec4cc" : "#aab4bd",
         tris = [[p[0],p[1],p[2]],[p[0],p[2],p[3]]];
@@ -16863,7 +16871,7 @@ function buildingDoorTriangles(o) {
 }
 function genAsset(o) {
     const q = normalizedAsset(o);
-    return [...assetLines(q), ...buildingDoorLines(q)].map((s) => ({ ...s, ob: q, d3: true, cs: sigNow() }));
+    return [...assetLines(q), ...buildingDoorLines(q)].map((s) => ({ ...s, ...(q.doorEnabled && buildingDoorSupported(q) ? { onFace:true, preciseTubeEdge:true, tubeContourView:orthView||"3d" } : {}), ob: q, d3: true, cs: sigNow() }));
 }
 const baseGenShape = genShape;
 genShape = function (o) {
@@ -17727,6 +17735,7 @@ const ASSET_KIT = (function () {
                     edgeIndex++;
                     if (part.signalSmoothSide) line.signalSmoothSide = true;
                     if (part.onFace) line.onFace = true;
+                    if (part.preciseTinyGaps) line.preciseTinyGaps = true;
                     if (part.preciseTubeEdge) {
                         line.preciseTubeEdge = true;
                         line.tubeContourView = (typeof orthView !== 'undefined' && orthView) || '3d';
@@ -19731,6 +19740,141 @@ ASSET_KIT.define('guardPoleHalf',{
    return K.repeatParts(parts,{axis:'z',spacing:h,count:K.count(o.crateCount,1,1,8)});
   });
 })();
+(function(){
+ const flag={onFace:true,preciseTubeEdge:true};
+ const value=(o,k,d,lo,hi)=>clamp(Number.isFinite(Number(o[k]))?Number(o[k]):d,lo,Math.max(lo,hi));
+ const box=(K,w,d,x,y,z0,z1)=>K.box(K.rectPath(w,d,x,y),z0,z1,flag);
+ const cylinder=(K,r,z0,z1,opt={})=>({...K.cylinder(r,z0,z1,{seg:12,verts:4,...opt}),...flag});
+ const ring=(K,w,h,x,z,y0,y1,t)=>{
+  const r=Math.min(w,h)*.20,outer=K.roundRectPath(w,h,r,2,x,z),inner=K.roundRectPath(w-2*t,h-2*t,Math.max(.002,r-t),2,x,z),tris=[],edges=[];
+  const pt=(a,y)=>[a[0],y,a[1]],quad=(a,b,c,d)=>tris.push([a,b,c],[a,c,d]);
+  for(let i=0;i<outer.length;i++){const j=(i+1)%outer.length,a=outer[i],b=outer[j],c=inner[i],e=inner[j];
+   quad(pt(a,y0),pt(b,y0),pt(e,y0),pt(c,y0));quad(pt(a,y1),pt(c,y1),pt(e,y1),pt(b,y1));
+   quad(pt(a,y0),pt(a,y1),pt(b,y1),pt(b,y0));quad(pt(c,y0),pt(e,y0),pt(e,y1),pt(c,y1));}
+  for(const y of [y0,y1])for(const path of [outer,inner])edges.push([...path.map(p=>pt(p,y)),pt(path[0],y)]);
+  for(const i of [0,3,6,9])edges.push([pt(outer[i],y0),pt(outer[i],y1)]);
+  return {meshTriangles:tris,meshEdges:edges,...flag};
+ };
+ const trainFramePath=(K,w,h,r,x,z)=>{
+  const scale=Math.max(1,.02/Math.min(w,h));
+  return beveledBoxFootprint(w*scale,h*scale,r*scale,4).map(([u,v])=>[x+u/scale,z+v/scale]);
+ };
+ const trainHoleWall=(K,outer,y0,y1,hole,r,group)=>{
+  const seamMarks=[null,null,null,null,null,null,null,null,
+   ...hole.map((_,i)=>beveledEdgeMark(i,r,4,group))];
+  return K.box(outer,y0,y1,{axis:'y',holes:[hole],holeSides:true,seamMarks,...flag});
+ };
+ const trainWindowRing=(K,w,h,x,z,y0,y1,t,r,group)=>{
+  const outer=trainFramePath(K,w,h,r,x,z),inner=trainFramePath(K,w-2*t,h-2*t,Math.max(.000001,r-t),x,z),
+   tris=[],edges=[],marks=[],pt=(a,y)=>[a[0],y,a[1]],
+   quad=(a,b,c,d)=>tris.push([a,b,c],[a,c,d]),add=(line,mark=null)=>{edges.push(line);marks.push(mark)},
+   loop=(path,y)=>[...path.map(p=>pt(p,y)),pt(path[0],y)];
+  for(let i=0;i<outer.length;i++){const j=(i+1)%outer.length,a=outer[i],b=outer[j],c=inner[i],e=inner[j];
+   quad(pt(a,y0),pt(b,y0),pt(e,y0),pt(c,y0));quad(pt(a,y1),pt(c,y1),pt(e,y1),pt(b,y1));
+   quad(pt(a,y0),pt(a,y1),pt(b,y1),pt(b,y0));quad(pt(c,y0),pt(e,y0),pt(e,y1),pt(c,y1));}
+  add(loop(outer,y0));add(loop(inner,y0));add(loop(inner,y1));
+  outer.forEach((p,i)=>add([pt(p,y0),pt(p,y1)],beveledEdgeMark(i,r,4,group+'-outer')));
+  const ir=Math.max(.000001,r-t);
+  inner.forEach((p,i)=>add([pt(p,y0),pt(p,y1)],beveledEdgeMark(i,ir,4,group+'-inner')));
+  return {meshTriangles:tris,meshEdges:edges,seamMarks:marks,...flag};
+ };
+ const seatHeight={key:'trainSeatHeight',label:'座面の高さ',default:.43,min:.16,max:o=>Math.max(.16,o.h*.74),step:.01,unit:'m',
+  handle:(o,v)=>({anchor:[-o.ra,-o.rb,0],sample:[-o.ra,-o.rb,v],probe:[-o.ra,-o.rb,v+1],fallback:{x:0,y:-1}})};
+ const seatCount=o=>{const n=Number(o.trainSeatCount ?? 4);return Math.max(1,Math.min(12,Number.isFinite(n)?Math.round(n):4));};
+ const countControl={key:'trainSeatCount',label:'席数',type:'range',canvasSlider:true,default:4,min:1,max:12,step:1,integer:true,unit:'席'};
+ const quietRounded=(K,w,d,h,r,opt)=>({...K.roundedBox(w,d,h,r,opt),ringLines:[],verticals:[]});
+ function seat(kind,label,w,divided,single){
+  ASSET_KIT.define(kind,{label,glyph:divided?'▥':'▰',group:'train',w,d:.68,h:.98,accent:'#3d5273',minHalfWidth:o=>divided&&!single?.005*seatCount(o):.12,minHalfDepth:()=>.12,minHeight:()=>.3,
+   constrainEdit:(next,old,patch)=>divided&&!single && Object.prototype.hasOwnProperty.call(patch,'trainSeatCount') && !Object.prototype.hasOwnProperty.call(patch,'ra')
+     ? {...next,ra:Math.abs(old.ra)*seatCount(next)/seatCount(old)} : next,
+   controls:[seatHeight,...(divided&&!single?[countControl]:[]),{key:'trainSeatArms',label:'両端の手すり',type:'boolean',default:!(divided&&single)}]},(o,K)=>{
+   const w=Math.max(divided&&!single?.01*seatCount(o):.24,2*Math.abs(o.ra)),d=Math.max(.24,2*Math.abs(o.rb)),h=Math.max(.3,o.h),
+    sh=value(o,'trainSeatHeight',.43,.16,h*.74),n=divided&&!single?K.count(o.trainSeatCount,4,1,12):1,
+    frame=Math.min(.045,w*.07,d*.10),cush=Math.min(.10,sh*.24),backD=Math.min(d*.20,.13),out=[];
+   if(!divided){out.push(box(K,w*.96,d*.82,0,d*.07,0,Math.max(.05,sh-cush)));
+    if(w>.45&&sh>.28){const z0=sh*.19,z1=sh*.66;out.push(box(K,w*.76,.008,0,-d*.347,z0,z1));
+     for(let i=1;i<4;i++)out.push(box(K,w*.68,.010,0,-d*.355,z0+(z1-z0)*i/4,z0+(z1-z0)*i/4+.008));}}
+   else{
+    const leg=Math.min(.025,w*.06,d*.06),top=Math.max(.06,sh-cush);
+    out.push({...box(K,w*.91,Math.min(d*.25,.10),0,0,Math.max(.03,top-.06),top),preciseTinyGaps:true});
+    for(const x of [-w*.37,w*.37])out.push({...cylinder(K,leg,0,top,{cx:x,cy:0})});}
+   const gap=divided&&!single?Math.min(.018,w/(n*8)):0,cell=w/n;
+   for(let i=0;i<n;i++){const x=-w/2+cell*(i+.5),cw=Math.max(.002,cell-gap);
+    if(divided){
+     const rise=h-sh,t=Math.min(.065,sh*.22,rise*.20),top=[
+      [-.45*d,sh],[-.35*d,sh-t*.20],[-.22*d,sh-t*.42],[-.07*d,sh-t*.50],
+      [.07*d,sh-t*.38],[.15*d,sh-t*.08],[.21*d,sh+rise*.08],[.25*d,sh+rise*.20],
+      [.29*d,sh+rise*.40],[.34*d,sh+rise*.68],[.39*d,h-t*.35]],
+     bottom=[[.48*d,h-t*.35],[.43*d,sh+rise*.68],[.38*d,sh+rise*.38],[.34*d,sh+rise*.15],
+      [.29*d,sh+rise*.02],[.23*d,sh-t*.65],[.10*d,sh-t*1.3],[-.08*d,sh-t*1.45],[-.24*d,sh-t*1.35],[-.45*d,sh-t]];
+     const profile=[...top,...bottom],xs=[x-cw/2,x+cw/2],p=(u,v)=>[u,v[0],v[1]],meshTriangles=[],meshEdges=[];
+     for(const [a,b,c] of K.triangulate(profile)){meshTriangles.push([p(xs[0],a),p(xs[0],c),p(xs[0],b)],[p(xs[1],a),p(xs[1],b),p(xs[1],c)]);}
+     for(let j=0;j<profile.length;j++){const k=(j+1)%profile.length,a=p(xs[0],profile[j]),b=p(xs[1],profile[j]),c=p(xs[1],profile[k]),d=p(xs[0],profile[k]);meshTriangles.push([a,b,c],[a,c,d]);}
+     meshEdges.push(top.map(v=>p(xs[0],v)));
+     if(i===n-1)meshEdges.push(top.map(v=>p(xs[1],v)));
+     for(const j of [0,top.length-1])meshEdges.push([p(xs[0],top[j]),p(xs[1],top[j])]);
+     out.push({meshTriangles,meshEdges,...flag});
+    } else {
+     out.push(quietRounded(K,cw,d*.91,cush,Math.min(.035,cush*.32),{cx:x,cy:-d*.025,z0:sh-cush,seg:2,cornerSeg:1,extra:flag}));
+     out.push(quietRounded(K,cw,backD,Math.max(.05,h-sh),Math.min(.03,backD*.3),{cx:x,cy:d/2-backD/2,z0:sh,seg:2,cornerSeg:1,extra:flag}));
+    }
+   }
+   if(o.trainSeatArms!==false && (!(divided&&single)||o.trainSeatArms===true)){const r=Math.min(.018,w*.035,d*.04),z=Math.min(h*.86,sh+.25),yf=-d*.38,yb=d*.38;
+    for(const s of [-1,1]){const x=s*(w/2-r);out.push({...K.quadraticTube(o,[[x,yf,sh],[x,yf,z],[x,(yf+yb)/2,z]],r,{steps:4,sides:8}),...flag});
+     out.push({...K.quadraticTube(o,[[x,(yf+yb)/2,z],[x,yb,z],[x,yb,sh]],r,{steps:4,sides:8}),...flag});}}
+   return out;
+  });
+ }
+ seat('trainBench','電車の長椅子',2.4,false,false);
+ seat('trainSeat','電車の椅子（長座面）',.58,false,true);
+ seat('trainDividedBench','電車の区切り長椅子',2.4,true,false);
+ seat('trainDividedSeat','電車の椅子（区切り）',.58,true,true);
+ const horizontalPoleLength={key:'trainRailLength',label:'ポールの長さ',min:.2,max:10,step:.05,unit:'m',get:o=>2*Math.abs(o.ra),patch:(o,v)=>({ra:v/2}),
+  handle:(o,v)=>({anchor:[0,-o.rb-.16,o.h],sample:[v/2,-o.rb-.16,o.h],probe:[v/2+1,-o.rb-.16,o.h],fallback:{x:1,y:0}})};
+ ASSET_KIT.define('trainStraps',{label:'つり革',glyph:'♧',group:'train',w:1.5,d:.12,h:.45,accent:'#bfc3c6',minHalfWidth:()=>.10,minHalfDepth:()=>.025,minHeight:()=>.20,controls:[
+  {key:'trainStrapCount',label:'つり革の数',type:'range',canvasSlider:true,default:4,min:1,max:12,step:1,integer:true,unit:'個'},horizontalPoleLength
+ ]},(o,K)=>{const w=Math.max(.2,2*Math.abs(o.ra)),d=Math.max(.05,2*Math.abs(o.rb)),h=Math.max(.2,o.h),n=K.count(o.trainStrapCount,4,1,12),r=Math.min(.016,d*.22,h*.05),out=[cylinder(K,r,-w/2,w/2,{axis:'x',cx:0,cy:h-r})];
+  const cell=w/n,rw=Math.min(.16,cell*.72,h*.36),rh=Math.min(.19,h*.42),t=Math.min(.018,rw*.14,rh*.14);
+  for(let i=0;i<n;i++){const x=-w/2+(i+.5)*cell,top=h-r*2;out.push(box(K,Math.max(.01,rw*.20),Math.min(d*.42,.025),x,0,rh,top));out.push(ring(K,rw,rh,x,rh/2,-Math.min(d*.4,.016),Math.min(d*.4,.016),t));}return out;
+ });
+ const poleLength={key:'trainPoleLength',label:'ポールの長さ',min:.2,max:5,step:.05,unit:'m',get:o=>o.h,patch:(o,v)=>({h:v}),
+  handle:(o,v)=>({anchor:[.22,0,0],sample:[.22,0,v],probe:[.22,0,v+1],fallback:{x:0,y:-1}})};
+ ASSET_KIT.define('trainPole',{label:'車内の縦ポール',glyph:'│',group:'train',w:.08,d:.08,h:2.2,accent:'#bfc3c6',minHalfWidth:()=>.012,minHalfDepth:()=>.012,minHeight:()=>.2,controls:[poleLength]},(o,K)=>{
+  const w=Math.max(.024,Math.abs(o.ra)*2),d=Math.max(.024,Math.abs(o.rb)*2),h=Math.max(.2,o.h),r=Math.min(w,d)*.36;return [cylinder(K,r,0,h),cylinder(K,Math.min(w,d)*.5,0,Math.min(.04,h*.1)),cylinder(K,Math.min(w,d)*.5,h-Math.min(.04,h*.1),h)];});
+ ASSET_KIT.define('trainHandrail',{label:'車内の横手すり',glyph:'┰',group:'train',w:1.8,d:.18,h:.12,accent:'#bfc3c6',minHalfWidth:()=>.10,minHalfDepth:()=>.025,minHeight:()=>.04,controls:[horizontalPoleLength]},(o,K)=>{
+  const w=Math.max(.2,2*Math.abs(o.ra)),d=Math.max(.05,2*Math.abs(o.rb)),h=Math.max(.04,o.h),r=Math.min(.022,d*.16,h*.20),out=[cylinder(K,r,-w/2,w/2,{axis:'x',cx:-d*.25,cy:h*.5})];
+  for(const x of [-w*.42,w*.42]){const rail=cylinder(K,r,-d*.25,d*.48,{axis:'y',cx:x,cy:h*.5});out.push(rail,box(K,r*4,Math.min(.02,d*.12),x,d*.46,h*.5-r*2,h*.5+r*2));}return out;
+ });
+ ASSET_KIT.define('trainWindowWall',{label:'窓付き車内壁',glyph:'▣',group:'train',w:2,d:.12,h:2.35,accent:'#9babae',minHalfWidth:()=>.25,minHalfDepth:()=>.025,minHeight:()=>.6,controls:[
+  {key:'trainWindowWidth',label:'窓の幅',default:1.35,min:.2,max:o=>Math.max(.2,2*o.ra-.16),step:.05,unit:'m',handle:(o,v)=>({anchor:[0,-o.rb,o.h*.65],sample:[v/2,-o.rb,o.h*.65],probe:[v/2+1,-o.rb,o.h*.65],fallback:{x:1,y:0}})},
+  {key:'trainWindowHeight',label:'窓の高さ',default:.9,min:.2,max:o=>Math.max(.2,o.h-value(o,'trainWindowBottom',1,.08,o.h-value(o,'trainWindowHeight',.9,.2,o.h-.16)-.08)-.08),step:.05,unit:'m',handle:(o,v)=>{const z=value(o,'trainWindowBottom',1,.08,o.h-v-.08);return {anchor:[0,-o.rb,z],sample:[0,-o.rb,z+v],probe:[0,-o.rb,z+v+1],fallback:{x:0,y:-1}}}},
+  {key:'trainWindowBottom',label:'窓の下端',default:1.0,min:.08,max:o=>Math.max(.08,o.h-value(o,'trainWindowHeight',.9,.2,o.h-.16)-.08),step:.05,unit:'m',handle:(o,v)=>({anchor:[-o.ra,-o.rb,0],sample:[-o.ra,-o.rb,v],probe:[-o.ra,-o.rb,v+1],fallback:{x:0,y:-1}})}
+ ]},(o,K)=>{const w=Math.max(.5,2*Math.abs(o.ra)),d=Math.max(.05,2*Math.abs(o.rb)),h=Math.max(.6,o.h),ww=value(o,'trainWindowWidth',1.35,.2,w-.16),wh=value(o,'trainWindowHeight',.9,.2,h-.16),z=value(o,'trainWindowBottom',1,.08,h-wh-.08),t=Math.min(.035,ww*.08,wh*.08),zc=z+wh/2;
+  const r=Math.min(.09,ww*.15,wh*.15),hole=trainFramePath(K,ww,wh,r,0,zc);
+  return [trainHoleWall(K,K.rectPath(w,h,0,h/2),-d/2,d/2,hole,r,'train-wall-hole'),trainWindowRing(K,ww,wh,0,zc,-d/2-.012,-d/2,t,r,'train-wall-frame')];
+ });
+ const doorGeom=o=>{
+  const w=Math.max(.5,2*Math.abs(o.ra)),d=Math.max(.05,2*Math.abs(o.rb)),h=Math.max(.7,o.h),
+   f=Math.min(.08,w*.1,h*.1),gap=value(o,'trainDoorGap',0,0,w-2*f-.02),inner=w-2*f,leaf=(inner-gap)/2,
+   zc=h*.57,maxW=Math.max(.002,leaf*.88),maxH=Math.max(.04,2*Math.min(zc-.03,h-f-.03-zc)),
+   ww=value(o,'trainDoorWindowWidth',leaf*.64,.002,maxW),wh=value(o,'trainDoorWindowHeight',h*.48,.04,maxH);
+  return {w,d,h,f,gap,inner,leaf,zc,maxW,maxH,ww,wh,dy:d*.32,x:-(gap/2+leaf/2)};
+ };
+ ASSET_KIT.define('trainSlidingDoor',{label:'電車の両開きドア',glyph:'▯',group:'train',w:1.65,d:.12,h:2.2,accent:'#a6b1b4',minHalfWidth:()=>.25,minHalfDepth:()=>.025,minHeight:()=>.7,controls:[
+  {key:'trainDoorGap',label:'扉の開き幅',type:'range',canvasSlider:true,default:0,min:0,max:o=>Math.max(0,2*o.ra-.2),step:.05,unit:'m'},
+  {key:'trainDoorWindowWidth',label:'扉窓の幅（左右連動）',canvasSlider:true,min:.002,max:o=>doorGeom(o).maxW,step:.01,unit:'m',get:o=>doorGeom(o).ww,
+   handle:(o,v)=>{const g=doorGeom(o),y=-g.dy-.045;return {anchor:[g.x,y,g.zc],sample:[g.x+v/2,y,g.zc],probe:[g.x+v/2+1,y,g.zc],fallback:{x:1,y:0}}}},
+  {key:'trainDoorWindowHeight',label:'扉窓の高さ（左右連動）',canvasSlider:true,min:.04,max:o=>doorGeom(o).maxH,step:.01,unit:'m',get:o=>doorGeom(o).wh,
+   handle:(o,v)=>{const g=doorGeom(o),y=-g.dy-.045;return {anchor:[g.x,y,g.zc],sample:[g.x,y,g.zc+v/2],probe:[g.x,y,g.zc+v/2+1],fallback:{x:0,y:-1}}}}
+ ]},(o,K)=>{const {w,d,h,f,gap,inner,leaf,ww,wh,zc,dy}=doorGeom(o),out=[];
+  for(const s of [-1,1])out.push(box(K,f,d,s*(w/2-f/2),0,0,h));out.push(box(K,inner,d,0,0,h-f,h),box(K,inner,d,0,0,0,Math.min(f*.3,.02)));
+  for(const s of [-1,1]){const x=s*(gap/2+leaf/2);
+   const r=Math.min(.07,ww*.18,wh*.18),hole=trainFramePath(K,ww,wh,r,x,zc),group=s<0?'train-door-left':'train-door-right';
+   out.push(trainHoleWall(K,K.rectPath(leaf,h-f,x,(h-f)/2),-dy,dy,hole,r,group+'-hole'));
+   const t=Math.min(.025,ww*.10,wh*.10);out.push(trainWindowRing(K,ww,wh,x,zc,-dy-.008,-dy,t,r,group+'-frame'));}
+  return out;
+ });
+})();
 "use strict";
 window.cityGridInstallAssetUI = function (bridge) {
     const {
@@ -20304,6 +20448,48 @@ window.cityGridInstallAssetUI = function (bridge) {
             alert("アセットを配置できませんでした。壊れた線は取り除きました。もう一度クリックしてください。");
         }
     }
+    function placeTrainPreset(mode) {
+        if (mode !== "corner" && mode !== "interior") return;
+        sanitizeScene();
+        const before = S.slice(), wasFloor = !!window.cityFloorPlanActive;
+        try {
+            const full = mode === "interior", q = assetGroundPoint({w:2.8,d:full?3.2:1.8,h:2.45}), parts = [],
+                angle = full ? (Number(P.yaw)||0)+90 : 0, a=angle*Math.PI/180, cs=Math.cos(a), sn=Math.sin(a);
+            function add(kind, x, y, z, patch = {}) {
+                const o = newAsset(kind, null, q);
+                Object.assign(o, {k:1,d:-1,off:[0,0,0],ca:q[0]+x*cs-y*sn,cb:q[2]+x*sn+y*cs,lift:z}, patch);
+                o.rot=angle+(Number(patch.rot)||0);
+                parts.push(o); return o;
+            }
+            add("box",0,0,0,{ra:1.4,rb:full?1.6:.9,h:.08});
+            const side = (s) => {
+                const wallY = s*(full?1.45:.84), seatY = s*(full?1.04:.43), rot=s===1?0:180;
+                add("trainWindowWall",0,wallY,.08,{ra:1.35,rot});
+                for(const x of [-.9,-.3,.3,.9]) add("trainDividedSeat",x,seatY,.08,{rot,trainSeatArms:false});
+                add("trainStraps",0,s*(full?1.02:.45),1.98,{ra:1.22,h:.45,rot,trainStrapCount:4});
+                for(const x of [-1.30,1.30]) add("trainPole",x,s*(full?.72:-.72),.08,{h:2.35});
+                add("box",0,s*(full?.72:-.72),2.40,{ra:1.4,rb:.045,h:.06});
+            };
+            side(1);
+            if (full) {
+                side(-1);
+                add("trainPole",0,0,.08,{h:2.35});
+                add("trainSlidingDoor",1.34,0,.08,{rot:90,ra:.75,h:2.2});
+            }
+            const lines = parts.flatMap(o => genShape(o));
+            if (!lines.length || lines.some(s => !validStroke(s))) throw new Error("invalid train preset geometry");
+            HU.push(S); RD=[]; S=[...S,...lines];
+            setSelection(parts.find(o => o.asset === "trainDividedSeat").id,false);
+            tool="edit"; setMode("draw");
+            if (wasFloor) { fitFloorPlan(); setMode("draw"); }
+            syncSel(); renderFresh();
+        } catch (err) {
+            S=before; prev=null; clearSelection();
+            console.error("City Grid train preset error",err);
+            try { render(); } catch(e) {}
+            alert("電車のレイアウトを配置できませんでした。もう一度お試しください。");
+        }
+    }
     let objectClipboard = [];
     function copySelectedObjects() {
         const objects = selectedObjects();
@@ -20713,6 +20899,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         { key: "traffic", label: "交通・標識", kinds: ["crosswalk", "trafficSignal", "pedSignal", "signPost", "signPost2", "signTriangle", "signDiamond", "signCombo", "crossingSign", "guardPoleU", "guardPoleM", "streetCone", "streetPavement"] },
         { key: "streetObjects", label: "小物・植栽", kinds: ["streetParcel", "streetBin", "streetMailbox", "streetPlant", "streetPlantBox", "paperLantern", "lanternString", "shopNoren"] },
         { key: "furniture", label: "家具", kinds: ["stool", "squareStool", "shopWardrobe", "shopWardrobe2", "displayShelf", "displayShelf2"] },
+        { key: "train", label: "電車", kinds: ["trainBench", "trainSeat", "trainDividedBench", "trainDividedSeat", "trainStraps", "trainPole", "trainHandrail", "trainWindowWall", "trainSlidingDoor"] },
         { key: "person", label: "人間", kinds: ["person"] },
         { key: "vehicle", label: "車", kinds: ["keiTruck", "keiVan", "sedan", "sedan2"] },
     ];
@@ -20748,13 +20935,13 @@ window.cityGridInstallAssetUI = function (bridge) {
         "</div>" +
         "</div>" +
         '<div class="assetTrayScroll" role="tabpanel">' +
-        ASSET_GROUPS.map((g) => g.kinds.map((k) => assetCardHtml(k, g.key)).join("")).join("") +
+        ASSET_GROUPS.map((g) => (g.key === "train" ? '<button type="button" class="trainPreset" data-group="train" data-train-preset="corner" title="床・窓・曲線椅子・ポールを一括配置"><span class="assetGlyph">✦</span><span>お手軽設定<br>片側の車内</span></button><button type="button" class="trainPreset" data-group="train" data-train-preset="interior" title="両側の座席と通路を一括配置"><span class="assetGlyph">✦</span><span>お手軽設定<br>車内全体</span></button>' : '') + g.kinds.map((k) => assetCardHtml(k, g.key)).join("")).join("") +
         "</div>" +
         "</div>" +
         '<div class="assetTrayNote">建物を選択して「壁付けベランダ」を押すと、正面壁の2階相当へ自動接着。未選択なら地面へ配置。パスパイプは選択後に画面上の制御点と半径ハンドルを編集できます。</div>';
     stage.parentNode.insertBefore(tray, el("hint"));
     const trayScroll = tray.querySelector(".assetTrayScroll"),
-        trayCards = [...trayScroll.querySelectorAll(".assetCard")],
+        trayCards = [...trayScroll.querySelectorAll(".assetCard, .trainPreset")],
         trayTabs = [...tray.querySelectorAll("[data-asset-group]")];
     const groupStoreKey = "cityGridAssetGroup";
     const savedGroup = (() => {
@@ -20831,6 +21018,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             if (tab.dataset.assetGroup !== activeGroups) showAssetGroup(tab.dataset.assetGroup);
             return;
         }
+        const preset = e.target.closest("[data-train-preset]");
+        if (preset) { placeTrainPreset(preset.dataset.trainPreset); return; }
         const b = e.target.closest("[data-asset]");
         if (b) placeAsset(b.dataset.asset);
     });
@@ -21036,7 +21225,7 @@ window.CityCanvasControls = (function () {
     function legacyLabel(kind,h) {
         if(kind.startsWith('building-') && kind.includes('OpeningW'))return '開口の幅';
         if(kind.startsWith('building-') && kind.includes('OpeningH'))return '開口の高さ';
-        if(kind==='building-backFace'||kind==='stacked-opening-back')return '開口の奥行き';
+        if(kind==='building-backFace'||kind==='stacked-opening-back'||kind==='cornerCut-opening-depth')return '開口の凹み';
         if(kind.startsWith('stacked-opening-w-'))return '開口の幅';
         if(kind==='stacked-opening-h')return '開口の高さ';
         if(kind==='awning-edgeZ')return '前縁の高さ';
@@ -21065,7 +21254,11 @@ window.CityCanvasControls = (function () {
             const kind=legacyType(o,h);if(!kind)continue;
             const id='handle:'+canonical(kind);
             if(seen.has(id))continue;
-            const value=asNumber(h.start,NaN);let min=asNumber(h.min,NaN),max=asNumber(h.max,NaN);
+            let value=asNumber(h.start,NaN),min=asNumber(h.min,NaN),max=asNumber(h.max,NaN),depthOffset=0;
+            if(kind==='building-backFace'||kind==='stacked-opening-back'){
+                const g=kind==='building-backFace'?buildingGeometry(o):stackedOpeningParams(o,o.floors?.[0]);
+                depthOffset=g.d/2;value+=depthOffset;min+=depthOffset;max+=depthOffset;
+            }
             if(kind==='window-grid-width'||kind==='window-grid-height'){
                 const w=Math.max(.2,Math.abs(Number(o.ra)||.2)*2),height=Math.max(.2,Math.abs(Number(o.h)||.2)),q=windowGridOptions(o,w,height),
                     cellW=Math.max(.03,(Math.max(.04,w-q.mx*2)-q.gx*Math.max(0,q.cols-1))/Math.max(1,q.cols)),
@@ -21074,7 +21267,7 @@ window.CityCanvasControls = (function () {
             }
             if(!Number.isFinite(value)||!Number.isFinite(min)||!Number.isFinite(max)||max<min)continue;
             const integer=!!h.integer||kind==='recessed-window-count';
-            result.push({id,label:legacyLabel(kind,h),value,min,max,step:integer?1:.01,integer,unit:integer?'':(kind.startsWith('person-')?'°':'m'),handle:h,kind});seen.add(id);
+            result.push({id,label:legacyLabel(kind,h),value,min,max,step:integer?1:.01,integer,unit:integer?'':(kind.startsWith('person-')?'°':'m'),handle:h,kind,depthOffset});seen.add(id);
             if(kind==='awning-edgeZ' && Number.isFinite(h.start2) && Number.isFinite(h.min2) && Number.isFinite(h.max2)){
                 result.push({id:'handle:awning-edgeY',label:'前縁の前後',value:h.start2,min:h.min2,max:h.max2,step:.01,unit:'m',kind:'awning-edgeY',handle:h});
             }
@@ -21095,7 +21288,7 @@ window.CityCanvasControls = (function () {
         const oldEd=ed,oldSnap=snapHit;
         if(oldEd)return false;
         try{
-            ed={id:o.id,o0:o,t:item.kind,sign:{...item.handle,start:v,dir:{x:1,y:0},scale:1,dir2:null},p0:{x:0,y:0},started:true};
+            ed={id:o.id,o0:o,t:item.kind,sign:{...item.handle,start:v-(item.depthOffset||0),dir:{x:1,y:0},scale:1,dir2:null},p0:{x:0,y:0},started:true};
             dragEdit({x:0,y:0});
             return true;
         } finally { ed=oldEd;snapHit=oldSnap; }
@@ -22288,13 +22481,18 @@ window.CityCanvasControls = (function () {
         if (document.activeElement !== el("buildingDoorType"))
             el("buildingDoorType").value = ["shutter", "double", "convenience"].includes(first.doorType) ? first.doorType : "shutter";
         el("buildingDoorNote").textContent = hasOpening
-            ? "扉は閉じた状態で、開口の幅・高さに合わせて作られます。" + (first.doorType === "convenience" && enabledCount ? " ガラス風の着色で、透過はしません。" : "") + (o.type === "compound" ? " 結合体内の開口に一括適用します。" : "")
+            ? "扉は開口の奥壁の位置に作られます。奥壁の奥行きハンドル／スライダーで凹みを調整できます。" + (first.doorType === "convenience" && enabledCount ? " ガラス風の着色で、透過はしません。" : "") + (o.type === "compound" ? " 結合体内の開口に一括適用します。" : "")
             : "先に建物の開口をONにしてください。";
     }
     function applyBuildingDoor(patch) {
         const o = doorPanelObject(); if (!o || !doorPanelParts(o).length) return;
         HU.push(S); RD = [];
-        if (o.type === "compound") setOb(o.id, { parts: o.parts.map(p => buildingDoorOpening(p) ? { ...p, ...patch } : p) });
+        if (o.type === "compound") setOb(o.id, { parts: o.parts.map(p => {
+            if (!buildingDoorOpening(p)) return p;
+            const keepDepth=patch.doorEnabled===true && p.asset==='building' && p.openingBack==null
+                ? {openingBack:buildingGeometry(p).backY} : {};
+            return { ...p, ...keepDepth, ...patch };
+        }) });
         else setOb(o.id, patch);
         render();
     }

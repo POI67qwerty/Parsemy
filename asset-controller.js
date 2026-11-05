@@ -650,6 +650,53 @@ window.cityGridInstallAssetUI = function (bridge) {
         }
     }
 
+    // 床に対して垂直に作る電車の一括レイアウト。各部品は独立した通常のオブジェクト。
+    // 全パーツの生成と検証後に一度だけ履歴へ追加し、Undoでまとめて戻せる。
+    function placeTrainPreset(mode) {
+        if (mode !== "corner" && mode !== "interior") return;
+        sanitizeScene();
+        const before = S.slice(), wasFloor = !!window.cityFloorPlanActive;
+        try {
+            const full = mode === "interior", q = assetGroundPoint({w:2.8,d:full?3.2:1.8,h:2.45}), parts = [],
+                angle = full ? (Number(P.yaw)||0)+90 : 0, a=angle*Math.PI/180, cs=Math.cos(a), sn=Math.sin(a);
+            // 車内全体は開いた端から通路を見通せるよう、配置時のカメラ方向へ向ける。
+            function add(kind, x, y, z, patch = {}) {
+                const o = newAsset(kind, null, q);
+                Object.assign(o, {k:1,d:-1,off:[0,0,0],ca:q[0]+x*cs-y*sn,cb:q[2]+x*sn+y*cs,lift:z}, patch);
+                o.rot=angle+(Number(patch.rot)||0);
+                parts.push(o); return o;
+            }
+            // 床の上に座席と壁を並べる。写真に近い片側、または鏡合わせの両側。
+            add("box",0,0,0,{ra:1.4,rb:full?1.6:.9,h:.08});
+            const side = (s) => {
+                const wallY = s*(full?1.45:.84), seatY = s*(full?1.04:.43), rot=s===1?0:180;
+                add("trainWindowWall",0,wallY,.08,{ra:1.35,rot});
+                for(const x of [-.9,-.3,.3,.9]) add("trainDividedSeat",x,seatY,.08,{rot,trainSeatArms:false});
+                add("trainStraps",0,s*(full?1.02:.45),1.98,{ra:1.22,h:.45,rot,trainStrapCount:4});
+                for(const x of [-1.30,1.30]) add("trainPole",x,s*(full?.72:-.72),.08,{h:2.35});
+                add("box",0,s*(full?.72:-.72),2.40,{ra:1.4,rb:.045,h:.06});
+            };
+            side(1);
+            if (full) {
+                side(-1);
+                add("trainPole",0,0,.08,{h:2.35});
+                add("trainSlidingDoor",1.34,0,.08,{rot:90,ra:.75,h:2.2});
+            }
+            const lines = parts.flatMap(o => genShape(o));
+            if (!lines.length || lines.some(s => !validStroke(s))) throw new Error("invalid train preset geometry");
+            HU.push(S); RD=[]; S=[...S,...lines];
+            setSelection(parts.find(o => o.asset === "trainDividedSeat").id,false);
+            tool="edit"; setMode("draw");
+            if (wasFloor) { fitFloorPlan(); setMode("draw"); }
+            syncSel(); renderFresh();
+        } catch (err) {
+            S=before; prev=null; clearSelection();
+            console.error("City Grid train preset error",err);
+            try { render(); } catch(e) {}
+            alert("電車のレイアウトを配置できませんでした。もう一度お試しください。");
+        }
+    }
+
     // オブジェクト用クリップボード。線画のクリップボードとは分けて、選択中の
     // 図形／アセット定義だけをコピーし、貼り付け時に新しいIDで再生成する。
     let objectClipboard = [];
@@ -1098,6 +1145,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         { key: "traffic", label: "交通・標識", kinds: ["crosswalk", "trafficSignal", "pedSignal", "signPost", "signPost2", "signTriangle", "signDiamond", "signCombo", "crossingSign", "guardPoleU", "guardPoleM", "streetCone", "streetPavement"] },
         { key: "streetObjects", label: "小物・植栽", kinds: ["streetParcel", "streetBin", "streetMailbox", "streetPlant", "streetPlantBox", "paperLantern", "lanternString", "shopNoren"] },
         { key: "furniture", label: "家具", kinds: ["stool", "squareStool", "shopWardrobe", "shopWardrobe2", "displayShelf", "displayShelf2"] },
+        { key: "train", label: "電車", kinds: ["trainBench", "trainSeat", "trainDividedBench", "trainDividedSeat", "trainStraps", "trainPole", "trainHandrail", "trainWindowWall", "trainSlidingDoor"] },
         { key: "person", label: "人間", kinds: ["person"] },
         // 車（人物の隣）。キャブは五角形の立体、荷台は直方体、タイヤは円柱で作る。
         // 寸法はすべて画面上の専用ハンドルで変えられる（engine-gizmo.js の vehicleGizmo）。
@@ -1141,7 +1189,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         "</div>" +
         "</div>" +
         '<div class="assetTrayScroll" role="tabpanel">' +
-        ASSET_GROUPS.map((g) => g.kinds.map((k) => assetCardHtml(k, g.key)).join("")).join("") +
+        ASSET_GROUPS.map((g) => (g.key === "train" ? '<button type="button" class="trainPreset" data-group="train" data-train-preset="corner" title="床・窓・曲線椅子・ポールを一括配置"><span class="assetGlyph">✦</span><span>お手軽設定<br>片側の車内</span></button><button type="button" class="trainPreset" data-group="train" data-train-preset="interior" title="両側の座席と通路を一括配置"><span class="assetGlyph">✦</span><span>お手軽設定<br>車内全体</span></button>' : '') + g.kinds.map((k) => assetCardHtml(k, g.key)).join("")).join("") +
         "</div>" +
         "</div>" +
         '<div class="assetTrayNote">建物を選択して「壁付けベランダ」を押すと、正面壁の2階相当へ自動接着。未選択なら地面へ配置。パスパイプは選択後に画面上の制御点と半径ハンドルを編集できます。</div>';
@@ -1149,7 +1197,7 @@ window.cityGridInstallAssetUI = function (bridge) {
 
     // グループのタブ切り替え。最後に開いていたグループを記憶して、次回も同じ所から始める。
     const trayScroll = tray.querySelector(".assetTrayScroll"),
-        trayCards = [...trayScroll.querySelectorAll(".assetCard")],
+        trayCards = [...trayScroll.querySelectorAll(".assetCard, .trainPreset")],
         trayTabs = [...tray.querySelectorAll("[data-asset-group]")];
     const groupStoreKey = "cityGridAssetGroup";
     const savedGroup = (() => {
@@ -1233,6 +1281,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             if (tab.dataset.assetGroup !== activeGroups) showAssetGroup(tab.dataset.assetGroup);
             return;
         }
+        const preset = e.target.closest("[data-train-preset]");
+        if (preset) { placeTrainPreset(preset.dataset.trainPreset); return; }
         const b = e.target.closest("[data-asset]");
         if (b) placeAsset(b.dataset.asset);
     });

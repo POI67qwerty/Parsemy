@@ -275,7 +275,7 @@ function exportSurfaceTrianglesBase(o) {
         quad(point(frontA, z0), point(backA, z0), point(backA, openingH), point(frontA, openingH));
         quad(point(frontB, z0), point(frontB, openingH), point(backB, openingH), point(backB, z0));
         quad(point(frontA, openingH), point(backA, openingH), point(backB, openingH), point(frontB, openingH));
-        quad(point(backA, z0), point(backB, z0), point(backB, openingH), point(backA, openingH));
+        if (!o.doorEnabled && !o.omitOpeningBack) quad(point(backA, z0), point(backB, z0), point(backB, openingH), point(backA, openingH));
     };
     const openingBoxAt = (cx, cy, bw, bd, z0, z1, opening) => {
         const x = bw / 2,
@@ -296,7 +296,7 @@ function exportSurfaceTrianglesBase(o) {
         q([dx - ow / 2, -y, z0], [dx - ow / 2, panelY, z0], [dx - ow / 2, panelY, oh + z0], [dx - ow / 2, -y, oh + z0]);
         q([dx + ow / 2, -y, z0], [dx + ow / 2, -y, oh + z0], [dx + ow / 2, panelY, oh + z0], [dx + ow / 2, panelY, z0]);
         q([dx - ow / 2, -y, oh + z0], [dx - ow / 2, panelY, oh + z0], [dx + ow / 2, panelY, oh + z0], [dx + ow / 2, -y, oh + z0]);
-        q([dx - ow / 2, panelY, z0], [dx + ow / 2, panelY, z0], [dx + ow / 2, panelY, oh + z0], [dx - ow / 2, panelY, oh + z0]);
+        if (!o.doorEnabled) q([dx - ow / 2, panelY, z0], [dx + ow / 2, panelY, z0], [dx + ow / 2, panelY, oh + z0], [dx - ow / 2, panelY, oh + z0]);
     };
     const beveledOpeningAt = (cx, cy, bw, bd, z0, z1, offset, segments, opening) => {
         const footprint = beveledBoxFootprint(bw, bd, offset, segments),
@@ -349,7 +349,7 @@ function exportSurfaceTrianglesBase(o) {
             [cx + dx + ow / 2, cy + panelY, oh + z0],
             [cx + dx + ow / 2, cy - y, oh + z0],
         );
-        quad(
+        if (!o.doorEnabled) quad(
             [cx + dx - ow / 2, cy + panelY, z0],
             [cx + dx + ow / 2, cy + panelY, z0],
             [cx + dx + ow / 2, cy + panelY, oh + z0],
@@ -594,7 +594,7 @@ function exportSurfaceTrianglesBase(o) {
             if (kind === "cornerCutStackedBuilding") {
                 // 階ごとの隅切り面は既存の隅切り直方体を共用し、親の回転を保って位置をずらす。
                 const base=customPt(o,0,0,0), dest=customPt(o,fx,fy,fz), shift=dest.map((v,j)=>v-base[j]),
-                    part={...o,asset:"cornerCutBox",ra:fw/2,rb:fd/2,h:fh,facadeEnabled:false,doorEnabled:false,arrayEnabled:false,cornerCutOpeningEnabled:!!opening,
+                    part={...o,asset:"cornerCutBox",ra:fw/2,rb:fd/2,h:fh,facadeEnabled:false,doorEnabled:false,omitOpeningBack:!!opening && o.doorEnabled===true,arrayEnabled:false,cornerCutOpeningEnabled:!!opening,
                         cornerCutOpeningW:opening?.openingW,cornerCutOpeningH:opening?.openingH,cornerCutOpeningDepth:opening?.openingBack},
                     append=tris=>tris.forEach(t=>out.push(t.map(p=>p.map((v,j)=>v+shift[j]))));
                 append(surfaceTriangles(part));
@@ -660,7 +660,7 @@ function exportSurfaceTrianglesBase(o) {
         boxAt((rightEdge + g.w / 2) / 2, 0, rightW, g.d, 0, g.h);
         boxAt(0, 0, g.w, g.d, g.openingH, g.h);
         // 開口はトンネルではなく、奥側に閉じた内壁を持つ。外側の奥行きと同じ位置へ置く。
-        quad(
+        if (!o.doorEnabled) quad(
             [leftEdge, panelY, 0],
             [rightEdge, panelY, 0],
             [rightEdge, panelY, g.openingH],
@@ -2113,7 +2113,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
             for (let i = 2; i < run.length; i += 2) c.lineTo(run[i], run[i + 1]);
             // 実面レイで確認した輪郭が1点だけ残る場合も、moveToだけでは描画されない。
             // 隠れた点はここへ入らないため、円柱などのサブピクセルの可視区間だけ点として残す。
-            if (s.railingRoundBar && run.length === 2) c.lineTo(run[0] + 0.001, run[1]);
+            if ((s.railingRoundBar || s.preciseTinyGaps) && run.length === 2) c.lineTo(run[0] + 0.001, run[1]);
             // 遮蔽された別の線と手前の可視線が重なった場合、可視線の二値化補完は
             // 禁止しない。描いた区間だけを線ID付きで記録する（同じ線の隠れは除外）。
             if (fishVisiblePixels && run.length >= 4) {
@@ -2236,7 +2236,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
                     // 粗い等間隔判定だけでは、その間の細い遮蔽物を見落とす。
                     // 例：22px 幅の板が 24px 間隔の検査点の間に収まり、
                     // 線が板を貫通していた。画面上の間隔で点ごとに判定する。
-                    const n = Math.max(1, Math.ceil(len / 2));
+                    const n = Math.max(1, Math.ceil(s.preciseTinyGaps ? len * 2 : len / 2));
                     for (let j = 1; j < n; j++) emit(at(j / n));
                 } else {
                     const worldN = Math.ceil(Math.hypot(v[0] - a[0], v[1] - a[1], v[2] - a[2]) * 10),

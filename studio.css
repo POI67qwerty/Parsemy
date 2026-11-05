@@ -959,10 +959,10 @@ body.cameraLocked #cv {
     opacity: 0.42;
     cursor: default;
 }
-.assetCard[hidden] {
+.assetCard[hidden], .trainPreset[hidden] {
     display: none !important;
 }
-.assetCard {
+.assetCard, .trainPreset {
     flex: 0 0 auto;
     display: flex;
     align-items: center;
@@ -976,7 +976,7 @@ body.cameraLocked #cv {
     text-align: left;
     cursor: pointer;
 }
-.assetCard:hover {
+.assetCard:hover, .trainPreset:hover {
     border-color: var(--mint) !important;
     background: #243b42 !important;
 }
@@ -989,7 +989,7 @@ body.cameraLocked #cv {
     background: linear-gradient(135deg, #2b625f, #394e86);
     font-size: 16px;
 }
-.assetCard span:last-child {
+.assetCard span:last-child, .trainPreset span:last-child {
     font-size: 11px;
     line-height: 1.2;
 }
@@ -1504,3 +1504,5 @@ body.cameraLocked #cv {
 #floorPlanDock .floorPlanDockStatus { display:none; }
 #floorPlanDock .dockHint { display:none; }
 #floorPlanDock .floorPlanDockInner > button { flex:0 0 auto; white-space:nowrap; }
+
+.trainPreset { border-color: #497e79 !important; background: #21413e !important; }

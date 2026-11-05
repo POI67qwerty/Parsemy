@@ -3684,6 +3684,12 @@ function linesWindowGrid(ctx) {
 // ここでは見た目を作らず、後段のassetLines()が安全に読める形へ変換する。
 function normalizedAsset(o) {
     let q = o?.attachment ? syncAttachedPart(o) : o;
+    // 旧データで奥壁位置が未指定の場合、扉の追加時にその時点の奥壁へ固定する。
+    // 未固定だと視点の反転時に奥壁と扉が飛び移ってしまう。
+    if (q?.asset === "building" && q.doorEnabled === true && q.openingBack == null) {
+        const d=Math.max(.05,Math.abs(Number(q.rb)||.5)*2);
+        q={...q,openingBack:buildingBackY(q,d)};
+    }
     if (q && q.asset === "cornerCutBox") {
         const params = cornerCutOpeningParams(q);
         return {
@@ -3903,13 +3909,13 @@ function buildingDoorSupported(o) {
 }
 function buildingDoorOpening(o) {
     if (!buildingDoorSupported(o)) return null;
-    let w, h, origin, tangent = [1, 0], inward = [0, 1];
+    let w, h, depth, origin, tangent = [1, 0], inward = [0, 1];
     if (o.asset === "building") {
         if (o.openingEnabled === false) return null;
-        const g = buildingGeometry(o); w = g.openingW; h = g.openingH; origin = [g.openingOffset, -g.d / 2, 0];
+        const g = buildingGeometry(o); w = g.openingW; h = g.openingH; depth = g.backY + g.d / 2; origin = [g.openingOffset, -g.d / 2, 0];
     } else if (o.asset === "cornerCutBox") {
         const g = cornerCutOpeningParams(o); if (!g.enabled) return null;
-        w = g.openingW; h = g.openingH; origin = [g.openingMidpoint[0], g.openingMidpoint[1], 0]; tangent = g.tangent; inward = g.inward;
+        w = g.openingW; h = g.openingH; depth = g.openingDepth; origin = [g.openingMidpoint[0], g.openingMidpoint[1], 0]; tangent = g.tangent; inward = g.inward;
     } else {
         if (!stackedOpeningEnabled(o)) return null;
         const f = o.floors?.[0] || { w: (Number(o.ra) || 2) * 2, d: (Number(o.rb) || 1.5) * 2, h: 2.2 },
@@ -3917,11 +3923,11 @@ function buildingDoorOpening(o) {
         w = g.openingW; h = g.openingH;
         if (g.corner) {
             origin = [fx + g.corner.openingMidpoint[0], fy + g.corner.openingMidpoint[1], fz];
-            tangent = g.corner.tangent; inward = g.corner.inward;
-        } else origin = [fx + g.openingOffset, fy - g.d / 2, fz];
+            tangent = g.corner.tangent; inward = g.corner.inward; depth = g.corner.openingDepth;
+        } else { origin = [fx + g.openingOffset, fy - g.d / 2, fz]; depth = g.openingBack + g.d / 2; }
     }
     const gap = Math.min(0.025, w * 0.035, h * 0.025), width = Math.max(0.01, w - 2 * gap), height = Math.max(0.01, h - gap);
-    return { width, height, origin, tangent, inward, gap };
+    return { width, height, openingWidth:w, openingHeight:h, origin, tangent, inward, gap, depth };
 }
 function buildingOpeningParamsForPosition(o) {
     if (!buildingDoorSupported(o)) return null;
@@ -3958,7 +3964,7 @@ function buildingDoorPoint(spec, x, depth, z) {
 function buildingDoorLines(o) {
     if (o?.doorEnabled !== true) return [];
     const g = buildingDoorOpening(o); if (!g) return [];
-    const w = g.width, h = g.height, x = w / 2, base = g.gap, depth = .006,
+    const w = g.width, h = g.height, x = w / 2, base = g.gap, depth = Math.max(0, g.depth - .002),
         type = ["shutter", "double", "convenience"].includes(o.doorType) ? o.doorType : "shutter",
         col = o.c || "#222222", out = [],
         line = points => out.push({ ...customLineA(o, points.map(p => buildingDoorPoint(g, p[0], depth, base + p[1])), col, 1.15), onFace: true, preciseTubeEdge: true, tubeContourView: orthView || "3d", doorGeometry: true }),
@@ -3994,8 +4000,8 @@ function buildingDoorLines(o) {
 function buildingDoorTriangles(o) {
     if (o?.doorEnabled !== true) return [];
     const g = buildingDoorOpening(o); if (!g) return [];
-    const x = g.width / 2, z0 = g.gap, z1 = z0 + g.height,
-        local = [[-x,z0],[x,z0],[x,z1],[-x,z1]].map(p => buildingDoorPoint(g,p[0],.008,p[1])),
+    const x = g.openingWidth / 2, z0 = 0, z1 = g.openingHeight,
+        local = [[-x,z0],[x,z0],[x,z1],[-x,z1]].map(p => buildingDoorPoint(g,p[0],g.depth,p[1])),
         p = local.map(q => customPt(o,...q)), type = o.doorType || "shutter",
         color = type === "double" ? "#a38b76" : type === "convenience" ? "#9ec4cc" : "#aab4bd",
         tris = [[p[0],p[1],p[2]],[p[0],p[2],p[3]]];
@@ -4005,7 +4011,7 @@ function buildingDoorTriangles(o) {
 // 正規化済みアセットを線画へ変換する入口。
 function genAsset(o) {
     const q = normalizedAsset(o);
-    return [...assetLines(q), ...buildingDoorLines(q)].map((s) => ({ ...s, ob: q, d3: true, cs: sigNow() }));
+    return [...assetLines(q), ...buildingDoorLines(q)].map((s) => ({ ...s, ...(q.doorEnabled && buildingDoorSupported(q) ? { onFace:true, preciseTubeEdge:true, tubeContourView:orthView||"3d" } : {}), ob: q, d3: true, cs: sigNow() }));
 }
 
 // ===== 9. 既存エンジンへの接続 =====

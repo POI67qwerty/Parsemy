@@ -850,6 +850,7 @@ const ASSET_KIT = (function () {
                     edgeIndex++;
                     if (part.signalSmoothSide) line.signalSmoothSide = true;
                     if (part.onFace) line.onFace = true;
+                    if (part.preciseTinyGaps) line.preciseTinyGaps = true;
                     if (part.preciseTubeEdge) {
                         line.preciseTubeEdge = true;
                         line.tubeContourView = (typeof orthView !== 'undefined' && orthView) || '3d';

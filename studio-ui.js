@@ -1166,13 +1166,18 @@
         if (document.activeElement !== el("buildingDoorType"))
             el("buildingDoorType").value = ["shutter", "double", "convenience"].includes(first.doorType) ? first.doorType : "shutter";
         el("buildingDoorNote").textContent = hasOpening
-            ? "扉は閉じた状態で、開口の幅・高さに合わせて作られます。" + (first.doorType === "convenience" && enabledCount ? " ガラス風の着色で、透過はしません。" : "") + (o.type === "compound" ? " 結合体内の開口に一括適用します。" : "")
+            ? "扉は開口の奥壁の位置に作られます。奥壁の奥行きハンドル／スライダーで凹みを調整できます。" + (first.doorType === "convenience" && enabledCount ? " ガラス風の着色で、透過はしません。" : "") + (o.type === "compound" ? " 結合体内の開口に一括適用します。" : "")
             : "先に建物の開口をONにしてください。";
     }
     function applyBuildingDoor(patch) {
         const o = doorPanelObject(); if (!o || !doorPanelParts(o).length) return;
         HU.push(S); RD = [];
-        if (o.type === "compound") setOb(o.id, { parts: o.parts.map(p => buildingDoorOpening(p) ? { ...p, ...patch } : p) });
+        if (o.type === "compound") setOb(o.id, { parts: o.parts.map(p => {
+            if (!buildingDoorOpening(p)) return p;
+            const keepDepth=patch.doorEnabled===true && p.asset==='building' && p.openingBack==null
+                ? {openingBack:buildingGeometry(p).backY} : {};
+            return { ...p, ...keepDepth, ...patch };
+        }) });
         else setOb(o.id, patch);
         render();
     }
