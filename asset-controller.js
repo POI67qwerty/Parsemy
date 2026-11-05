@@ -594,6 +594,24 @@ window.cityGridInstallAssetUI = function (bridge) {
             alert("ベランダを配置できませんでした。建物を選択してからもう一度クリックしてください。");
         }
     }
+    // 配置情報や色・グループ・配列は保持し、形だけ棚の初期状態に戻す。
+    window.cityResetAssetShape = function(o) {
+        const kind=o?.asset;
+        if(!kind || !ASSETS[kind] || obLocked(o)) return false;
+        const linked=['buildingAwning','buildingAwningOpen','buildingSign'].includes(o.linkedAsset) && ['parent','child'].includes(o.linkedRole);
+        const fresh=linked ? placeLinkedAsset(o.linkedAsset, null)[o.linkedRole] : newAsset(kind, null, [0,-1,0]);
+        const keep=['id','k','d','off','ca','cb','lift','rot','rotX','rotZ','c','w','wf','accent',
+            'displayName','visible','locked','groupId','linkedAsset','linkedRole','attachment',
+            'arrayEnabled','arrayCount','arraySpacing','arrayAxis'];
+        for(const key of keep) if(Object.prototype.hasOwnProperty.call(o,key))fresh[key]=o[key];
+        const lines=genShape(syncAttachedPart(fresh));
+        if(!lines.length || lines.some(s=>!validStroke(s)))return false;
+        HU.push(S);RD=[];
+        S=[...S.filter(s=>!(s.ob && s.ob.id===o.id)),...lines];
+        setOb(o.id,{}); // 接続している子を親の形に追従させる
+        render();
+        return true;
+    };
     // 通常アセット、ベランダ、接続アセットを入口で振り分ける配置関数。
     function placeAsset(kind, p) {
         if (kind === "buildingAwning" || kind === "buildingAwningOpen" || kind === "buildingSign")
@@ -1127,7 +1145,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         "</div>" +
         "</div>" +
         '<div class="assetTrayNote">建物を選択して「壁付けベランダ」を押すと、正面壁の2階相当へ自動接着。未選択なら地面へ配置。パスパイプは選択後に画面上の制御点と半径ハンドルを編集できます。</div>';
-    stage.appendChild(tray);
+    stage.parentNode.insertBefore(tray, el("hint"));
 
     // グループのタブ切り替え。最後に開いていたグループを記憶して、次回も同じ所から始める。
     const trayScroll = tray.querySelector(".assetTrayScroll"),
@@ -1343,6 +1361,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         tray.style.display = tray.style.display === "block" ? "none" : "block";
         el("assetToggle").classList.toggle("on", tray.style.display === "block");
         tray.classList.toggle("floorAssetTray", !!window.cityFloorPlanActive && tray.style.display === "block");
+        fit();
         requestAnimationFrame(syncFloorPlanDockLayout);
     };
 

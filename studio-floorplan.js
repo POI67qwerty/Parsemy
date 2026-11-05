@@ -174,7 +174,7 @@
     floorPlanDock.id = "floorPlanDock";
     floorPlanDock.innerHTML =
         '<div class="floorPlanDockInner"><div class="floorPlanDockHeader"><div id="floorPlanDockStatus" class="floorPlanDockStatus">オブジェクトを選択すると、移動・回転・サイズ変更ができます。<small>カメラ本体：位置　／　先端の丸：向き</small></div><div class="floorHistoryButtons"><button type="button" id="floorUndo" class="floorHistoryButton" title="間取りの操作を元に戻す">↶ 元に戻す</button><button type="button" id="floorRedo" class="floorHistoryButton" title="間取りの操作をやり直す">↷ やり直す</button></div><button type="button" class="dockCollapse" data-floor-dock-action="collapse" title="操作バーを折りたたむ">−</button></div><button type="button" data-floor-dock-action="left">↺ 15°</button><button type="button" data-floor-dock-action="right">↻ 15°</button><button type="button" data-floor-dock-action="rot30">30°</button><button type="button" data-floor-dock-action="rot45">45°</button><button type="button" data-floor-dock-action="90">90°回す</button><label class="floorLensTools">レンズ <input id="floorLensInput" type="number" min="14" max="200" step="1"> mm</label><div class="floorPlanPanTools"><span>表示移動</span><button type="button" data-floor-dock-action="pan-up" title="表示を上へ">↑</button><button type="button" data-floor-dock-action="pan-down" title="表示を下へ">↓</button><button type="button" data-floor-dock-action="pan-left" title="表示を左へ">←</button><button type="button" data-floor-dock-action="pan-right" title="表示を右へ">→</button></div><button type="button" data-floor-dock-action="assets">＋アセット</button><button type="button" data-floor-dock-action="delete">片付ける</button><span class="dockHint">中／右ドラッグ：表示移動　・　表示移動ボタン／Alt＋矢印／WASD：キャンバス移動　・　2本指ピンチ：ズームイン／ズームアウト（正面・横・上のまま）　・　磁石ON：家具移動と幅／奥行の面編集をエッジへ吸着　・　2本指タップ：元に戻す／3本指タップ：やり直す</span></div>';
-    stage.appendChild(floorPlanDock);
+    stage.parentNode.insertBefore(floorPlanDock, stage);
     // アセット棚を開いたときは、間取り操作バーを棚の上へ逃がす。棚と操作バーを重ねないためのレイアウト調整。
     function syncFloorPlanDockLayout() {
         const tray = el("assetTray");
@@ -1888,6 +1888,8 @@
     floorDockCollapse.title = "操作バーを開く";
     floorDockCollapse.onclick = () => {
         const collapsed = floorPlanDock.classList.toggle("collapsed");
+        fitCanvasDisplay();
+        render();
         floorDockCollapse.textContent = collapsed ? "＋ 操作" : "−";
         floorDockCollapse.title = collapsed ? "操作バーを開く" : "操作バーを折りたたむ";
     };

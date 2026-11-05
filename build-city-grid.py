@@ -15,6 +15,7 @@
 - asset-controller.js  : アセット配置・JSON・棚UI
 - studio-lib.js        : studio-ui.js と studio-floorplan.js が共有する小さな道具箱
 - studio-floorplan.js : 間取りモード（選択・移動・回転・寸法編集）
+- studio-canvas-controls.js : キャンバス上の共通アセット操作
 - studio-ui.js         : パネル・プリセット・初期化（間取りは studio-floorplan.js）
 
 cyberpunk-city-studio.html は生成物なので、直接編集せず、
@@ -116,7 +117,7 @@ def main() -> None:
     )
     controller = read("asset-controller.js")
     # 読み込み順は index.html と同じ（lib → ui → floorplan）。
-    ui = read("studio-lib.js") + "\n" + read("studio-ui.js") + "\n" + read("studio-floorplan.js")
+    ui = read("studio-lib.js") + "\n" + read("studio-canvas-controls.js") + "\n" + read("studio-ui.js") + "\n" + read("studio-floorplan.js")
 
     # 単体HTMLの「engine」ブロック＝コア＋入力／描画ツール。
     engine = lib + "\n" + core + "\n" + tools

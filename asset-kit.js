@@ -174,6 +174,17 @@ const ASSET_KIT = (function () {
         }
         return out;
     }
+    // 部品のまとまりを指定軸へ等間隔で並べる。元を含む個数・符号付き間隔。
+    // ローカル座標で動かすため、回転・生成面にも一緒に追従する。
+    function repeatParts(parts, {axis = "z", spacing = 1, count: copies = 1, group = "repeat"} = {}) {
+        const dir = axis === "x" ? [1,0,0] : axis === "y" ? [0,1,0] : [0,0,1],
+            step = Number.isFinite(Number(spacing)) ? Number(spacing) : 1;
+        return repeat(count(copies,1,1,100), i => moveParts(parts, ...dir.map(v => v*step*i)).map(part => {
+            // ベベル等の輪郭候補はコピーごとに独立して選別する。
+            if (!Array.isArray(part.seamMarks)) return part;
+            return {...part,seamMarks:part.seamMarks.map(mark => mark ? {...mark,key:`${mark.key}/${group}:${i}`} : mark)};
+        }));
+    }
     // 格子（行×列）。fn(row, col, u, v) は部品を返す。u/v は 0→1 の進み具合。
     function grid(rows, cols, fn) {
         return repeat(rows, (r, u) => repeat(cols, (c, v) => fn(r, c, u, v)));
@@ -913,6 +924,7 @@ const ASSET_KIT = (function () {
         moveParts,
         count,
         repeat,
+        repeatParts,
         grid,
         revolution,
         circlePath,

@@ -1857,3 +1857,66 @@ ASSET_KIT.define('guardPoleHalf',{
  }
  return out;
 });
+
+// ===== 屋根板・監視カメラ・飲料コンテナ =====
+(function(){
+ const v=(o,k,d,lo,hi)=>clamp(o[k]!=null&&Number.isFinite(Number(o[k]))?Number(o[k]):d,lo,hi),
+       flag={onFace:true,preciseTubeEdge:true};
+ // 山を連続した一枚の断面から押し出す。表面と裏面は同じ波形。
+ ASSET_KIT.define('corrugatedRoof',{label:'トタン屋根の板',glyph:'▰',group:'buildingParts',w:1,d:1.4,h:.08,accent:'#a8aaa4',
+  minHalfWidth:()=>.05,minHalfDepth:()=>.05,minHeight:()=>.02,controls:[
+   {key:'roofWaveCount',label:'蛇腹（波）の数',type:'range',default:8,min:1,max:24,step:1,integer:true,unit:'山'},
+   {key:'roofSheetThickness',label:'板の厚さ',default:.01,min:.003,max:o=>Math.max(.003,Math.min(.08,o.h*.45)),step:.005,unit:'m',
+    handle:(o,x)=>({anchor:[-o.ra,-o.rb,0],sample:[-o.ra,-o.rb,x],probe:[-o.ra,-o.rb,x+1],fallback:{x:0,y:-1}})}
+  ]},(o,K)=>{
+   const w=Math.max(.1,2*Math.abs(o.ra)),d=Math.max(.1,2*Math.abs(o.rb)),h=Math.max(.02,o.h),
+    n=K.count(o.roofWaveCount,8,1,24),t=v(o,'roofSheetThickness',.01,.003,Math.min(.08,h*.45)),steps=n*4,top=[];
+   for(let i=0;i<=steps;i++){const x=-w/2+w*i/steps,z=t+(h-t)*(1-Math.cos(i*Math.PI/2))/2;top.push([x,z]);}
+   const bottom=top.map(([x,z])=>[x,z-t]).reverse();
+   return [K.box([...top,...bottom],-d/2,d/2,{axis:'y',...flag})];
+  });
+ // 4面ひさし部品をそのまま使い、前方の円形レンズと壁取り付け脚を組む。
+ const stem=o=>v(o,'cameraStemHeight',.12,.04,2);
+ ASSET_KIT.define('securityCamera',{label:'監視カメラ',glyph:'◉',group:'street',w:.34,d:.55,h:.50,accent:'#a3aba8',
+  minHalfWidth:()=>.07,minHalfDepth:()=>.1,minHeight:o=>stem(o)+.22,controls:[
+   {key:'cameraStemHeight',label:'支柱の長さ',default:.12,min:.04,max:2,step:.01,unit:'m',
+    patch:(o,x)=>({cameraStemHeight:x,h:o.h+x-stem(o)}),
+    handle:(o,x)=>({anchor:[0,0,.10],sample:[0,0,.10+x],probe:[0,0,1.10+x],fallback:{x:0,y:-1}})}
+  ]},(o,K)=>{
+   const w=Math.max(.14,Math.abs(o.ra)*2),d=Math.max(.2,Math.abs(o.rb)*2),h=Math.max(stem(o)+.22,o.h),
+    base=.10+stem(o),hh=h-base,front=-d*.32,back=d*.45,headD=back-front,headY=(front+back)/2,
+    lensR=Math.min(w*.27,hh*.30),hoodW=w,hoodH=hh*.92,hoodBase=base+hh*.04,
+    frame=Math.max(.005,Math.min(.035,d*.08)),brim=Math.max(.01,d*.26),hoodY=front+frame/2-brim/2,
+    t=Math.max(.005,Math.min(w,hh)*.055),b=Math.min(w,hh)*.12;
+   const parts=[
+    K.box(K.rectPath(w*.68,.025,0,d*.48),0,Math.max(.16,base*.78),flag),
+    K.box(K.rectPath(w*.58,d*.46,0,d*.20),.07,.095,flag),
+    K.cylinder(Math.min(w*.13,.045),.095,base,{seg:12,verts:4,...flag}),
+    K.box(K.rectPath(w*.80,headD,0,headY),base,h-hh*.06,flag),
+    ...K.moveParts(K.part('screenHood',{w:hoodW,h:hoodH,frameDepth:frame,brimLength:brim,knee:hoodH*.55,t,bevel:b}),0,hoodY,hoodBase),
+    ...K.moveParts([K.cylinder(lensR*1.15,front-.035,front+.005,{axis:'y',seg:20,verts:4,...flag}),
+                    K.cylinder(lensR*.78,front-.048,front-.036,{axis:'y',seg:20,verts:4,...flag})],0,0,base+hh*.52)
+   ];return parts;
+  });
+ // 写真のような上面が開いた樹脂ケース。横の持ち手は実際に空いた開口。
+ ASSET_KIT.define('bottleCrate',{label:'飲料コンテナ',glyph:'▣',group:'streetObjects',w:.55,d:.38,h:.32,accent:'#d89c27',
+  minHalfWidth:()=>.06,minHalfDepth:()=>.06,minHeight:()=>.08,controls:[
+   {key:'crateCount',label:'重ねる個数',type:'range',canvasSlider:true,default:1,min:1,max:8,step:1,integer:true,unit:'個'}
+  ]},(o,K)=>{
+   const w=Math.max(.12,2*Math.abs(o.ra)),d=Math.max(.12,2*Math.abs(o.rb)),h=Math.max(.08,o.h),
+    t=Math.min(.018,w*.08,d*.08,h*.09),rim=Math.min(.03,h*.1),mid0=h*.50,mid1=h*.75,
+    parts=[],box=(x,y,ww,dd,z0,z1)=>parts.push(K.box(K.rectPath(ww,dd,x,y),z0,z1,flag));
+   // 底・前後左右の板。持ち手部分は中央を空けて四角い開口を残す。
+   box(0,0,w-2*t,d-2*t,0,t);
+   for(const sy of [-1,1]){const y=sy*(d/2-t/2);box(0,y,w,t,t,mid0);box(0,y,w,t,mid1,h-rim);
+    for(const sx of [-1,1])box(sx*w*.375,y,w*.25,t,mid0,mid1);}
+   for(const sx of [-1,1]){const x=sx*(w/2-t/2);box(x,0,t,d-2*t,t,mid0);box(x,0,t,d-2*t,mid1,h-rim);
+    for(const sy of [-1,1])box(x,sy*(d-2*t)*.375,t,(d-2*t)*.25,mid0,mid1);}
+   // ケース端の張り出し縁。4つの帯で上面開口をふさがない。
+   for(const z of [0,h-rim]){
+    for(const sy of [-1,1])box(0,sy*(d/2-t*.4),w+2*t,t*1.8,z,z+rim);
+    for(const sx of [-1,1])box(sx*(w/2-t*.4),0,t*1.8,d-2*t,z,z+rim);
+   }
+   return K.repeatParts(parts,{axis:'z',spacing:h,count:K.count(o.crateCount,1,1,8)});
+  });
+})();

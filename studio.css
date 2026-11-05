@@ -1475,3 +1475,32 @@ body.cameraLocked #cv {
 /* 名前は一覧の鉛筆から編集。空欄で元の名前に戻せます。 */
 .objectRename { flex:none; width:23px; height:23px; padding:0 !important; font-size:14px; }
 .objectNameInput { width:100%; min-width:45px; padding:2px 4px; font-size:16px; color:var(--tx); background:#1d2c33; border:1px solid var(--mint); border-radius:4px; }
+
+/* 形状操作は描画領域の外、上段に固定。ボタンだけ固定しスライダー列を横スクロールする。 */
+#canvasAssetControl { flex:none; min-width:0; display:flex; align-items:center; gap:8px; padding:6px 10px; background:#101c22; border-bottom:1px solid #344951; color:#eafff9; }
+#canvasAssetControl[hidden], #canvasAssetControl [hidden] { display:none !important; }
+#canvasAssetControl .canvasAssetFixed { display:flex; flex:0 0 auto; align-items:center; gap:5px; }
+#canvasAssetControl button { white-space:nowrap; padding:5px 8px; font-size:11px; }
+#canvasAssetControl .canvasAssetControlItems { display:flex; flex:1 1 auto; min-width:0; align-items:center; gap:9px; overflow-x:auto; overflow-y:hidden; overscroll-behavior-x:contain; scrollbar-width:thin; padding:2px 0 4px; }
+#canvasAssetControl .canvasAssetRow { flex:0 0 auto; display:flex; align-items:center; gap:5px; margin:0; padding:0 5px 0 0; font-size:11px; white-space:nowrap; border-right:1px solid #34514d; }
+#canvasAssetControl input[type=range] { width:100px; min-width:75px; margin:0; accent-color:#73dfbf; touch-action:none; cursor:pointer; }
+#canvasAssetControl output { min-width:24px; text-align:right; color:#c0ffe8; font-weight:700; }
+#canvasAssetControl .canvasAssetControlUnit { font-size:10px; }
+#canvasAssetControl .canvasAssetControlLock { color:#ffca99; font-size:11px; white-space:nowrap; }
+/* アセット棚もステージ外に配置し、開いてもキャンバスに重ならない。 */
+#assetTray, #assetTray.floorAssetTray { position:relative; left:auto; right:auto; bottom:auto; flex:none; margin:0 8px 8px; z-index:4; }
+.assetTrayNote { display:none; }
+@media(max-width:600px){
+    #canvasAssetControl { gap:5px; padding:5px 6px; }
+    #canvasAssetControl button { padding:5px; font-size:10px; }
+    #canvasAssetControl input[type=range] { width:80px; }
+    #assetTray, #assetTray.floorAssetTray { margin:0 6px 6px; }
+}
+
+/* 正投影の操作バーもキャンバスを覆わない位置に置く。 */
+#floorPlanDock, #floorPlanDock.collapsed { position:relative; top:auto; right:auto; bottom:auto; width:100%; flex:none; pointer-events:auto; }
+#floorPlanDock .floorPlanDockInner { flex-wrap:nowrap; overflow-x:auto; overscroll-behavior-x:contain; border-radius:0; padding:4px 8px; }
+#floorPlanDock .floorPlanDockHeader { flex:0 0 auto; align-items:center; }
+#floorPlanDock .floorPlanDockStatus { display:none; }
+#floorPlanDock .dockHint { display:none; }
+#floorPlanDock .floorPlanDockInner > button { flex:0 0 auto; white-space:nowrap; }

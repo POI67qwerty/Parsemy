@@ -2775,6 +2775,8 @@
             cornerCutEditSession = false;
         };
     });
+    // 汎用キャンバス編集UIは別モジュールに集約する。
+    const canvasAssetEditor = window.CityCanvasControls.install(stage);
     // 登録の controls から数値欄を自動生成。特別なUIを持つ旧アセットには手を加えない。
     let genericAssetPanelKind=null, genericAssetPanelId=null, genericAssetEditSession=false;
     function syncGenericAssetEditor() {
@@ -2853,6 +2855,7 @@
         updateOutliner();
         syncAssetControls();
         syncGenericAssetEditor();
+        canvasAssetEditor.sync();
         syncStandardViewButtons();
         syncSignPanel();
         syncBuildingDoorPanel();
@@ -3186,6 +3189,7 @@
             fit();
         }
         SH.floorPlanDock.classList.add("open");
+        fitCanvasDisplay();
         SH.syncFloorPlanDockLayout?.();
         Z = 1;
         ox = 0;
@@ -3205,6 +3209,7 @@
         // 間取り中に変更した共有カメラ設定は、そのまま3D視点へ引き継ぐ。
         window.cityFloorPlanActive = false;
         SH.floorPlanDock.classList.remove("open");
+        fitCanvasDisplay();
         const saved = floorPlanView,
             restoreSide = floorPlanAutoHidSide && !floorPlanSideWasHidden;
         floorPlanView = null;

@@ -149,7 +149,7 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <h3>配列</h3>
 <label><input type=checkbox id=arrayEnabled> 配列を適用</label>
 <div id=arrayModifierFields style="display:none">
-<label><span>個数（元を含む）</span><input type=number id=arrayCount min=1 max=100 step=1 value=3 style="width:100px"></label>
+<label><span>個数（元を含む）</span><input type=range id=arrayCountSlider min=1 max=100 step=1 value=3><input type=number id=arrayCount min=1 max=100 step=1 value=3 style="width:70px"></label>
 <label><span>間隔</span><input type=number id=arraySpacing min=-100 max=100 step=0.1 value=1.5 style="width:100px"><span class=un>m</span></label>
 <label><span>方向</span><select id=arrayAxis><option value=x>X（左右）</option><option value=y>Y（地面の奥行き）</option><option value=z>Z（高さ）</option></select></label>
 <div class=note>間隔は中心から中心までの距離。マイナスで反対方向に並びます。方向はギズモと同じワールド軸です（位置欄のY・Zとは表記が異なります）。複数選択した場合は全てに適用します。複雑な形状や多数のコピーは表示が重くなる場合があります。</div>
@@ -506,14 +506,22 @@ $("ar").onchange = () => {
 };
 
 // ===== 5. 画面サイズに合わせて表示 =====
-function fit() {
+function fitCanvasDisplay() {
     const st = $("stage"),
         s = Math.min((st.clientWidth - 12) / W, (st.clientHeight - 12) / H);
     cv.style.width = W * s + "px";
     cv.style.height = H * s + "px";
+}
+function fit() {
+    fitCanvasDisplay();
     render();
 }
 addEventListener("resize", fit);
+// 上部の編集バーや下部の棚の開閉でもキャンバスを新しい領域へ収める。
+if (typeof ResizeObserver !== "undefined") {
+    let fitQueued=false;
+    new ResizeObserver(()=>{if(!fitQueued){fitQueued=true;requestAnimationFrame(()=>{fitQueued=false;fit();});}}).observe($("stage"));
+}
 
 // ===== 6. 消失点の計算（カメラ→VP） =====
 // 軸: 0=X方向, 1=Z方向, 2=垂直。VPが無限遠なら dir(平行線の向き) を返す
@@ -1936,7 +1944,7 @@ function syncSel() {
     $("arrayEnabled").checked = enabled;
     $("arrayModifierFields").style.display = enabled ? "" : "none";
     const cfg = arrayModifierSpec({ ...o, arrayEnabled: true });
-    for (const [id, value] of [["arrayCount", cfg.count], ["arraySpacing", cfg.spacing], ["arrayAxis", cfg.axis]])
+    for (const [id, value] of [["arrayCount", cfg.count], ["arrayCountSlider", cfg.count], ["arraySpacing", cfg.spacing], ["arrayAxis", cfg.axis]])
         if (document.activeElement !== $(id)) $(id).value = String(value);
 }
 let arrayEditSession = false;
@@ -1950,7 +1958,7 @@ function applyArrayModifier(patch, continuous = false) {
 }
 $("arrayEnabled").onchange = e => { arrayEditSession = false; applyArrayModifier({ arrayEnabled: e.target.checked }); };
 $("arrayAxis").onchange = e => { arrayEditSession = false; applyArrayModifier({ arrayAxis: e.target.value }); };
-for (const [id, key, lo, hi, integer] of [["arrayCount", "arrayCount", 1, 100, true], ["arraySpacing", "arraySpacing", -100, 100, false]]) {
+for (const [id, key, lo, hi, integer] of [["arrayCount", "arrayCount", 1, 100, true], ["arrayCountSlider", "arrayCount", 1, 100, true], ["arraySpacing", "arraySpacing", -100, 100, false]]) {
     const input = $(id);
     input.oninput = () => {
         if (input.value.trim() === "" || !Number.isFinite(Number(input.value))) return;

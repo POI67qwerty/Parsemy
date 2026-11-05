@@ -1674,6 +1674,30 @@ body.cameraLocked #cv {
 }
 .objectRename { flex:none; width:23px; height:23px; padding:0 !important; font-size:14px; }
 .objectNameInput { width:100%; min-width:45px; padding:2px 4px; font-size:16px; color:var(--tx); background:#1d2c33; border:1px solid var(--mint); border-radius:4px; }
+#canvasAssetControl { flex:none; min-width:0; display:flex; align-items:center; gap:8px; padding:6px 10px; background:#101c22; border-bottom:1px solid #344951; color:#eafff9; }
+#canvasAssetControl[hidden], #canvasAssetControl [hidden] { display:none !important; }
+#canvasAssetControl .canvasAssetFixed { display:flex; flex:0 0 auto; align-items:center; gap:5px; }
+#canvasAssetControl button { white-space:nowrap; padding:5px 8px; font-size:11px; }
+#canvasAssetControl .canvasAssetControlItems { display:flex; flex:1 1 auto; min-width:0; align-items:center; gap:9px; overflow-x:auto; overflow-y:hidden; overscroll-behavior-x:contain; scrollbar-width:thin; padding:2px 0 4px; }
+#canvasAssetControl .canvasAssetRow { flex:0 0 auto; display:flex; align-items:center; gap:5px; margin:0; padding:0 5px 0 0; font-size:11px; white-space:nowrap; border-right:1px solid #34514d; }
+#canvasAssetControl input[type=range] { width:100px; min-width:75px; margin:0; accent-color:#73dfbf; touch-action:none; cursor:pointer; }
+#canvasAssetControl output { min-width:24px; text-align:right; color:#c0ffe8; font-weight:700; }
+#canvasAssetControl .canvasAssetControlUnit { font-size:10px; }
+#canvasAssetControl .canvasAssetControlLock { color:#ffca99; font-size:11px; white-space:nowrap; }
+#assetTray, #assetTray.floorAssetTray { position:relative; left:auto; right:auto; bottom:auto; flex:none; margin:0 8px 8px; z-index:4; }
+.assetTrayNote { display:none; }
+@media(max-width:600px){
+    #canvasAssetControl { gap:5px; padding:5px 6px; }
+    #canvasAssetControl button { padding:5px; font-size:10px; }
+    #canvasAssetControl input[type=range] { width:80px; }
+    #assetTray, #assetTray.floorAssetTray { margin:0 6px 6px; }
+}
+#floorPlanDock, #floorPlanDock.collapsed { position:relative; top:auto; right:auto; bottom:auto; width:100%; flex:none; pointer-events:auto; }
+#floorPlanDock .floorPlanDockInner { flex-wrap:nowrap; overflow-x:auto; overscroll-behavior-x:contain; border-radius:0; padding:4px 8px; }
+#floorPlanDock .floorPlanDockHeader { flex:0 0 auto; align-items:center; }
+#floorPlanDock .floorPlanDockStatus { display:none; }
+#floorPlanDock .dockHint { display:none; }
+#floorPlanDock .floorPlanDockInner > button { flex:0 0 auto; white-space:nowrap; }
 </style>
     </head>
     <body>
@@ -1981,7 +2005,7 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <h3>配列</h3>
 <label><input type=checkbox id=arrayEnabled> 配列を適用</label>
 <div id=arrayModifierFields style="display:none">
-<label><span>個数（元を含む）</span><input type=number id=arrayCount min=1 max=100 step=1 value=3 style="width:100px"></label>
+<label><span>個数（元を含む）</span><input type=range id=arrayCountSlider min=1 max=100 step=1 value=3><input type=number id=arrayCount min=1 max=100 step=1 value=3 style="width:70px"></label>
 <label><span>間隔</span><input type=number id=arraySpacing min=-100 max=100 step=0.1 value=1.5 style="width:100px"><span class=un>m</span></label>
 <label><span>方向</span><select id=arrayAxis><option value=x>X（左右）</option><option value=y>Y（地面の奥行き）</option><option value=z>Z（高さ）</option></select></label>
 <div class=note>間隔は中心から中心までの距離。マイナスで反対方向に並びます。方向はギズモと同じワールド軸です（位置欄のY・Zとは表記が異なります）。複数選択した場合は全てに適用します。複雑な形状や多数のコピーは表示が重くなる場合があります。</div>
@@ -2328,14 +2352,21 @@ $("ar").onchange = () => {
     cv.height = H;
     fit();
 };
-function fit() {
+function fitCanvasDisplay() {
     const st = $("stage"),
         s = Math.min((st.clientWidth - 12) / W, (st.clientHeight - 12) / H);
     cv.style.width = W * s + "px";
     cv.style.height = H * s + "px";
+}
+function fit() {
+    fitCanvasDisplay();
     render();
 }
 addEventListener("resize", fit);
+if (typeof ResizeObserver !== "undefined") {
+    let fitQueued=false;
+    new ResizeObserver(()=>{if(!fitQueued){fitQueued=true;requestAnimationFrame(()=>{fitQueued=false;fit();});}}).observe($("stage"));
+}
 function calc() {
     const f = (W * P.lens) / 36,
         th = (P.yaw * Math.PI) / 180,
@@ -3553,7 +3584,7 @@ function syncSel() {
     $("arrayEnabled").checked = enabled;
     $("arrayModifierFields").style.display = enabled ? "" : "none";
     const cfg = arrayModifierSpec({ ...o, arrayEnabled: true });
-    for (const [id, value] of [["arrayCount", cfg.count], ["arraySpacing", cfg.spacing], ["arrayAxis", cfg.axis]])
+    for (const [id, value] of [["arrayCount", cfg.count], ["arrayCountSlider", cfg.count], ["arraySpacing", cfg.spacing], ["arrayAxis", cfg.axis]])
         if (document.activeElement !== $(id)) $(id).value = String(value);
 }
 let arrayEditSession = false;
@@ -3567,7 +3598,7 @@ function applyArrayModifier(patch, continuous = false) {
 }
 $("arrayEnabled").onchange = e => { arrayEditSession = false; applyArrayModifier({ arrayEnabled: e.target.checked }); };
 $("arrayAxis").onchange = e => { arrayEditSession = false; applyArrayModifier({ arrayAxis: e.target.value }); };
-for (const [id, key, lo, hi, integer] of [["arrayCount", "arrayCount", 1, 100, true], ["arraySpacing", "arraySpacing", -100, 100, false]]) {
+for (const [id, key, lo, hi, integer] of [["arrayCount", "arrayCount", 1, 100, true], ["arrayCountSlider", "arrayCount", 1, 100, true], ["arraySpacing", "arraySpacing", -100, 100, false]]) {
     const input = $(id);
     input.oninput = () => {
         if (input.value.trim() === "" || !Number.isFinite(Number(input.value))) return;
@@ -13045,7 +13076,7 @@ function unpack(d) {
         const st = d.S.map((s) => (s.ob ? { ...s, ob: fixOb(s.ob) } : s)),
             seen = new Set(),
             out = [],
-            needsAssetUpdate = o => !!o && (o.arrayEnabled === true || o.doorEnabled === true || o.openingOffset != null || ["screenHood", "shopAwning", "displayShelf2", "trafficSignal", "pedSignal", "railing", "streetPavement", "streetMailbox", "streetParcel", "streetPlantBox", "squareStool", "shopWardrobe", "shopWardrobe2", "pictureStairs", "guardPoleHalf"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsAssetUpdate))),
+            needsAssetUpdate = o => !!o && (o.arrayEnabled === true || o.doorEnabled === true || o.openingOffset != null || ["screenHood", "shopAwning", "displayShelf2", "trafficSignal", "pedSignal", "railing", "streetPavement", "streetMailbox", "streetParcel", "streetPlantBox", "squareStool", "shopWardrobe", "shopWardrobe2", "pictureStairs", "guardPoleHalf", "corrugatedRoof", "securityCamera", "bottleCrate"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsAssetUpdate))),
             regenerate = s => !!s.ob && (!s.d3 || needsAssetUpdate(s.ob));
         st.forEach((s) => {
             if (!regenerate(s)) out.push(s);
@@ -17097,6 +17128,14 @@ const ASSET_KIT = (function () {
         }
         return out;
     }
+    function repeatParts(parts, {axis = "z", spacing = 1, count: copies = 1, group = "repeat"} = {}) {
+        const dir = axis === "x" ? [1,0,0] : axis === "y" ? [0,1,0] : [0,0,1],
+            step = Number.isFinite(Number(spacing)) ? Number(spacing) : 1;
+        return repeat(count(copies,1,1,100), i => moveParts(parts, ...dir.map(v => v*step*i)).map(part => {
+            if (!Array.isArray(part.seamMarks)) return part;
+            return {...part,seamMarks:part.seamMarks.map(mark => mark ? {...mark,key:`${mark.key}/${group}:${i}`} : mark)};
+        }));
+    }
     function grid(rows, cols, fn) {
         return repeat(rows, (r, u) => repeat(cols, (c, v) => fn(r, c, u, v)));
     }
@@ -17754,6 +17793,7 @@ const ASSET_KIT = (function () {
         moveParts,
         count,
         repeat,
+        repeatParts,
         grid,
         revolution,
         circlePath,
@@ -19635,6 +19675,62 @@ ASSET_KIT.define('guardPoleHalf',{
  }
  return out;
 });
+(function(){
+ const v=(o,k,d,lo,hi)=>clamp(o[k]!=null&&Number.isFinite(Number(o[k]))?Number(o[k]):d,lo,hi),
+       flag={onFace:true,preciseTubeEdge:true};
+ ASSET_KIT.define('corrugatedRoof',{label:'トタン屋根の板',glyph:'▰',group:'buildingParts',w:1,d:1.4,h:.08,accent:'#a8aaa4',
+  minHalfWidth:()=>.05,minHalfDepth:()=>.05,minHeight:()=>.02,controls:[
+   {key:'roofWaveCount',label:'蛇腹（波）の数',type:'range',default:8,min:1,max:24,step:1,integer:true,unit:'山'},
+   {key:'roofSheetThickness',label:'板の厚さ',default:.01,min:.003,max:o=>Math.max(.003,Math.min(.08,o.h*.45)),step:.005,unit:'m',
+    handle:(o,x)=>({anchor:[-o.ra,-o.rb,0],sample:[-o.ra,-o.rb,x],probe:[-o.ra,-o.rb,x+1],fallback:{x:0,y:-1}})}
+  ]},(o,K)=>{
+   const w=Math.max(.1,2*Math.abs(o.ra)),d=Math.max(.1,2*Math.abs(o.rb)),h=Math.max(.02,o.h),
+    n=K.count(o.roofWaveCount,8,1,24),t=v(o,'roofSheetThickness',.01,.003,Math.min(.08,h*.45)),steps=n*4,top=[];
+   for(let i=0;i<=steps;i++){const x=-w/2+w*i/steps,z=t+(h-t)*(1-Math.cos(i*Math.PI/2))/2;top.push([x,z]);}
+   const bottom=top.map(([x,z])=>[x,z-t]).reverse();
+   return [K.box([...top,...bottom],-d/2,d/2,{axis:'y',...flag})];
+  });
+ const stem=o=>v(o,'cameraStemHeight',.12,.04,2);
+ ASSET_KIT.define('securityCamera',{label:'監視カメラ',glyph:'◉',group:'street',w:.34,d:.55,h:.50,accent:'#a3aba8',
+  minHalfWidth:()=>.07,minHalfDepth:()=>.1,minHeight:o=>stem(o)+.22,controls:[
+   {key:'cameraStemHeight',label:'支柱の長さ',default:.12,min:.04,max:2,step:.01,unit:'m',
+    patch:(o,x)=>({cameraStemHeight:x,h:o.h+x-stem(o)}),
+    handle:(o,x)=>({anchor:[0,0,.10],sample:[0,0,.10+x],probe:[0,0,1.10+x],fallback:{x:0,y:-1}})}
+  ]},(o,K)=>{
+   const w=Math.max(.14,Math.abs(o.ra)*2),d=Math.max(.2,Math.abs(o.rb)*2),h=Math.max(stem(o)+.22,o.h),
+    base=.10+stem(o),hh=h-base,front=-d*.32,back=d*.45,headD=back-front,headY=(front+back)/2,
+    lensR=Math.min(w*.27,hh*.30),hoodW=w,hoodH=hh*.92,hoodBase=base+hh*.04,
+    frame=Math.max(.005,Math.min(.035,d*.08)),brim=Math.max(.01,d*.26),hoodY=front+frame/2-brim/2,
+    t=Math.max(.005,Math.min(w,hh)*.055),b=Math.min(w,hh)*.12;
+   const parts=[
+    K.box(K.rectPath(w*.68,.025,0,d*.48),0,Math.max(.16,base*.78),flag),
+    K.box(K.rectPath(w*.58,d*.46,0,d*.20),.07,.095,flag),
+    K.cylinder(Math.min(w*.13,.045),.095,base,{seg:12,verts:4,...flag}),
+    K.box(K.rectPath(w*.80,headD,0,headY),base,h-hh*.06,flag),
+    ...K.moveParts(K.part('screenHood',{w:hoodW,h:hoodH,frameDepth:frame,brimLength:brim,knee:hoodH*.55,t,bevel:b}),0,hoodY,hoodBase),
+    ...K.moveParts([K.cylinder(lensR*1.15,front-.035,front+.005,{axis:'y',seg:20,verts:4,...flag}),
+                    K.cylinder(lensR*.78,front-.048,front-.036,{axis:'y',seg:20,verts:4,...flag})],0,0,base+hh*.52)
+   ];return parts;
+  });
+ ASSET_KIT.define('bottleCrate',{label:'飲料コンテナ',glyph:'▣',group:'streetObjects',w:.55,d:.38,h:.32,accent:'#d89c27',
+  minHalfWidth:()=>.06,minHalfDepth:()=>.06,minHeight:()=>.08,controls:[
+   {key:'crateCount',label:'重ねる個数',type:'range',canvasSlider:true,default:1,min:1,max:8,step:1,integer:true,unit:'個'}
+  ]},(o,K)=>{
+   const w=Math.max(.12,2*Math.abs(o.ra)),d=Math.max(.12,2*Math.abs(o.rb)),h=Math.max(.08,o.h),
+    t=Math.min(.018,w*.08,d*.08,h*.09),rim=Math.min(.03,h*.1),mid0=h*.50,mid1=h*.75,
+    parts=[],box=(x,y,ww,dd,z0,z1)=>parts.push(K.box(K.rectPath(ww,dd,x,y),z0,z1,flag));
+   box(0,0,w-2*t,d-2*t,0,t);
+   for(const sy of [-1,1]){const y=sy*(d/2-t/2);box(0,y,w,t,t,mid0);box(0,y,w,t,mid1,h-rim);
+    for(const sx of [-1,1])box(sx*w*.375,y,w*.25,t,mid0,mid1);}
+   for(const sx of [-1,1]){const x=sx*(w/2-t/2);box(x,0,t,d-2*t,t,mid0);box(x,0,t,d-2*t,mid1,h-rim);
+    for(const sy of [-1,1])box(x,sy*(d-2*t)*.375,t,(d-2*t)*.25,mid0,mid1);}
+   for(const z of [0,h-rim]){
+    for(const sy of [-1,1])box(0,sy*(d/2-t*.4),w+2*t,t*1.8,z,z+rim);
+    for(const sx of [-1,1])box(sx*(w/2-t*.4),0,t*1.8,d-2*t,z,z+rim);
+   }
+   return K.repeatParts(parts,{axis:'z',spacing:h,count:K.count(o.crateCount,1,1,8)});
+  });
+})();
 "use strict";
 window.cityGridInstallAssetUI = function (bridge) {
     const {
@@ -20156,6 +20252,23 @@ window.cityGridInstallAssetUI = function (bridge) {
             alert("ベランダを配置できませんでした。建物を選択してからもう一度クリックしてください。");
         }
     }
+    window.cityResetAssetShape = function(o) {
+        const kind=o?.asset;
+        if(!kind || !ASSETS[kind] || obLocked(o)) return false;
+        const linked=['buildingAwning','buildingAwningOpen','buildingSign'].includes(o.linkedAsset) && ['parent','child'].includes(o.linkedRole);
+        const fresh=linked ? placeLinkedAsset(o.linkedAsset, null)[o.linkedRole] : newAsset(kind, null, [0,-1,0]);
+        const keep=['id','k','d','off','ca','cb','lift','rot','rotX','rotZ','c','w','wf','accent',
+            'displayName','visible','locked','groupId','linkedAsset','linkedRole','attachment',
+            'arrayEnabled','arrayCount','arraySpacing','arrayAxis'];
+        for(const key of keep) if(Object.prototype.hasOwnProperty.call(o,key))fresh[key]=o[key];
+        const lines=genShape(syncAttachedPart(fresh));
+        if(!lines.length || lines.some(s=>!validStroke(s)))return false;
+        HU.push(S);RD=[];
+        S=[...S.filter(s=>!(s.ob && s.ob.id===o.id)),...lines];
+        setOb(o.id,{});
+        render();
+        return true;
+    };
     function placeAsset(kind, p) {
         if (kind === "buildingAwning" || kind === "buildingAwningOpen" || kind === "buildingSign")
             return placeLinkedAssetInstance(kind, p);
@@ -20639,7 +20752,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         "</div>" +
         "</div>" +
         '<div class="assetTrayNote">建物を選択して「壁付けベランダ」を押すと、正面壁の2階相当へ自動接着。未選択なら地面へ配置。パスパイプは選択後に画面上の制御点と半径ハンドルを編集できます。</div>';
-    stage.appendChild(tray);
+    stage.parentNode.insertBefore(tray, el("hint"));
     const trayScroll = tray.querySelector(".assetTrayScroll"),
         trayCards = [...trayScroll.querySelectorAll(".assetCard")],
         trayTabs = [...tray.querySelectorAll("[data-asset-group]")];
@@ -20843,6 +20956,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         tray.style.display = tray.style.display === "block" ? "none" : "block";
         el("assetToggle").classList.toggle("on", tray.style.display === "block");
         tray.classList.toggle("floorAssetTray", !!window.cityFloorPlanActive && tray.style.display === "block");
+        fit();
         requestAnimationFrame(syncFloorPlanDockLayout);
     };
     const primitiveKinds = ["rect", "circle", "cone", "sphere", "triPrism", "triPyramid"];
@@ -20888,6 +21002,173 @@ window.cityGridInstallAssetUI = function (bridge) {
     };
     SH.orthHandleGap = (span, factor = 0.35) =>
         Math.max(48 / Z, Math.min(88 / Z, Math.max(0, span) * orthScale() * factor));
+})();
+window.CityCanvasControls = (function () {
+    "use strict";
+    const asNumber = (v, fallback) => Number.isFinite(Number(v)) ? Number(v) : fallback;
+    function collectHandles(sg) {
+        const found=[], seen=new Set();
+        function walk(v,depth) {
+            if(!v || typeof v!=="object" || depth>4 || seen.has(v))return;
+            seen.add(v);
+            if(v.s && v.dir && typeof v.kind==='string') { found.push(v); return; }
+            if(Array.isArray(v))v.forEach(q=>walk(q,depth+1));
+            else Object.keys(v).forEach(k=>{if(k!=='o' && k!=='bounds')walk(v[k],depth+1);});
+        }
+        walk(sg,0);
+        return found;
+    }
+    function legacyType(o,h) {
+        if(h.kind.startsWith('person-joint-'))return null;
+        if(o.asset==='building')return 'building-'+h.kind;
+        if(o.asset==='awning')return 'awning-'+h.kind;
+        if(o.asset==='sign')return 'sign-'+h.kind;
+        if(o.asset==='cone')return 'cone-height';
+        if(o.asset==='sphere')return 'sphere-radius';
+        return h.kind;
+    }
+    function canonical(kind) {
+        if(/^building-(front|back)OpeningW/.test(kind))return 'building-opening-width';
+        if(/^building-(front|back)OpeningH/.test(kind))return 'building-opening-height';
+        if(/^stacked-opening-w-/.test(kind))return 'stacked-opening-width';
+        return kind;
+    }
+    function legacyLabel(kind,h) {
+        if(kind.startsWith('building-') && kind.includes('OpeningW'))return '開口の幅';
+        if(kind.startsWith('building-') && kind.includes('OpeningH'))return '開口の高さ';
+        if(kind==='building-backFace'||kind==='stacked-opening-back')return '開口の奥行き';
+        if(kind.startsWith('stacked-opening-w-'))return '開口の幅';
+        if(kind==='stacked-opening-h')return '開口の高さ';
+        if(kind==='awning-edgeZ')return '前縁の高さ';
+        if(kind==='sign-faceW')return '看板の幅';
+        if(kind==='sign-faceH')return '看板の高さ';
+        if(kind==='cone-height')return '高さ';
+        if(kind==='sphere-radius'||kind==='path-radius')return '半径';
+        if(kind.startsWith('path-point-'))return `制御点${Number(h.index)+1} ${['X','Y','Z'][h.axis]||''}`;
+        return h.label || kind;
+    }
+    function list(o) {
+        if(!o || (o.type!=='asset' && o.type!=='circ'))return [];
+        const sg=typeof specialGizmo==='function'?specialGizmo(o):null,
+            handles=collectHandles(sg),result=[],seen=new Set(),controls=assetEditorControls(o);
+        for(const c of controls){
+            if(!['number','range'].includes(c.type||'number'))continue;
+            const h=handles.find(q=>q.paramKey===c.key);
+            if(!h && c.canvasSlider!==true && !(c.type==='range' && typeof c.handle!=='function'))continue;
+            const value=assetControlValue(o,c),min=assetControlLimit(c.min,o,Math.min(0,value-5)),max=assetControlLimit(c.max,o,Math.max(value+5,5)),
+                id='param:'+c.key;
+            if(!Number.isFinite(value)||!Number.isFinite(min)||!Number.isFinite(max)||max<min)continue;
+            result.push({id,label:c.label||c.key,value,min,max,step:c.step??(c.integer?1:.01),integer:!!c.integer,unit:c.unit||'',control:c});seen.add(id);
+        }
+        for(const h of handles){
+            if(h.paramKey)continue;
+            const kind=legacyType(o,h);if(!kind)continue;
+            const id='handle:'+canonical(kind);
+            if(seen.has(id))continue;
+            const value=asNumber(h.start,NaN);let min=asNumber(h.min,NaN),max=asNumber(h.max,NaN);
+            if(kind==='window-grid-width'||kind==='window-grid-height'){
+                const w=Math.max(.2,Math.abs(Number(o.ra)||.2)*2),height=Math.max(.2,Math.abs(Number(o.h)||.2)),q=windowGridOptions(o,w,height),
+                    cellW=Math.max(.03,(Math.max(.04,w-q.mx*2)-q.gx*Math.max(0,q.cols-1))/Math.max(1,q.cols)),
+                    cellH=Math.max(.03,(Math.max(.04,height-q.sill-q.head)-q.gz*Math.max(0,q.rows-1))/Math.max(1,q.rows));
+                max=kind==='window-grid-width'?cellW:cellH;min=Math.min(min,max);
+            }
+            if(!Number.isFinite(value)||!Number.isFinite(min)||!Number.isFinite(max)||max<min)continue;
+            const integer=!!h.integer||kind==='recessed-window-count';
+            result.push({id,label:legacyLabel(kind,h),value,min,max,step:integer?1:.01,integer,unit:integer?'':(kind.startsWith('person-')?'°':'m'),handle:h,kind});seen.add(id);
+            if(kind==='awning-edgeZ' && Number.isFinite(h.start2) && Number.isFinite(h.min2) && Number.isFinite(h.max2)){
+                result.push({id:'handle:awning-edgeY',label:'前縁の前後',value:h.start2,min:h.min2,max:h.max2,step:.01,unit:'m',kind:'awning-edgeY',handle:h});
+            }
+        }
+        return result;
+    }
+    function apply(o,item,value) {
+        if(!o || !item || obLocked(o) || !Number.isFinite(value))return false;
+        const v=clamp(item.integer?Math.round(value):value,item.min,item.max);
+        if(item.control){
+            const c=item.control,patch=typeof c.patch==='function'?c.patch(o,v):{[c.key]:v};
+            return setOb(o.id,patch)!==false;
+        }
+        if(item.kind==='awning-edgeY'){
+            const h=item.handle;
+            return setOb(o.id,{awningEdgeY:snapAwningEdge(snapAwningEdge(v,h.min2),h.max2),awningFrontBottom:h.frontBottom,awningEdgeEdited:true})!==false;
+        }
+        const oldEd=ed,oldSnap=snapHit;
+        if(oldEd)return false;
+        try{
+            ed={id:o.id,o0:o,t:item.kind,sign:{...item.handle,start:v,dir:{x:1,y:0},scale:1,dir2:null},p0:{x:0,y:0},started:true};
+            dragEdit({x:0,y:0});
+            return true;
+        } finally { ed=oldEd;snapHit=oldSnap; }
+    }
+    function faces(o) {
+        if(!o || isStackedBuildingAsset(o) || o.type==='compound')return [];
+        const names={'u+':'幅＋','u-':'幅−','v+':'奥行き＋','v-':'奥行き−','top':'高さ＋','base':'高さ−',
+            'n+':'厚さ＋','n-':'厚さ−'};
+        const circle=o.type==='circ'||(o.type==='asset'&&o.asset==='stool');
+        const solid=['asset','box','cyl','rect','circ','triPrism','triPyramid'].includes(o.type) && !(o.type==='asset'&&ASSETS[o.asset]?.heightControl==='custom');
+        const ids=o.attachment?.wallSideSign?['u+','u-','v+','v-','n+','n-']:[...(circle?[]:['u+','u-','v+','v-']),...(solid?['top','base']:[])];
+        return ids.map(id=>{
+            const axis=id[0],value=axis==='u'?Math.abs(o.ra)*2:axis==='v'?Math.abs(o.rb)*2:Math.max(0,Number(o.h)||0);
+            return {id:'face:'+id,label:names[id],value,min:0,max:Math.max(10,Math.ceil(value/10)*20),step:.01,unit:'m',face:id};
+        });
+    }
+    function install(stage){
+        const panel=document.createElement('div');panel.id='canvasAssetControl';panel.hidden=true;
+        panel.innerHTML='<div class="canvasAssetFixed"><button type="button" class="canvasGround">地面につける</button><button type="button" class="canvasReset" title="位置・向きは維持して形と寸法を初期状態に戻す">リセットする</button><span class="canvasAssetControlLock" hidden>ロック中</span></div><div class="canvasAssetControlItems" aria-label="選択中の形状調整"></div>';
+        stage.parentNode.insertBefore(panel,stage);
+        const items=panel.querySelector('.canvasAssetControlItems'),ground=panel.querySelector('.canvasGround'),reset=panel.querySelector('.canvasReset');
+        let selectedId=null,signature='',session=null;
+        ground.addEventListener('click',()=>{const o=selectedObjects();if(o.length===1&&!obLocked(o[0]))document.getElementById('obGnd').click();});
+        reset.addEventListener('click',()=>{const o=selectedObjects();if(o.length===1&&!obLocked(o[0]))window.cityResetAssetShape?.(o[0]);});
+        function sync(){
+            const selected=selectedObjects(),o=selected.length===1?selected[0]:null,
+                controls=o&&objectVisible(o)?[...list(o),...faces(o)]:[],show=!!o&&objectVisible(o);
+            const visibilityChanged=panel.hidden===show;
+            panel.hidden=!show;
+            if(visibilityChanged)fitCanvasDisplay();
+            if(!show){selectedId=null;signature='';session=null;return;}
+            if(selectedId!==o.id){selectedId=o.id;signature='';session=null;items.scrollLeft=0;}
+            ground.disabled=obLocked(o);reset.disabled=obLocked(o)||!ASSETS[o.asset];
+            panel.querySelector('.canvasAssetControlLock').hidden=!obLocked(o);
+            const sig=controls.map(c=>c.id).join('|');
+            if(sig!==signature){
+                signature=sig;items.replaceChildren();
+                controls.forEach(c=>{
+                    const row=document.createElement('label');row.className='canvasAssetRow';row.dataset.controlId=c.id;
+                    const label=document.createElement('span'),slider=document.createElement('input'),out=document.createElement('output'),unit=document.createElement('span');
+                    label.className='canvasAssetControlLabel';label.textContent=c.label;slider.type='range';slider.dataset.controlId=c.id;slider.setAttribute('aria-label',c.label);unit.className='canvasAssetControlUnit';unit.textContent=c.unit;
+                    row.append(label,slider,out,unit);items.append(row);
+                });
+            }
+            controls.forEach(c=>{
+                const row=Array.from(items.children).find(n=>n.dataset.controlId===c.id),input=row?.querySelector('input');if(!input)return;
+                row.querySelector('.canvasAssetControlLabel').textContent=c.label;row.querySelector('.canvasAssetControlUnit').textContent=c.unit;
+                input.min=String(c.min);input.max=String(c.max);input.step=c.integer?'1':'any';input.value=String(c.value);input.disabled=obLocked(o)||c.min>=c.max;
+                row.querySelector('output').textContent=String(+c.value.toFixed(4));
+            });
+        }
+        items.addEventListener('input',event=>{
+            const input=event.target;if(!(input instanceof HTMLInputElement)||!input.dataset.controlId)return;
+            const selected=selectedObjects(),o=selected.length===1?selected[0]:null;
+            if(!o||o.id!==selectedId||obLocked(o))return;
+            const item=[...list(o),...faces(o)].find(c=>c.id===input.dataset.controlId),n=Number(input.value);
+            if(!item||!Number.isFinite(n))return;
+            const value=clamp(item.integer?Math.round(n):n,item.min,item.max);
+            if(Math.abs(value-item.value)<1e-9)return;
+            if(!session||session.id!==o.id||session.key!==item.id){HU.push(S);RD=[];session={id:o.id,key:item.id};}
+            if(item.face){
+                let delta=value-item.value;
+                if(o.asset==='sign' && (item.face==='top'||item.face==='base'))delta*=.74;
+                const patch=o.attachment?.wallSideSign?wallSideSignFacePatch(o,item.face,delta):
+                    o.asset==='building'?buildingOuterFacePatch(o,item.face,delta):facePatch(o,item.face,delta);
+                setOb(o.id,patch);
+            }else apply(o,item,value);
+            render();
+        });
+        for(const event of ['change','focusout','pointercancel'])items.addEventListener(event,()=>{session=null;});
+        return {sync,panel};
+    }
+    return {list,apply,install};
 })();
 (function () {
     "use strict";
@@ -23612,6 +23893,8 @@ window.cityGridInstallAssetUI = function (bridge) {
             cornerCutEditSession = false;
         };
     });
+    // 汎用キャンバス編集UIは別モジュールに集約する。
+    const canvasAssetEditor = window.CityCanvasControls.install(stage);
     // 登録の controls から数値欄を自動生成。特別なUIを持つ旧アセットには手を加えない。
     let genericAssetPanelKind=null, genericAssetPanelId=null, genericAssetEditSession=false;
     function syncGenericAssetEditor() {
@@ -23690,6 +23973,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         updateOutliner();
         syncAssetControls();
         syncGenericAssetEditor();
+        canvasAssetEditor.sync();
         syncStandardViewButtons();
         syncSignPanel();
         syncBuildingDoorPanel();
@@ -24020,6 +24304,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             fit();
         }
         SH.floorPlanDock.classList.add("open");
+        fitCanvasDisplay();
         SH.syncFloorPlanDockLayout?.();
         Z = 1;
         ox = 0;
@@ -24039,6 +24324,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         // 間取り中に変更した共有カメラ設定は、そのまま3D視点へ引き継ぐ。
         window.cityFloorPlanActive = false;
         SH.floorPlanDock.classList.remove("open");
+        fitCanvasDisplay();
         const saved = floorPlanView,
             restoreSide = floorPlanAutoHidSide && !floorPlanSideWasHidden;
         floorPlanView = null;
@@ -24729,7 +25015,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     floorPlanDock.id = "floorPlanDock";
     floorPlanDock.innerHTML =
         '<div class="floorPlanDockInner"><div class="floorPlanDockHeader"><div id="floorPlanDockStatus" class="floorPlanDockStatus">オブジェクトを選択すると、移動・回転・サイズ変更ができます。<small>カメラ本体：位置　／　先端の丸：向き</small></div><div class="floorHistoryButtons"><button type="button" id="floorUndo" class="floorHistoryButton" title="間取りの操作を元に戻す">↶ 元に戻す</button><button type="button" id="floorRedo" class="floorHistoryButton" title="間取りの操作をやり直す">↷ やり直す</button></div><button type="button" class="dockCollapse" data-floor-dock-action="collapse" title="操作バーを折りたたむ">−</button></div><button type="button" data-floor-dock-action="left">↺ 15°</button><button type="button" data-floor-dock-action="right">↻ 15°</button><button type="button" data-floor-dock-action="rot30">30°</button><button type="button" data-floor-dock-action="rot45">45°</button><button type="button" data-floor-dock-action="90">90°回す</button><label class="floorLensTools">レンズ <input id="floorLensInput" type="number" min="14" max="200" step="1"> mm</label><div class="floorPlanPanTools"><span>表示移動</span><button type="button" data-floor-dock-action="pan-up" title="表示を上へ">↑</button><button type="button" data-floor-dock-action="pan-down" title="表示を下へ">↓</button><button type="button" data-floor-dock-action="pan-left" title="表示を左へ">←</button><button type="button" data-floor-dock-action="pan-right" title="表示を右へ">→</button></div><button type="button" data-floor-dock-action="assets">＋アセット</button><button type="button" data-floor-dock-action="delete">片付ける</button><span class="dockHint">中／右ドラッグ：表示移動　・　表示移動ボタン／Alt＋矢印／WASD：キャンバス移動　・　2本指ピンチ：ズームイン／ズームアウト（正面・横・上のまま）　・　磁石ON：家具移動と幅／奥行の面編集をエッジへ吸着　・　2本指タップ：元に戻す／3本指タップ：やり直す</span></div>';
-    stage.appendChild(floorPlanDock);
+    stage.parentNode.insertBefore(floorPlanDock, stage);
     // アセット棚を開いたときは、間取り操作バーを棚の上へ逃がす。棚と操作バーを重ねないためのレイアウト調整。
     function syncFloorPlanDockLayout() {
         const tray = el("assetTray");
@@ -26443,6 +26729,8 @@ window.cityGridInstallAssetUI = function (bridge) {
     floorDockCollapse.title = "操作バーを開く";
     floorDockCollapse.onclick = () => {
         const collapsed = floorPlanDock.classList.toggle("collapsed");
+        fitCanvasDisplay();
+        render();
         floorDockCollapse.textContent = collapsed ? "＋ 操作" : "−";
         floorDockCollapse.title = collapsed ? "操作バーを開く" : "操作バーを折りたたむ";
     };
