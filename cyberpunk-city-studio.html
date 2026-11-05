@@ -22519,6 +22519,343 @@ ASSET_KIT.define('guardPoleHalf',{
  });
 })();
 
+// ===== 金網フェンス（上角ベベルのパイプ外枠＋伸縮しても歪まないひし形網目） =====
+function chainFenceMaxDiameter(o) {
+    return Math.max(.02, Math.min(.5, (Math.max(.3, Number(o?.h) || 1.4) - .08) / 3.4));
+}
+function chainFenceDiameter(o) {
+    const v = Number(o?.fenceDiameter);
+    return Math.max(.02, Math.min(chainFenceMaxDiameter(o), Number.isFinite(v) ? v : .06));
+}
+function chainFenceBend(o) {
+    return chainFenceDiameter(o) * 1.2;
+}
+function chainFenceMinHeight(o) {
+    return chainFenceDiameter(o) * 3.4 + .08;
+}
+function chainFenceStraight(o) {
+    return Math.max(.1, 2 * Math.abs(Number(o?.ra) || 0) - 2 * chainFenceBend(o) - chainFenceDiameter(o));
+}
+function chainFenceMinHalfWidth(o) {
+    return (.1 + 2 * chainFenceBend(o) + chainFenceDiameter(o)) / 2;
+}
+function chainFenceMeshPitch(o) {
+    const v = Number(o?.fenceMeshPitch);
+    return Math.max(.04, Math.min(.8, Number.isFinite(v) ? v : .14));
+}
+function chainFenceCount(o) {
+    const v = Math.round(Number(o?.fenceCount));
+    return Math.max(1, Math.min(20, Number.isFinite(v) ? v : 1));
+}
+function chainFenceGap(o) {
+    const v = Number(o?.fenceGap);
+    return Math.max(0, Math.min(2, Number.isFinite(v) ? v : 0));
+}
+function chainFenceTubePart(o, sections, radius, ringMarks = [], opts = {}) {
+    const N = 16,
+        capStart = opts.capStart !== false,
+        capEnd = opts.capEnd !== false,
+        rings = sections.map((s) =>
+            s.ring ||
+            Array.from({ length: N }, (_, j) => {
+                const a = (2 * Math.PI * j) / N,
+                    c = Math.cos(a) * radius;
+                return [s.x + s.nx * c, Math.sin(a) * radius, s.z + s.nz * c];
+            }),
+        ),
+        triangles = [],
+        edges = [],
+        world = rings.map((r) => r.map((p) => L2W(o, ...p))),
+        cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
+        sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]],
+        dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+        view = orthView ? orthBasis().depth.map((v) => -v) : null,
+        camera = camPos(),
+        allFacing = [];
+    for (let i = 0; i < rings.length - 1; i++) {
+        const center = L2W(o, (sections[i].x + sections[i + 1].x) / 2, 0, (sections[i].z + sections[i + 1].z) / 2),
+            facing = [];
+        for (let j = 0; j < N; j++) {
+            const k = (j + 1) % N,
+                a = rings[i][j],
+                b = rings[i][k],
+                c = rings[i + 1][k],
+                d = rings[i + 1][j];
+            triangles.push([a, b, c], [a, c, d]);
+            const A = world[i][j],
+                B = world[i][k],
+                D = world[i + 1][j],
+                normal = cross(sub(B, A), sub(D, A)),
+                radial = sub(A, center);
+            if (dot(normal, radial) < 0) for (let q = 0; q < 3; q++) normal[q] = -normal[q];
+            facing.push(dot(normal, view || sub(camera, A)) > 1e-12);
+        }
+        allFacing.push(facing);
+        const idx = [];
+        for (let j = 0; j < N; j++) if (facing[(j + N - 1) % N] !== facing[j]) idx.push(j);
+        sections[i]._sil = idx.filter((j) => !(sections[i].skipInner && Math.cos((2 * Math.PI * j) / N) < -0.5));
+    }
+    for (let j = 0; j < N; j++) {
+        let run = null;
+        for (let i = 0; i < rings.length - 1; i++) {
+            if (sections[i]._sil?.includes(j)) {
+                if (!run) run = [rings[i][j]];
+                run.push(rings[i + 1][j]);
+            } else if (run) {
+                edges.push(run);
+                run = null;
+            }
+        }
+        if (run) edges.push(run);
+    }
+    const capFacing = (idx, reverse) => {
+        const center = [sections[idx].x, 0, sections[idx].z];
+        for (let j = 0; j < N; j++) {
+            const k = (j + 1) % N;
+            triangles.push(reverse ? [center, rings[idx][k], rings[idx][j]] : [center, rings[idx][j], rings[idx][k]]);
+        }
+        const C = L2W(o, ...center),
+            A = world[idx][0],
+            B = world[idx][Math.floor(N / 4)],
+            normal = reverse ? cross(sub(B, C), sub(A, C)) : cross(sub(A, C), sub(B, C));
+        return dot(normal, view || sub(camera, C)) > 1e-12;
+    };
+    const startVis = capStart ? capFacing(0, true) : false,
+        endVis = capEnd ? capFacing(rings.length - 1, false) : false,
+        marks = new Set([...(capStart ? [0] : []), ...ringMarks, ...(capEnd ? [rings.length - 1] : [])]);
+    for (const i of marks) {
+        if (!rings[i]) continue;
+        const vis = Array.from({ length: N }, (_, j) =>
+            i === 0
+                ? allFacing[0]?.[j] || startVis
+                : i === rings.length - 1
+                  ? allFacing[rings.length - 2]?.[j] || endVis
+                  : allFacing[i - 1]?.[j] || allFacing[i]?.[j],
+        );
+        if (vis.every(Boolean)) {
+            edges.push([...rings[i], rings[i][0]]);
+            continue;
+        }
+        if (!vis.some(Boolean)) continue;
+        const start = vis.findIndex((v, j) => v && !vis[(j + N - 1) % N]);
+        let run = null;
+        for (let k = 0; k < N; k++) {
+            const j = (start + k) % N;
+            if (vis[j]) {
+                if (!run) run = [rings[i][j]];
+                run.push(rings[i][(j + 1) % N]);
+            } else if (run) {
+                edges.push(run);
+                run = null;
+            }
+        }
+        if (run) edges.push(run);
+    }
+    return { meshTriangles: triangles, meshEdges: edges, preciseTubeEdge: true, onFace: true };
+}
+function chainFencePanelParts(o, xOff = 0) {
+    const d = chainFenceDiameter(o),
+        r = d / 2,
+        b = chainFenceBend(o),
+        L = chainFenceStraight(o),
+        H = Math.max(chainFenceMinHeight(o), Number(o?.h) || 1.4),
+        xPost = L / 2 + b,
+        top = H - r,
+        zArc = top - b,
+        bottomBar = !!o?.fenceBottomBar,
+        sections = [],
+        marks = [];
+    const add = (px, pz, nx, nz, mark = false, extra = {}) => {
+        sections.push({ x: xOff + px, z: pz, nx, nz, ...extra });
+        if (mark) marks.push(sections.length - 1);
+    };
+    const zStart = bottomBar ? 3 * r : Math.min(d * 1.1, zArc * 0.15),
+        postSpan = Math.max(0.02, zArc - zStart),
+        bands = Math.max(2, Math.min(24, Math.round(postSpan / 0.34)));
+    add(-xPost, 0, -1, 0);
+    if (bottomBar) {
+        add(-xPost, r, -1, 0, false, { skipInner: true });
+        add(-xPost, 3 * r, -1, 0);
+    } else {
+        add(-xPost, zStart, -1, 0, true);
+    }
+    for (let k = 1; k < bands; k++) add(-xPost, zStart + (k / bands) * postSpan, -1, 0, true);
+    for (let i = 0; i <= 8; i++) {
+        const a = Math.PI - (i * Math.PI) / 16;
+        add(-L / 2 + b * Math.cos(a), zArc + b * Math.sin(a), Math.cos(a), Math.sin(a), i === 0 || i === 8);
+    }
+    for (let i = 0; i <= 8; i++) {
+        const a = Math.PI / 2 - (i * Math.PI) / 16;
+        add(L / 2 + b * Math.cos(a), zArc + b * Math.sin(a), Math.cos(a), Math.sin(a), i === 0 || i === 8);
+    }
+    for (let k = bands - 1; k >= 1; k--) add(xPost, zStart + (k / bands) * postSpan, 1, 0, true);
+    if (bottomBar) {
+        add(xPost, 3 * r, 1, 0, false, { skipInner: true });
+        add(xPost, r, 1, 0);
+    } else {
+        add(xPost, zStart, 1, 0, true);
+    }
+    add(xPost, 0, 1, 0);
+    const parts = [chainFenceTubePart(o, sections, r, marks)];
+    if (bottomBar) {
+        const N = 16,
+            zBot = 2 * r,
+            weldRing = (sign) =>
+                Array.from({ length: N }, (_, j) => {
+                    const a = (2 * Math.PI * j) / N;
+                    return [xOff + sign * (xPost - r * Math.abs(Math.cos(a))), Math.sin(a) * r, zBot + Math.cos(a) * r];
+                });
+        const barSections = [
+            { x: xOff - (xPost - r), z: zBot, nx: 0, nz: 1, ring: weldRing(-1) },
+            { x: xOff + (xPost - r), z: zBot, nx: 0, nz: 1, ring: weldRing(1) },
+        ];
+        parts.push(chainFenceTubePart(o, barSections, r, [0, 1], { capStart: false, capEnd: false }));
+    }
+    // ひし形金網（線画のみ・面なし）。幅や高さを変えても45°正方形ピッチを保ち、網目数が増減する。
+    const xIn = xPost - r - 0.0008,
+        zMax = top - r - 0.0008,
+        zMin = bottomBar ? 3 * r + 0.0008 : 0,
+        rIn = Math.max(0, (b - r) * Math.cos(Math.PI / 16) - 0.0008),
+        pitch = chainFenceMeshPitch(o),
+        step = Math.max(pitch, (chainFenceCount(o) * (2 * xIn + Math.max(0, zMax - zMin))) / 360),
+        meshEdges = [];
+    if (xIn > 0.005 && zMax - zMin > 0.005) {
+        const K = Math.ceil((xIn + (zMax - zMin)) / step) + 1,
+            cxAbs = Math.max(0, xIn - rIn),
+            cz = zMax - rIn;
+        for (const s of [-1, 1]) {
+            for (let k = -K; k <= K; k++) {
+                const xk = k * step;
+                let x0 = s === 1 ? Math.max(-xIn, xk - (zMax - zMin)) : Math.max(-xIn, xk),
+                    x1 = s === 1 ? Math.min(xIn, xk) : Math.min(xIn, xk + (zMax - zMin));
+                if (x1 - x0 <= 1e-3) continue;
+                let rejected = false;
+                if (rIn > 1e-5) {
+                    for (const cornerSign of [-1, 1]) {
+                        const cx = cornerSign * cxAbs,
+                            zAt = (x) => zMax + s * (x - xk),
+                            inQuad = (x) => cornerSign * (x - cx) > 1e-7 && zAt(x) - cz > 1e-7,
+                            outArc = (x) => inQuad(x) && (x - cx) ** 2 + (zAt(x) - cz) ** 2 > rIn * rIn;
+                        if (inQuad(x0) || inQuad(x1) || inQuad((x0 + x1) * 0.5)) {
+                            const d0 = zMax - cz + s * (cx - xk),
+                                disc = 2 * rIn * rIn - d0 * d0;
+                            if (disc <= 1e-12) {
+                                if (outArc(x0) || outArc(x1) || outArc((x0 + x1) * 0.5)) {
+                                    rejected = true;
+                                    break;
+                                }
+                            } else {
+                                const root = Math.sqrt(disc),
+                                    u0 = (-s * d0 - root) / 2,
+                                    u1 = (-s * d0 + root) / 2;
+                                if (outArc(x0)) x0 = Math.max(x0, cx + u0);
+                                if (outArc(x1)) x1 = Math.min(x1, cx + u1);
+                            }
+                        }
+                    }
+                }
+                if (rejected || x1 - x0 <= 2e-3) continue;
+                const z0 = zMax + s * (x0 - xk),
+                    z1 = zMax + s * (x1 - xk),
+                    len = Math.hypot(x1 - x0, z1 - z0),
+                    ts = [0];
+                for (const d of [r * 0.45, r * 1.0]) if (d * 2.2 < len) ts.push(d / len);
+                for (const d of [r * 1.0, r * 0.45]) if (d * 2.2 < len) ts.push(1 - d / len);
+                ts.push(1);
+                meshEdges.push(ts.map((t) => [xOff + x0 + (x1 - x0) * t, 0, z0 + (z1 - z0) * t]));
+            }
+        }
+    }
+    if (meshEdges.length) parts.push({ meshTriangles: [], meshEdges, preciseTubeEdge: true, onFace: true });
+    return parts;
+}
+function chainFenceBuild(o) {
+    const count = chainFenceCount(o),
+        unitWidth = chainFenceStraight(o) + 2 * chainFenceBend(o) + chainFenceDiameter(o),
+        stepX = unitWidth + chainFenceGap(o),
+        out = [];
+    for (let i = 0; i < count; i++) out.push(...chainFencePanelParts(o, i * stepX));
+    return out;
+}
+(function () {
+    const controls = [
+        {
+            key: 'fenceStraight',
+            label: '直線部分の長さ',
+            canvasSlider: true,
+            min: .1,
+            max: 100,
+            step: .05,
+            unit: 'm',
+            get: chainFenceStraight,
+            patch: (o, v) => ({ ra: (v + 2 * chainFenceBend(o) + chainFenceDiameter(o)) / 2 }),
+            handle: (o, v) => ({ anchor: [-v / 2, 0, o.h], sample: [v / 2, 0, o.h], probe: [(v + 1) / 2, 0, o.h], fallback: { x: 1, y: 0 } }),
+        },
+        {
+            key: 'fenceDiameter',
+            label: '鉄棒の太さ',
+            canvasSlider: true,
+            default: .06,
+            min: .02,
+            max: chainFenceMaxDiameter,
+            step: .005,
+            unit: 'm',
+            get: chainFenceDiameter,
+            patch: (o, v) => ({ fenceDiameter: v, ra: (chainFenceStraight(o) + 3.4 * v) / 2, rb: Math.max(.01, v / 2) }),
+            handle: (o, v) => {
+                const x = -chainFenceStraight(o) * .25;
+                return { anchor: [x, 0, o.h - v / 2], sample: [x, -v / 2, o.h - v / 2], probe: [x, -(v + 1) / 2, o.h - v / 2], fallback: { x: 1, y: 0 } };
+            },
+        },
+        {
+            key: 'fenceMeshPitch',
+            label: '網目の大きさ',
+            canvasSlider: true,
+            default: .14,
+            min: .04,
+            max: .8,
+            step: .01,
+            unit: 'm',
+            get: chainFenceMeshPitch,
+            handle: (o, v) => {
+                const y = -chainFenceDiameter(o) / 2 - .02,
+                    z0 = Math.max(.1, (Number(o.h) || 1.4) * .62 - v / 2);
+                return { anchor: [0, y, z0], sample: [v, y, z0 + v], probe: [v + 1, y, z0 + v + 1], fallback: { x: 1, y: -1 } };
+            },
+        },
+        { key: 'fenceCount', label: '横に並べる数', type: 'range', canvasSlider: true, default: 1, min: 1, max: 20, step: 1, integer: true, unit: '枚' },
+        { key: 'fenceGap', label: '並べる間隔', type: 'range', canvasSlider: true, default: 0, min: 0, max: 2, step: .02, unit: 'm' },
+        { key: 'fenceBottomBar', label: '下の横パイプ', type: 'boolean', default: false },
+    ];
+    ASSET_KIT.define(
+        'chainFence',
+        {
+            label: '金網フェンス',
+            glyph: '▦',
+            group: 'street',
+            w: 1.8,
+            d: .06,
+            h: 1.4,
+            accent: '#b87648',
+            minHeight: chainFenceMinHeight,
+            minHalfWidth: chainFenceMinHalfWidth,
+            minHalfDepth: () => .01,
+            maxHalfDepth: (o) => chainFenceMaxDiameter(o) / 2,
+            constrainEdit: (next, old, patch) => {
+                const has = (k) => Object.prototype.hasOwnProperty.call(patch, k);
+                if (!has('fenceDiameter') && !has('rb')) return next;
+                const d = Math.max(.02, Math.min(chainFenceMaxDiameter(next), Number(has('fenceDiameter') ? next.fenceDiameter : next.rb * 2) || .06));
+                next.fenceDiameter = d;
+                next.rb = d / 2;
+                if (!has('ra')) next.ra = (chainFenceStraight(old) + 3.4 * d) / 2;
+                return next;
+            },
+            controls,
+        },
+        (o) => chainFenceBuild(o),
+    );
+})();
+
 /* City Grid Studio asset controller.
    アセットの配置・接続・JSON入出力・棚UIを担当する。
 
