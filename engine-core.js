@@ -135,6 +135,7 @@ ${R("bt", "しきい値", 16, 240, 1)}
 <label><input type=checkbox id=snp checked> 磁石でスナップ（他の図形・地面にくっつく）</label>
 ${R("sn", "吸着する距離", 4, 60, 1, "px")}
 <div class="note">編集モードで線を選択できます。色つきの矢印＝軸移動、白い四角＝面の押し引き、点線の輪＝回転。選択中の線をドラッグすると移動し、間取りでは専用ハンドルで寸法を調整できます。</div>
+<div id=objLockedNotice class="note" style="display:none">ロック中：選択・表示切替はできますが、編集するにはロックを解除してください。</div>
 <div id=objP style="display:none">
 <h3>選択中のオブジェクト</h3>
 ${RO("rot", "回転", -180, 180, 0.1, "°")}
@@ -1375,11 +1376,6 @@ function setObjectLock(id, locked) {
         const def = obOf(member);
         if (def) setOb(member, { locked: !!locked });
     });
-    if (locked && ids.has(sel)) {
-        // ロックしたものは選択から外す（ギズモも消える）。
-        ids.forEach((member) => selIds.delete(member));
-        normalizeSelection();
-    }
     return true;
 }
 function unlockAllObjects() {
@@ -1553,25 +1549,19 @@ function normalizeSelection() {
     [...selIds].forEach((id) => {
         if (!obOf(id) || !objectVisible(obOf(id))) selIds.delete(id);
     });
-    // ロック中のオブジェクトは選択に残さない（後からロックした場合もここで外れる）。
-    [...selIds].forEach((id) => {
-        if (obLocked(obOf(id))) selIds.delete(id);
-    });
     // グループは常に一体選択。行・キャンバスのどのメンバーを選んでも全員を選ぶ。
-    // ただしロック中のメンバーは加えない。
     [...selIds].forEach((id) =>
         groupMemberIds(id).forEach((member) => {
-            if (!obLocked(obOf(member)) && objectVisible(obOf(member))) selIds.add(member);
+            if (objectVisible(obOf(member))) selIds.add(member);
         }),
     );
     if (sel && (!obOf(sel) || !objectVisible(obOf(sel)))) sel = null;
-    if (sel && obLocked(obOf(sel))) sel = null;
     if (!sel && selIds.size) sel = [...selIds][selIds.size - 1];
-    if (sel && !selIds.has(sel) && !obLocked(obOf(sel))) selIds.add(sel);
+    if (sel && !selIds.has(sel)) selIds.add(sel);
 }
-function setSelection(id, add = false) {
-    // ロック中のものは選択しない（当たり判定・一覧・箱選択のすべてがここへ集まる）。
-    if (id && obLocked(obOf(id))) {
+function setSelection(id, add = false, allowLocked = false) {
+    // 一覧からはロック中も選択できる。キャンバス上では従来どおり誤選択を防ぐ。
+    if (id && obLocked(obOf(id)) && !allowLocked) {
         if (typeof window.flashHint === "function") window.flashHint("ロック中のオブジェクトです（一覧の鍵で解除）");
         return false;
     }
@@ -1636,7 +1626,7 @@ function setOb(id, patch) {
     if (typeof buildingOpeningEditConstraint === "function") next = buildingOpeningEditConstraint(next, o, patch || {});
     // 登録アセットが寸法の安全範囲を宣言した場合、数値欄とギズモの双方で守る。
     const assetMeta = next.type === "asset" && typeof ASSETS !== "undefined" ? ASSETS[next.asset] : null;
-    if (typeof assetMeta?.constrainEdit === "function") next = assetMeta.constrainEdit(next, o, patch || {}) || next;
+    if (typeof assetMeta?.constrainEdit === "function" && !(obLocked(o) && patch && Object.keys(patch).every(k => LOCK_ADMIN_KEYS.has(k)))) next = assetMeta.constrainEdit(next, o, patch || {}) || next;
     if (typeof assetMeta?.minHeight === "function" && patch && Object.prototype.hasOwnProperty.call(patch, "h"))
         next.h = Math.max(Number(assetMeta.minHeight(next)) || 0.005, Number(next.h) || 0);
     if (typeof assetMeta?.minHalfWidth === "function" && patch && Object.prototype.hasOwnProperty.call(patch, "ra"))
@@ -1906,6 +1896,8 @@ function syncSel() {
     if (sel && !o) sel = null;
     if (typeof window.cityGridObjectSelection === "function") window.cityGridObjectSelection(o ? sel : null);
     $("objP").style.display = o ? "" : "none";
+    $("objP").inert = !!o && obLocked(o);
+    $("objLockedNotice").style.display = o && obLocked(o) ? "" : "none";
     if (!o) return;
     if (sel !== lastSel) {
         lastSel = sel;
@@ -2119,7 +2111,7 @@ $("obGnd").onclick = () => {
 //   mode = "shift"   … 少し横へずらして複製（パネルの「複製」ボタン。従来の動き）。
 // ずらす量以外は共通で、ID・グループ・接続（看板などの親子）を付け替えて再生成する。
 function duplicateSelected(mode) {
-    const objects = selectedObjects();
+    const objects = selectedObjects().filter(o => !obLocked(o));
     if (!objects.length) return 0;
     const lead = objects.find((o) => o.id === sel) || objects[0],
         newGroup = objects.length > 1 && objects.some((o) => o.groupId) ? "group-" + uid() : null,

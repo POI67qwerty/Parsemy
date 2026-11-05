@@ -1518,13 +1518,64 @@ function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
  ASSET_KIT.define('streetCone',{...common,label:'交通コーン',glyph:'▲',group:'traffic',w:.42,d:.42,h:.7,accent:'#ed7845',minHeight:()=>.1,controls:[
    {key:'coneBaseThickness',label:'台座の厚さ',default:.05,min:.01,max:o=>Math.max(.01,o.h*.35),step:.01,unit:'m',handle:(o,v)=>vertical(o,v,-o.ra,-o.rb)}
  ]},(o,K)=>{const {w,d,h}=size(o),t=val(o,'coneBaseThickness',.05,.01,h*.35),z1=t+(h-t)*.35,z2=t+(h-t)*.67,rad=z=>.4*(1-.83*(z-t)/(h-t));return [K.box(K.rectPath(w,d),0,t),streetRoundPart(o,K,[[w*.4,d*.4,t],[w*rad(z1),d*rad(z1),z1],[w*rad(z2),d*rad(z2),z2],[w*.068,d*.068,h]],[1,2])];});
- ASSET_KIT.define('streetPavement',{...common,label:'タイル舗道',glyph:'▦',group:'traffic',w:2.4,d:1.2,h:.12,accent:'#a3aaa7',minHeight:()=>.02,controls:[
-   {key:'pavementTileSize',label:'タイル間隔',default:.3,min:.08,max:2,step:.05,unit:'m',handle:(o,v)=>({anchor:[-o.ra,-o.rb,o.h+.001],sample:[-o.ra+v,-o.rb,o.h+.001],probe:[-o.ra+v+1,-o.rb,o.h+.001],fallback:{x:1,y:0}})}
- ]},(o,K)=>{const {w,d,h}=size(o),step=val(o,'pavementTileSize',.3,.08,2),edges=[],dx=Math.max(step,w/32),dy=Math.max(step,d/32),z=h+.001;
-  // 一方向32本まで。非常に大きい場合は実効間隔を広げて負荷を制限。
-  for(let i=1;i*dx<w-1e-8;i++){const x=-w/2+i*dx;edges.push([[x,-d/2,z],[x,d/2,z]]);}
-  for(let i=1;i*dy<d-1e-8;i++){const y=-d/2+i*dy;edges.push([[-w/2,y,z],[w/2,y,z]]);}
-  return [K.box(K.rectPath(w,d),0,h),{meshTriangles:[],meshEdges:edges,onFace:true}];});
+ // 舗道は動かさず、縁石をタイルの外側4辺へ配置する。
+ const curbWidth=o=>val(o,'pavementCurbWidth',.18,.02,2),
+       curbHeight=o=>val(o,'pavementCurbHeight',.06,.005,1),
+       curbBevel=o=>val(o,'pavementCurbBevel',.04,0,curbWidth(o));
+ function pavementCurbRing(w,d,cw,b,z0,z1,tileTop) {
+  // 外側はベベル直方体の断面・輪郭候補と同じ。内側は元のタイルの長方形。
+  const outer=beveledBoxFootprint(w+2*cw,d+2*cw,b,4),n=b>1e-6?5:1,
+   corners=beveledBoxFootprint(w,d,0,4),inner=corners.flatMap(p=>Array.from({length:n},()=>p)),
+   triangles=[],edges=[],marks=[],point=(p,z)=>[p[0],p[1],z];
+  const tri=(a,c,e)=>{const u=c.map((v,i)=>v-a[i]),v=e.map((x,i)=>x-a[i]);
+   if(Math.hypot(u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0])>1e-12)triangles.push([a,c,e]);},
+   quad=(a,c,e,f)=>{tri(a,c,e);tri(a,e,f);},
+   add=(p,mark=null)=>{edges.push(p);marks.push(mark);},
+   loop=(p,z)=>[...p.map(v=>point(v,z)),point(p[0],z)];
+  for(let i=0;i<outer.length;i++){
+   const j=(i+1)%outer.length,a=outer[i],c=outer[j],u=inner[i],v=inner[j];
+   quad(point(a,z0),point(c,z0),point(c,z1),point(a,z1));
+   quad(point(u,z0),point(u,z1),point(v,z1),point(v,z0));
+   quad(point(a,z1),point(c,z1),point(v,z1),point(u,z1));
+   quad(point(a,z0),point(u,z0),point(v,z0),point(c,z0));
+  }
+  add(loop(outer,z0));add(loop(outer,z1));
+  outer.forEach((p,i)=>add([point(p,z0),point(p,z1)],beveledEdgeMark(i,b,4,'pavementCurb')));
+  // 内側の境界は元のタイルの外周に接する。タイル上面より上の線だけを追加。
+  add(loop(corners,z1));corners.forEach(p=>add([point(p,tileTop),point(p,z1)]));
+  return {meshTriangles:triangles,meshEdges:edges,seamMarks:marks,onFace:true,preciseTubeEdge:true};
+ }
+ ASSET_KIT.define('streetPavement',{...common,label:'タイル舗道',glyph:'▦',group:'traffic',w:2.4,d:1.2,h:.12,accent:'#a3aaa7',minHeight:()=>.02,
+  constrainEdit:(next,old,patch)=>{const q={...next},has=k=>Object.prototype.hasOwnProperty.call(patch,k);
+   if(has('pavementCurbWidth'))q.pavementCurbWidth=clamp(Number(q.pavementCurbWidth)||.02,Math.max(.02,curbBevel(old)),2);
+   if(has('pavementCurbHeight'))q.pavementCurbHeight=clamp(Number(q.pavementCurbHeight)||.005,.005,1);
+   if(has('pavementCurbBevel'))q.pavementCurbBevel=clamp(Number(q.pavementCurbBevel)||0,0,curbWidth(q));
+   return q;},controls:[
+   {key:'pavementTileSize',label:'タイル間隔',default:.3,min:.08,max:2,step:.05,unit:'m',handle:(o,v)=>({anchor:[-o.ra,-o.rb,o.h+.001],sample:[-o.ra+v,-o.rb,o.h+.001],probe:[-o.ra+v+1,-o.rb,o.h+.001],fallback:{x:1,y:0}})},
+   {key:'pavementCurbEnabled',label:'縁石をつける',type:'boolean',default:false},
+   {key:'pavementCurbWidth',label:'縁石の幅',default:.18,min:o=>Math.max(.02,curbBevel(o)),max:2,step:.01,unit:'m',
+    handle:(o,v)=>{if(!o.pavementCurbEnabled)return null;const x=o.ra*.35,y=-o.rb,z=o.h+curbHeight(o)+.05;
+     return {anchor:[x,y,z],sample:[x,y-v,z],probe:[x,y-v-1,z],fallback:{x:1,y:0}};}},
+   {key:'pavementCurbHeight',label:'縁石の高さ',default:.06,min:.005,max:1,step:.01,unit:'m',
+    handle:(o,v)=>{if(!o.pavementCurbEnabled)return null;const x=-o.ra*.4,y=-o.rb-curbWidth(o)*.5;
+     return {anchor:[x,y,o.h],sample:[x,y,o.h+v],probe:[x,y,o.h+v+1],fallback:{x:0,y:-1}};}},
+   {key:'pavementCurbBevel',label:'縁石の角のベベル',default:.04,min:0,max:curbWidth,step:.005,unit:'m',
+    get:curbBevel,handle:(o,v)=>{if(!o.pavementCurbEnabled)return null;const w=curbWidth(o),x=o.ra+w,y=o.rb+w,z=o.h+curbHeight(o)+.30;
+     return {anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}};}}
+ ]},(o,K)=>{const {w,d,h}=size(o),step=val(o,'pavementTileSize',.3,.08,2),enabled=o.pavementCurbEnabled===true,
+    cw=enabled?curbWidth(o):0,ch=enabled?curbHeight(o):0,b=enabled?curbBevel(o):0,edges=[],curbEdges=[],
+    dx=Math.max(step,w/32),dy=Math.max(step,d/32),z=h+.001,front=-d/2,back=d/2,left=-w/2,right=w/2;
+  // タイル面はOFFのときと同じ。縁石の目地もタイル列に揃える。
+  for(let i=1;i*dx<w-1e-8;i++){const x=left+i*dx;edges.push([[x,front,z],[x,back,z]]);
+   if(enabled)for(const sy of [-1,1]){const inner=sy*d/2,outer=sy*(d/2+cw);
+    curbEdges.push([[x,outer+sy*.001,0],[x,outer+sy*.001,h+ch+.001],[x,inner,h+ch+.001],[x,inner,h]]);}}
+  for(let i=1;i*dy<d-1e-8;i++){const y=front+i*dy;edges.push([[left,y,z],[right,y,z]]);
+   if(enabled)for(const sx of [-1,1]){const inner=sx*w/2,outer=sx*(w/2+cw);
+    curbEdges.push([[outer+sx*.001,y,0],[outer+sx*.001,y,h+ch+.001],[inner,y,h+ch+.001],[inner,y,h]]);}}
+  const parts=[K.box(K.rectPath(w,d),0,h,enabled?{preciseTubeEdge:true,onFace:true}:{}),{meshTriangles:[],meshEdges:edges,onFace:true,...(enabled?{preciseTubeEdge:true}:{})}];
+  if(enabled){parts.push(pavementCurbRing(w,d,cw,b,0,h+ch,h));
+   parts.push({meshTriangles:[],meshEdges:curbEdges,onFace:true,preciseTubeEdge:true});}
+  return parts;});
  ASSET_KIT.define('streetParcel',{...common,label:'段ボール箱',glyph:'▣',group:'streetObjects',w:.62,d:.46,h:.44,accent:'#cba475',minHeight:()=>.05,controls:[
    {key:'parcelTapeWidth',label:'テープ幅',default:.09,min:.01,max:o=>Math.max(.01,Math.abs(o.ra)*1.7),step:.01,unit:'m',handle:(o,v)=>({anchor:[0,0,o.h+.001],sample:[v/2,0,o.h+.001],probe:[(v+1)/2,0,o.h+.001],fallback:{x:1,y:0}})},
    {key:'parcelOpen',label:'ふたの開き',type:'range',default:0,min:0,max:180,step:1,unit:'°',handle:(o,v)=>({anchor:[-o.ra,0,o.h+.1],sample:[-o.ra+.12+v*.002,0,o.h+.1],probe:[-o.ra+1.12+v*.002,0,o.h+.1],fallback:{x:1,y:0},pixelsPerUnit:1})}

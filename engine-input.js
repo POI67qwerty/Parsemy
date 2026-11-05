@@ -187,6 +187,8 @@ function eraseAt(p) {
         det = new Set();
     let ch = false;
     for (const s of S) {
+        // 消しゴムでもロックされたオブジェクトは変更しない。
+        if (s.ob && (obLocked(s.ob) || !objectVisible(s.ob))) { res.push(s); continue; }
         const hit = s.p.map((v) => {
             const q = sp(s, v);
             return q.ok && (q.x - p.x) ** 2 + (q.y - p.y) ** 2 <= r2;
@@ -605,7 +607,7 @@ cv.onpointerdown = (e) => {
                 const o = obOf(id),
                     group = o?.attachment?.verticalOnly
                         ? [{ ...o, off: [...(o.off || [0, 0, 0])] }]
-                        : selectedObjects().map((q) => ({ ...q, off: [...(q.off || [0, 0, 0])] }));
+                        : selectedObjects().filter(q => !obLocked(q)).map((q) => ({ ...q, off: [...(q.off || [0, 0, 0])] }));
                 ed = {
                     t: "mv",
                     id,

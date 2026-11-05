@@ -4343,6 +4343,7 @@ function ringPointDepth(p3) {
     return Math.hypot(p3[0] - cp[0], p3[1] - cp[1], p3[2] - cp[2]);
 }
 function drawGizmo(c) {
+    if (obLocked(sel && obOf(sel))) return;
     const g = gizmo();
     if (!g) {
         const o = sel && obOf(sel);
@@ -4571,6 +4572,7 @@ function nearestHandleOf(handles, p, R) {
     return best;
 }
 function hitGizmo(p) {
+    if (obLocked(sel && obOf(sel))) return null;
     const active = sel && obOf(sel),
         special = active && specialGizmo(active),
         R = 20 / Z;
@@ -5184,7 +5186,7 @@ function beginGizmo(h, p) {
     const o = h.g.o,
         r = unscr(p),
         co = CO(),
-        group = o.attachment?.verticalOnly ? [o] : selectedObjects(),
+        group = o.attachment?.verticalOnly ? [o] : selectedObjects().filter(q => !obLocked(q)),
         base = {
             id: o.id,
             o0: o.type === "compound" ? JSON.parse(JSON.stringify(o)) : { ...o },

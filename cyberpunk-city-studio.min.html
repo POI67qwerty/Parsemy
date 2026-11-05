@@ -280,17 +280,6 @@ body {
     margin-right: 2px;
     flex: none;
 }
-.brandMark {
-    display: grid;
-    place-items: center;
-    width: 34px;
-    height: 34px;
-    border-radius: 11px;
-    background: linear-gradient(135deg, var(--mint), #4a8cff);
-    color: #081116;
-    font-weight: 900;
-    box-shadow: 0 0 22px rgba(102, 227, 200, 0.25);
-}
 .brandText {
     font-weight: 800;
     letter-spacing: 0.02em;
@@ -923,6 +912,13 @@ canvas {
     border-color: #4a6a7a !important;
     background: #131c22 !important;
 }
+.objectRow.lockedObject.selected {
+    border-color: #ffd179 !important;
+    background: #354032 !important;
+}
+#objP[inert] {
+    opacity: .65;
+}
 .objectRow.lockedObject .objectLock {
     opacity: 1;
     filter: none;
@@ -1410,12 +1406,6 @@ body.cameraLocked #cv {
     gap: 7px;
     padding-right: 4px;
 }
-.brandMark {
-    width: 29px;
-    height: 29px;
-    border-radius: 9px;
-    font-size: 13px;
-}
 .brandText {
     font-size: 12px;
 }
@@ -1691,7 +1681,6 @@ body.cameraLocked #cv {
         <div id="main">
             <div id="bar">
                 <div class="brand">
-                    <div class="brandMark">◈</div>
                     <div class="brandText">CITY GRID<small>compact studio</small></div>
                 </div>
                 <div class="barGroup">
@@ -1748,7 +1737,7 @@ body.cameraLocked #cv {
                 <div class="barGroup" id="standardViews">
                     <button id="floorViewCenter" title="前／後／上／下／右／左の表示位置だけを、選択中のオブジェクトの中央へ寄せます（カメラ＝3D視点は動かしません）">表示中央へ</button
                     ><button id="viewFloorFront" title="7：間取り（正面）">7 前</button
-                    ><button id="viewFloorBack" title="後ろから見る">後ろ</button
+                    ><button id="viewFloorBack" title="後から見る">後</button
                     ><button id="viewFloorTop" title="9：上から見る">9 上</button
                     ><button id="viewFloorBottom" title="下から見る">下</button
                     ><button id="viewFloorSide" title="8：右から見る">8 右</button
@@ -1978,6 +1967,7 @@ ${R("bt", "しきい値", 16, 240, 1)}
 <label><input type=checkbox id=snp checked> 磁石でスナップ（他の図形・地面にくっつく）</label>
 ${R("sn", "吸着する距離", 4, 60, 1, "px")}
 <div class="note">編集モードで線を選択できます。色つきの矢印＝軸移動、白い四角＝面の押し引き、点線の輪＝回転。選択中の線をドラッグすると移動し、間取りでは専用ハンドルで寸法を調整できます。</div>
+<div id=objLockedNotice class="note" style="display:none">ロック中：選択・表示切替はできますが、編集するにはロックを解除してください。</div>
 <div id=objP style="display:none">
 <h3>選択中のオブジェクト</h3>
 ${RO("rot", "回転", -180, 180, 0.1, "°")}
@@ -3071,10 +3061,6 @@ function setObjectLock(id, locked) {
         const def = obOf(member);
         if (def) setOb(member, { locked: !!locked });
     });
-    if (locked && ids.has(sel)) {
-        ids.forEach((member) => selIds.delete(member));
-        normalizeSelection();
-    }
     return true;
 }
 function unlockAllObjects() {
@@ -3227,21 +3213,17 @@ function normalizeSelection() {
     [...selIds].forEach((id) => {
         if (!obOf(id) || !objectVisible(obOf(id))) selIds.delete(id);
     });
-    [...selIds].forEach((id) => {
-        if (obLocked(obOf(id))) selIds.delete(id);
-    });
     [...selIds].forEach((id) =>
         groupMemberIds(id).forEach((member) => {
-            if (!obLocked(obOf(member)) && objectVisible(obOf(member))) selIds.add(member);
+            if (objectVisible(obOf(member))) selIds.add(member);
         }),
     );
     if (sel && (!obOf(sel) || !objectVisible(obOf(sel)))) sel = null;
-    if (sel && obLocked(obOf(sel))) sel = null;
     if (!sel && selIds.size) sel = [...selIds][selIds.size - 1];
-    if (sel && !selIds.has(sel) && !obLocked(obOf(sel))) selIds.add(sel);
+    if (sel && !selIds.has(sel)) selIds.add(sel);
 }
-function setSelection(id, add = false) {
-    if (id && obLocked(obOf(id))) {
+function setSelection(id, add = false, allowLocked = false) {
+    if (id && obLocked(obOf(id)) && !allowLocked) {
         if (typeof window.flashHint === "function") window.flashHint("ロック中のオブジェクトです（一覧の鍵で解除）");
         return false;
     }
@@ -3296,7 +3278,7 @@ function setOb(id, patch) {
     let next = { ...o, ...patch };
     if (typeof buildingOpeningEditConstraint === "function") next = buildingOpeningEditConstraint(next, o, patch || {});
     const assetMeta = next.type === "asset" && typeof ASSETS !== "undefined" ? ASSETS[next.asset] : null;
-    if (typeof assetMeta?.constrainEdit === "function") next = assetMeta.constrainEdit(next, o, patch || {}) || next;
+    if (typeof assetMeta?.constrainEdit === "function" && !(obLocked(o) && patch && Object.keys(patch).every(k => LOCK_ADMIN_KEYS.has(k)))) next = assetMeta.constrainEdit(next, o, patch || {}) || next;
     if (typeof assetMeta?.minHeight === "function" && patch && Object.prototype.hasOwnProperty.call(patch, "h"))
         next.h = Math.max(Number(assetMeta.minHeight(next)) || 0.005, Number(next.h) || 0);
     if (typeof assetMeta?.minHalfWidth === "function" && patch && Object.prototype.hasOwnProperty.call(patch, "ra"))
@@ -3531,6 +3513,8 @@ function syncSel() {
     if (sel && !o) sel = null;
     if (typeof window.cityGridObjectSelection === "function") window.cityGridObjectSelection(o ? sel : null);
     $("objP").style.display = o ? "" : "none";
+    $("objP").inert = !!o && obLocked(o);
+    $("objLockedNotice").style.display = o && obLocked(o) ? "" : "none";
     if (!o) return;
     if (sel !== lastSel) {
         lastSel = sel;
@@ -3736,7 +3720,7 @@ $("obGnd").onclick = () => {
     render();
 };
 function duplicateSelected(mode) {
-    const objects = selectedObjects();
+    const objects = selectedObjects().filter(o => !obLocked(o));
     if (!objects.length) return 0;
     const lead = objects.find((o) => o.id === sel) || objects[0],
         newGroup = objects.length > 1 && objects.some((o) => o.groupId) ? "group-" + uid() : null,
@@ -7660,6 +7644,7 @@ function ringPointDepth(p3) {
     return Math.hypot(p3[0] - cp[0], p3[1] - cp[1], p3[2] - cp[2]);
 }
 function drawGizmo(c) {
+    if (obLocked(sel && obOf(sel))) return;
     const g = gizmo();
     if (!g) {
         const o = sel && obOf(sel);
@@ -7868,6 +7853,7 @@ function nearestHandleOf(handles, p, R) {
     return best;
 }
 function hitGizmo(p) {
+    if (obLocked(sel && obOf(sel))) return null;
     const active = sel && obOf(sel),
         special = active && specialGizmo(active),
         R = 20 / Z;
@@ -8417,7 +8403,7 @@ function beginGizmo(h, p) {
     const o = h.g.o,
         r = unscr(p),
         co = CO(),
-        group = o.attachment?.verticalOnly ? [o] : selectedObjects(),
+        group = o.attachment?.verticalOnly ? [o] : selectedObjects().filter(q => !obLocked(q)),
         base = {
             id: o.id,
             o0: o.type === "compound" ? JSON.parse(JSON.stringify(o)) : { ...o },
@@ -12044,6 +12030,7 @@ function eraseAt(p) {
         det = new Set();
     let ch = false;
     for (const s of S) {
+        if (s.ob && (obLocked(s.ob) || !objectVisible(s.ob))) { res.push(s); continue; }
         const hit = s.p.map((v) => {
             const q = sp(s, v);
             return q.ok && (q.x - p.x) ** 2 + (q.y - p.y) ** 2 <= r2;
@@ -12430,7 +12417,7 @@ cv.onpointerdown = (e) => {
                 const o = obOf(id),
                     group = o?.attachment?.verticalOnly
                         ? [{ ...o, off: [...(o.off || [0, 0, 0])] }]
-                        : selectedObjects().map((q) => ({ ...q, off: [...(q.off || [0, 0, 0])] }));
+                        : selectedObjects().filter(q => !obLocked(q)).map((q) => ({ ...q, off: [...(q.off || [0, 0, 0])] }));
                 ed = {
                     t: "mv",
                     id,
@@ -13058,7 +13045,7 @@ function unpack(d) {
         const st = d.S.map((s) => (s.ob ? { ...s, ob: fixOb(s.ob) } : s)),
             seen = new Set(),
             out = [],
-            needsAssetUpdate = o => !!o && (o.arrayEnabled === true || o.doorEnabled === true || o.openingOffset != null || ["screenHood", "shopAwning", "displayShelf2", "trafficSignal", "pedSignal", "railing", "streetMailbox", "streetParcel", "streetPlantBox", "squareStool", "shopWardrobe", "shopWardrobe2", "pictureStairs", "guardPoleHalf"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsAssetUpdate))),
+            needsAssetUpdate = o => !!o && (o.arrayEnabled === true || o.doorEnabled === true || o.openingOffset != null || ["screenHood", "shopAwning", "displayShelf2", "trafficSignal", "pedSignal", "railing", "streetPavement", "streetMailbox", "streetParcel", "streetPlantBox", "squareStool", "shopWardrobe", "shopWardrobe2", "pictureStairs", "guardPoleHalf"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsAssetUpdate))),
             regenerate = s => !!s.ob && (!s.d3 || needsAssetUpdate(s.ob));
         st.forEach((s) => {
             if (!regenerate(s)) out.push(s);
@@ -19339,12 +19326,60 @@ function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
  ASSET_KIT.define('streetCone',{...common,label:'交通コーン',glyph:'▲',group:'traffic',w:.42,d:.42,h:.7,accent:'#ed7845',minHeight:()=>.1,controls:[
    {key:'coneBaseThickness',label:'台座の厚さ',default:.05,min:.01,max:o=>Math.max(.01,o.h*.35),step:.01,unit:'m',handle:(o,v)=>vertical(o,v,-o.ra,-o.rb)}
  ]},(o,K)=>{const {w,d,h}=size(o),t=val(o,'coneBaseThickness',.05,.01,h*.35),z1=t+(h-t)*.35,z2=t+(h-t)*.67,rad=z=>.4*(1-.83*(z-t)/(h-t));return [K.box(K.rectPath(w,d),0,t),streetRoundPart(o,K,[[w*.4,d*.4,t],[w*rad(z1),d*rad(z1),z1],[w*rad(z2),d*rad(z2),z2],[w*.068,d*.068,h]],[1,2])];});
- ASSET_KIT.define('streetPavement',{...common,label:'タイル舗道',glyph:'▦',group:'traffic',w:2.4,d:1.2,h:.12,accent:'#a3aaa7',minHeight:()=>.02,controls:[
-   {key:'pavementTileSize',label:'タイル間隔',default:.3,min:.08,max:2,step:.05,unit:'m',handle:(o,v)=>({anchor:[-o.ra,-o.rb,o.h+.001],sample:[-o.ra+v,-o.rb,o.h+.001],probe:[-o.ra+v+1,-o.rb,o.h+.001],fallback:{x:1,y:0}})}
- ]},(o,K)=>{const {w,d,h}=size(o),step=val(o,'pavementTileSize',.3,.08,2),edges=[],dx=Math.max(step,w/32),dy=Math.max(step,d/32),z=h+.001;
-  for(let i=1;i*dx<w-1e-8;i++){const x=-w/2+i*dx;edges.push([[x,-d/2,z],[x,d/2,z]]);}
-  for(let i=1;i*dy<d-1e-8;i++){const y=-d/2+i*dy;edges.push([[-w/2,y,z],[w/2,y,z]]);}
-  return [K.box(K.rectPath(w,d),0,h),{meshTriangles:[],meshEdges:edges,onFace:true}];});
+ const curbWidth=o=>val(o,'pavementCurbWidth',.18,.02,2),
+       curbHeight=o=>val(o,'pavementCurbHeight',.06,.005,1),
+       curbBevel=o=>val(o,'pavementCurbBevel',.04,0,curbWidth(o));
+ function pavementCurbRing(w,d,cw,b,z0,z1,tileTop) {
+  const outer=beveledBoxFootprint(w+2*cw,d+2*cw,b,4),n=b>1e-6?5:1,
+   corners=beveledBoxFootprint(w,d,0,4),inner=corners.flatMap(p=>Array.from({length:n},()=>p)),
+   triangles=[],edges=[],marks=[],point=(p,z)=>[p[0],p[1],z];
+  const tri=(a,c,e)=>{const u=c.map((v,i)=>v-a[i]),v=e.map((x,i)=>x-a[i]);
+   if(Math.hypot(u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0])>1e-12)triangles.push([a,c,e]);},
+   quad=(a,c,e,f)=>{tri(a,c,e);tri(a,e,f);},
+   add=(p,mark=null)=>{edges.push(p);marks.push(mark);},
+   loop=(p,z)=>[...p.map(v=>point(v,z)),point(p[0],z)];
+  for(let i=0;i<outer.length;i++){
+   const j=(i+1)%outer.length,a=outer[i],c=outer[j],u=inner[i],v=inner[j];
+   quad(point(a,z0),point(c,z0),point(c,z1),point(a,z1));
+   quad(point(u,z0),point(u,z1),point(v,z1),point(v,z0));
+   quad(point(a,z1),point(c,z1),point(v,z1),point(u,z1));
+   quad(point(a,z0),point(u,z0),point(v,z0),point(c,z0));
+  }
+  add(loop(outer,z0));add(loop(outer,z1));
+  outer.forEach((p,i)=>add([point(p,z0),point(p,z1)],beveledEdgeMark(i,b,4,'pavementCurb')));
+  add(loop(corners,z1));corners.forEach(p=>add([point(p,tileTop),point(p,z1)]));
+  return {meshTriangles:triangles,meshEdges:edges,seamMarks:marks,onFace:true,preciseTubeEdge:true};
+ }
+ ASSET_KIT.define('streetPavement',{...common,label:'タイル舗道',glyph:'▦',group:'traffic',w:2.4,d:1.2,h:.12,accent:'#a3aaa7',minHeight:()=>.02,
+  constrainEdit:(next,old,patch)=>{const q={...next},has=k=>Object.prototype.hasOwnProperty.call(patch,k);
+   if(has('pavementCurbWidth'))q.pavementCurbWidth=clamp(Number(q.pavementCurbWidth)||.02,Math.max(.02,curbBevel(old)),2);
+   if(has('pavementCurbHeight'))q.pavementCurbHeight=clamp(Number(q.pavementCurbHeight)||.005,.005,1);
+   if(has('pavementCurbBevel'))q.pavementCurbBevel=clamp(Number(q.pavementCurbBevel)||0,0,curbWidth(q));
+   return q;},controls:[
+   {key:'pavementTileSize',label:'タイル間隔',default:.3,min:.08,max:2,step:.05,unit:'m',handle:(o,v)=>({anchor:[-o.ra,-o.rb,o.h+.001],sample:[-o.ra+v,-o.rb,o.h+.001],probe:[-o.ra+v+1,-o.rb,o.h+.001],fallback:{x:1,y:0}})},
+   {key:'pavementCurbEnabled',label:'縁石をつける',type:'boolean',default:false},
+   {key:'pavementCurbWidth',label:'縁石の幅',default:.18,min:o=>Math.max(.02,curbBevel(o)),max:2,step:.01,unit:'m',
+    handle:(o,v)=>{if(!o.pavementCurbEnabled)return null;const x=o.ra*.35,y=-o.rb,z=o.h+curbHeight(o)+.05;
+     return {anchor:[x,y,z],sample:[x,y-v,z],probe:[x,y-v-1,z],fallback:{x:1,y:0}};}},
+   {key:'pavementCurbHeight',label:'縁石の高さ',default:.06,min:.005,max:1,step:.01,unit:'m',
+    handle:(o,v)=>{if(!o.pavementCurbEnabled)return null;const x=-o.ra*.4,y=-o.rb-curbWidth(o)*.5;
+     return {anchor:[x,y,o.h],sample:[x,y,o.h+v],probe:[x,y,o.h+v+1],fallback:{x:0,y:-1}};}},
+   {key:'pavementCurbBevel',label:'縁石の角のベベル',default:.04,min:0,max:curbWidth,step:.005,unit:'m',
+    get:curbBevel,handle:(o,v)=>{if(!o.pavementCurbEnabled)return null;const w=curbWidth(o),x=o.ra+w,y=o.rb+w,z=o.h+curbHeight(o)+.30;
+     return {anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}};}}
+ ]},(o,K)=>{const {w,d,h}=size(o),step=val(o,'pavementTileSize',.3,.08,2),enabled=o.pavementCurbEnabled===true,
+    cw=enabled?curbWidth(o):0,ch=enabled?curbHeight(o):0,b=enabled?curbBevel(o):0,edges=[],curbEdges=[],
+    dx=Math.max(step,w/32),dy=Math.max(step,d/32),z=h+.001,front=-d/2,back=d/2,left=-w/2,right=w/2;
+  for(let i=1;i*dx<w-1e-8;i++){const x=left+i*dx;edges.push([[x,front,z],[x,back,z]]);
+   if(enabled)for(const sy of [-1,1]){const inner=sy*d/2,outer=sy*(d/2+cw);
+    curbEdges.push([[x,outer+sy*.001,0],[x,outer+sy*.001,h+ch+.001],[x,inner,h+ch+.001],[x,inner,h]]);}}
+  for(let i=1;i*dy<d-1e-8;i++){const y=front+i*dy;edges.push([[left,y,z],[right,y,z]]);
+   if(enabled)for(const sx of [-1,1]){const inner=sx*w/2,outer=sx*(w/2+cw);
+    curbEdges.push([[outer+sx*.001,y,0],[outer+sx*.001,y,h+ch+.001],[inner,y,h+ch+.001],[inner,y,h]]);}}
+  const parts=[K.box(K.rectPath(w,d),0,h,enabled?{preciseTubeEdge:true,onFace:true}:{}),{meshTriangles:[],meshEdges:edges,onFace:true,...(enabled?{preciseTubeEdge:true}:{})}];
+  if(enabled){parts.push(pavementCurbRing(w,d,cw,b,0,h+ch,h));
+   parts.push({meshTriangles:[],meshEdges:curbEdges,onFace:true,preciseTubeEdge:true});}
+  return parts;});
  ASSET_KIT.define('streetParcel',{...common,label:'段ボール箱',glyph:'▣',group:'streetObjects',w:.62,d:.46,h:.44,accent:'#cba475',minHeight:()=>.05,controls:[
    {key:'parcelTapeWidth',label:'テープ幅',default:.09,min:.01,max:o=>Math.max(.01,Math.abs(o.ra)*1.7),step:.01,unit:'m',handle:(o,v)=>({anchor:[0,0,o.h+.001],sample:[v/2,0,o.h+.001],probe:[(v+1)/2,0,o.h+.001],fallback:{x:1,y:0}})},
    {key:'parcelOpen',label:'ふたの開き',type:'range',default:0,min:0,max:180,step:1,unit:'°',handle:(o,v)=>({anchor:[-o.ra,0,o.h+.1],sample:[-o.ra+.12+v*.002,0,o.h+.1],probe:[-o.ra+1.12+v*.002,0,o.h+.1],fallback:{x:1,y:0},pixelsPerUnit:1})}
@@ -20927,13 +20962,13 @@ window.cityGridInstallAssetUI = function (bridge) {
       </div>
     </section>
     <section class="workspaceScreen" data-workspace-screen="object" hidden>
-    <div id="objectEditSectionSlot"></div>
     <div class="sceneTitle">シーン内オブジェクト</div>
     <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneInvertSel">選択を反転</button><button id="sceneHideSel">選択中を非表示</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneLockSel" title="選択中のオブジェクトをロック／解除（⌘/Ctrl+L）">選択をロック</button><button id="sceneUnlockAll" title="ロック中のオブジェクトをすべて解除">全ロック解除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button><button id="sceneCombineSel">結合</button><button id="sceneSeparateSel">結合解除</button></div>
     <div class="alignTools"><button id="centerOnScreenSel" title="選択中のオブジェクト（接着した子パーツ・グループを含む）を、いま見ている画面の中央へ移動">画面中央へ</button><button id="centerChildSel" title="テント付き建物・看板付き建物のテント／看板を、建物の左右（X方向）の中央へすぐ戻す。1個を選ぶだけで使えます">テント・看板を中央へ</button></div>
     <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Z軸（高さ）</option><option value=2>Y軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
     <div class="sceneNote">行のチェックで複数選択、✎で名前変更（空欄で標準名）。「選択中を非表示」は一覧の○から再表示。「画面中央へ」は1個でも動きます（看板付き建物・テント付き建物は建物本体の中心を画面中央へ合わせます）。整列は2個以上を選んでください。グループ化は後から解除できます。結合は複数の定義を一つの複合オブジェクトにまとめ、結合解除まで一体として扱います。</div>
     <div id="objectList"><div class="emptyList">まだオブジェクトがありません</div></div>
+    <div id="objectEditSectionSlot"></div>
     </section>
     <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　7 前　8 横　9 上　0 3D　／　詳細操作は「？」</div>`;
     const presetDetails = [...side.querySelectorAll("details")],
@@ -21111,7 +21146,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         });
     }
     function groupSelectedScene() {
-        const objects = selectedObjects();
+        const objects = selectedObjects().filter(o => !obLocked(o));
         if (objects.length < 2) {
             alert("グループ化するオブジェクトを2個以上選択してください");
             return;
@@ -21127,7 +21162,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         render();
     }
     function ungroupSelectedScene() {
-        const objects = selectedObjects().filter((o) => o.groupId);
+        const objects = selectedObjects().filter((o) => o.groupId && !obLocked(o));
         if (!objects.length) return;
         HU.push(S);
         RD = [];
@@ -21142,7 +21177,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         render();
     }
     function combineSelectedScene() {
-        const objects = selectedObjects();
+        const objects = selectedObjects().filter(o => !obLocked(o));
         if (objects.length < 2) {
             alert("結合するオブジェクトを2個以上選択してください");
             return;
@@ -21202,7 +21237,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         render();
     }
     function separateSelectedScene() {
-        const objects = selectedObjects().filter((o) => o.type === "compound");
+        const objects = selectedObjects().filter((o) => o.type === "compound" && !obLocked(o));
         if (!objects.length) return;
         const wanted = new Set(objects.map((o) => o.id)),
             parts = [];
@@ -21242,7 +21277,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             ungroup = el("sceneUngroupSel"),
             combine = el("sceneCombineSel"),
             separate = el("sceneSeparateSel"),
-            objects = selectedObjects(),
+            objects = selectedObjects().filter(o => !obLocked(o)),
             units = new Set(objects.map((o) => o.groupId || o.id));
         if (group) group.disabled = units.size < 2;
         if (ungroup) ungroup.disabled = !objects.some((o) => o.groupId);
@@ -21349,6 +21384,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             syncGroupActions();
             return;
         }
+        const listScroll = list.scrollTop;
         list.innerHTML = objects.length
             ? objects
                   .map((o, i) => {
@@ -21369,10 +21405,11 @@ window.cityGridInstallAssetUI = function (bridge) {
                       const visible = objectVisible(o),
                           locked = obLocked(o);
                       // 鍵ボタンは「ロック中でも押せる」唯一の入口。ここから解除できる。
-                      return `<div class="objectRow ${selIds.has(o.id) ? "selected" : ""} ${sel === o.id ? "activeObject" : ""} ${visible ? "" : "hiddenObject"} ${locked ? "lockedObject" : ""}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? "オブジェクトを非表示" : "オブジェクトを表示"}" aria-label="${visible ? "非表示" : "表示"}">${visible ? "◉" : "○"}</button><button type="button" class="objectLock ${locked ? "isLocked" : ""}" data-object-lock="${o.id}" title="${locked ? "ロックを解除（⌘/Ctrl+L）" : "ロックする（⌘/Ctrl+L）"}" aria-label="${locked ? "ロック解除" : "ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked ? "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" : "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="${escapeObjectText(objectDisplayName(o))}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta"><span class="objectName">${escapeObjectText(objectDisplayName(o))}${typeof o.displayName === "string" && o.displayName.trim() ? "" : ` ${i + 1}`}</span> ${group}<small>${detail}</small></span><button type="button" class="objectRename" data-object-rename="${o.id}" title="名前を変更" aria-label="${escapeObjectText(objectDisplayName(o))}の名前を変更">✎</button></div>`;
+                      return `<div class="objectRow ${selIds.has(o.id) ? "selected" : ""} ${sel === o.id ? "activeObject" : ""} ${visible ? "" : "hiddenObject"} ${locked ? "lockedObject" : ""}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? "オブジェクトを非表示" : "オブジェクトを表示"}" aria-label="${visible ? "非表示" : "表示"}">${visible ? "◉" : "○"}</button><button type="button" class="objectLock ${locked ? "isLocked" : ""}" data-object-lock="${o.id}" title="${locked ? "ロックを解除（⌘/Ctrl+L）" : "ロックする（⌘/Ctrl+L）"}" aria-label="${locked ? "ロック解除" : "ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked ? "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" : "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? "checked" : ""} aria-label="${escapeObjectText(objectDisplayName(o))}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta"><span class="objectName">${escapeObjectText(objectDisplayName(o))}${typeof o.displayName === "string" && o.displayName.trim() ? "" : ` ${i + 1}`}</span> ${group}<small>${detail}</small></span><button type="button" class="objectRename" data-object-rename="${o.id}" title="名前を変更" aria-label="${escapeObjectText(objectDisplayName(o))}の名前を変更">✎</button></div>`;
                   })
                   .join("")
             : '<div class="emptyList">まだオブジェクトがありません</div>';
+        list.scrollTop = listScroll;
         outlinerKey=key;
         outlinerRows=new Map([...list.querySelectorAll("[data-object]")].map(row=>[row.dataset.object,row]));
         outlinerSelection=new Set(selIds);outlinerActive=sel;
@@ -21396,7 +21433,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         render();
     }
     function alignSelectedScene() {
-        const objects = selectedObjects(),
+        const objects = selectedObjects().filter(o => !obLocked(o)),
             units = [],
             unitMap = new Map();
         objects.forEach((o) => {
@@ -21606,7 +21643,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             chosen = obOf(id);
         if (e.target.closest("[data-object-rename]")) {
             e.preventDefault(); e.stopPropagation();
-            if (!chosen || b.querySelector(".objectNameInput")) return;
+            if (!chosen || obLocked(chosen) || b.querySelector(".objectNameInput")) return;
             const label = b.querySelector(".objectName"), input = document.createElement("input");
             input.className = "objectNameInput"; input.type = "text"; input.maxLength = 100;
             input.value = typeof chosen.displayName === "string" ? chosen.displayName : "";
@@ -21648,13 +21685,6 @@ window.cityGridInstallAssetUI = function (bridge) {
             render();
             return;
         }
-        if (chosen && obLocked(chosen)) {
-            // ロック中の行は選択できない。理由を伝えて終わる。
-            e.preventDefault();
-            syncSel();
-            render();
-            return;
-        }
         if (chosen && !objectVisible(chosen)) {
             e.preventDefault();
             syncSel();
@@ -21662,7 +21692,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             return;
         }
         if (e.target.matches("[data-object-check]")) {
-            if (e.target.checked) setSelection(id, true);
+            if (e.target.checked) setSelection(id, true, true);
             else {
                 groupMemberIds(id).forEach((member) => selIds.delete(member));
                 if (sel === id) sel = [...selIds].pop() || null;
@@ -21674,7 +21704,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             render();
             return;
         }
-        setSelection(id, e.shiftKey || e.metaKey || e.ctrlKey);
+        setSelection(id, e.shiftKey || e.metaKey || e.ctrlKey, true);
         tool = "edit";
         setMode("draw");
         syncSel();
@@ -21684,7 +21714,6 @@ window.cityGridInstallAssetUI = function (bridge) {
         selIds.clear();
         sceneObjects()
             .filter(objectVisible)
-            .filter((o) => !obLocked(o)) // ロック中は全選択の対象外
             .forEach((o) => selIds.add(o.id));
         sel = [...selIds].pop() || null;
         normalizeSelection();
@@ -21695,7 +21724,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     };
     el("sceneInvertSel").onclick = () => {
         normalizeSelection();
-        const objects = sceneObjects().filter(o => objectVisible(o) && !obLocked(o));
+        const objects = sceneObjects().filter(o => objectVisible(o));
         // 通常グループは一体、接続アセットだけのグループは個別選択。
         const grouped = new Set(objects.filter(o => o.groupId && !o.linkedAsset && !o.attachment?.parentId).map(o => o.groupId));
         const units = new Map();
@@ -24712,7 +24741,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     }
     addEventListener("resize", () => requestAnimationFrame(syncFloorPlanDockLayout));
     const angle360 = (a) => (((Number(a) || 0) % 360) + 360) % 360;
-    const floorPlanObject = () => sel && obOf(sel);
+    const floorPlanObject = () => { const o = sel && obOf(sel); return o && !obLocked(o) ? o : null; };
     function floorPlanWorldAt(p) {
         const q = pickOnPlane(p, 1, -1, [0, 0, 0]);
         return q && Number.isFinite(q[0]) && Number.isFinite(q[2]) ? { x: q[0], z: q[2] } : null;
@@ -24742,10 +24771,12 @@ window.cityGridInstallAssetUI = function (bridge) {
         const o = floorPlanObject(),
             out = { object: null, camera: null };
         if (o) {
+            // 縮小しても回転丸を外形から画面上で十分離し、幅・移動の操作と重ならない。
+            const turnGap = Math.max(.42, 42 / (Math.max(.05, Z) * Math.max(1, orthScale())));
             if (o.type === "compound") {
                 const b = obBounds(o),
                     base = objectAnchorWorld(o),
-                    dist = Math.max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], 0.6) * 0.5 + 0.42;
+                    dist = Math.max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], 0.6) * 0.5 + turnGap;
                 out.object = { o, base, center: scrW(base), world: { x: base[0], z: base[2] + dist } };
                 out.object.s =
                     orthPlane() === "front"
@@ -24765,8 +24796,8 @@ window.cityGridInstallAssetUI = function (bridge) {
                     a = (Number(o.rot) || 0) * DG,
                     dist =
                         pathObject || o.k !== 1
-                            ? Math.max(bounds.hi[0] - bounds.lo[0], bounds.hi[2] - bounds.lo[2], 0.6) * 0.5 + 0.62
-                            : Math.max(Math.abs(Number(o.ra) || 0.3), Math.abs(Number(o.rb) || 0.3)) + 0.42;
+                            ? Math.max(bounds.hi[0] - bounds.lo[0], bounds.hi[2] - bounds.lo[2], 0.6) * 0.5 + Math.max(.62, turnGap)
+                            : Math.max(Math.abs(Number(o.ra) || 0.3), Math.abs(Number(o.rb) || 0.3)) + turnGap;
                 out.object = {
                     o,
                     base,
@@ -24819,7 +24850,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 .slice()
                 .reverse()
                 .find((o) => {
-                    if (!o || !objectVisible(o)) return false;
+                    if (!o || !objectVisible(o) || obLocked(o)) return false;
                     const b = obBounds(o), spec = arrayModifierSpec(o);
                     // 配列はコピーごとに当たり判定する。隙間では選択しない。
                     if (spec && spec.count > 1) {
@@ -24872,7 +24903,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 .slice()
                 .reverse()
                 .find((o) => {
-                    if (!o || !objectVisible(o)) return false;
+                    if (!o || !objectVisible(o) || obLocked(o)) return false;
                     const spec = arrayModifierSpec(o),
                         b = spec && spec.count > 1 ? boundsWithoutArray(o) : obBounds(o),
                         count = spec && spec.count > 1 ? spec.count : 1;
@@ -24905,7 +24936,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 .slice()
                 .reverse()
                 .find((o) => {
-                    if (!o || !objectVisible(o)) return false;
+                    if (!o || !objectVisible(o) || obLocked(o)) return false;
                     const q = scrW(objectAnchorWorld(o));
                     return q.ok && Math.hypot(q.x - p.x, q.y - p.y) <= 28 / Z;
                 }) || null
@@ -26337,7 +26368,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     }
     // キーボードやドックの移動量を、表示中の面（前・横・上）の軸へ変換する。
     function moveFloorSelected(dx, dz) {
-        const selected = selectedObjects(),
+        const selected = selectedObjects().filter(q => !obLocked(q)),
             o = selected.find((q) => q.id === sel) || selected[0],
             objects = o?.attachment?.verticalOnly ? [o] : selected;
         if (!o || !objects.length) return;
@@ -26468,7 +26499,9 @@ window.cityGridInstallAssetUI = function (bridge) {
                     typeof hitGizmo === "function" && tool === "edit" && mode === "draw"
                         ? hitGizmo(pos(e))
                         : null;
-                gizmoRing = !!hit && (hit.t === "ring" || hit.t === "tiltring");
+                // 通常の間取りには3D回転リングを描いていない。見えないリングが
+                // 面や移動を奪わないよう、リングを実際に描く壁横看板だけ通す。
+                gizmoRing = !!obOf(sel)?.attachment?.wallSideSign && !!hit && (hit.t === "ring" || hit.t === "tiltring");
             } catch (err) {
                 gizmoRing = false;
             }
@@ -26519,7 +26552,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                         (specialT === "face" && specialAsset !== "sign") ||
                         specialT === "axis" ||
                         specialT === "mv" ||
-                        (specialT === "ring" && !signScreenGizmo),
+                        ((specialT === "ring" || specialT === "tiltring") && !signScreenGizmo),
                     customFloorGizmo = !!special && !genericGizmo;
                 const activeFloorObject = sel && obOf(sel),
                     wallPlaneSelection = !!(activeFloorObject && activeFloorObject.k !== 1),
@@ -26626,7 +26659,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 moveObject = floorPlanObject();
             if (moveHandle && moveObject && (orthPlane() === "top" || orthPlane() === "side" || orthPlane() === "front")) {
                 const base = objectAnchorWorld(moveObject),
-                    group = moveObject.attachment?.verticalOnly ? [moveObject] : selectedObjects(),
+                    group = moveObject.attachment?.verticalOnly ? [moveObject] : selectedObjects().filter(q => !obLocked(q)),
                     snap = snapSetupGroup(group, base);
                 e.preventDefault();
                 e.stopImmediatePropagation();
@@ -26696,7 +26729,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     }
                     const w = floorPlanVerticalWorldAt(p),
                         base = objectAnchorWorld(hit),
-                        group = hit.attachment?.verticalOnly ? [hit] : selectedObjects(),
+                        group = hit.attachment?.verticalOnly ? [hit] : selectedObjects().filter(q => !obLocked(q)),
                         snap = snapSetupGroup(group, base);
                     if (!w) {
                         syncSel();
@@ -26801,7 +26834,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                     return;
                 }
                 const base = objectAnchorWorld(hit),
-                    group = hit.attachment?.verticalOnly ? [hit] : selectedObjects(),
+                    group = hit.attachment?.verticalOnly ? [hit] : selectedObjects().filter(q => !obLocked(q)),
                     snap = snapSetupGroup(group, base);
                 // 選択済みオブジェクトをドラッグした場合は、選択中の地面オブジェクトを同じ量だけ動かす。
                 floorPlanDrag = {

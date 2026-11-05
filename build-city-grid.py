@@ -127,6 +127,12 @@ def main() -> None:
     # 旧ビルドはHTML本体を保持するため、新しいボタンだけ置き去りになる。
     marker = '<div class="barGroup" id="standardViews">'
     source = read("index.html")
+    # 左上のロゴ表示も index.html と同じ内容にする。
+    brand = '<div class="brand">'
+    brand_start, brand_target = source.index(brand), html.index(brand)
+    brand_end = source.index('</div>\n                <div class="barGroup">', brand_start) + 6
+    brand_target_end = html.index('</div>\n                <div class="barGroup">', brand_target) + 6
+    html = html[:brand_target] + source[brand_start:brand_end] + html[brand_target_end:]
     source_start, target_start = source.index(marker), html.index(marker)
     source_end, target_end = source.index("</div>", source_start) + 6, html.index("</div>", target_start) + 6
     html = html[:target_start] + source[source_start:source_end] + html[target_end:]

@@ -68,17 +68,6 @@ body {
     margin-right: 2px;
     flex: none;
 }
-.brandMark {
-    display: grid;
-    place-items: center;
-    width: 34px;
-    height: 34px;
-    border-radius: 11px;
-    background: linear-gradient(135deg, var(--mint), #4a8cff);
-    color: #081116;
-    font-weight: 900;
-    box-shadow: 0 0 22px rgba(102, 227, 200, 0.25);
-}
 .brandText {
     font-weight: 800;
     letter-spacing: 0.02em;
@@ -714,6 +703,13 @@ canvas {
     border-color: #4a6a7a !important;
     background: #131c22 !important;
 }
+.objectRow.lockedObject.selected {
+    border-color: #ffd179 !important;
+    background: #354032 !important;
+}
+#objP[inert] {
+    opacity: .65;
+}
 .objectRow.lockedObject .objectLock {
     opacity: 1;
     filter: none;
@@ -1208,12 +1204,6 @@ body.cameraLocked #cv {
 .brand {
     gap: 7px;
     padding-right: 4px;
-}
-.brandMark {
-    width: 29px;
-    height: 29px;
-    border-radius: 9px;
-    font-size: 13px;
 }
 .brandText {
     font-size: 12px;

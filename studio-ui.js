@@ -89,13 +89,13 @@
     </section>
 
     <section class="workspaceScreen" data-workspace-screen="object" hidden>
-    <div id="objectEditSectionSlot"></div>
     <div class="sceneTitle">シーン内オブジェクト</div>
     <div class="sceneTools"><button id="sceneSelectAll">全選択</button><button id="sceneClearSel">選択解除</button><button id="sceneInvertSel">選択を反転</button><button id="sceneHideSel">選択中を非表示</button><button id="sceneDeleteSel" class="danger">選択中を削除</button><button id="sceneLockSel" title="選択中のオブジェクトをロック／解除（⌘/Ctrl+L）">選択をロック</button><button id="sceneUnlockAll" title="ロック中のオブジェクトをすべて解除">全ロック解除</button><button id="sceneGroupSel">グループ化</button><button id="sceneUngroupSel">グループ解除</button><button id="sceneCombineSel">結合</button><button id="sceneSeparateSel">結合解除</button></div>
     <div class="alignTools"><button id="centerOnScreenSel" title="選択中のオブジェクト（接着した子パーツ・グループを含む）を、いま見ている画面の中央へ移動">画面中央へ</button><button id="centerChildSel" title="テント付き建物・看板付き建物のテント／看板を、建物の左右（X方向）の中央へすぐ戻す。1個を選ぶだけで使えます">テント・看板を中央へ</button></div>
     <div class="alignTools"><select id="alignAxis"><option value=0>X軸（左右）</option><option value=1>Z軸（高さ）</option><option value=2>Y軸（奥行き）</option></select><select id="alignMode"><option value=middle>中央に整列</option><option value=min>最小側に整列</option><option value=max>最大側に整列</option></select><button id="alignApply">整列</button></div>
     <div class="sceneNote">行のチェックで複数選択、✎で名前変更（空欄で標準名）。「選択中を非表示」は一覧の○から再表示。「画面中央へ」は1個でも動きます（看板付き建物・テント付き建物は建物本体の中心を画面中央へ合わせます）。整列は2個以上を選んでください。グループ化は後から解除できます。結合は複数の定義を一つの複合オブジェクトにまとめ、結合解除まで一体として扱います。</div>
     <div id="objectList"><div class="emptyList">まだオブジェクトがありません</div></div>
+    <div id="objectEditSectionSlot"></div>
     </section>
     <div class="quickHint">1 設定　2 視点　3 描画　4 編集　5 アセット　7 前　8 横　9 上　0 3D　／　詳細操作は「？」</div>`;
     // 元の設定項目をそのまま移す（複製せず、既存イベントと値を保持する）。
@@ -298,7 +298,7 @@
         });
     }
     function groupSelectedScene() {
-        const objects = selectedObjects();
+        const objects = selectedObjects().filter(o => !obLocked(o));
         if (objects.length < 2) {
             alert("グループ化するオブジェクトを2個以上選択してください");
             return;
@@ -314,7 +314,7 @@
         render();
     }
     function ungroupSelectedScene() {
-        const objects = selectedObjects().filter((o) => o.groupId);
+        const objects = selectedObjects().filter((o) => o.groupId && !obLocked(o));
         if (!objects.length) return;
         HU.push(S);
         RD = [];
@@ -329,7 +329,7 @@
         render();
     }
     function combineSelectedScene() {
-        const objects = selectedObjects();
+        const objects = selectedObjects().filter(o => !obLocked(o));
         if (objects.length < 2) {
             alert("結合するオブジェクトを2個以上選択してください");
             return;
@@ -389,7 +389,7 @@
         render();
     }
     function separateSelectedScene() {
-        const objects = selectedObjects().filter((o) => o.type === "compound");
+        const objects = selectedObjects().filter((o) => o.type === "compound" && !obLocked(o));
         if (!objects.length) return;
         const wanted = new Set(objects.map((o) => o.id)),
             parts = [];
@@ -429,7 +429,7 @@
             ungroup = el("sceneUngroupSel"),
             combine = el("sceneCombineSel"),
             separate = el("sceneSeparateSel"),
-            objects = selectedObjects(),
+            objects = selectedObjects().filter(o => !obLocked(o)),
             units = new Set(objects.map((o) => o.groupId || o.id));
         if (group) group.disabled = units.size < 2;
         if (ungroup) ungroup.disabled = !objects.some((o) => o.groupId);
@@ -540,6 +540,7 @@
             syncGroupActions();
             return;
         }
+        const listScroll = list.scrollTop;
         list.innerHTML = objects.length
             ? objects
                   .map((o, i) => {
@@ -560,10 +561,11 @@
                       const visible = objectVisible(o),
                           locked = obLocked(o);
                       // 鍵ボタンは「ロック中でも押せる」唯一の入口。ここから解除できる。
-                      return `<div class="objectRow ${selIds.has(o.id) ? "selected" : ""} ${sel === o.id ? "activeObject" : ""} ${visible ? "" : "hiddenObject"} ${locked ? "lockedObject" : ""}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? "オブジェクトを非表示" : "オブジェクトを表示"}" aria-label="${visible ? "非表示" : "表示"}">${visible ? "◉" : "○"}</button><button type="button" class="objectLock ${locked ? "isLocked" : ""}" data-object-lock="${o.id}" title="${locked ? "ロックを解除（⌘/Ctrl+L）" : "ロックする（⌘/Ctrl+L）"}" aria-label="${locked ? "ロック解除" : "ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked ? "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" : "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="${escapeObjectText(objectDisplayName(o))}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta"><span class="objectName">${escapeObjectText(objectDisplayName(o))}${typeof o.displayName === "string" && o.displayName.trim() ? "" : ` ${i + 1}`}</span> ${group}<small>${detail}</small></span><button type="button" class="objectRename" data-object-rename="${o.id}" title="名前を変更" aria-label="${escapeObjectText(objectDisplayName(o))}の名前を変更">✎</button></div>`;
+                      return `<div class="objectRow ${selIds.has(o.id) ? "selected" : ""} ${sel === o.id ? "activeObject" : ""} ${visible ? "" : "hiddenObject"} ${locked ? "lockedObject" : ""}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? "オブジェクトを非表示" : "オブジェクトを表示"}" aria-label="${visible ? "非表示" : "表示"}">${visible ? "◉" : "○"}</button><button type="button" class="objectLock ${locked ? "isLocked" : ""}" data-object-lock="${o.id}" title="${locked ? "ロックを解除（⌘/Ctrl+L）" : "ロックする（⌘/Ctrl+L）"}" aria-label="${locked ? "ロック解除" : "ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked ? "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" : "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? "checked" : ""} aria-label="${escapeObjectText(objectDisplayName(o))}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta"><span class="objectName">${escapeObjectText(objectDisplayName(o))}${typeof o.displayName === "string" && o.displayName.trim() ? "" : ` ${i + 1}`}</span> ${group}<small>${detail}</small></span><button type="button" class="objectRename" data-object-rename="${o.id}" title="名前を変更" aria-label="${escapeObjectText(objectDisplayName(o))}の名前を変更">✎</button></div>`;
                   })
                   .join("")
             : '<div class="emptyList">まだオブジェクトがありません</div>';
+        list.scrollTop = listScroll;
         outlinerKey=key;
         outlinerRows=new Map([...list.querySelectorAll("[data-object]")].map(row=>[row.dataset.object,row]));
         outlinerSelection=new Set(selIds);outlinerActive=sel;
@@ -587,7 +589,7 @@
         render();
     }
     function alignSelectedScene() {
-        const objects = selectedObjects(),
+        const objects = selectedObjects().filter(o => !obLocked(o)),
             units = [],
             unitMap = new Map();
         objects.forEach((o) => {
@@ -798,7 +800,7 @@
             chosen = obOf(id);
         if (e.target.closest("[data-object-rename]")) {
             e.preventDefault(); e.stopPropagation();
-            if (!chosen || b.querySelector(".objectNameInput")) return;
+            if (!chosen || obLocked(chosen) || b.querySelector(".objectNameInput")) return;
             const label = b.querySelector(".objectName"), input = document.createElement("input");
             input.className = "objectNameInput"; input.type = "text"; input.maxLength = 100;
             input.value = typeof chosen.displayName === "string" ? chosen.displayName : "";
@@ -840,13 +842,6 @@
             render();
             return;
         }
-        if (chosen && obLocked(chosen)) {
-            // ロック中の行は選択できない。理由を伝えて終わる。
-            e.preventDefault();
-            syncSel();
-            render();
-            return;
-        }
         if (chosen && !objectVisible(chosen)) {
             e.preventDefault();
             syncSel();
@@ -854,7 +849,7 @@
             return;
         }
         if (e.target.matches("[data-object-check]")) {
-            if (e.target.checked) setSelection(id, true);
+            if (e.target.checked) setSelection(id, true, true);
             else {
                 groupMemberIds(id).forEach((member) => selIds.delete(member));
                 if (sel === id) sel = [...selIds].pop() || null;
@@ -866,7 +861,7 @@
             render();
             return;
         }
-        setSelection(id, e.shiftKey || e.metaKey || e.ctrlKey);
+        setSelection(id, e.shiftKey || e.metaKey || e.ctrlKey, true);
         tool = "edit";
         setMode("draw");
         syncSel();
@@ -876,7 +871,6 @@
         selIds.clear();
         sceneObjects()
             .filter(objectVisible)
-            .filter((o) => !obLocked(o)) // ロック中は全選択の対象外
             .forEach((o) => selIds.add(o.id));
         sel = [...selIds].pop() || null;
         normalizeSelection();
@@ -887,7 +881,7 @@
     };
     el("sceneInvertSel").onclick = () => {
         normalizeSelection();
-        const objects = sceneObjects().filter(o => objectVisible(o) && !obLocked(o));
+        const objects = sceneObjects().filter(o => objectVisible(o));
         // 通常グループは一体、接続アセットだけのグループは個別選択。
         const grouped = new Set(objects.filter(o => o.groupId && !o.linkedAsset && !o.attachment?.parentId).map(o => o.groupId));
         const units = new Map();

@@ -186,7 +186,7 @@
     }
     addEventListener("resize", () => requestAnimationFrame(syncFloorPlanDockLayout));
     const angle360 = (a) => (((Number(a) || 0) % 360) + 360) % 360;
-    const floorPlanObject = () => sel && obOf(sel);
+    const floorPlanObject = () => { const o = sel && obOf(sel); return o && !obLocked(o) ? o : null; };
     function floorPlanWorldAt(p) {
         const q = pickOnPlane(p, 1, -1, [0, 0, 0]);
         return q && Number.isFinite(q[0]) && Number.isFinite(q[2]) ? { x: q[0], z: q[2] } : null;
@@ -216,10 +216,12 @@
         const o = floorPlanObject(),
             out = { object: null, camera: null };
         if (o) {
+            // 縮小しても回転丸を外形から画面上で十分離し、幅・移動の操作と重ならない。
+            const turnGap = Math.max(.42, 42 / (Math.max(.05, Z) * Math.max(1, orthScale())));
             if (o.type === "compound") {
                 const b = obBounds(o),
                     base = objectAnchorWorld(o),
-                    dist = Math.max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], 0.6) * 0.5 + 0.42;
+                    dist = Math.max(b.hi[0] - b.lo[0], b.hi[2] - b.lo[2], 0.6) * 0.5 + turnGap;
                 out.object = { o, base, center: scrW(base), world: { x: base[0], z: base[2] + dist } };
                 out.object.s =
                     orthPlane() === "front"
@@ -239,8 +241,8 @@
                     a = (Number(o.rot) || 0) * DG,
                     dist =
                         pathObject || o.k !== 1
-                            ? Math.max(bounds.hi[0] - bounds.lo[0], bounds.hi[2] - bounds.lo[2], 0.6) * 0.5 + 0.62
-                            : Math.max(Math.abs(Number(o.ra) || 0.3), Math.abs(Number(o.rb) || 0.3)) + 0.42;
+                            ? Math.max(bounds.hi[0] - bounds.lo[0], bounds.hi[2] - bounds.lo[2], 0.6) * 0.5 + Math.max(.62, turnGap)
+                            : Math.max(Math.abs(Number(o.ra) || 0.3), Math.abs(Number(o.rb) || 0.3)) + turnGap;
                 out.object = {
                     o,
                     base,
@@ -293,7 +295,7 @@
                 .slice()
                 .reverse()
                 .find((o) => {
-                    if (!o || !objectVisible(o)) return false;
+                    if (!o || !objectVisible(o) || obLocked(o)) return false;
                     const b = obBounds(o), spec = arrayModifierSpec(o);
                     // 配列はコピーごとに当たり判定する。隙間では選択しない。
                     if (spec && spec.count > 1) {
@@ -346,7 +348,7 @@
                 .slice()
                 .reverse()
                 .find((o) => {
-                    if (!o || !objectVisible(o)) return false;
+                    if (!o || !objectVisible(o) || obLocked(o)) return false;
                     const spec = arrayModifierSpec(o),
                         b = spec && spec.count > 1 ? boundsWithoutArray(o) : obBounds(o),
                         count = spec && spec.count > 1 ? spec.count : 1;
@@ -379,7 +381,7 @@
                 .slice()
                 .reverse()
                 .find((o) => {
-                    if (!o || !objectVisible(o)) return false;
+                    if (!o || !objectVisible(o) || obLocked(o)) return false;
                     const q = scrW(objectAnchorWorld(o));
                     return q.ok && Math.hypot(q.x - p.x, q.y - p.y) <= 28 / Z;
                 }) || null
@@ -1811,7 +1813,7 @@
     }
     // キーボードやドックの移動量を、表示中の面（前・横・上）の軸へ変換する。
     function moveFloorSelected(dx, dz) {
-        const selected = selectedObjects(),
+        const selected = selectedObjects().filter(q => !obLocked(q)),
             o = selected.find((q) => q.id === sel) || selected[0],
             objects = o?.attachment?.verticalOnly ? [o] : selected;
         if (!o || !objects.length) return;
@@ -1942,7 +1944,9 @@
                     typeof hitGizmo === "function" && tool === "edit" && mode === "draw"
                         ? hitGizmo(pos(e))
                         : null;
-                gizmoRing = !!hit && (hit.t === "ring" || hit.t === "tiltring");
+                // 通常の間取りには3D回転リングを描いていない。見えないリングが
+                // 面や移動を奪わないよう、リングを実際に描く壁横看板だけ通す。
+                gizmoRing = !!obOf(sel)?.attachment?.wallSideSign && !!hit && (hit.t === "ring" || hit.t === "tiltring");
             } catch (err) {
                 gizmoRing = false;
             }
@@ -1993,7 +1997,7 @@
                         (specialT === "face" && specialAsset !== "sign") ||
                         specialT === "axis" ||
                         specialT === "mv" ||
-                        (specialT === "ring" && !signScreenGizmo),
+                        ((specialT === "ring" || specialT === "tiltring") && !signScreenGizmo),
                     customFloorGizmo = !!special && !genericGizmo;
                 const activeFloorObject = sel && obOf(sel),
                     wallPlaneSelection = !!(activeFloorObject && activeFloorObject.k !== 1),
@@ -2100,7 +2104,7 @@
                 moveObject = floorPlanObject();
             if (moveHandle && moveObject && (orthPlane() === "top" || orthPlane() === "side" || orthPlane() === "front")) {
                 const base = objectAnchorWorld(moveObject),
-                    group = moveObject.attachment?.verticalOnly ? [moveObject] : selectedObjects(),
+                    group = moveObject.attachment?.verticalOnly ? [moveObject] : selectedObjects().filter(q => !obLocked(q)),
                     snap = snapSetupGroup(group, base);
                 e.preventDefault();
                 e.stopImmediatePropagation();
@@ -2170,7 +2174,7 @@
                     }
                     const w = floorPlanVerticalWorldAt(p),
                         base = objectAnchorWorld(hit),
-                        group = hit.attachment?.verticalOnly ? [hit] : selectedObjects(),
+                        group = hit.attachment?.verticalOnly ? [hit] : selectedObjects().filter(q => !obLocked(q)),
                         snap = snapSetupGroup(group, base);
                     if (!w) {
                         syncSel();
@@ -2275,7 +2279,7 @@
                     return;
                 }
                 const base = objectAnchorWorld(hit),
-                    group = hit.attachment?.verticalOnly ? [hit] : selectedObjects(),
+                    group = hit.attachment?.verticalOnly ? [hit] : selectedObjects().filter(q => !obLocked(q)),
                     snap = snapSetupGroup(group, base);
                 // 選択済みオブジェクトをドラッグした場合は、選択中の地面オブジェクトを同じ量だけ動かす。
                 floorPlanDrag = {
