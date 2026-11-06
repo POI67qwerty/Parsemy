@@ -3,7 +3,7 @@
 // ===== 13. 書き出し（透過PNG） =====
 // m: 'line'=描画のみ / 'guide'=補助線のみ / 'both'=補助線＋描画（どれも背景透過・写真なし）
 // 面表示がONなら、PNGにも面と背面処理を反映する。
-function out(m, hidden = false) {
+function out(m, hidden = false, strengthenClipboardLines = false) {
     // 書き出す範囲：ズーム中は「画面に見えている範囲」、範囲指定があればその枠との重なり。拡大率のまま出力する
     const fit = $("zf").checked && Z > 1;
     let r = fit ? { x: -ox / Z, y: -oy / Z, w: W / Z, h: H / Z } : { x: 0, y: 0, w: W, h: H };
@@ -51,7 +51,27 @@ function out(m, hidden = false) {
         }
         x.setTransform(1, 0, 0, 1, 0, 0);
     }
-    if (m !== "guide") x.drawImage(lineLayer(false, false, cw, ch, tf, hidden || P.surfaceMode), 0, 0); // 線画／背面処理（二値化つき）
+    if (m !== "guide") {
+        const layer = lineLayer(false, false, cw, ch, tf, hidden || P.surfaceMode);
+        const binaryLines = $("bin").checked;
+        if (binaryLines || strengthenClipboardLines) {
+            // Binary exports must have fully opaque ink; clipboard-only AA compensation boosts
+            // alpha without touching transparent pixels. In either case, edit only the line layer.
+            const lc = document.createElement("canvas");
+            lc.width = cw;
+            lc.height = ch;
+            const lx = lc.getContext("2d", { willReadFrequently: true });
+            lx.drawImage(layer, 0, 0);
+            const image = lx.getImageData(0, 0, cw, ch), pixels = image.data;
+            for (let i = 3; i < pixels.length; i += 4) {
+                const alpha = pixels[i] / 255;
+                if (alpha <= 0 || alpha >= 1) continue;
+                pixels[i] = binaryLines ? 255 : Math.round((1 - Math.pow(1 - alpha, 1.4)) * 255);
+            }
+            lx.putImageData(image, 0, 0);
+            x.drawImage(lc, 0, 0);
+        } else x.drawImage(layer, 0, 0);
+    } // 線画／背面処理（二値化つき)
     return c;
 }
 function closeExportMenu() {
@@ -91,7 +111,8 @@ async function copyExportToClipboard(kind, id, label, hidden = false) {
     try {
         if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined")
             throw new Error("Clipboard image API is unavailable");
-        const blob = await new Promise((resolve) => out(kind, hidden).toBlob(resolve, "image/png"));
+        const clipboardCanvas = out(kind, hidden, kind === "line");
+        const blob = await new Promise((resolve) => clipboardCanvas.toBlob(resolve, "image/png"));
         if (!blob) throw new Error("PNG blob was not created");
         await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
         button.textContent = "コピー済み";

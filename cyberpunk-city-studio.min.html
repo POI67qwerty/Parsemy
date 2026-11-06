@@ -12995,7 +12995,7 @@ exportToggle.onclick = (e) => {
     e.stopPropagation();
     setExportOpen(!exportMenu.classList.contains("open"));
 };
-function out(m, hidden = false) {
+function out(m, hidden = false, strengthenClipboardLines = false) {
     const fit = $("zf").checked && Z > 1;
     let r = fit ? { x: -ox / Z, y: -oy / Z, w: W / Z, h: H / Z } : { x: 0, y: 0, w: W, h: H };
     if (CR) {
@@ -13042,7 +13042,25 @@ function out(m, hidden = false) {
         }
         x.setTransform(1, 0, 0, 1, 0, 0);
     }
-    if (m !== "guide") x.drawImage(lineLayer(false, false, cw, ch, tf, hidden || P.surfaceMode), 0, 0);
+    if (m !== "guide") {
+        const layer = lineLayer(false, false, cw, ch, tf, hidden || P.surfaceMode);
+        const binaryLines = $("bin").checked;
+        if (binaryLines || strengthenClipboardLines) {
+            const lc = document.createElement("canvas");
+            lc.width = cw;
+            lc.height = ch;
+            const lx = lc.getContext("2d", { willReadFrequently: true });
+            lx.drawImage(layer, 0, 0);
+            const image = lx.getImageData(0, 0, cw, ch), pixels = image.data;
+            for (let i = 3; i < pixels.length; i += 4) {
+                const alpha = pixels[i] / 255;
+                if (alpha <= 0 || alpha >= 1) continue;
+                pixels[i] = binaryLines ? 255 : Math.round((1 - Math.pow(1 - alpha, 1.4)) * 255);
+            }
+            lx.putImageData(image, 0, 0);
+            x.drawImage(lc, 0, 0);
+        } else x.drawImage(layer, 0, 0);
+    }
     return c;
 }
 function closeExportMenu() {
@@ -13080,7 +13098,8 @@ async function copyExportToClipboard(kind, id, label, hidden = false) {
     try {
         if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined")
             throw new Error("Clipboard image API is unavailable");
-        const blob = await new Promise((resolve) => out(kind, hidden).toBlob(resolve, "image/png"));
+        const clipboardCanvas = out(kind, hidden, kind === "line");
+        const blob = await new Promise((resolve) => clipboardCanvas.toBlob(resolve, "image/png"));
         if (!blob) throw new Error("PNG blob was not created");
         await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
         button.textContent = "コピー済み";
