@@ -1483,6 +1483,7 @@ body.cameraLocked #cv {
 #canvasAssetControl button { white-space:nowrap; padding:5px 8px; font-size:11px; }
 #canvasAssetControl .canvasAssetControlItems { display:flex; flex:1 1 auto; min-width:0; align-items:center; gap:9px; overflow-x:auto; overflow-y:hidden; overscroll-behavior-x:contain; scrollbar-width:thin; padding:2px 0 4px; }
 #canvasAssetControl .canvasAssetRow { flex:0 0 auto; display:flex; align-items:center; gap:5px; margin:0; padding:0 5px 0 0; font-size:11px; white-space:nowrap; border-right:1px solid #34514d; }
+#canvasAssetControl .canvasAssetControlLabel { width:auto; }
 #canvasAssetControl input[type=range] { width:100px; min-width:75px; margin:0; accent-color:#73dfbf; touch-action:none; cursor:pointer; }
 #canvasAssetControl output { min-width:24px; text-align:right; color:#c0ffe8; font-weight:700; }
 #canvasAssetControl .canvasAssetControlUnit { font-size:10px; }

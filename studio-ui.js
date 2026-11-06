@@ -522,7 +522,6 @@
             key = JSON.stringify(objects.map(o=>[o.id, assetLabel(o), objectDisplayName(o), assetGlyph(o), o.type, o.asset,
                 o.groupId || "", o.type === "compound" ? (o.parts?.length || 0) : null,
                 o.asset === "person" ? Number(o.h).toFixed(2) : null, objectVisible(o), obLocked(o)]));
-        syncIsolationButton(objects);
         if (!window.__legacyOutlinerRebuild && key === outlinerKey) {
             // 一覧の内容が同じならDOMを破棄せず、選択が変わった行だけ更新。
             // カメラの移動・オブジェクトドラッグ中に数百行を毎回再構築しない。
@@ -540,6 +539,8 @@
             syncGroupActions();
             return;
         }
+        // isolation状態は一覧内容と同じ状態キーで変わるため、内容変更時だけDOMへ反映する。
+        syncIsolationButton(objects);
         const listScroll = list.scrollTop;
         list.innerHTML = objects.length
             ? objects
@@ -946,19 +947,29 @@
     };
 
     // 以前の版でアセット生成に失敗した場合、pのない壊れた線がSに残ることがある。
-    // それを先に除去し、以降の図形作成を止めない。
+    // それを先に除去し、以降の図形作成を止めない。検証済みの線はWeakSetで記憶し毎フレームの再走査を省く。
+    const validatedStrokes = new WeakSet();
     function validStroke(s) {
         if (!s || Array.isArray(s) || !Array.isArray(s.p) || s.p.length < 1) return false;
-        return s.p.every((v) =>
+        if (validatedStrokes.has(s)) return true;
+        const ok = s.p.every((v) =>
             Array.isArray(v)
                 ? v.length >= 3 && v.every(Number.isFinite)
                 : v && Number.isFinite(v.x) && Number.isFinite(v.y),
         );
+        if (ok) validatedStrokes.add(s);
+        return ok;
     }
     function sanitizeScene() {
-        const clean = S.filter(validStroke);
-        if (clean.length !== S.length) {
-            S = clean;
+        let allValid = true;
+        for (let i = 0; i < S.length; i++) {
+            if (!validStroke(S[i])) {
+                allValid = false;
+                break;
+            }
+        }
+        if (!allValid) {
+            S = S.filter(validStroke);
             normalizeSelection();
             HU = [];
             RD = [];
@@ -1390,7 +1401,7 @@
             values = [
                 ["recessedFloorCount", q.floorCount],
                 ["recessedFloorHeight", q.floorHeight],
-                ["recessedFirstFloorExtra", q.firstFloorExtra],
+                ["recessedFirstFloorExtra", q.firstFloorHeight],
                 ["recessedFloorGap", q.floorGap],
                 ["recessedCornerBevel", q.cornerBevel],
                 ["recessedCornerBevelSegments", q.cornerBevelSegments],
@@ -1416,7 +1427,7 @@
             const limits = {
                     recessedFloorCount: [1, 30],
                     recessedFloorHeight: [0.5, 30],
-                    recessedFirstFloorExtra: [0, 5],
+                    recessedFirstFloorExtra: [0.5, 30],
                     recessedFloorGap: [0, 5],
                     recessedCornerBevel: [0, recessedMaxInset(q.w, q.d)],
                     recessedCornerBevelSegments: [1, 8],
@@ -1427,11 +1438,21 @@
                 }[name],
                 value = Number(rawValue);
             if (!limits || !Number.isFinite(value)) return;
-            patch[name] = clamp(
+            const clamped = clamp(
                 name === "recessedFloorCount" || name === "recessedWindowCount" ? Math.round(value) : value,
                 limits[0],
                 limits[1],
             );
+            if (name === "recessedFloorHeight") {
+                patch.recessedFloorHeight = clamped;
+                patch.recessedFirstFloorHeight = q.firstFloorHeight;
+                patch.recessedFirstFloorExtra = q.firstFloorHeight - clamped;
+            } else if (name === "recessedFirstFloorExtra") {
+                patch.recessedFirstFloorHeight = clamped;
+                patch.recessedFirstFloorExtra = clamped - q.floorHeight;
+            } else {
+                patch[name] = clamped;
+            }
         }
         const next = { ...o, ...patch },
             nextParams = recessedStackedBuildingParams(next);
@@ -1487,6 +1508,8 @@
                 activeFloor: 0,
                 recessedFloorCount: q.floorCount,
                 recessedFloorHeight: q.floorHeight,
+                recessedFirstFloorHeight: q.firstFloorHeight,
+                recessedFirstFloorExtra: q.firstFloorExtra,
                 recessedFloorGap: q.floorGap,
             });
             recessedEditSession = false;

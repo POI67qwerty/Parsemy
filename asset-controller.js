@@ -122,12 +122,15 @@ window.cityGridInstallAssetUI = function (bridge) {
         if (kind === "recessedStackedBuilding") {
             const floorCount = Math.max(1, Math.min(30, Math.round(Number(info.recessedFloorCount) || 4))),
                 floorHeight = Math.max(0.5, Number(info.recessedFloorHeight) || 2.1),
-                firstFloorExtra = Math.max(
-                    0,
-                    Number.isFinite(Number(info.recessedFirstFloorExtra)) ? Number(info.recessedFirstFloorExtra) : 0.35,
+                firstFloorHeight = Math.max(
+                    0.5,
+                    Number.isFinite(Number(info.recessedFirstFloorHeight))
+                        ? Number(info.recessedFirstFloorHeight)
+                        : floorHeight + (Number.isFinite(Number(info.recessedFirstFloorExtra)) ? Number(info.recessedFirstFloorExtra) : 0.35),
                 ),
+                firstFloorExtra = firstFloorHeight - floorHeight,
                 floorGap = Math.max(0, Number.isFinite(Number(info.recessedFloorGap)) ? Number(info.recessedFloorGap) : 1.25),
-                totalH = floorCount * floorHeight + firstFloorExtra + Math.max(0, floorCount - 1) * floorGap;
+                totalH = firstFloorHeight + Math.max(0, floorCount - 1) * (floorHeight + floorGap);
             return {
                 ...base,
                 type: "asset",
@@ -143,6 +146,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 h: totalH,
                 recessedFloorCount: floorCount,
                 recessedFloorHeight: floorHeight,
+                recessedFirstFloorHeight: firstFloorHeight,
                 recessedFirstFloorExtra: firstFloorExtra,
                 recessedFloorGap: floorGap,
                 recessedCornerBevel: info.recessedCornerBevel,
@@ -1096,55 +1100,101 @@ window.cityGridInstallAssetUI = function (bridge) {
         {
             key: "primitive",
             label: "プリミティブ",
-            kinds: ["rect", "box", "beveledBox", "circle", "cone", "sphere", "triPrism", "triPyramid", "awning", "screenHood"],
+            // 平面・押し出し元 → 直方体・角柱・角錐 → 円錐・球・ひさしの順。
+            kinds: ["rect", "track", "circle", "box", "beveledBox", "awning", "triPrism", "triPyramid", "cone", "sphere", "screenHood"],
         },
         {
             key: "building",
             label: "建物",
-            // 建物そのもの（本体と、階を持つ建物）だけ。
+            // 単層建物 → 付属付き建物 → 階層建物 → 屋台の順。
             kinds: [
                 "building",
                 "cornerCutBox",
+                "buildingAwning",
+                "buildingAwningOpen",
+                "buildingSign",
                 "stackedBuilding",
+                "beveledStackedBuilding",
                 "cornerCutStackedBuilding",
                 "recessedStackedBuilding",
-                "beveledStackedBuilding",
-                // テント付き建物・看板付き開口建物・テント付き開口建物は
-                // 「建物＋付属パーツ」だが、置くのは建物なので建物グループへ入れる。
-                "buildingAwning",
-                "buildingSign",
-                "buildingAwningOpen",
-                // 屋台は「建物として置くもの」なので建物グループへ入れる。
                 "stall",
-                // カウンター（普通／L字／コの字）も「建物として置くもの」。
-                // 長さ・奥行き・天板の厚さ・土台の高さは画面のハンドルで変えられる。
-                "counter",
-                "counterL",
-                "counterU",
             ],
         },
         {
             key: "buildingParts",
             label: "建物パーツ",
-            // 建物に付ける部材・設備。屋根・テント・ベランダ・コの字壁・手すり・室外機。
+            // 屋根・テント → 窓・ベランダ・壁・手すり → 室外機・五角形塊の順。
             kinds: [
                 "gableRoof",
                 "shedRoof",
+                "corrugatedRoof",
                 "shopAwning",
                 "shopWindow",
                 "balcony",
                 "uWall",
                 "railing",
                 "outdoorUnit",
-                // 五角形の立体（上端を斜めに落とした塊）。車のキャブと同じ部品で作る。
                 "pentaBox",
             ],
         },
-        // 既存の street キーを保ち、以前のタブ選択もそのまま復元できる。
-        { key: "street", label: "街の設備", kinds: ["stairs", "pictureStairs", "ramp", "pathPipe", "wallSign", "windowGrid", "vendingMachine", "lightboxSign", "bezierCable"] },
-        { key: "traffic", label: "交通・標識", kinds: ["crosswalk", "trafficSignal", "pedSignal", "signPost", "signPost2", "signTriangle", "signDiamond", "signCombo", "crossingSign", "guardPoleU", "guardPoleM", "streetCone", "streetPavement"] },
-        { key: "streetObjects", label: "小物・植栽", kinds: ["streetParcel", "streetBin", "streetMailbox", "streetPlant", "streetPlantBox", "paperLantern", "lanternString", "shopNoren"] },
-        { key: "furniture", label: "家具", kinds: ["stool", "squareStool", "shopWardrobe", "shopWardrobe2", "displayShelf", "displayShelf2"] },
+        // 既存の street キーを保ち、階段・フェンス → 看板・窓・カメラ → 配管・ケーブル → 自販機・遊具の順に整理。
+        {
+            key: "street",
+            label: "街の設備",
+            kinds: [
+                "stairs",
+                "pictureStairs",
+                "ramp",
+                "chainFence",
+                "wallSign",
+                "lightboxSign",
+                "windowGrid",
+                "securityCamera",
+                "pathPipe",
+                "bezierCable",
+                "vendingMachine",
+                "ufoCatcher",
+                "gachaMachine",
+            ],
+        },
+        {
+            key: "traffic",
+            label: "交通・標識",
+            // 路面 → 信号機 → 標識（1枚・2枚・踏切） → 車止め・コーンの順。
+            kinds: [
+                "crosswalk",
+                "streetPavement",
+                "trafficSignal",
+                "pedSignal",
+                "signPost",
+                "signTriangle",
+                "signDiamond",
+                "signPost2",
+                "signCombo",
+                "crossingSign",
+                "guardPoleU",
+                "guardPoleM",
+                "streetCone",
+            ],
+        },
+        {
+            key: "streetObjects",
+            label: "小物・植栽",
+            // 箱・容器・ごみ箱・ポスト → 植栽 → 提灯・暖簾の順。
+            kinds: [
+                "streetParcel",
+                "bottleCrate",
+                "streetBin",
+                "streetMailbox",
+                "streetPlant",
+                "streetPlantBox",
+                "paperLantern",
+                "lanternString",
+                "shopNoren",
+            ],
+        },
+        // 家具：椅子・スツール → カウンター → タンス・棚の順。
+        { key: "furniture", label: "家具", kinds: ["stool", "squareStool", "counter", "counterL", "counterU", "shopWardrobe", "shopWardrobe2", "displayShelf", "displayShelf2"] },
         { key: "train", label: "電車", kinds: ["trainBench", "trainSeat", "trainDividedBench", "trainDividedSeat", "trainStraps", "trainPole", "trainHandrail", "trainWindowWall", "trainSlidingDoor"] },
         { key: "person", label: "人間", kinds: ["person"] },
         // 車（人物の隣）。キャブは五角形の立体、荷台は直方体、タイヤは円柱で作る。

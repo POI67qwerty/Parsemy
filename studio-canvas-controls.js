@@ -4,6 +4,94 @@
 window.CityCanvasControls = (function () {
     "use strict";
     const asNumber = (v, fallback) => Number.isFinite(Number(v)) ? Number(v) : fallback;
+    let activeController = null;
+    const CAMERA_CONTROLS_PERSPECTIVE = [
+        { key: "lens", label: "レンズ", min: 14, max: 200, step: 1, integer: true, decimals: 0, unit: "mm" },
+        { key: "yaw", label: "水平角", min: -90, max: 90, step: 0.001, integer: false, decimals: 1, unit: "°" },
+        { key: "pitch", label: "仰角", min: -60, max: 60, step: 0.001, integer: false, decimals: 1, unit: "°" },
+        { key: "hz", label: "アイレベル", min: -50, max: 150, step: 0.1, integer: false, decimals: 0, unit: "%" },
+        { key: "ch", label: "カメラ高", min: 0.05, max: 30, step: 0.01, integer: false, decimals: 2, unit: "m" },
+        { key: "cx", label: "左右位置", min: -30, max: 30, step: 0.05, integer: false, decimals: 2, unit: "m" },
+        { key: "cz", label: "前後位置", min: -30, max: 30, step: 0.05, integer: false, decimals: 2, unit: "m" },
+    ];
+    const CAMERA_CONTROLS_FISHEYE = [
+        { key: "fov", label: "画角", min: 90, max: 360, step: 1, integer: true, decimals: 0, unit: "°" },
+        { key: "roll", label: "回転", min: -180, max: 180, step: 0.1, integer: false, decimals: 1, unit: "°" },
+        { key: "yaw", label: "水平角", min: -90, max: 90, step: 0.001, integer: false, decimals: 1, unit: "°" },
+        { key: "pitch", label: "仰角", min: -60, max: 60, step: 0.001, integer: false, decimals: 1, unit: "°" },
+        { key: "ch", label: "カメラ高", min: 0.05, max: 30, step: 0.01, integer: false, decimals: 2, unit: "m" },
+        { key: "cx", label: "左右位置", min: -30, max: 30, step: 0.05, integer: false, decimals: 2, unit: "m" },
+        { key: "cz", label: "前後位置", min: -30, max: 30, step: 0.05, integer: false, decimals: 2, unit: "m" },
+    ];
+    function formatCameraValue(c, raw) {
+        const n = asNumber(raw, 0);
+        if (c.integer || c.decimals === 0) return String(Math.round(n));
+        return n.toFixed(c.decimals ?? 2);
+    }
+    function cameraList() {
+        if (typeof P === "undefined" || !P) return [];
+        const defs = typeof T !== "undefined" && T === "f" ? CAMERA_CONTROLS_FISHEYE : CAMERA_CONTROLS_PERSPECTIVE;
+        return defs.map((c) => {
+            const domInput = typeof document !== "undefined" ? document.getElementById(c.key) : null,
+                min = asNumber(domInput?.min, c.min),
+                max = asNumber(domInput?.max, c.max);
+            return {
+                id: "camera:" + c.key,
+                cameraKey: c.key,
+                label: c.label,
+                value: clamp(asNumber(P[c.key], 0), min, max),
+                min,
+                max,
+                step: c.step,
+                integer: !!c.integer,
+                decimals: c.decimals,
+                unit: c.unit,
+            };
+        });
+    }
+    function resetCamera() {
+        if (typeof cameraLock !== "undefined" && cameraLock) {
+            if (typeof notifyLocked === "function") notifyLocked("カメラは固定されています");
+            return false;
+        }
+        const gt = document.getElementById("gt")?.value || (typeof T !== "undefined" && T === "f" ? "5" : "2"),
+            defaults = { lens: 50, yaw: 39.912, hz: 50, pitch: 0, fov: 180, roll: 0, ch: 1, cx: 0, cz: 0 };
+        if (gt === "1") {
+            defaults.yaw = 0;
+            defaults.pitch = 0;
+        } else if (gt === "2") {
+            defaults.pitch = 0;
+        } else if (gt === "3") {
+            defaults.pitch = 30;
+        } else if (gt === "3u") {
+            defaults.pitch = 24;
+            defaults.hz = 78;
+        } else if (gt === "3d") {
+            defaults.pitch = -24;
+            defaults.hz = 22;
+        } else if (gt === "5") {
+            defaults.yaw = 0;
+            defaults.pitch = 0;
+            defaults.roll = 0;
+            defaults.fov = 180;
+        } else if (gt === "6") {
+            defaults.yaw = 45;
+            defaults.pitch = 0;
+            defaults.roll = 0;
+            defaults.fov = 270;
+        }
+        Object.assign(P, defaults);
+        if (typeof CAMKEY !== "undefined") CAMKEY = null;
+        if (typeof orthView !== "undefined" && orthView) orthView = null;
+        if (typeof Z !== "undefined") Z = 1;
+        if (typeof ox !== "undefined") ox = 0;
+        if (typeof oy !== "undefined") oy = 0;
+        if (typeof sync === "function") sync();
+        if (typeof regenObjects === "function") regenObjects();
+        if (typeof render === "function") render();
+        else if (typeof renderSoon === "function") renderSoon();
+        return true;
+    }
     function collectHandles(sg) {
         const found=[], seen=new Set();
         function walk(v,depth) {
@@ -110,6 +198,16 @@ window.CityCanvasControls = (function () {
             return true;
         } finally { ed=oldEd;snapHit=oldSnap; }
     }
+    function toggles(o) {
+        if(!o || (o.type!=='asset' && o.type!=='circ'))return [];
+        return assetEditorControls(o).filter(c=>c.type==='boolean' && c.canvasToggle===true).map(c=>({
+            id:'toggle:'+c.key,
+            label:c.label||c.key,
+            checked:!!assetControlValue(o,c),
+            toggle:true,
+            control:c,
+        }));
+    }
     // 白い面ハンドルはそれぞれ反対側を固定して外形を変更する。
     // 対応する面だけを取り出し、既存の facePatch をそのまま使う。
     function faces(o) {
@@ -128,44 +226,150 @@ window.CityCanvasControls = (function () {
         const panel=document.createElement('div');panel.id='canvasAssetControl';panel.hidden=true;
         panel.innerHTML='<div class="canvasAssetFixed"><button type="button" class="canvasGround">地面につける</button><button type="button" class="canvasReset" title="位置・向きは維持して形と寸法を初期状態に戻す">リセットする</button><span class="canvasAssetControlLock" hidden>ロック中</span></div><div class="canvasAssetControlItems" aria-label="選択中の形状調整"></div>';
         stage.parentNode.insertBefore(panel,stage);
-        const items=panel.querySelector('.canvasAssetControlItems'),ground=panel.querySelector('.canvasGround'),reset=panel.querySelector('.canvasReset');
+        const items=panel.querySelector('.canvasAssetControlItems'),ground=panel.querySelector('.canvasGround'),reset=panel.querySelector('.canvasReset'),lockBadge=panel.querySelector('.canvasAssetControlLock');
+        const rowMap=new Map();
         let selectedId=null,signature='',session=null;
-        ground.addEventListener('click',()=>{const o=selectedObjects();if(o.length===1&&!obLocked(o[0]))document.getElementById('obGnd').click();});
-        reset.addEventListener('click',()=>{const o=selectedObjects();if(o.length===1&&!obLocked(o[0]))window.cityResetAssetShape?.(o[0]);});
+        ground.addEventListener('click',()=>{
+            if(typeof mode!=='undefined'&&mode==='view')return;
+            const o=selectedObjects();
+            if(o.length===1&&!obLocked(o[0]))document.getElementById('obGnd').click();
+        });
+        reset.addEventListener('click',()=>{
+            if(typeof mode!=='undefined'&&mode==='view'){
+                resetCamera();
+                return;
+            }
+            const o=selectedObjects();
+            if(o.length===1&&!obLocked(o[0]))window.cityResetAssetShape?.(o[0]);
+        });
+        function rebuildRows(controls){
+            items.replaceChildren();
+            rowMap.clear();
+            controls.forEach(c=>{
+                const row=document.createElement('label');row.className='canvasAssetRow';row.dataset.controlId=c.id;
+                const label=document.createElement('span'),slider=document.createElement('input');
+                label.className='canvasAssetControlLabel';label.textContent=c.label;slider.dataset.controlId=c.id;slider.setAttribute('aria-label',c.label);
+                if(c.toggle){
+                    slider.type='checkbox';slider.dataset.assetToggle=c.control.key;
+                    row.append(label,slider);
+                }else{
+                    const out=document.createElement('output'),unit=document.createElement('span');
+                    slider.type='range';unit.className='canvasAssetControlUnit';unit.textContent=c.unit;
+                    if(c.cameraKey){
+                        slider.dataset.cameraControl=c.cameraKey;
+                        slider.dataset.assetControl=c.cameraKey;
+                    }else if(c.control?.key){
+                        slider.dataset.assetControl=c.control.key;
+                    }
+                    row.append(label,slider,out,unit);
+                }
+                items.append(row);
+                rowMap.set(c.id,{row,label,slider,out:row.querySelector('output'),unit:row.querySelector('.canvasAssetControlUnit')});
+            });
+        }
         function sync(){
+            const isCameraMode=typeof mode!=='undefined'&&mode==='view';
+            if(isCameraMode){
+                const controls=cameraList(),show=controls.length>0,
+                    locked=typeof cameraLock!=='undefined'&&!!cameraLock,
+                    visibilityChanged=panel.hidden===show;
+                panel.hidden=!show;
+                panel.dataset.mode='camera';
+                if(visibilityChanged)fitCanvasDisplay();
+                if(!show){selectedId=null;signature='';session=null;return;}
+                if(selectedId!=='__camera__'){selectedId='__camera__';signature='';session=null;items.scrollLeft=0;}
+                items.setAttribute('aria-label','カメラの調整');
+                ground.hidden=true;
+                reset.hidden=false;
+                reset.disabled=locked;
+                reset.title='カメラの位置・向き・レンズを現在のグリッド種別の初期状態に戻す';
+                lockBadge.textContent='カメラ固定中';
+                lockBadge.hidden=!locked;
+                const sig='camera:'+controls.map(c=>c.id).join('|');
+                if(sig!==signature){
+                    signature=sig;
+                    rebuildRows(controls);
+                }
+                controls.forEach(c=>{
+                    const ref=rowMap.get(c.id);if(!ref)return;
+                    ref.label.textContent=c.label;
+                    ref.unit.textContent=c.unit;
+                    ref.slider.min=String(c.min);
+                    ref.slider.max=String(c.max);
+                    ref.slider.step=c.integer?'1':String(c.step||'any');
+                    ref.slider.value=String(c.value);
+                    ref.slider.disabled=locked||c.min>=c.max;
+                    ref.out.textContent=formatCameraValue(c,c.value);
+                });
+                return;
+            }
+            panel.dataset.mode='asset';
+            items.setAttribute('aria-label','選択中の形状調整');
+            ground.hidden=false;
+            reset.hidden=false;
+            reset.title='位置・向きは維持して形と寸法を初期状態に戻す';
+            lockBadge.textContent='ロック中';
             const selected=selectedObjects(),o=selected.length===1?selected[0]:null,
-                controls=o&&objectVisible(o)?[...list(o),...faces(o)]:[],show=!!o&&objectVisible(o);
+                controls=o&&objectVisible(o)?[...toggles(o),...list(o),...faces(o)]:[],show=!!o&&objectVisible(o);
             const visibilityChanged=panel.hidden===show;
             panel.hidden=!show;
             if(visibilityChanged)fitCanvasDisplay();
             if(!show){selectedId=null;signature='';session=null;return;}
             if(selectedId!==o.id){selectedId=o.id;signature='';session=null;items.scrollLeft=0;}
-            ground.disabled=obLocked(o);reset.disabled=obLocked(o)||!ASSETS[o.asset];
-            panel.querySelector('.canvasAssetControlLock').hidden=!obLocked(o);
+            const locked=obLocked(o);
+            ground.disabled=locked;reset.disabled=locked||!ASSETS[o.asset];
+            lockBadge.hidden=!locked;
             const sig=controls.map(c=>c.id).join('|');
             if(sig!==signature){
-                signature=sig;items.replaceChildren();
-                controls.forEach(c=>{
-                    const row=document.createElement('label');row.className='canvasAssetRow';row.dataset.controlId=c.id;
-                    const label=document.createElement('span'),slider=document.createElement('input'),out=document.createElement('output'),unit=document.createElement('span');
-                    label.className='canvasAssetControlLabel';label.textContent=c.label;slider.type='range';slider.dataset.controlId=c.id;slider.setAttribute('aria-label',c.label);unit.className='canvasAssetControlUnit';unit.textContent=c.unit;
-                    row.append(label,slider,out,unit);items.append(row);
-                });
+                signature=sig;
+                rebuildRows(controls);
             }
             controls.forEach(c=>{
-                const row=Array.from(items.children).find(n=>n.dataset.controlId===c.id),input=row?.querySelector('input');if(!input)return;
-                row.querySelector('.canvasAssetControlLabel').textContent=c.label;row.querySelector('.canvasAssetControlUnit').textContent=c.unit;
-                input.min=String(c.min);input.max=String(c.max);input.step=c.integer?'1':'any';input.value=String(c.value);input.disabled=obLocked(o)||c.min>=c.max;
-                row.querySelector('output').textContent=String(+c.value.toFixed(4));
+                const ref=rowMap.get(c.id);if(!ref)return;
+                ref.label.textContent=c.label;
+                if(c.toggle){
+                    ref.slider.checked=!!c.checked;ref.slider.disabled=locked;
+                    return;
+                }
+                ref.unit.textContent=c.unit;
+                ref.slider.min=String(c.min);ref.slider.max=String(c.max);ref.slider.step=c.integer?'1':'any';ref.slider.value=String(c.value);ref.slider.disabled=locked||c.min>=c.max;
+                ref.out.textContent=String(+c.value.toFixed(4));
             });
-
         }
         items.addEventListener('input',event=>{
             const input=event.target;if(!(input instanceof HTMLInputElement)||!input.dataset.controlId)return;
+            if(typeof mode!=='undefined'&&mode==='view'&&input.dataset.cameraControl){
+                if(typeof cameraLock!=='undefined'&&cameraLock){
+                    if(typeof notifyLocked==='function')notifyLocked('カメラは固定されています');
+                    return;
+                }
+                const key=input.dataset.cameraControl,item=cameraList().find(c=>c.cameraKey===key);
+                if(!item)return;
+                const n=Number(input.value);
+                if(!Number.isFinite(n))return;
+                const value=clamp(item.integer?Math.round(n):n,item.min,item.max);
+                if(typeof setP==='function')setP(key,value);
+                else P[key]=value;
+                const ref=rowMap.get(item.id);
+                if(ref?.out)ref.out.textContent=formatCameraValue(item,P[key]);
+                if(typeof render==='function')render();
+                else if(typeof renderSoon==='function')renderSoon();
+                return;
+            }
             const selected=selectedObjects(),o=selected.length===1?selected[0]:null;
             if(!o||o.id!==selectedId||obLocked(o))return;
-            const item=[...list(o),...faces(o)].find(c=>c.id===input.dataset.controlId),n=Number(input.value);
-            if(!item||!Number.isFinite(n))return;
+            const item=[...toggles(o),...list(o),...faces(o)].find(c=>c.id===input.dataset.controlId);
+            if(!item)return;
+            if(item.toggle){
+                const value=!!input.checked,c=item.control;
+                if(value===item.checked)return;
+                HU.push(S);RD=[];session=null;
+                setOb(o.id,typeof c.patch==='function'?c.patch(o,value):{[c.key]:value});
+                render();
+                return;
+            }
+            const n=Number(input.value);
+            if(!Number.isFinite(n))return;
             const value=clamp(item.integer?Math.round(n):n,item.min,item.max);
             if(Math.abs(value-item.value)<1e-9)return;
             if(!session||session.id!==o.id||session.key!==item.id){HU.push(S);RD=[];session={id:o.id,key:item.id};}
@@ -179,7 +383,8 @@ window.CityCanvasControls = (function () {
             render();
         });
         for(const event of ['change','focusout','pointercancel'])items.addEventListener(event,()=>{session=null;});
-        return {sync,panel};
+        activeController={sync,panel};
+        return activeController;
     }
-    return {list,apply,install};
+    return {list,cameraList,resetCamera,apply,install,sync:()=>activeController?.sync?.()};
 })();

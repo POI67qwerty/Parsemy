@@ -307,7 +307,7 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><button id=recessedAlign class="primary">上方向へ整列</button></label>
 <label><span>階数</span><input type=number class=nv id=recessedFloorCount min=1 max=30 step=1 style="width:100px"></label>
 <label><span>階高（上階）</span><input type=number class=nv id=recessedFloorHeight min=0.5 step=0.05 style="width:100px"><span class=un>m</span></label>
-<label><span>1階の高さ（追加分）</span><input type=number class=nv id=recessedFirstFloorExtra min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>1階の高さ</span><input type=number class=nv id=recessedFirstFloorExtra min=0.5 step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><span>階接合部の高さ</span><input type=number class=nv id=recessedFloorGap min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><span>前右角のベベル</span><input type=number class=nv id=recessedCornerBevel min=0 step=0.05 style="width:100px"><span class=un>m</span></label>
 <label><span>ベベル分割数</span><input type=number class=nv id=recessedCornerBevelSegments min=1 max=8 step=1 style="width:100px"><span class=un>分割</span></label>
@@ -413,9 +413,12 @@ function sync() {
     for (const k in P) {
         const el = $("v_" + k);
         if (el && document.activeElement !== el && typeof P[k] === "number") el.value = +(+P[k]).toFixed(3);
+        const sl = $(k);
+        if (sl && document.activeElement !== sl && typeof P[k] === "number") sl.value = P[k];
     }
     syncSurfaceToggle();
     if (typeof syncExportLineWidth === "function") syncExportLineWidth();
+    if (typeof mode !== "undefined" && mode === "view") window.CityCanvasControls?.sync?.();
 } // 入力中の欄は上書きしない
 function syncSurfaceToggle() {
     const b = $("surfaceToggle");
@@ -574,7 +577,7 @@ const V = {
 const DG = Math.PI / 180;
 const camPos = () => [P.cx, P.ch - 1, P.cz],
     CO = () => [-P.cx, 1 - P.ch, -P.cz],
-    sigNow = () => P.ch + "," + P.cx + "," + P.cz + "," + P.yaw + "," + P.pitch + "," + P.roll + "," + T; // カメラの位置／ワールド→カメラからの相対への足し算
+    sigNow = () => P.ch + "," + P.cx + "," + P.cz + "," + (orthView || "3d"); // 3D形状生成が依存するカメラ位置＋正投影種別
 // ワールドのベクトル→カメラ座標（水平回転→上下→ロール）
 // カメラの回転（ワールド→視点）を行列にして使い回す。
 // 以前は点1つごとに sin/cos を6回呼んでいたため、線や面の点数が多いほど
@@ -1287,9 +1290,58 @@ function genShapeCore(ob) {
     return L.map((pl) => ({ c: ob.c, w: ob.w, ob, d3: true, cs: sigNow(), p: dens3(pl) }));
 }
 // ===== 10. 図形の編集（選択・移動・回転・大きさ・浮かせる） =====
+let _obCacheS = null,
+    _obCacheLen = -1,
+    _obCacheFirst = null,
+    _obCacheLast = null,
+    _obCacheFirstOb = null,
+    _obCacheLastOb = null,
+    _obCacheMap = new Map(),
+    _obCacheList = [];
+function _ensureObIndex() {
+    const len = S.length,
+        first = len ? S[0] : null,
+        last = len ? S[len - 1] : null,
+        firstOb = first && first.ob,
+        lastOb = last && last.ob;
+    if (
+        _obCacheS === S &&
+        _obCacheLen === len &&
+        _obCacheFirst === first &&
+        _obCacheLast === last &&
+        _obCacheFirstOb === firstOb &&
+        _obCacheLastOb === lastOb
+    ) {
+        return _obCacheMap;
+    }
+    _obCacheS = S;
+    _obCacheLen = len;
+    _obCacheFirst = first;
+    _obCacheLast = last;
+    _obCacheFirstOb = firstOb;
+    _obCacheLastOb = lastOb;
+    _obCacheMap.clear();
+    _obCacheList = [];
+    for (let i = 0; i < len; i++) {
+        const o = S[i] && S[i].ob;
+        if (o && o.id && !_obCacheMap.has(o.id)) {
+            _obCacheMap.set(o.id, o);
+            _obCacheList.push(o);
+        }
+    }
+    return _obCacheMap;
+}
 const obOf = (id) => {
+    if (!id) return null;
+    const hit = _ensureObIndex().get(id);
+    if (hit && S.some((s) => s.ob === hit)) return hit;
     const s = S.find((s) => s.ob && s.ob.id === id);
+    if (s && s.ob) _obCacheMap.set(id, s.ob);
     return s && s.ob;
+};
+const sceneObjects = () => {
+    _ensureObIndex();
+    return _obCacheList;
 };
 const objectVisible = (o) => !o || o.visible !== false;
 
@@ -1324,6 +1376,7 @@ function setCameraLock(on) {
         mg = null;
     }
     if (typeof window.syncLockButtons === "function") window.syncLockButtons();
+    window.CityCanvasControls?.sync?.();
     if (typeof window.flashHint === "function")
         window.flashHint(cameraLock ? "カメラを固定しました（L で解除）" : "カメラの固定を解除しました");
     render();
@@ -2016,14 +2069,25 @@ function fieldPatch(o, name, v) {
         if (!Number.isFinite(value)) return {};
         if (name === "w") return { ra: Math.max(0.25, value * 0.5) };
         if (name === "dp") return { rb: Math.max(0.25, value * 0.5) };
-        return {
-            floorHeight: clamp(
-                (Math.max(0.5, value) - q.firstFloorExtra - Math.max(0, q.floorCount - 1) * q.floorGap) /
-                    q.floorCount,
+        const upperCount = Math.max(0, q.floorCount - 1);
+        if (upperCount > 0) {
+            const nextFloorH = clamp(
+                (Math.max(0.5, value) - q.firstFloorHeight - upperCount * q.floorGap) / upperCount,
                 0.5,
                 30,
-            ),
-            h: Math.max(0.5, value),
+            );
+            return {
+                recessedFloorHeight: nextFloorH,
+                recessedFirstFloorHeight: q.firstFloorHeight,
+                recessedFirstFloorExtra: q.firstFloorHeight - nextFloorH,
+                h: q.firstFloorHeight + upperCount * (nextFloorH + q.floorGap),
+            };
+        }
+        const nextFirstH = clamp(Math.max(0.5, value), 0.5, 30);
+        return {
+            recessedFirstFloorHeight: nextFirstH,
+            recessedFirstFloorExtra: nextFirstH - q.floorHeight,
+            h: nextFirstH,
         };
     }
     if (o.type === "asset" && o.asset === "building" && ["w", "dp", "h"].includes(name)) {

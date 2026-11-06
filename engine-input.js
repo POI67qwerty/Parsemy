@@ -882,6 +882,7 @@ function setMode(m) {
                 : "ドラッグ：視点を回転／Shiftまたは右ドラッグ：水平移動／ホイール：ズーム（矢印キーでも可）"
             : "線を引くと、向かっているVPへ自動で吸着します。Ctrl/⌘+Zで元に戻す") +
         " ／ 中ドラッグ：回転・Shift+ドラッグ：パン";
+    window.CityCanvasControls?.sync?.();
 }
 $("mV").onclick = () => setMode("view");
 $("mD").onclick = () => setTool("pen");

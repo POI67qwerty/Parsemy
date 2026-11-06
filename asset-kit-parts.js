@@ -112,14 +112,15 @@
     // 四隅の断面と輪郭候補はベベル直方体と同じ4分割・seam方式。
     K.registerPart("screenHood", (o) => {
         const read=(v,f)=>v!==null && v!==undefined && Number.isFinite(Number(v)) ? Number(v) : f,
-            w=Math.max(.1,Math.abs(read(o.w,1.1))), h=Math.max(.1,Math.abs(read(o.h,.8))),
+            minSize=o.group ? .03 : .1,
+            w=Math.max(minSize,Math.abs(read(o.w,1.1))), h=Math.max(minSize,Math.abs(read(o.h,.8))),
             oldLength=Math.max(.02,Math.abs(read(o.length,.4))),
             frameDepth=Math.max(.005,read(o.frameDepth,oldLength*.25)),
             brimLength=Math.max(0,read(o.brimLength,oldLength-frameDepth)),
             length=frameDepth+brimLength,
             t=Math.max(.005,Math.min(read(o.t,.04),w*.4,h*.28)),
-            b=Math.max(0,Math.min(read(o.bevel,.1),w*.45,h*.45)),
-            pad=Math.max(t,b)+.001, knee=Math.max(pad,Math.min(h-pad,read(o.knee,h*.55))),
+            b=o.circular ? 0 : Math.max(0,Math.min(read(o.bevel,.1),w*.45,h*.45)),
+            pad=Math.max(t,b)+Math.min(.001,h*.02), knee=Math.max(pad,Math.min(h-pad,read(o.knee,h*.55))),
             innerB=Math.max(0,b-t), back=length/2,
             // 枠の奥行きと、枠より手前へ張り出すつばは独立した実寸。
             front=z=>back-(frameDepth+brimLength*Math.max(0,Math.min(1,(z-knee)/(h-knee))));
@@ -127,6 +128,14 @@
         // 零面積三角形と重複線を出さない（外側のベベルを維持）。
         const count=b>1e-6 ? 20 : 4, seg=count===20 ? 4 : 1;
         function contour(width,height,radius) {
+            if(o.circular){
+                const cseg=24,out=[];
+                for(let i=0;i<cseg;i++){
+                    const a=2*Math.PI*i/cseg;
+                    out.push({x:width/2*Math.cos(a),z:h/2+height/2*Math.sin(a),corner:i});
+                }
+                return out;
+            }
             let p=beveledBoxFootprint(width,height,radius,4);
             if(count===20 && p.length===4)p=p.flatMap(v=>Array.from({length:5},()=>v.slice()));
             const out=[];
@@ -156,17 +165,26 @@
         const same=(a,c)=>Math.hypot(...a.map((v,i)=>v-c[i]))<1e-10;
         const addEdge=(e,mark=null)=>{if(e.length>=2&&!e.every(p=>same(p,e[0]))){edges.push(e);marks.push(mark);}};
         const loop=(list,fn)=>{const p=list.map(fn).filter((v,i,a)=>i===0||!same(v,a[i-1]));if(p.length>2)addEdge([...p,p[0]]);};
-        loop(outer,pfront);loop(inner,pfront);loop(outer,pback);loop(inner,pback);
-        for(const [list,radius,group] of [[outer,b,'hoodOuter'],[inner,innerB,'hoodInner']]){
-            let prior=null;
-            for(const v of list){
-                if(v.corner===null)continue;
-                const a=pfront(v),c=pback(v);if(prior && same(a,prior))continue;prior=a;
-                const mark=radius>1e-6 ? beveledEdgeMark(v.corner,radius,seg,group) : null;
-                addEdge([a,c],mark);
+        const prefix=o.group ? String(o.group)+"-" : "";
+        loop(outer,pfront);loop(inner,pfront);loop(outer,pback);if(!o.noBackInner)loop(inner,pback);
+        const circularBaseEdges=edges.length;
+        if(o.circular){
+            outer.forEach((v)=>{
+                addEdge([pfront(v),pback(v)],null);
+            });
+        } else {
+            const sideLists=o.noInnerSeam ? [[outer,b,prefix+'hoodOuter']] : [[outer,b,prefix+'hoodOuter'],[inner,innerB,prefix+'hoodInner']];
+            for(const [list,radius,group] of sideLists){
+                let prior=null;
+                for(const v of list){
+                    if(v.corner===null)continue;
+                    const a=pfront(v),c=pback(v);if(prior && same(a,prior))continue;prior=a;
+                    const mark=radius>1e-6 ? beveledEdgeMark(v.corner,radius,seg,group) : null;
+                    addEdge([a,c],mark);
+                }
             }
         }
-        return [{meshTriangles:triangles,meshEdges:edges,seamMarks:marks,onFace:true,preciseTubeEdge:true,color:o.color,width:o.width}];
+        return [{meshTriangles:triangles,meshEdges:edges,seamMarks:marks,circularHood:!!o.circular,circularBaseEdges,onFace:true,preciseTubeEdge:true,color:o.color,width:o.width}];
     });
 
     // ---- 日よけ（オーニング）：斜めの幕＋手前の垂れ＋腕 ----

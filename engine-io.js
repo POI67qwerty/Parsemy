@@ -163,6 +163,7 @@ function applyType(v) {
     if (v === 6) set({ yaw: 45, pitch: 0, roll: 0, fov: 270 });
     sync();
     setMode(mode);
+    window.CityCanvasControls?.sync?.();
     render();
 }
 $("gt").onchange = (e) => {
@@ -227,7 +228,7 @@ function unpack(d) {
         const st = d.S.map((s) => (s.ob ? { ...s, ob: fixOb(s.ob) } : s)),
             seen = new Set(),
             out = [],
-            needsAssetUpdate = o => !!o && (o.arrayEnabled === true || o.doorEnabled === true || o.openingOffset != null || ["screenHood", "shopAwning", "displayShelf2", "trafficSignal", "pedSignal", "railing", "streetPavement", "streetMailbox", "streetParcel", "streetPlantBox", "squareStool", "shopWardrobe", "shopWardrobe2", "pictureStairs", "guardPoleHalf", "corrugatedRoof", "securityCamera", "bottleCrate"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsAssetUpdate))),
+            needsAssetUpdate = o => !!o && (o.arrayEnabled === true || o.doorEnabled === true || o.openingOffset != null || ["pathPipe", "screenHood", "shopAwning", "displayShelf2", "trafficSignal", "pedSignal", "railing", "streetPavement", "streetMailbox", "streetParcel", "streetPlantBox", "squareStool", "shopWardrobe", "shopWardrobe2", "pictureStairs", "guardPoleHalf", "corrugatedRoof", "securityCamera", "bottleCrate", "chainFence", "ufoCatcher", "gachaMachine"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsAssetUpdate))),
             regenerate = s => !!s.ob && (!s.d3 || needsAssetUpdate(s.ob));
         // 形を更新した既存アセットの保存線を新しい形へ作り直す。
         // 元の最初の線の位置へ挿入し、他の物体や手描き線との並び順も保つ。

@@ -258,6 +258,37 @@ const ASSET_KIT = (function () {
     function loft(rings, extra = {}) {
         return { rings: rings.filter((r) => r && Array.isArray(r.path) && r.path.length >= 3), ...extra };
     }
+    // 面を持たない装飾線・目地線・ワイヤー部品を作る共通ヘルパー。
+    function wire(edges, extra = {}) {
+        return {
+            meshTriangles: [],
+            meshEdges: Array.isArray(edges) ? edges : [],
+            onFace: true,
+            preciseTubeEdge: true,
+            ...extra,
+        };
+    }
+    // 角丸パス（roundRectPath）の縦辺にベベル稜線マークを付与する共通ヘルパー。
+    function bevelMarks(path, radius, segments = 4, group = 0) {
+        if (!Array.isArray(path) || typeof beveledEdgeMark !== "function") return null;
+        return [null, null, ...path.map((_, i) => beveledEdgeMark(i, radius, segments, group))];
+    }
+    // 矩形開口（x0..x1, z0..z1）の周囲4ストリップ（＋任意の凹み内壁・奥壁）を組む共通ヘルパー。
+    function recessedWall(xMin, xMax, zMin, zMax, y0, y1, hole, extra = {}) {
+        const hx0 = Math.max(xMin, Math.min(xMax, Number(hole?.x0) || 0)),
+            hx1 = Math.max(hx0, Math.min(xMax, Number(hole?.x1) || 0)),
+            hz0 = Math.max(zMin, Math.min(zMax, Number(hole?.z0) || 0)),
+            hz1 = Math.max(hz0, Math.min(zMax, Number(hole?.z1) || 0)),
+            flags = { onFace: true, preciseTubeEdge: true, ...extra },
+            out = [];
+        if (hz0 - zMin > 1e-4) out.push(box(rectPath(xMax - xMin, y1 - y0, (xMin + xMax) * 0.5, (y0 + y1) * 0.5), zMin, hz0, flags));
+        if (zMax - hz1 > 1e-4) out.push(box(rectPath(xMax - xMin, y1 - y0, (xMin + xMax) * 0.5, (y0 + y1) * 0.5), hz1, zMax, flags));
+        if (hx0 - xMin > 1e-4 && hz1 - hz0 > 1e-4)
+            out.push(box(rectPath(hx0 - xMin, y1 - y0, (xMin + hx0) * 0.5, (y0 + y1) * 0.5), hz0, hz1, flags));
+        if (xMax - hx1 > 1e-4 && hz1 - hz0 > 1e-4)
+            out.push(box(rectPath(xMax - hx1, y1 - y0, (hx1 + xMax) * 0.5, (y0 + y1) * 0.5), hz0, hz1, flags));
+        return out;
+    }
 
     // ===== 面の三角形分割 =====
     function area2(path) {
@@ -869,6 +900,13 @@ const ASSET_KIT = (function () {
         KIT_POINTS[kind] = (o) => {
             const points=[];
             for(const part of build(o,API)||[]) {
+                if(part && Array.isArray(part.path) && !part.meshEdges && !part.meshTriangles) {
+                    const z0=part.z0, z1=part.z1;
+                    for(const [x,y] of part.path) {
+                        points.push(L2W(o,x,y,z0), L2W(o,x,y,z1));
+                    }
+                    continue;
+                }
                 for(const seg of partEdges(part))for(const v of seg)points.push(L2W(o,...v));
                 for(const tri of partTris(part))for(const v of tri)points.push(L2W(o,...v));
             }
@@ -939,6 +977,9 @@ const ASSET_KIT = (function () {
         sheet,
         face3,
         loft,
+        wire,
+        bevelMarks,
+        recessedWall,
         // 曲面（上下の縁を丸めた直方体）
         roundedBox,
         // 文字

@@ -301,24 +301,43 @@ function facePatch(o, fid, dl) {
         m = 0.005,
         meta = o?.type === "asset" ? ASSETS[o.asset] : null,
         minHeight = typeof meta?.minHeight === "function" ? Math.max(m, Number(meta.minHeight(o)) || m) : m;
-    if (fid === "top") {
+    if (fid === "top" || fid === "base") {
         if (o.type === "asset" && o.asset === "sign") {
-            // 看板の実外周は0.08h〜0.82h。上端を動かすと下端を固定する。
             const dh = dl / 0.74,
-                h = Math.max(m, o.h + dh);
-            return { h, extrude: true, lift: o.lift - 0.08 * (h - o.h) };
+                h = Math.max(m, o.h + dh),
+                ratio = fid === "top" ? 0.08 : 0.82;
+            return { h, extrude: true, lift: o.lift - ratio * (h - o.h) };
         }
-        return { h: Math.max(minHeight, o.h + dl), extrude: true };
-    }
-    if (fid === "base") {
-        if (o.type === "asset" && o.asset === "sign") {
-            // 下端を動かすと上端を固定する。dlは下向き面の移動量。
-            const dh = dl / 0.74,
-                h = Math.max(m, o.h + dh);
-            return { h, extrude: true, lift: o.lift - 0.82 * (h - o.h) };
+        if (o.type === "asset" && o.asset === "recessedStackedBuilding" && typeof recessedStackedBuildingParams === "function") {
+            const q = recessedStackedBuildingParams(o),
+                upperCount = Math.max(0, q.floorCount - 1),
+                minTotal = upperCount > 0 ? q.firstFloorHeight + upperCount * (0.5 + q.floorGap) : 0.5,
+                targetH = Math.max(minTotal, o.h + dl);
+            if (upperCount > 0) {
+                const nextFloorH = clamp((targetH - q.firstFloorHeight - upperCount * q.floorGap) / upperCount, 0.5, 30),
+                    h = q.firstFloorHeight + upperCount * (nextFloorH + q.floorGap);
+                return {
+                    recessedFloorHeight: nextFloorH,
+                    recessedFirstFloorHeight: q.firstFloorHeight,
+                    recessedFirstFloorExtra: q.firstFloorHeight - nextFloorH,
+                    h,
+                    extrude: true,
+                    ...(fid === "base" ? { lift: o.lift - (h - o.h) } : {}),
+                };
+            }
+            const nextFirstH = clamp(targetH, 0.5, 30);
+            return {
+                recessedFirstFloorHeight: nextFirstH,
+                recessedFirstFloorExtra: nextFirstH - q.floorHeight,
+                h: nextFirstH,
+                extrude: true,
+                ...(fid === "base" ? { lift: o.lift - (nextFirstH - o.h) } : {}),
+            };
         }
         const h = Math.max(minHeight, o.h + dl);
-        return { h, extrude: true, lift: o.lift - (h - o.h) };
+        return fid === "top"
+            ? { h, extrude: true }
+            : { h, extrude: true, lift: o.lift - (h - o.h) };
     }
     const sg = fid[1] === "+" ? 1 : -1,
         isU = fid[0] === "u",

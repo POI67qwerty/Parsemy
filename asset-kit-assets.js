@@ -636,7 +636,42 @@ function signalPoleContour(part, o) {
 // 灯器の丸角や円形標識は多角形で面を作っているが、分割ごとの縦線は
 // 本来の縞模様ではない。前後の輪は維持し、奥行き方向は輪郭の2本だけ。
 function signalSmoothSides(part, o, K) {
-    if (!o || window.__legacySignalSmooth || !part?.path || part.path.length <= 4) return part;
+    if (!o || window.__legacySignalSmooth) return part;
+    if (part?.circularHood && part.meshEdges?.length >= 3) {
+        const frontLoop = part.meshEdges[0], backLoop = part.meshEdges[2],
+            n = Math.min(frontLoop.length, backLoop.length) - 1;
+        if (n > 4) {
+            const sub = (a, b) => a.map((v, i) => v - b[i]),
+                dot = (a, b) => a.reduce((v, w, i) => v + w * b[i], 0),
+                origin = L2W(o, 0, 0, 0),
+                u = sub(L2W(o, 1, 0, 0), origin),
+                v = sub(L2W(o, 0, 0, 1), origin),
+                eye = orthView ? orthBasis().depth.map((x) => -x) : sub(camPos(), origin),
+                eu = dot(eye, u),
+                ev = dot(eye, v),
+                path = frontLoop.slice(0, n).map((p) => [p[0], p[2]]),
+                winding = path.reduce((a, p, i) => a + p[0] * path[(i + 1) % n][1] - path[(i + 1) % n][0] * p[1], 0) >= 0 ? 1 : -1,
+                faces = [];
+            for (let i = 0; i < n; i++) {
+                const a = path[i], b = path[(i + 1) % n], du = b[0] - a[0], dv = b[1] - a[1],
+                    cu = orthView ? eu : eu - a[0], cv = orthView ? ev : ev - a[1];
+                faces.push(winding * (dv * cu - du * cv) > 1e-12);
+            }
+            const idx = [];
+            for (let i = 0; i < n; i++) if (faces[(i + n - 1) % n] !== faces[i]) idx.push(i);
+            const picks = idx.length === 2 ? idx : [0, Math.floor(n / 2)],
+                base = part.circularBaseEdges || 3;
+            part.meshEdges.length = base;
+            if (part.seamMarks) part.seamMarks.length = base;
+            for (const i of picks) {
+                part.meshEdges.push([frontLoop[i], backLoop[i]]);
+                if (part.seamMarks) part.seamMarks.push(null);
+            }
+            part.signalSmoothSide = true;
+        }
+        return part;
+    }
+    if (!part?.path || part.path.length <= 4) return part;
     const axis=part.axis || "z", sub=(a,b)=>a.map((v,i)=>v-b[i]),
         dot=(a,b)=>a.reduce((v,w,i)=>v+w*b[i],0),
         // L2Wは回転・移動のアフィン変換なので、断面2軸だけを一度求める。
@@ -692,6 +727,220 @@ function signalPoleParts(K, g, o) {
 
 // 横腕の長さは灯器と支柱の隙間。灯器の寸法や高さは変えない。
 function signalArmControl() { return {key:'signalArmGap',label:'横腕の長さ',default:.4,min:.05,max:4,step:.05,unit:'m',handle:(o,v)=>{const g=signalGeometry(o),x=g.headX;return {anchor:[0,0,g.H],sample:[x,0,g.H],probe:[x+1,0,g.H],fallback:{x:1,y:0}};}}; }
+function trafficSignalHoodGeometry(o) {
+    const g = signalGeometry(o),
+        front = -g.headD / 2,
+        lampR = Math.max(0.02, ASSET_KIT.param(o, "tsLampR", 0.125)),
+        s = Math.min(lampR * 2.28, g.headW * 0.285, g.headH * 0.88),
+        t = Math.max(0.007, Math.min(0.016, s * 0.055)),
+        pad = t + Math.min(0.001, s * 0.02),
+        kneeMin = +(pad + 0.001).toFixed(4),
+        kneeMax = +Math.max(kneeMin + 0.01, s - pad - 0.001).toFixed(4),
+        defaultBrim = 0.12,
+        defaultKnee = +clamp(s * 0.25, kneeMin, kneeMax).toFixed(3),
+        rawLegacy = o?.tsHood !== undefined ? Number(o.tsHood) : undefined,
+        enabled = o?.signalHood !== false && !(rawLegacy !== undefined && rawLegacy <= 0.01 && o?.tsHoodLength === undefined),
+        rawBrim = Number.isFinite(Number(o?.tsHoodLength))
+            ? Number(o.tsHoodLength)
+            : rawLegacy !== undefined && rawLegacy > 0.01
+              ? Math.abs(rawLegacy - 0.1) < 1e-6
+                  ? defaultBrim
+                  : rawLegacy
+              : defaultBrim,
+        brimLength = clamp(rawBrim, 0, 0.6),
+        frameDepth = 0.022,
+        rawKnee = Number.isFinite(Number(o?.tsHoodKnee)) ? Number(o.tsHoodKnee) : defaultKnee,
+        knee = clamp(rawKnee, kneeMin, kneeMax);
+    return { g, front, lampR, s, t, pad, kneeMin, kneeMax, defaultBrim, defaultKnee, enabled, brimLength, frameDepth, knee };
+}
+function trafficSignalHoodControls() {
+    return [
+        {
+            key: "signalHood",
+            label: "ひさし",
+            type: "boolean",
+            default: true,
+            canvasToggle: true,
+            get: (o) => trafficSignalHoodGeometry(o).enabled,
+            patch: (o, v) => ({
+                signalHood: !!v,
+                ...(v && Number(o?.tsHood) <= 0.01 ? { tsHood: 0.1 } : {}),
+            }),
+        },
+        {
+            key: "tsHoodLength",
+            label: "ひさしのつばの長さ",
+            min: 0,
+            max: 0.6,
+            step: 0.01,
+            unit: "m",
+            get: (o) => trafficSignalHoodGeometry(o).brimLength,
+            patch: (o, v) => ({ tsHoodLength: clamp(Number(v) || 0, 0, 0.6) }),
+            handle: (o, v) => {
+                const p = trafficSignalHoodGeometry(o);
+                if (!p.enabled) return null;
+                const x = (p.g.suspended ? p.g.headX : 0) - p.g.headW * 0.3,
+                    baseY = p.front - 0.0015 - p.frameDepth,
+                    z = p.g.headCz + p.s / 2;
+                return {
+                    anchor: [x, baseY, z],
+                    sample: [x, baseY - v, z],
+                    probe: [x, baseY - v - 1, z],
+                    fallback: { x: 0, y: 1 },
+                };
+            },
+        },
+        {
+            key: "tsHoodKnee",
+            label: "ひさしの傾き（折れ点の高さ）",
+            min: (o) => trafficSignalHoodGeometry(o).kneeMin,
+            max: (o) => trafficSignalHoodGeometry(o).kneeMax,
+            step: 0.005,
+            unit: "m",
+            get: (o) => trafficSignalHoodGeometry(o).knee,
+            patch: (o, v) => {
+                const p = trafficSignalHoodGeometry(o);
+                return { tsHoodKnee: clamp(Number(v) ?? p.knee, p.kneeMin, p.kneeMax) };
+            },
+            handle: (o, v) => {
+                const p = trafficSignalHoodGeometry(o);
+                if (!p.enabled) return null;
+                const x = (p.g.suspended ? p.g.headX : 0) - p.g.headW * 0.3 - p.s / 2,
+                    y = p.front - 0.0015 - p.frameDepth,
+                    z0 = p.g.headCz - p.s / 2;
+                return {
+                    anchor: [x, y, z0],
+                    sample: [x, y, z0 + v],
+                    probe: [x, y, z0 + v + 1],
+                    fallback: { x: 0, y: -1 },
+                };
+            },
+        },
+    ];
+}
+function signalLampHoodParts(K, cx, cz, front, w, h, hood, bevel, group, kneeRatio = 0.24, circular = false, explicitKnee = null, explicitFrameDepth = null) {
+    const frameDepth = explicitFrameDepth !== null ? explicitFrameDepth : Math.max(0.018, Math.min(0.028, hood * 0.3)),
+        brimLength = Math.max(0, hood),
+        t = Math.max(0.007, Math.min(0.016, Math.min(w, h) * 0.055)),
+        b = circular ? 0 : Math.max(0, Math.min(bevel, Math.min(w, h) * 0.38)),
+        pad = Math.max(circular ? t : b, t) + Math.min(0.001, h * 0.02),
+        knee = explicitKnee !== null ? clamp(explicitKnee, pad, Math.max(pad, h - pad)) : Math.max(pad + 0.001, h * kneeRatio),
+        backY = front - 0.0015,
+        hoodY = backY - (frameDepth + brimLength) / 2;
+    return K.moveParts(
+        K.part("screenHood", {
+            w,
+            h,
+            frameDepth,
+            brimLength,
+            knee,
+            t,
+            bevel: b,
+            circular,
+            group,
+            noBackInner: true,
+            noInnerSeam: true,
+        }),
+        cx,
+        hoodY,
+        cz - h / 2,
+    );
+}
+function pedSignalHoodGeometry(o) {
+    const g = signalGeometry(o),
+        front = -g.headD / 2,
+        lamp = Math.min(Math.max(0.1, ASSET_KIT.param(o, "psLamp", 0.25)), Math.min(g.headW - 0.06, g.headH * 0.45)),
+        topCz = g.headBottom + g.headH * 0.72,
+        bottomCz = g.headBottom + g.headH * 0.27,
+        w = Math.min(lamp * 1.18, g.headW - 0.02),
+        h = Math.min(lamp * 1.18, g.headH * 0.43),
+        t = Math.max(0.007, Math.min(0.016, Math.min(w, h) * 0.055)),
+        bevel = Math.max(0, Math.min(Math.min(0.03, Math.min(w, h) * 0.16), Math.min(w, h) * 0.38)),
+        pad = Math.max(t, bevel) + Math.min(0.001, h * 0.02),
+        kneeMin = +(pad + 0.001).toFixed(4),
+        kneeMax = +Math.max(kneeMin + 0.01, h - pad - 0.001).toFixed(4),
+        defaultBrim = 0.09,
+        defaultKnee = +clamp(h * 0.35, kneeMin, kneeMax).toFixed(3),
+        rawLegacy = o?.psHood !== undefined ? Number(o.psHood) : undefined,
+        enabled = o?.signalHood !== false && !(rawLegacy !== undefined && rawLegacy <= 0.01 && o?.psHoodLength === undefined),
+        rawBrim = Number.isFinite(Number(o?.psHoodLength))
+            ? Number(o.psHoodLength)
+            : rawLegacy !== undefined && rawLegacy > 0.01
+              ? Math.abs(rawLegacy - 0.06) < 1e-6
+                  ? defaultBrim
+                  : rawLegacy
+              : defaultBrim,
+        brimLength = clamp(rawBrim, 0, 0.6),
+        frameDepth = 0.022,
+        rawKnee = Number.isFinite(Number(o?.psHoodKnee)) ? Number(o.psHoodKnee) : defaultKnee,
+        knee = clamp(rawKnee, kneeMin, kneeMax);
+    return { g, front, lamp, topCz, bottomCz, w, h, t, bevel, pad, kneeMin, kneeMax, defaultBrim, defaultKnee, enabled, brimLength, frameDepth, knee };
+}
+function pedSignalHoodControls() {
+    return [
+        {
+            key: "signalHood",
+            label: "ひさし",
+            type: "boolean",
+            default: true,
+            canvasToggle: true,
+            get: (o) => pedSignalHoodGeometry(o).enabled,
+            patch: (o, v) => ({
+                signalHood: !!v,
+                ...(v && Number(o?.psHood) <= 0.01 ? { psHood: 0.06 } : {}),
+            }),
+        },
+        {
+            key: "psHoodLength",
+            label: "ひさしのつばの長さ",
+            min: 0,
+            max: 0.6,
+            step: 0.01,
+            unit: "m",
+            get: (o) => pedSignalHoodGeometry(o).brimLength,
+            patch: (o, v) => ({ psHoodLength: clamp(Number(v) || 0, 0, 0.6) }),
+            handle: (o, v) => {
+                const p = pedSignalHoodGeometry(o);
+                if (!p.enabled) return null;
+                const x = (p.g.suspended ? p.g.headX : 0) - p.w * 0.25,
+                    baseY = p.front - 0.0015 - p.frameDepth,
+                    z = p.topCz + p.h / 2;
+                return {
+                    anchor: [x, baseY, z],
+                    sample: [x, baseY - v, z],
+                    probe: [x, baseY - v - 1, z],
+                    fallback: { x: 0, y: 1 },
+                };
+            },
+        },
+        {
+            key: "psHoodKnee",
+            label: "ひさしの傾き（折れ点の高さ）",
+            min: (o) => pedSignalHoodGeometry(o).kneeMin,
+            max: (o) => pedSignalHoodGeometry(o).kneeMax,
+            step: 0.005,
+            unit: "m",
+            get: (o) => pedSignalHoodGeometry(o).knee,
+            patch: (o, v) => {
+                const p = pedSignalHoodGeometry(o);
+                return { psHoodKnee: clamp(Number(v) ?? p.knee, p.kneeMin, p.kneeMax) };
+            },
+            handle: (o, v) => {
+                const p = pedSignalHoodGeometry(o);
+                if (!p.enabled) return null;
+                const x = (p.g.suspended ? p.g.headX : 0) - p.w / 2,
+                    y = p.front - 0.0015 - p.frameDepth,
+                    z0 = p.bottomCz - p.h / 2;
+                return {
+                    anchor: [x, y, z0],
+                    sample: [x, y, z0 + v],
+                    probe: [x, y, z0 + v + 1],
+                    fallback: { x: 0, y: -1 },
+                };
+            },
+        },
+    ];
+}
 function signalArmParts(o,K,g,headParts) {
     if(!g.suspended)return headParts;
     const moved=K.moveParts(headParts,g.headX,0,0).map(p=>p.signalSmoothSide?signalSmoothSides(p,o,K):p),
@@ -709,7 +958,7 @@ ASSET_KIT.define(
         h: 2.8,
         accent: "#5c6b73",
         geometryBounds: true,
-        controls: [depthBevelControl("spDepthBevel", 0.05, true),signalArmControl()],
+        controls: [...trafficSignalHoodControls(), depthBevelControl("spDepthBevel", 0.05, true), signalArmControl()],
         spHeadH: 0.34, // 灯器（頭）の高さ
         spPoleR: 0.042, // ポールの半径
         spBaseR: 0.16, // 台座の半径
@@ -718,23 +967,42 @@ ASSET_KIT.define(
         tsHood: 0.1, // ひさし（フード）の長さ
     },
     (o, K) => {
-        const g = signalGeometry(o),
-            front = -g.headD / 2,
-            lampR = Math.max(0.02, K.param(o, "tsLampR", 0.125)),
-            hood = Math.max(0, K.param(o, "tsHood", 0.1)),
+        const hp = trafficSignalHoodGeometry(o),
+            { g, front, lampR, s: hoodS } = hp,
             pole = signalPoleParts(K, g, o), parts = [];
         // 灯器：角を丸めた横長の箱
         parts.push(signalSmoothSides(K.depthBeveledBox(g.headW, g.headD, g.headH, K.param(o, "spDepthBevel", 0.05), {seg: 3, z0: g.headBottom}), o, K));
-        // 灯（青・黄・赤）と、灯のまわりのひさし
+        // 灯（青・黄・赤）と、灯のまわりの上が張り出す斜めひさし
+        const lensFront = hp.enabled && !window.__legacySignalMount ? front - 0.005 : front - 0.024,
+            lensBack = hp.enabled && !window.__legacySignalMount ? front - 0.0015 : front - 0.008;
         [-1, 0, 1].forEach((i) => {
             const x = i * g.headW * 0.3;
-            parts.push(...K.moveParts([K.cylinder(lampR, front - 0.024, front - 0.008, { axis: "y", seg: 20 })], x, 0, g.headCz));
-            // ひさし（フード）：灯のまわりの筒を手前へ張り出す（依頼50で輪の板に変えたが、
-            // 見た目が意図と違うため元の筒へ戻した）。
-            if (hood > 0.01)
-                parts.push(
-                    ...K.moveParts([K.cylinder(lampR * 1.26, front - 0.012 - hood, front + 0.004, { axis: "y", caps: false, seg: 22 })], x, 0, g.headCz),
-                );
+            parts.push(...K.moveParts([Object.assign(K.cylinder(lampR, lensFront, lensBack, { axis: "y", seg: 20 }), { preciseTubeEdge: true })], x, 0, g.headCz));
+            if (hp.enabled) {
+                if (window.__legacySignalMount) {
+                    const legacyHood = Math.max(0.02, K.param(o, "tsHood", 0.1));
+                    parts.push(
+                        ...K.moveParts([K.cylinder(lampR * 1.26, front - 0.012 - legacyHood, front + 0.004, { axis: "y", caps: false, seg: 22 })], x, 0, g.headCz),
+                    );
+                } else
+                    parts.push(
+                        ...signalLampHoodParts(
+                            K,
+                            x,
+                            g.headCz,
+                            front,
+                            hoodS,
+                            hoodS,
+                            hp.brimLength,
+                            0,
+                            "tsHood" + (i + 1),
+                            0.25,
+                            true,
+                            hp.knee,
+                            hp.frameDepth,
+                        ).map((p) => signalSmoothSides(p, o, K)),
+                    );
+            }
         });
         return [...pole,...signalArmParts(o,K,g,parts)];
     },
@@ -751,7 +1019,7 @@ ASSET_KIT.define(
         h: 2.4,
         accent: "#5c6b73",
         geometryBounds: true,
-        controls: [depthBevelControl("spDepthBevel", 0.05, true),signalArmControl()],
+        controls: [...pedSignalHoodControls(), depthBevelControl("spDepthBevel", 0.05, true), signalArmControl()],
         spHeadH: 0.66,
         spPoleR: 0.038,
         spBaseR: 0.15,
@@ -760,34 +1028,51 @@ ASSET_KIT.define(
         psHood: 0.06, // ひさし（四角い枠）の張り出し
     },
     (o, K) => {
-        const g = signalGeometry(o),
-            front = -g.headD / 2,
-            lamp = Math.min(Math.max(0.1, K.param(o, "psLamp", 0.25)), Math.min(g.headW - 0.06, g.headH * 0.45)),
+        const hp = pedSignalHoodGeometry(o),
+            { g, front, lamp, topCz, bottomCz } = hp,
             // 上=止まれ（赤）／下=進め（青）。灯の中心の高さ。
-            topCz = g.headBottom + g.headH * 0.72,
-            bottomCz = g.headBottom + g.headH * 0.27,
+            lensFront = hp.enabled && !window.__legacySignalMount ? front - 0.005 : front - 0.022,
+            lensBack = hp.enabled && !window.__legacySignalMount ? front - 0.0015 : front - 0.008,
             pole = signalPoleParts(K, g, o), parts = [],
-            lens = (cz) => signalSmoothSides(K.box(K.offsetPath(K.roundRectPath(lamp, lamp, Math.min(0.03, lamp * 0.16), 2), 0, cz), front - 0.022, front - 0.008, { axis: "y" }), o, K);
+            lens = (cz) => signalSmoothSides(K.box(K.offsetPath(K.roundRectPath(lamp, lamp, Math.min(0.03, lamp * 0.16), 2), 0, cz), lensFront, lensBack, { axis: "y" }), o, K);
         parts.push(signalSmoothSides(K.depthBeveledBox(g.headW, g.headD, g.headH, K.param(o, "spDepthBevel", 0.05), {seg: 3, z0: g.headBottom}), o, K));
         parts.push(lens(topCz), lens(bottomCz));
-        // ひさし（四角い枠）：灯のまわりの帯を手前へ張り出す。
-        // 車両用と同じく「外側の枠＋内側の穴」にして、線画でも枠として見えるようにする。
-        const hood = Math.max(0, K.param(o, "psHood", 0.06));
-        if (hood > 0.01)
-            [topCz, bottomCz].forEach((cz) =>
-                parts.push(
-                    signalSmoothSides(K.box(
-                        K.offsetPath(K.roundRectPath(lamp * 1.2, lamp * 1.2, Math.min(0.03, lamp * 0.16), 2), 0, cz),
-                        front - 0.01 - hood,
-                        front + 0.004,
-                        {
-                            axis: "y",
-                            holes: [K.offsetPath(K.roundRectPath(lamp * 1.02, lamp * 1.02, Math.min(0.02, lamp * 0.1), 2), 0, cz)],
-                            holeSides: true,
-                        },
-                    ), o, K),
-                ),
-            );
+        // ひさし：各灯のまわりに、上が長く手前へ張り出し下が斜めに引っ込むひさしを付ける。
+        if (hp.enabled)
+            [topCz, bottomCz].forEach((cz, idx) => {
+                if (window.__legacySignalMount) {
+                    const legacyHood = Math.max(0.02, K.param(o, "psHood", 0.06));
+                    parts.push(
+                        signalSmoothSides(K.box(
+                            K.offsetPath(K.roundRectPath(lamp * 1.2, lamp * 1.2, Math.min(0.03, lamp * 0.16), 2), 0, cz),
+                            front - 0.01 - legacyHood,
+                            front + 0.004,
+                            {
+                                axis: "y",
+                                holes: [K.offsetPath(K.roundRectPath(lamp * 1.02, lamp * 1.02, Math.min(0.02, lamp * 0.1), 2), 0, cz)],
+                                holeSides: true,
+                            },
+                        ), o, K),
+                    );
+                } else
+                    parts.push(
+                        ...signalLampHoodParts(
+                            K,
+                            0,
+                            cz,
+                            front,
+                            hp.w,
+                            hp.h,
+                            hp.brimLength,
+                            hp.bevel,
+                            "psHood" + idx,
+                            0.35,
+                            false,
+                            hp.knee,
+                            hp.frameDepth,
+                        ),
+                    );
+            });
         return [...pole,...signalArmParts(o,K,g,parts)];
     },
 );
@@ -1053,6 +1338,7 @@ ASSET_KIT.define(
     {
         label: "カウンター",
         glyph: "▭",
+        group: "furniture",
         w: 2.0,
         d: 0.6,
         h: 1.0,
@@ -1070,6 +1356,7 @@ ASSET_KIT.define(
     {
         label: "L字カウンター",
         glyph: "└",
+        group: "furniture",
         w: 1.8,
         d: 1.8,
         h: 1.0,
@@ -1087,6 +1374,7 @@ ASSET_KIT.define(
     {
         label: "コの字カウンター",
         glyph: "⊔",
+        group: "furniture",
         w: 2.2,
         d: 1.6,
         h: 1.0,
@@ -2106,6 +2394,18 @@ function chainFenceGap(o) {
     const v = Number(o?.fenceGap);
     return Math.max(0, Math.min(2, Number.isFinite(v) ? v : 0));
 }
+function chainFenceMaxBottomHeight(o) {
+    const d = chainFenceDiameter(o),
+        r = d / 2,
+        b = chainFenceBend(o),
+        H = Math.max(chainFenceMinHeight(o), Number(o?.h) || 1.4);
+    return Math.max(r, H - d - b - .08);
+}
+function chainFenceBottomHeight(o) {
+    const r = chainFenceDiameter(o) / 2,
+        v = Number(o?.fenceBottomHeight);
+    return Math.max(r, Math.min(chainFenceMaxBottomHeight(o), Number.isFinite(v) ? v : Math.max(r, .12)));
+}
 function chainFenceTubePart(o, sections, radius, ringMarks = [], opts = {}) {
     const N = 16,
         capStart = opts.capStart !== false,
@@ -2217,21 +2517,32 @@ function chainFencePanelParts(o, xOff = 0) {
         xPost = L / 2 + b,
         top = H - r,
         zArc = top - b,
-        bottomBar = !!o?.fenceBottomBar,
+        bottomBar = o?.fenceBottomBar !== false,
+        zBot = chainFenceBottomHeight(o),
+        zBotLow = Math.max(0, zBot - r),
+        zBotHigh = zBot + r,
         sections = [],
         marks = [];
     const add = (px, pz, nx, nz, mark = false, extra = {}) => {
         sections.push({ x: xOff + px, z: pz, nx, nz, ...extra });
         if (mark) marks.push(sections.length - 1);
     };
-    const zStart = bottomBar ? 3 * r : Math.min(d * 1.1, zArc * 0.15),
+    const zStart = bottomBar ? zBotHigh : Math.min(d * 1.1, zArc * 0.15),
         postSpan = Math.max(0.02, zArc - zStart),
-        bands = Math.max(2, Math.min(24, Math.round(postSpan / 0.34)));
-    add(-xPost, 0, -1, 0);
+        bands = Math.max(1, Math.min(24, Math.round(postSpan / 0.34))),
+        lowBands = bottomBar && zBotLow > d * 1.6 ? Math.max(1, Math.min(12, Math.round(zBotLow / 0.34))) : 1;
     if (bottomBar) {
-        add(-xPost, r, -1, 0, false, { skipInner: true });
-        add(-xPost, 3 * r, -1, 0);
+        if (zBotLow > 1e-4) {
+            add(-xPost, 0, -1, 0);
+            for (let k = 1; k < lowBands; k++) add(-xPost, (k / lowBands) * zBotLow, -1, 0, true);
+            add(-xPost, zBotLow, -1, 0, false, { skipInner: true });
+            add(-xPost, zBotHigh, -1, 0);
+        } else {
+            add(-xPost, 0, -1, 0, false, { skipInner: true });
+            add(-xPost, zBotHigh, -1, 0);
+        }
     } else {
+        add(-xPost, 0, -1, 0);
         add(-xPost, zStart, -1, 0, true);
     }
     for (let k = 1; k < bands; k++) add(-xPost, zStart + (k / bands) * postSpan, -1, 0, true);
@@ -2245,16 +2556,21 @@ function chainFencePanelParts(o, xOff = 0) {
     }
     for (let k = bands - 1; k >= 1; k--) add(xPost, zStart + (k / bands) * postSpan, 1, 0, true);
     if (bottomBar) {
-        add(xPost, 3 * r, 1, 0, false, { skipInner: true });
-        add(xPost, r, 1, 0);
+        add(xPost, zBotHigh, 1, 0, false, { skipInner: true });
+        if (zBotLow > 1e-4) {
+            add(xPost, zBotLow, 1, 0);
+            for (let k = lowBands - 1; k >= 1; k--) add(xPost, (k / lowBands) * zBotLow, 1, 0, true);
+            add(xPost, 0, 1, 0);
+        } else {
+            add(xPost, 0, 1, 0);
+        }
     } else {
         add(xPost, zStart, 1, 0, true);
+        add(xPost, 0, 1, 0);
     }
-    add(xPost, 0, 1, 0);
     const parts = [chainFenceTubePart(o, sections, r, marks)];
     if (bottomBar) {
         const N = 16,
-            zBot = 2 * r,
             weldRing = (sign) =>
                 Array.from({ length: N }, (_, j) => {
                     const a = (2 * Math.PI * j) / N;
@@ -2269,7 +2585,7 @@ function chainFencePanelParts(o, xOff = 0) {
     // ひし形金網（線画のみ・面なし）。幅や高さを変えても45°正方形ピッチを保ち、網目数が増減する。
     const xIn = xPost - r - 0.0008,
         zMax = top - r - 0.0008,
-        zMin = bottomBar ? 3 * r + 0.0008 : 0,
+        zMin = bottomBar ? zBotHigh + 0.0008 : 0,
         rIn = Math.max(0, (b - r) * Math.cos(Math.PI / 16) - 0.0008),
         pitch = chainFenceMeshPitch(o),
         step = Math.max(pitch, (chainFenceCount(o) * (2 * xIn + Math.max(0, zMax - zMin))) / 360),
@@ -2374,13 +2690,48 @@ function chainFenceBuild(o) {
             get: chainFenceMeshPitch,
             handle: (o, v) => {
                 const y = -chainFenceDiameter(o) / 2 - .02,
-                    z0 = Math.max(.1, (Number(o.h) || 1.4) * .62 - v / 2);
+                    z0 = Math.max(.1, (Number(o.h) || 1.4) * .58 - v / 2);
                 return { anchor: [0, y, z0], sample: [v, y, z0 + v], probe: [v + 1, y, z0 + v + 1], fallback: { x: 1, y: -1 } };
             },
         },
-        { key: 'fenceCount', label: '横に並べる数', type: 'range', canvasSlider: true, default: 1, min: 1, max: 20, step: 1, integer: true, unit: '枚' },
+        {
+            key: 'fenceBottomHeight',
+            label: '下パイプの高さ',
+            canvasSlider: true,
+            default: .12,
+            min: (o) => chainFenceDiameter(o) / 2,
+            max: chainFenceMaxBottomHeight,
+            step: .01,
+            unit: 'm',
+            when: (o) => o?.fenceBottomBar !== false,
+            get: chainFenceBottomHeight,
+            handle: (o, v) => {
+                const x = -chainFenceStraight(o) * .28,
+                    r = chainFenceDiameter(o) / 2;
+                return { anchor: [x, -r, 0], sample: [x, -r, v], probe: [x, -r, v + 1], fallback: { x: 0, y: -1 } };
+            },
+        },
+        {
+            key: 'fenceCount',
+            label: '横に並べる数',
+            type: 'range',
+            canvasSlider: true,
+            default: 1,
+            min: 1,
+            max: 20,
+            step: 1,
+            integer: true,
+            unit: '枚',
+            get: chainFenceCount,
+            handle: (o, v) => {
+                const r = chainFenceDiameter(o) / 2,
+                    x = Math.abs(Number(o.ra) || .9),
+                    z = (Number(o.h) || 1.4) * .78;
+                return { anchor: [x - .15, -r, z], sample: [x + .04, -r, z], probe: [x + 1.04, -r, z], fallback: { x: 1, y: 0 }, pixelsPerUnit: 26 };
+            },
+        },
         { key: 'fenceGap', label: '並べる間隔', type: 'range', canvasSlider: true, default: 0, min: 0, max: 2, step: .02, unit: 'm' },
-        { key: 'fenceBottomBar', label: '下の横パイプ', type: 'boolean', default: false },
+        { key: 'fenceBottomBar', label: '下の横パイプ', type: 'boolean', default: true },
     ];
     ASSET_KIT.define(
         'chainFence',
@@ -2410,3 +2761,1120 @@ function chainFenceBuild(o) {
         (o) => chainFenceBuild(o),
     );
 })();
+
+// ===== UFOキャッチャー・ガチャ（上に積み重ね・横連結対応） =====
+// ベベル直方体（beveledBoxFootprint + beveledEdgeMark）を部品として生成する共通ヘルパー
+function arcadeBeveledBox(K, w, d, b, z0, z1, cx = 0, cy = 0, group = 'arc-bev') {
+    const seg = 4,
+        path = beveledBoxFootprint(w, d, b, seg).map(([px, py]) => [px + cx, py + cy]),
+        seamMarks = [null, null, ...path.map((_, i) => beveledEdgeMark(i, b, seg, group))];
+    return K.box(path, z0, z1, { onFace: true, preciseTubeEdge: true, seamMarks });
+}
+
+// UFOキャッチャーの下部キャビネット：
+// ・四隅は beveledBoxFootprint と同じ4分割ベベル（beveledEdgeMark 付き）
+// ・左前方は斜めに下がるボタン操作台（余分なボタン突起なし）
+// ・右側は幅・高さを調整できる景品取り出し口の実凹み開口
+function ufoLowerCabinetPart(g, K) {
+    const { w, d, baseH, bevel: b, consoleW, consoleProj, consoleFrontZ, chuteX0, chuteX1, chuteZ0, chuteZ1, chuteDepth } = g,
+        front = -d / 2,
+        seg = 4,
+        fp = beveledBoxFootprint(w, d, b, seg),
+        n = seg + 1,
+        cx0 = fp[n - 1][0],
+        cx1 = cx0 + consoleW,
+        yh = Math.min(d / 2 - .02, front + chuteDepth),
+        yCon = front - consoleProj,
+        tris = [],
+        edges = [],
+        marks = [],
+        quad = (p0, p1, p2, p3) => tris.push([p0, p1, p2], [p0, p2, p3]),
+        addEdge = (pts, mark = null) => {
+            edges.push(pts);
+            marks.push(mark);
+        };
+    // 平面の底面・上面輪郭：左前方の操作台張り出しを含めた閉ループ
+    const topPoly2 = [[cx0, yCon], [cx1, yCon], [cx1, front], ...fp.slice(n)],
+        botPoly2 = topPoly2.slice().reverse();
+    for (const tri of K.triangulate(botPoly2)) tris.push(tri.map(([x, y]) => [x, y, 0]));
+    // 上面は本体部分（y >= front）を水平面（z = baseH）とし、操作台部分（y < front）は斜め面にする
+    const mainTop2 = [[cx0, front], ...fp.slice(n)];
+    for (const tri of K.triangulate(mainTop2)) tris.push(tri.map(([x, y]) => [x, y, baseH]));
+    // 操作台の斜め上面・前面・左右側面
+    quad([cx0, yCon, consoleFrontZ], [cx1, yCon, consoleFrontZ], [cx1, front, baseH], [cx0, front, baseH]);
+    quad([cx0, yCon, 0], [cx1, yCon, 0], [cx1, yCon, consoleFrontZ], [cx0, yCon, consoleFrontZ]);
+    quad([cx0, front, 0], [cx0, yCon, 0], [cx0, yCon, consoleFrontZ], [cx0, front, baseH]);
+    quad([cx0, front, 0], [cx0, front, consoleFrontZ], [cx0, front, baseH], [cx0, front, 0]);
+    quad([cx1, yCon, 0], [cx1, front, 0], [cx1, front, baseH], [cx1, yCon, consoleFrontZ]);
+    // 外周のベベル角と右・奥・左の壁面（fp[n] から fp[0..n-1] まで）
+    for (let i = n; i < fp.length; i++) {
+        const j = (i + 1) % fp.length,
+            [x0, y0] = fp[i],
+            [x1, y1] = fp[j];
+        quad([x0, y0, 0], [x1, y1, 0], [x1, y1, baseH], [x0, y0, baseH]);
+    }
+    for (let i = 0; i < n - 1; i++) {
+        const [x0, y0] = fp[i],
+            [x1, y1] = fp[i + 1];
+        quad([x0, y0, 0], [x1, y1, 0], [x1, y1, baseH], [x0, y0, baseH]);
+    }
+    // 正面右側の壁（x: cx1 〜 rx1, y = front）と景品取り出し口の凹み5面
+    const rx1 = fp[n][0];
+    quad([cx1, front, 0], [rx1, front, 0], [rx1, front, chuteZ0], [cx1, front, chuteZ0]);
+    quad([cx1, front, chuteZ1], [rx1, front, chuteZ1], [rx1, front, baseH], [cx1, front, baseH]);
+    quad([cx1, front, chuteZ0], [chuteX0, front, chuteZ0], [chuteX0, front, chuteZ1], [cx1, front, chuteZ1]);
+    quad([chuteX1, front, chuteZ0], [rx1, front, chuteZ0], [rx1, front, chuteZ1], [chuteX1, front, chuteZ1]);
+    quad([chuteX0, yh, chuteZ0], [chuteX1, yh, chuteZ0], [chuteX1, yh, chuteZ1], [chuteX0, yh, chuteZ1]);
+    quad([chuteX0, front, chuteZ0], [chuteX0, yh, chuteZ0], [chuteX0, yh, chuteZ1], [chuteX0, front, chuteZ1]);
+    quad([chuteX1, yh, chuteZ0], [chuteX1, front, chuteZ0], [chuteX1, front, chuteZ1], [chuteX1, yh, chuteZ1]);
+    quad([chuteX0, front, chuteZ0], [chuteX1, front, chuteZ0], [chuteX1, yh, chuteZ0], [chuteX0, yh, chuteZ0]);
+    quad([chuteX0, yh, chuteZ1], [chuteX1, yh, chuteZ1], [chuteX1, front, chuteZ1], [chuteX0, front, chuteZ1]);
+
+    // 稜線（上下のベベル輪郭＋操作台の斜め稜線＋取り出し口＋ベベル角の縦シルエット候補）
+    const outerBot = [[cx0, yCon, 0], [cx1, yCon, 0], [cx1, front, 0], ...fp.slice(n).map(([x, y]) => [x, y, 0]), ...fp.slice(0, n).map(([x, y]) => [x, y, 0]), [cx0, yCon, 0]];
+    addEdge(outerBot);
+    const outerTop = [[cx0, front, baseH], ...fp.slice(n).map(([x, y]) => [x, y, baseH]), ...fp.slice(0, n).map(([x, y]) => [x, y, baseH])];
+    addEdge(outerTop);
+    // 上縁のステージ帯ラインと下縁のベース帯ライン（参考画像の上下ベベル帯）
+    const rimZ = Math.max(chuteZ1 + .02, baseH - Math.min(.055, baseH * .09));
+    if (baseH - rimZ > .018) {
+        addEdge([[cx1, front, rimZ], ...fp.slice(n).map(([x, y]) => [x, y, rimZ]), ...fp.slice(0, n).map(([x, y]) => [x, y, rimZ])]);
+    }
+    const plinthZ = Math.min(chuteZ0 - .02, Math.min(.055, baseH * .09));
+    if (plinthZ > .018) {
+        addEdge([[cx0, yCon, plinthZ], [cx1, yCon, plinthZ], [cx1, front, plinthZ], ...fp.slice(n).map(([x, y]) => [x, y, plinthZ]), ...fp.slice(0, n).map(([x, y]) => [x, y, plinthZ])]);
+    }
+    // 操作台の輪郭線（斜め天板と前面）
+    addEdge([[cx0, front, baseH], [cx0, yCon, consoleFrontZ], [cx1, yCon, consoleFrontZ], [cx1, front, baseH]]);
+    addEdge([[cx0, yCon, 0], [cx0, yCon, consoleFrontZ]]);
+    addEdge([[cx1, yCon, 0], [cx1, yCon, consoleFrontZ]]);
+    addEdge([[cx1, front, 0], [cx1, front, baseH]]);
+    // 四隅ベベルの縦線（seamMarks でシルエットの1本のみ描画）
+    fp.forEach(([x, y], idx) => {
+        addEdge([[x, y, 0], [x, y, baseH]], beveledEdgeMark(idx, b, seg, 'ufo-base'));
+    });
+    // 景品取り出し口（角丸ベベルなしの明瞭な凹み開口枠）
+    addEdge([[chuteX0, front, chuteZ0], [chuteX1, front, chuteZ0], [chuteX1, front, chuteZ1], [chuteX0, front, chuteZ1], [chuteX0, front, chuteZ0]]);
+    addEdge([[chuteX0, yh, chuteZ0], [chuteX1, yh, chuteZ0], [chuteX1, yh, chuteZ1], [chuteX0, yh, chuteZ1], [chuteX0, yh, chuteZ0]]);
+    for (const [x, z] of [[chuteX0, chuteZ0], [chuteX1, chuteZ0], [chuteX1, chuteZ1], [chuteX0, chuteZ1]]) {
+        addEdge([[x, front, z], [x, yh, z]]);
+    }
+    return { meshTriangles: tris, meshEdges: edges, seamMarks: marks, onFace: true, preciseTubeEdge: true };
+}
+
+// ショーケースの柱（前方はベベル内側に収まる角柱、後方は参考画像の斜めガセット一体のL字柱）
+function ufoShowcasePosts(g, K) {
+    const { w, d, baseH, roofBottom, showcaseH, bevel } = g,
+        flag = { onFace: true, preciseTubeEdge: true },
+        front = -d / 2,
+        back = d / 2,
+        postW = Math.max(.036, Math.min(.050, w * .052)),
+        postD = Math.max(.036, Math.min(.050, d * .052)),
+        insetX = Math.max(.014, bevel - postW),
+        insetY = Math.max(.014, bevel * .42),
+        px = w / 2 - insetX - postW / 2,
+        frontPy = front + insetY + postD / 2,
+        backY1 = back - insetY,
+        backY0 = backY1 - postD,
+        gussetD = Math.min(d * .22, (d - 2 * insetY - 2 * postD) * .38),
+        gussetH = Math.min(.20, showcaseH * .25),
+        parts = [];
+    // 前方左右の柱（内側面が x = ∓(w/2 - bevel) に揃い、操作台左端と干渉しない）
+    for (const sx of [-1, 1]) {
+        parts.push(K.box(K.rectPath(postW, postD, sx * px, frontPy), baseH, roofBottom, flag));
+    }
+    // 後方左右の柱（下部が前方へ斜めに広がるガセット一体型）
+    const rearProfileYZ =
+            gussetD > .04 && gussetH > .04
+                ? [
+                      [backY0 - gussetD, baseH],
+                      [backY0, baseH + gussetH],
+                      [backY0, roofBottom],
+                      [backY1, roofBottom],
+                      [backY1, baseH],
+                  ]
+                : [
+                      [backY0, baseH],
+                      [backY0, roofBottom],
+                      [backY1, roofBottom],
+                      [backY1, baseH],
+                  ],
+        rearPath = K.area2(rearProfileYZ) < 0 ? rearProfileYZ.slice().reverse() : rearProfileYZ;
+    for (const sx of [-1, 1]) {
+        parts.push(K.box(rearPath, sx * px - postW / 2, sx * px + postW / 2, { axis: 'x', ...flag }));
+    }
+    return parts;
+}
+
+function ufoCatcherGeom(o) {
+    const w = Math.max(.42, 2 * Math.abs(Number(o?.ra) || .45)),
+        d = Math.max(.40, 2 * Math.abs(Number(o?.rb) || .425)),
+        h = Math.max(.90, Number(o?.h) || 1.85),
+        maxBase = Math.max(.30, h * .54),
+        baseH = clamp(Number.isFinite(Number(o?.ufoBaseHeight)) ? Number(o.ufoBaseHeight) : .68, .26, maxBase),
+        maxBevel = Math.max(.02, Math.min(w, d) * .20),
+        bevel = clamp(Number.isFinite(Number(o?.ufoBevel)) ? Number(o.ufoBevel) : .070, .01, maxBevel),
+        flatW = Math.max(.26, w - 2 * bevel),
+        minConsoleW = .10,
+        maxConsoleW = Math.max(.14, flatW - .16),
+        defaultConsoleW = clamp(Math.min(w * .24, flatW * .32), minConsoleW, maxConsoleW),
+        consoleW = clamp(Number.isFinite(Number(o?.ufoConsoleWidth)) ? Number(o.ufoConsoleWidth) : defaultConsoleW, minConsoleW, maxConsoleW),
+        consoleProj = Math.max(.08, d * .13),
+        consoleSlant = Math.max(.08, baseH * .18),
+        consoleFrontZ = Math.max(.14, baseH - consoleSlant),
+        cx0 = -w / 2 + bevel,
+        cx1 = cx0 + consoleW,
+        rx1 = w / 2 - bevel,
+        availW = Math.max(.10, rx1 - cx1 - .04),
+        maxChuteW = availW,
+        chuteW = clamp(Number.isFinite(Number(o?.ufoChuteWidth)) ? Number(o.ufoChuteWidth) : .28, .10, maxChuteW),
+        defaultChuteMidX = (cx1 + rx1) / 2,
+        maxChuteOffX = Math.max(0, (availW - chuteW) / 2),
+        chuteOffX = clamp(Number.isFinite(Number(o?.ufoChuteX)) ? Number(o.ufoChuteX) : 0, -maxChuteOffX, maxChuteOffX),
+        chuteMidX = defaultChuteMidX + chuteOffX,
+        chuteX0 = chuteMidX - chuteW / 2,
+        chuteX1 = chuteMidX + chuteW / 2,
+        minChuteZ = .05,
+        maxChuteTopZ = Math.max(minChuteZ + .10, baseH - .06),
+        maxChuteH = Math.max(.08, maxChuteTopZ - minChuteZ),
+        chuteH = clamp(Number.isFinite(Number(o?.ufoChuteHeight)) ? Number(o.ufoChuteHeight) : .22, .08, maxChuteH),
+        defaultChuteMidZ = clamp(baseH * .44, minChuteZ + chuteH / 2, maxChuteTopZ - chuteH / 2),
+        minChuteOffZ = minChuteZ + chuteH / 2 - defaultChuteMidZ,
+        maxChuteOffZ = maxChuteTopZ - chuteH / 2 - defaultChuteMidZ,
+        chuteOffZ = clamp(Number.isFinite(Number(o?.ufoChuteZ)) ? Number(o.ufoChuteZ) : 0, minChuteOffZ, maxChuteOffZ),
+        chuteMidZ = defaultChuteMidZ + chuteOffZ,
+        chuteZ0 = chuteMidZ - chuteH / 2,
+        chuteZ1 = chuteMidZ + chuteH / 2,
+        chuteDepth = Math.min(.16, d * .24),
+        topSign = o?.ufoTopSign !== false,
+        signRise = topSign ? Math.min(.045, h * .025) : 0,
+        canopyTop = h - signRise,
+        canopyH = Math.max(.15, Math.min(.25, (canopyTop - baseH) * .22)),
+        roofBottom = canopyTop - canopyH,
+        showcaseH = Math.max(.28, roofBottom - baseH),
+        maxClawX = Math.max(.05, w * .28),
+        clawX = clamp(Number.isFinite(Number(o?.ufoClawX)) ? Number(o.ufoClawX) : 0, -maxClawX, maxClawX),
+        maxDrop = Math.max(.12, showcaseH * .58),
+        clawDrop = clamp(Number.isFinite(Number(o?.ufoClawDrop)) ? Number(o.ufoClawDrop) : .30, .10, maxDrop),
+        count = clamp(Math.round(Number(o?.ufoCount) || 1), 1, 10),
+        gap = clamp(Number.isFinite(Number(o?.ufoGap)) ? Number(o.ufoGap) : 0, 0, 1);
+    return {
+        w, d, h, maxBase, baseH, maxBevel, bevel,
+        minConsoleW, maxConsoleW, consoleW, consoleProj, consoleSlant, consoleFrontZ, cx0, cx1, rx1,
+        maxChuteW, chuteW, defaultChuteMidX, maxChuteOffX, chuteOffX, chuteMidX, chuteX0, chuteX1,
+        maxChuteH, chuteH, defaultChuteMidZ, minChuteOffZ, maxChuteOffZ, chuteOffZ, chuteMidZ, chuteZ0, chuteZ1, chuteDepth,
+        topSign, signRise, canopyTop, canopyH, roofBottom, showcaseH,
+        maxClawX, clawX, maxDrop, clawDrop, count, gap,
+    };
+}
+
+function ufoCatcherUnitParts(o, K) {
+    const g = ufoCatcherGeom(o),
+        { w, d, h, baseH, bevel, topSign, canopyTop, canopyH, roofBottom, showcaseH, clawX, clawDrop } = g,
+        flag = { onFace: true, preciseTubeEdge: true },
+        front = -d / 2,
+        parts = [];
+    // 1) 下部キャビネット本体（四隅ベベル＋上下ベベル帯＋左下の斜め操作台＋幅・高さ可変の景品取り出し口）
+    parts.push(ufoLowerCabinetPart(g, K));
+    // 2) ショーケース四隅の柱（後方は下部斜めガセット一体型）
+    parts.push(...ufoShowcasePosts(g, K));
+    // 3) 上部キャノピー（四隅ベベル＋上下ベベル帯ライン＋正面の角丸看板プレート）
+    const canopyOver = Math.max(.028, d * .045),
+        canopyD = d + canopyOver,
+        canopyCy = -canopyOver / 2;
+    parts.push(arcadeBeveledBox(K, w, canopyD, bevel, roofBottom, canopyTop, 0, canopyCy, 'ufo-canopy'));
+    const cFp = beveledBoxFootprint(w, canopyD, bevel, 4).map(([px, py]) => [px, py + canopyCy]),
+        cBand = Math.min(.032, canopyH * .17),
+        signW = Math.max(.24, (w - 2 * bevel) * .90),
+        signY1 = front - canopyOver,
+        cLowerLoop = [...cFp.map(([x, y]) => [x, y, roofBottom + cBand]), [cFp[0][0], cFp[0][1], roofBottom + cBand]],
+        cUpperLoop = topSign
+            ? [
+                  [signW / 2, signY1, canopyTop - cBand],
+                  ...cFp.slice(5).map(([x, y]) => [x, y, canopyTop - cBand]),
+                  ...cFp.slice(0, 5).map(([x, y]) => [x, y, canopyTop - cBand]),
+                  [-signW / 2, signY1, canopyTop - cBand],
+              ]
+            : [...cFp.map(([x, y]) => [x, y, canopyTop - cBand]), [cFp[0][0], cFp[0][1], canopyTop - cBand]];
+    if (cBand > .014) {
+        parts.push(K.wire([cLowerLoop, cUpperLoop], flag));
+    }
+    if (topSign) {
+        const signZ0 = roofBottom + cBand + .008,
+            signZ1 = h,
+            signY0 = signY1 - .032,
+            signR = Math.min(.038, (signZ1 - signZ0) * .24),
+            signPath = K.roundRectPath(signW, signZ1 - signZ0, signR, 3, 0, (signZ0 + signZ1) / 2),
+            signMarks = [null, null, ...signPath.map((_, i) => beveledEdgeMark(i, signR, 3, 'ufo-sign'))];
+        parts.push(K.box(signPath, signY0, signY1, { axis: 'y', seamMarks: signMarks, ...flag }));
+    }
+    // 4) クレーン機構（ベベル付き天井キャリッジ＋シャフト＋丸型UFOヘッド＋湾曲2本爪アーム）
+    const carrH = Math.min(.065, showcaseH * .11),
+        carrW = Math.min(.18, w * .20),
+        carrD = Math.min(.15, d * .19),
+        clawY = -d * .04,
+        headD = Math.min(.125, w * .145),
+        headH = headD * .72,
+        headTopZ = Math.max(baseH + .22, roofBottom - carrH - clawDrop),
+        headBotZ = headTopZ - headH,
+        shaftD = Math.max(.032, headD * .32);
+    parts.push(arcadeBeveledBox(K, carrW, carrD, Math.min(.03, carrW * .22), roofBottom - carrH, roofBottom, clawX, clawY, 'ufo-carr'));
+    if (roofBottom - carrH - headTopZ > .01) {
+        parts.push(arcadeBeveledBox(K, shaftD, shaftD, shaftD * .42, headTopZ, roofBottom - carrH, clawX, clawY, 'ufo-shaft'));
+    }
+    parts.push(arcadeBeveledBox(K, headD, headD, headD * .44, headBotZ, headTopZ, clawX, clawY, 'ufo-head'));
+    // 左右の湾曲C字型クレーン爪アーム
+    const armReach = Math.min(.115, w * .135),
+        armDrop = Math.min(.135, Math.max(.06, headBotZ - baseH - .05)),
+        armT = Math.max(.020, headD * .18),
+        armD = Math.max(.026, headD * .24);
+    for (const s of [-1, 1]) {
+        const x0 = clawX + s * (headD * .28),
+            x1 = clawX + s * (armReach * .92),
+            x2 = clawX + s * armReach,
+            x3 = clawX + s * (armReach * .46),
+            z0 = headBotZ + .005,
+            z1 = headBotZ - armDrop * .34,
+            z2 = headBotZ - armDrop * .70,
+            z3 = headBotZ - armDrop,
+            outer = [
+                [x0 + s * armT * .5, z0],
+                [x1 + s * armT * .5, z1],
+                [x2 + s * armT * .45, z2],
+                [x3 + s * armT * .25, z3 - armT * .35],
+                [x3 - s * armT * .45, z3 + armT * .25],
+                [x2 - s * armT * .5, z2 + armT * .08],
+                [x1 - s * armT * .5, z1],
+                [x0 - s * armT * .5, z0],
+            ],
+            poly = K.area2(outer) < 0 ? outer.slice().reverse() : outer;
+        parts.push(K.box(poly, clawY - armD / 2, clawY + armD / 2, { axis: 'y', ...flag }));
+    }
+    return parts;
+}
+
+function ufoCatcherBuild(o, K = ASSET_KIT) {
+    const g = ufoCatcherGeom(o),
+        unit = ufoCatcherUnitParts(o, K),
+        pitch = g.w + g.gap,
+        xStart = -((g.count - 1) * pitch) / 2;
+    return K.repeatParts(K.moveParts(unit, xStart, 0, 0), { axis: 'x', spacing: pitch, count: g.count, group: 'ufo-col' });
+}
+
+function gachaMachineGeom(o) {
+    const w = Math.max(.22, 2 * Math.abs(Number(o?.ra) || .19)),
+        d = Math.max(.24, 2 * Math.abs(Number(o?.rb) || .22)),
+        h = Math.max(.36, Number(o?.h) || .68),
+        bevel = Math.min(.032, Math.min(w, d) * .11),
+        waistRatio = clamp(Number.isFinite(Number(o?.gachaWaistRatio)) ? Number(o.gachaWaistRatio) : .47, .36, .60),
+        baseH = h * .18,
+        waistZ = h * waistRatio,
+        maxChuteW = Math.max(.08, w - 2 * bevel - .04),
+        chuteW = clamp(Number.isFinite(Number(o?.gachaChuteWidth)) ? Number(o.gachaChuteWidth) : .17, .08, maxChuteW),
+        maxChuteOffX = Math.max(0, (maxChuteW - chuteW) / 2),
+        chuteOffX = clamp(Number.isFinite(Number(o?.gachaChuteX)) ? Number(o.gachaChuteX) : 0, -maxChuteOffX, maxChuteOffX),
+        chuteMidX = chuteOffX,
+        chuteX0 = chuteMidX - chuteW / 2,
+        chuteX1 = chuteMidX + chuteW / 2,
+        minFloorZ = .012,
+        maxTopZ = Math.max(baseH + .05, waistZ * .62),
+        maxChuteH = Math.max(.06, maxTopZ - minFloorZ - .01),
+        chuteH = clamp(Number.isFinite(Number(o?.gachaChuteHeight)) ? Number(o.gachaChuteHeight) : .11, .05, maxChuteH),
+        defaultFloorZ = clamp(baseH * .22, minFloorZ, maxTopZ - chuteH),
+        minChuteOffZ = minFloorZ - defaultFloorZ,
+        maxChuteOffZ = maxTopZ - chuteH - defaultFloorZ,
+        chuteOffZ = clamp(Number.isFinite(Number(o?.gachaChuteZ)) ? Number(o.gachaChuteZ) : 0, minChuteOffZ, maxChuteOffZ),
+        chuteFloorZ = defaultFloorZ + chuteOffZ,
+        chuteTopZ = chuteFloorZ + chuteH,
+        chuteMidZ = (chuteFloorZ + chuteTopZ) / 2,
+        stack = clamp(Math.round(Number(o?.gachaStack) || 1), 1, 6),
+        count = clamp(Math.round(Number(o?.gachaCount) || 1), 1, 10);
+    return {
+        w, d, h, bevel, waistRatio, baseH, waistZ,
+        maxChuteW, chuteW, maxChuteOffX, chuteOffX, chuteMidX, chuteX0, chuteX1,
+        minFloorZ, maxTopZ, defaultFloorZ, minChuteOffZ, maxChuteOffZ, chuteOffZ, chuteFloorZ, maxChuteH, chuteH, chuteTopZ, chuteMidZ,
+        stack, count,
+    };
+}
+
+// ガチャの下部ベース＋一体型外装シェル（0 〜 topZ：斜め前方ベース・取り出し口凹み・継ぎ目のないC字切り欠き側面・上部額を一体構成）
+function gachaLowerBodyPart(g, topZ, winTopZ, sideT, cCurve, yDrumAtX) {
+    const { w, d, baseH, waistZ, chuteX0: hx0, chuteX1: hx1, chuteFloorZ: z0, chuteTopZ: z1 } = g,
+        front = -d / 2,
+        back = d / 2,
+        baseProj = Math.max(.034, d * .10),
+        yToe = front - baseProj,
+        yh = Math.min(back - .03, front + Math.max(.07, d * .22)),
+        lx0 = -w / 2,
+        rx1 = w / 2,
+        ix0 = lx0 + sideT,
+        ix1 = rx1 - sideT,
+        yAt = (z) => (z < baseH ? yToe + (front - yToe) * (z / baseH) : front),
+        y0 = yAt(z0),
+        y1 = yAt(z1),
+        straddle = z0 < baseH - 1e-4 && z1 > baseH + 1e-4,
+        tris = [],
+        edges = [],
+        quad = (p0, p1, p2, p3) => tris.push([p0, p1, p2], [p0, p2, p3]);
+
+    // 底面（z = 0）と外装上面（z = topZ）
+    quad([lx0, back, 0], [rx1, back, 0], [rx1, yToe, 0], [lx0, yToe, 0]);
+    quad([lx0, front, topZ], [rx1, front, topZ], [rx1, back, topZ], [lx0, back, topZ]);
+    // 背面壁（0 〜 topZ 一体）と下部ベース左右壁（0 〜 waistZ）・ベース前方張り出し三角側面
+    quad([rx1, back, 0], [lx0, back, 0], [lx0, back, topZ], [rx1, back, topZ]);
+    quad([lx0, back, 0], [lx0, front, 0], [lx0, front, waistZ], [lx0, back, waistZ]);
+    quad([rx1, front, 0], [rx1, back, 0], [rx1, back, waistZ], [rx1, front, waistZ]);
+    tris.push([[lx0, front, 0], [lx0, yToe, 0], [lx0, front, baseH]]);
+    tris.push([[rx1, yToe, 0], [rx1, front, 0], [rx1, front, baseH]]);
+
+    // 左右外装壁の上部（waistZ 〜 topZ：水平棚＋真円に近い半円C字窓切り欠き付きの連続1枚パネル＋厚みリボン）
+    quad([lx0, back, winTopZ], [lx0, front, winTopZ], [lx0, front, topZ], [lx0, back, topZ]);
+    quad([rx1, front, winTopZ], [rx1, back, winTopZ], [rx1, back, topZ], [rx1, front, topZ]);
+    for (let k = 0; k < cCurve.length - 1; k++) {
+        const a = cCurve[k],
+            b = cCurve[k + 1];
+        if (Math.abs(a[1] - b[1]) > 1e-5) {
+            quad([lx0, back, a[1]], [lx0, a[0], a[1]], [lx0, b[0], b[1]], [lx0, back, b[1]]);
+            quad([rx1, a[0], a[1]], [rx1, back, a[1]], [rx1, back, b[1]], [rx1, b[0], b[1]]);
+            quad([ix0, a[0], a[1]], [ix0, back, a[1]], [ix0, back, b[1]], [ix0, b[0], b[1]]);
+            quad([ix1, back, a[1]], [ix1, a[0], a[1]], [ix1, b[0], b[1]], [ix1, back, b[1]]);
+        }
+        quad([lx0, a[0], a[1]], [ix0, a[0], a[1]], [ix0, b[0], b[1]], [lx0, b[0], b[1]]);
+        quad([ix1, a[0], a[1]], [rx1, a[0], a[1]], [rx1, b[0], b[1]], [ix1, b[0], b[1]]);
+    }
+
+    // 下胴上端の水平レッジ（z = waistZ）と上部額の前面・下面（winTopZ 〜 topZ）
+    const yLedgeBack = cCurve[1][0];
+    quad([lx0, front, waistZ], [rx1, front, waistZ], [rx1, yLedgeBack, waistZ], [lx0, yLedgeBack, waistZ]);
+    quad([lx0, front, winTopZ], [rx1, front, winTopZ], [rx1, front, topZ], [lx0, front, topZ]);
+    quad([lx0, yLedgeBack, winTopZ], [rx1, yLedgeBack, winTopZ], [rx1, front, winTopZ], [lx0, front, winTopZ]);
+
+    // 1) 黒い下部ベースの前方斜面（z: 0 〜 baseH）
+    if (z0 >= baseH - 1e-4) {
+        quad([lx0, yToe, 0], [rx1, yToe, 0], [rx1, front, baseH], [lx0, front, baseH]);
+    } else {
+        const zb = Math.min(baseH, z1),
+            yb = yAt(zb);
+        if (z0 > 1e-4) quad([lx0, yToe, 0], [rx1, yToe, 0], [rx1, y0, z0], [lx0, y0, z0]);
+        quad([lx0, y0, z0], [hx0, y0, z0], [hx0, yb, zb], [lx0, yb, zb]);
+        quad([hx1, y0, z0], [rx1, y0, z0], [rx1, yb, zb], [hx1, yb, zb]);
+        if (zb < baseH - 1e-4) quad([lx0, yb, zb], [rx1, yb, zb], [rx1, front, baseH], [lx0, front, baseH]);
+    }
+
+    // 2) 下胴前面（y = front, z: baseH 〜 waistZ）
+    if (z1 <= baseH + 1e-4) {
+        quad([lx0, front, baseH], [rx1, front, baseH], [rx1, front, waistZ], [lx0, front, waistZ]);
+    } else {
+        const za = Math.max(baseH, z0);
+        if (za > baseH + 1e-4) quad([lx0, front, baseH], [rx1, front, baseH], [rx1, front, za], [lx0, front, za]);
+        quad([lx0, front, za], [hx0, front, za], [hx0, front, z1], [lx0, front, z1]);
+        quad([hx1, front, za], [rx1, front, za], [rx1, front, z1], [hx1, front, z1]);
+        if (z1 < waistZ - 1e-4) quad([lx0, front, z1], [rx1, front, z1], [rx1, front, waistZ], [lx0, front, waistZ]);
+    }
+
+    // 3) カプセル取り出し口凹み内部（床・天井・奥壁・左右内壁）
+    quad([hx0, y0, z0], [hx1, y0, z0], [hx1, yh, z0], [hx0, yh, z0]);
+    quad([hx0, yh, z1], [hx1, yh, z1], [hx1, y1, z1], [hx0, y1, z1]);
+    quad([hx0, yh, z0], [hx1, yh, z0], [hx1, yh, z1], [hx0, yh, z1]);
+    if (straddle) {
+        quad([hx0, y0, z0], [hx0, yh, z0], [hx0, yh, baseH], [hx0, front, baseH]);
+        quad([hx0, front, baseH], [hx0, yh, baseH], [hx0, yh, z1], [hx0, front, z1]);
+        quad([hx1, yh, z0], [hx1, y0, z0], [hx1, front, baseH], [hx1, yh, baseH]);
+        quad([hx1, yh, baseH], [hx1, front, baseH], [hx1, front, z1], [hx1, yh, z1]);
+    } else {
+        quad([hx0, y0, z0], [hx0, yh, z0], [hx0, yh, z1], [hx0, y1, z1]);
+        quad([hx1, yh, z0], [hx1, y0, z0], [hx1, y1, z1], [hx1, yh, z1]);
+    }
+
+    // 4) 輪郭線（側面・背面に不要な水平分割線を出さない一体型輪郭＋C字切り欠きの内縁厚みライン）
+    edges.push([[lx0, yToe, 0], [rx1, yToe, 0], [rx1, back, 0], [lx0, back, 0], [lx0, yToe, 0]]);
+    edges.push([[lx0, yToe, 0], [lx0, front, baseH], [lx0, front, waistZ]]);
+    edges.push([[rx1, yToe, 0], [rx1, front, baseH], [rx1, front, waistZ]]);
+    edges.push([[lx0, back, 0], [lx0, back, topZ]]);
+    edges.push([[rx1, back, 0], [rx1, back, topZ]]);
+    edges.push([[lx0, front, winTopZ], [lx0, front, topZ]]);
+    edges.push([[rx1, front, winTopZ], [rx1, front, topZ]]);
+    edges.push(cCurve.map(([y, z]) => [lx0, y, z]));
+    edges.push(cCurve.map(([y, z]) => [rx1, y, z]));
+    // C字切り欠き内縁の厚みライン（カプセル容器の前面曲面より奥の角丸コの字アーク部分）
+    const cArcOnly = cCurve.slice(1, -1);
+    edges.push([
+        [ix0, yDrumAtX(ix0, 1), winTopZ],
+        ...cArcOnly.map(([y, z]) => [ix0, y, z]),
+        [ix0, yDrumAtX(ix0, 0), waistZ],
+    ]);
+    edges.push([
+        [ix1, yDrumAtX(ix1, 1), winTopZ],
+        ...cArcOnly.map(([y, z]) => [ix1, y, z]),
+        [ix1, yDrumAtX(ix1, 0), waistZ],
+    ]);
+    edges.push([[lx0, front, waistZ], [rx1, front, waistZ]]);
+    edges.push([[lx0, front, winTopZ], [rx1, front, winTopZ]]);
+    edges.push([[lx0, front, topZ], [rx1, front, topZ], [rx1, back, topZ], [lx0, back, topZ], [lx0, front, topZ]]);
+    if (z0 <= baseH + 1e-4 && z1 >= baseH - 1e-4) {
+        edges.push([[hx1, front, baseH], [rx1, front, baseH], [rx1, back, baseH], [lx0, back, baseH], [lx0, front, baseH], [hx0, front, baseH]]);
+    } else {
+        edges.push([[lx0, front, baseH], [rx1, front, baseH], [rx1, back, baseH], [lx0, back, baseH], [lx0, front, baseH]]);
+    }
+    // 取り出し口の枠線と内壁線
+    edges.push([[hx0, y0, z0], [hx1, y0, z0]]);
+    if (straddle) {
+        edges.push([[hx0, y0, z0], [hx0, front, baseH], [hx0, front, z1], [hx1, front, z1], [hx1, front, baseH], [hx1, y0, z0]]);
+    } else {
+        edges.push([[hx0, y0, z0], [hx0, y1, z1], [hx1, y1, z1], [hx1, y0, z0]]);
+    }
+    edges.push([[hx0, yh, z0], [hx1, yh, z0], [hx1, yh, z1], [hx0, yh, z1], [hx0, yh, z0]]);
+    edges.push([[hx0, y0, z0], [hx0, yh, z0]]);
+    edges.push([[hx1, y0, z0], [hx1, yh, z0]]);
+    edges.push([[hx0, y1, z1], [hx0, yh, z1]]);
+    edges.push([[hx1, y1, z1], [hx1, yh, z1]]);
+    return { meshTriangles: tris, meshEdges: edges, onFace: true, preciseTubeEdge: true };
+}
+
+function gachaMachineUnitParts(o, K) {
+    const g = gachaMachineGeom(o),
+        { w, d, h, baseH, waistZ, chuteX0: hx0, chuteX1: hx1, chuteTopZ } = g,
+        flag = { onFace: true, preciseTubeEdge: true },
+        front = -d / 2,
+        back = d / 2,
+        capH = Math.max(.036, h * .070),
+        topZ = h - capH,
+        foreheadH = Math.max(.042, h * .086),
+        winTopZ = topZ - foreheadH,
+        winSpan = Math.max(.08, winTopZ - waistZ),
+        sideT = Math.max(.024, w * .068),
+        innerW = w - 2 * sideT,
+        ix1 = innerW / 2,
+        ix0 = -ix1,
+        dx1 = w / 2 - .003,
+        dx0 = -dx1,
+        // C字切り欠き：参考画像通りの「角が丸いコの字（水平上辺→上奥角丸→垂直奥辺→下奥角丸→水平下辺）」
+        cutDepthY = front + d * .52,
+        rCut = Math.min(winSpan * .32, (cutDepthY - front) * .46),
+        yCorner = cutDepthY - rCut,
+        cCurve = [[front, winTopZ], [yCorner, winTopZ]];
+    for (let i = 1; i <= 6; i++) {
+        const ang = -Math.PI / 2 + (i / 6) * (Math.PI / 2);
+        cCurve.push([yCorner + rCut * Math.cos(ang), winTopZ - rCut - rCut * Math.sin(ang)]);
+    }
+    for (let i = 0; i <= 6; i++) {
+        const ang = (i / 6) * (Math.PI / 2);
+        cCurve.push([yCorner + rCut * Math.cos(ang), waistZ + rCut - rCut * Math.sin(ang)]);
+    }
+    cCurve.push([front, waistZ]);
+
+    // 内部カプセル容器（ガチャが入ってるところ）の3D曲面関数 yDrumAtX(x, t)：
+    // ・縦方向（t: 0→1）は下端（waistZ）が白い台座の奥へ入り込み、中央上部で手前（-Y）へ大きく張り出し、上端（winTopZ）で額の下へ収まるカーブ
+    // ・横方向（x: dx0→dx1）も中央が手前へ緩やかに膨らむ3Dドーム曲面
+    const yDrumBase = (t) =>
+            front + d * (.105 * Math.pow(1 - t, 1.45) + .026 * t - .112 * Math.sin(Math.PI * Math.pow(t, .76))),
+        yDrumAtX = (x, t) => {
+            const u = x / Math.max(1e-4, dx1),
+                xBow = -d * .018 * (1 - u * u) * (.30 + .70 * Math.sin(Math.PI * t));
+            return yDrumBase(t) + xBow;
+        },
+        parts = [];
+
+    // 1) 斜め前方ベース＋取り出し口＋C字切り欠き一体型外装シェル（0 〜 topZ）
+    parts.push(gachaLowerBodyPart(g, topZ, winTopZ, sideT, cCurve, yDrumAtX));
+
+    // 上部額（winTopZ 〜 topZ）正面の角丸タイトルバッジ枠
+    const badgeW = w * .38,
+        badgeH = foreheadH * .42,
+        badgeCz = (winTopZ + topZ) * .5,
+        by = front - .0015,
+        badgePts = K.roundRectPath(badgeW, badgeH, Math.min(.006, badgeH * .35), 2, 0, badgeCz).map(([x, z]) => [x, by, z]);
+    badgePts.push(badgePts[0]);
+    parts.push(K.wire([badgePts], flag));
+
+    // 2) 中央上端（waistZ）から垂れ下がる白いU字シールド型ハンドル台座＋円盤ダイヤル＋横長回転つまみ
+    const mountW = w * .36,
+        mountH = Math.max(.09, (waistZ - baseH) * .68),
+        mountBotZ = Math.max(chuteTopZ + .020, waistZ - mountH),
+        mountR = Math.min(mountW * .42, (waistZ - mountBotZ) * .45),
+        mountProj = Math.max(.025, d * .058),
+        mountFront = front - mountProj,
+        uShieldXZ = [[-mountW / 2, waistZ], [mountW / 2, waistZ]];
+    for (let i = 0; i <= 5; i++) {
+        const a = (i / 5) * (Math.PI / 2);
+        uShieldXZ.push([mountW / 2 - mountR + mountR * Math.cos(a), mountBotZ + mountR - mountR * Math.sin(a)]);
+    }
+    for (let i = 0; i <= 5; i++) {
+        const a = Math.PI / 2 + (i / 5) * (Math.PI / 2);
+        uShieldXZ.push([-mountW / 2 + mountR + mountR * Math.cos(a), mountBotZ + mountR - mountR * Math.sin(a)]);
+    }
+    const shieldRev = K.area2(uShieldXZ) < 0,
+        shieldPoly = shieldRev ? uShieldXZ.slice().reverse() : uShieldXZ,
+        shieldMarks = [
+            null,
+            null,
+            ...shieldPoly.map((p) => (p[1] > waistZ - 1e-4 ? null : p[0] < 0 ? 'gacha-shield:L' : 'gacha-shield:R')),
+        ];
+    parts.push(K.box(shieldPoly, mountFront, front, { axis: 'y', seamMarks: shieldMarks, ...flag }));
+    // 白い台座の上面が waistZ レッジの奥（カプセル容器下端）へ回り込むライン
+    parts.push(
+        K.wire(
+            [
+                [[-mountW / 2, front, waistZ + .0015], [-mountW / 2, yDrumAtX(-mountW / 2, 0), waistZ + .0015]],
+                [[mountW / 2, front, waistZ + .0015], [mountW / 2, yDrumAtX(mountW / 2, 0), waistZ + .0015]],
+            ],
+            flag,
+        ),
+    );
+
+    // 取り出し口上部のアーチ型ステップライン（参考画像の下胴正面下部のアーチ段差）
+    const flapTopZ = Math.min(mountBotZ - .008, Math.max(chuteTopZ, baseH) + (waistZ - baseH) * .20),
+        flapBotZ = Math.max(baseH, chuteTopZ);
+    if (flapTopZ > flapBotZ + .012) {
+        const fR = Math.min((hx1 - hx0) * .28, flapTopZ - flapBotZ),
+            fy = front - .0015,
+            flapPts = [[hx0, fy, flapBotZ]];
+        for (let i = 0; i <= 4; i++) {
+            const a = Math.PI - (i / 4) * (Math.PI / 2);
+            flapPts.push([hx0 + fR + fR * Math.cos(a), fy, flapTopZ - fR + fR * Math.sin(a)]);
+        }
+        for (let i = 0; i <= 4; i++) {
+            const a = Math.PI / 2 - (i / 4) * (Math.PI / 2);
+            flapPts.push([hx1 - fR + fR * Math.cos(a), fy, flapTopZ - fR + fR * Math.sin(a)]);
+        }
+        flapPts.push([hx1, fy, flapBotZ]);
+        parts.push(K.wire([flapPts], flag));
+    }
+
+    const dialCz = (waistZ + mountBotZ) * .5 - .004,
+        dialD = Math.min(mountW * .72, (waistZ - mountBotZ) * .70),
+        dialR = dialD * .47,
+        dialFront = mountFront - .025,
+        dialPath = K.roundRectPath(dialD, dialD, dialR, 4, 0, dialCz),
+        dialMarks = K.bevelMarks(dialPath, dialR, 4, 'gacha-dial');
+    parts.push(K.box(dialPath, dialFront, mountFront, { axis: 'y', seamMarks: dialMarks, ...flag }));
+
+    const barH = Math.max(.024, dialD * .30),
+        barR = .006,
+        barPath = K.roundRectPath(dialD * .92, barH, barR, 2, 0, dialCz),
+        barMarks = K.bevelMarks(barPath, barR, 2, 'gacha-bar');
+    parts.push(K.box(barPath, dialFront - .025, dialFront, { axis: 'y', seamMarks: barMarks, ...flag }));
+
+    // ダイヤル円盤内側の凹みリム弧（回転つまみの上下）
+    const inDialR = dialR * .74,
+        dy = dialFront - .0015,
+        angMin = Math.asin(Math.min(.85, (barH * .5 + .004) / inDialR)),
+        upperArc = [],
+        lowerArc = [];
+    for (let i = 0; i <= 8; i++) {
+        const a1 = angMin + (i / 8) * (Math.PI - 2 * angMin),
+            a2 = -angMin - (i / 8) * (Math.PI - 2 * angMin);
+        upperArc.push([inDialR * Math.cos(a1), dy, dialCz + inDialR * Math.sin(a1)]);
+        lowerArc.push([inDialR * Math.cos(a2), dy, dialCz + inDialR * Math.sin(a2)]);
+    }
+    parts.push(K.wire([upperArc, lowerArc], flag));
+
+    // 3) 右側のコイン投入口（上）と上丸アーチ型の返却・価格プレート（下）
+    const coinX = w * .31,
+        slotW = w * .105,
+        slotH = (waistZ - baseH) * .20,
+        slotCz = waistZ - (waistZ - baseH) * .18,
+        slotFront = front - .025;
+    parts.push(K.box(K.rectPath(slotW, slotH, coinX, slotCz), slotFront, front, { axis: 'y', ...flag }));
+    parts.push(
+        K.wire([[[coinX, slotFront - .0015, slotCz - slotH * .28], [coinX, slotFront - .0015, slotCz + slotH * .28]]], flag),
+    );
+    const archW = w * .165,
+        archTopZ = waistZ - (waistZ - baseH) * .33,
+        archBotZ = Math.min(archTopZ - .04, Math.max(baseH + (waistZ - baseH) * .12, chuteTopZ + .014)),
+        archH = Math.max(.04, archTopZ - archBotZ),
+        archR = Math.min(archW / 2, archH * .48),
+        archXZ = [[coinX - archW / 2, archBotZ], [coinX + archW / 2, archBotZ]];
+    for (let i = 0; i <= 6; i++) {
+        const a = (i / 6) * Math.PI;
+        archXZ.push([coinX + archR * Math.cos(a), archBotZ + archH - archR + archR * Math.sin(a)]);
+    }
+    const archPoly = K.area2(archXZ) < 0 ? archXZ.slice().reverse() : archXZ,
+        archMarks = [
+            null,
+            null,
+            ...archPoly.map((p) => (p[1] <= archBotZ + 1e-4 ? null : p[0] < coinX ? 'gacha-arch:L' : 'gacha-arch:R')),
+        ];
+    parts.push(K.box(archPoly, slotFront, front, { axis: 'y', seamMarks: archMarks, ...flag }));
+    // アーチプレート内のラベル枠線
+    const inW = archW * .72,
+        inZ0 = archBotZ + archH * .14,
+        inZ1 = archBotZ + archH * .68,
+        ay = slotFront - .0015;
+    parts.push(
+        K.wire([
+            [
+                [coinX - inW / 2, ay, inZ0],
+                [coinX + inW / 2, ay, inZ0],
+                [coinX + inW / 2, ay, inZ1],
+                [coinX - inW / 2, ay, inZ1],
+                [coinX - inW / 2, ay, inZ0],
+            ],
+        ], flag),
+    );
+
+    // 4) 上部カプセルケース（ガチャが入ってるところ：縦にも横にも滑らかにカーブする3D透明ドーム＋湾曲ディスプレイ台紙）
+    const yBackDrum = cutDepthY + d * .04,
+        drumSteps = 14,
+        xSteps = 8,
+        xNodes = [dx0];
+    for (let j = 0; j <= xSteps; j++) xNodes.push(ix0 + (ix1 - ix0) * (j / xSteps));
+    xNodes.push(dx1);
+    const drumTris = [],
+        drumLeftEdge = [],
+        drumRightEdge = [],
+        drumBotEdge = [],
+        drumTopEdge = [],
+        dQuad = (p0, p1, p2, p3) => drumTris.push([p0, p1, p2], [p0, p2, p3]);
+    for (const x of xNodes) {
+        drumBotEdge.push([x, yDrumAtX(x, 0), waistZ]);
+        drumTopEdge.push([x, yDrumAtX(x, 1), winTopZ]);
+    }
+    for (let i = 0; i <= drumSteps; i++) {
+        const t = i / drumSteps,
+            z = waistZ + t * winSpan,
+            yfL = yDrumAtX(dx0, t),
+            yfR = yDrumAtX(dx1, t);
+        drumLeftEdge.push([dx0, yfL, z]);
+        drumRightEdge.push([dx1, yfR, z]);
+        if (i < drumSteps) {
+            const t1 = (i + 1) / drumSteps,
+                zNext = waistZ + t1 * winSpan;
+            for (let j = 0; j < xNodes.length - 1; j++) {
+                const xA = xNodes[j],
+                    xB = xNodes[j + 1];
+                dQuad(
+                    [xA, yDrumAtX(xA, t), z],
+                    [xB, yDrumAtX(xB, t), z],
+                    [xB, yDrumAtX(xB, t1), zNext],
+                    [xA, yDrumAtX(xA, t1), zNext],
+                );
+            }
+            // C字切り欠き内面（x = ix0, ix1）から奥へ続くカプセルドラム側面
+            dQuad([ix0, yBackDrum, z], [ix0, yDrumAtX(ix0, t), z], [ix0, yDrumAtX(ix0, t1), zNext], [ix0, yBackDrum, zNext]);
+            dQuad([ix1, yDrumAtX(ix1, t), z], [ix1, yBackDrum, z], [ix1, yBackDrum, zNext], [ix1, yDrumAtX(ix1, t1), zNext]);
+            // 外縁（dx0, dx1）と内縁（ix0, ix1）をつなぐ側面閉じストリップ
+            dQuad([dx0, yDrumAtX(ix0, t), z], [dx0, yfL, z], [dx0, yDrumAtX(dx0, t1), zNext], [dx0, yDrumAtX(ix0, t1), zNext]);
+            dQuad([dx1, yfR, z], [dx1, yDrumAtX(ix1, t), z], [dx1, yDrumAtX(ix1, t1), zNext], [dx1, yDrumAtX(dx1, t1), zNext]);
+        }
+    }
+    dQuad([ix1, yBackDrum, waistZ], [ix0, yBackDrum, waistZ], [ix0, yBackDrum, winTopZ], [ix1, yBackDrum, winTopZ]);
+    for (let j = 0; j < xNodes.length - 1; j++) {
+        const xA = xNodes[j],
+            xB = xNodes[j + 1],
+            yBackA = xA < ix0 - 1e-5 || xB > ix1 + 1e-5 ? yDrumAtX(xA < 0 ? ix0 : ix1, 0) : yBackDrum,
+            yBackB = xA < ix0 - 1e-5 || xB > ix1 + 1e-5 ? yDrumAtX(xA < 0 ? ix0 : ix1, 1) : yBackDrum;
+        dQuad([xA, yBackA, waistZ], [xB, yBackA, waistZ], [xB, yDrumAtX(xB, 0), waistZ], [xA, yDrumAtX(xA, 0), waistZ]);
+        dQuad([xA, yDrumAtX(xA, 1), winTopZ], [xB, yDrumAtX(xB, 1), winTopZ], [xB, yBackB, winTopZ], [xA, yBackB, winTopZ]);
+    }
+    parts.push({
+        meshTriangles: drumTris,
+        meshEdges: [drumLeftEdge, drumRightEdge, drumBotEdge, drumTopEdge],
+        ...flag,
+    });
+
+    // カプセル容器の3D曲面に沿って湾曲する商品見本台紙（外枠・ヘッダー帯・中央イラスト枠・下部バーコード帯）
+    const cardX = (w - 2 * sideT) * .44,
+        inCardX = cardX * .82,
+        tBot = .04,
+        tBar = .18,
+        tIn0 = .28,
+        tIn1 = .73,
+        tHead = .80,
+        tTop = .94,
+        ptCard = (x, t) => [x, yDrumAtX(x, t) - .002, waistZ + t * winSpan],
+        spanX = (x0, x1, t, n = 8) => {
+            const arr = [];
+            for (let i = 0; i <= n; i++) arr.push(ptCard(x0 + (x1 - x0) * (i / n), t));
+            return arr;
+        },
+        spanT = (x, t0, t1, n = 10) => {
+            const arr = [];
+            for (let i = 0; i <= n; i++) arr.push(ptCard(x, t0 + (t1 - t0) * (i / n)));
+            return arr;
+        };
+    parts.push(
+        K.wire([
+            [
+                ...spanT(-cardX, tBot, tTop, 12),
+                ...spanX(-cardX, cardX, tTop, 8).slice(1),
+                ...spanT(cardX, tTop, tBot, 12).slice(1),
+                ...spanX(cardX, -cardX, tBot, 8).slice(1),
+            ],
+            spanX(-cardX, cardX, tHead, 8),
+            spanX(-cardX, cardX, tBar, 8),
+            [
+                ...spanT(-inCardX, tIn0, tIn1, 8),
+                ...spanX(-inCardX, inCardX, tIn1, 6).slice(1),
+                ...spanT(inCardX, tIn1, tIn0, 8).slice(1),
+                ...spanX(inCardX, -inCardX, tIn0, 6).slice(1),
+            ],
+        ], flag),
+    );
+
+    // 5) 黒い天板キャップ（topZ 〜 h）：下部は外壁と面一で立ち上がり、上端（crownH）が45°に面取りされたベベルキャップ
+    const crownH = Math.min(.014, capH * .36),
+        crownInset = Math.min(.012, w * .034),
+        zBev = h - crownH,
+        lx0 = -w / 2,
+        rx1 = w / 2,
+        cx0 = lx0 + crownInset,
+        cx1 = rx1 - crownInset,
+        cf = front + crownInset,
+        cb = back - crownInset,
+        capTris = [],
+        cQuad = (p0, p1, p2, p3) => capTris.push([p0, p1, p2], [p0, p2, p3]);
+    cQuad([lx0, back, topZ], [rx1, back, topZ], [rx1, front, topZ], [lx0, front, topZ]);
+    cQuad([lx0, front, topZ], [rx1, front, topZ], [rx1, front, zBev], [lx0, front, zBev]);
+    cQuad([rx1, front, topZ], [rx1, back, topZ], [rx1, back, zBev], [rx1, front, zBev]);
+    cQuad([rx1, back, topZ], [lx0, back, topZ], [lx0, back, zBev], [rx1, back, zBev]);
+    cQuad([lx0, back, topZ], [lx0, front, topZ], [lx0, front, zBev], [lx0, back, zBev]);
+    cQuad([lx0, front, zBev], [rx1, front, zBev], [cx1, cf, h], [cx0, cf, h]);
+    cQuad([rx1, front, zBev], [rx1, back, zBev], [cx1, cb, h], [cx1, cf, h]);
+    cQuad([rx1, back, zBev], [lx0, back, zBev], [cx0, cb, h], [cx1, cb, h]);
+    cQuad([lx0, back, zBev], [lx0, front, zBev], [cx0, cf, h], [cx0, cb, h]);
+    cQuad([cx0, cf, h], [cx1, cf, h], [cx1, cb, h], [cx0, cb, h]);
+    parts.push({
+        meshTriangles: capTris,
+        meshEdges: [
+            [[lx0, front, zBev], [rx1, front, zBev], [rx1, back, zBev], [lx0, back, zBev], [lx0, front, zBev]],
+            [[cx0, cf, h], [cx1, cf, h], [cx1, cb, h], [cx0, cb, h], [cx0, cf, h]],
+            [[lx0, front, topZ], [lx0, front, zBev], [cx0, cf, h]],
+            [[rx1, front, topZ], [rx1, front, zBev], [cx1, cf, h]],
+            [[rx1, back, topZ], [rx1, back, zBev], [cx1, cb, h]],
+            [[lx0, back, topZ], [lx0, back, zBev], [cx0, cb, h]],
+        ],
+        ...flag,
+    });
+    return parts;
+}
+
+function gachaMachineBuild(o, K = ASSET_KIT) {
+    const g = gachaMachineGeom(o),
+        unit = gachaMachineUnitParts(o, K),
+        stacked = K.repeatParts(unit, { axis: 'z', spacing: g.h, count: g.stack, group: 'gacha-stack' }),
+        xStart = -((g.count - 1) * g.w) / 2;
+    return K.repeatParts(K.moveParts(stacked, xStart, 0, 0), { axis: 'x', spacing: g.w, count: g.count, group: 'gacha-col' });
+}
+
+(function () {
+    ASSET_KIT.define(
+        'ufoCatcher',
+        {
+            label: 'UFOキャッチャー',
+            glyph: '⌅',
+            group: 'street',
+            w: .90,
+            d: .85,
+            h: 1.85,
+            accent: '#36d6a8',
+            minHalfWidth: () => .21,
+            minHalfDepth: () => .20,
+            minHeight: () => .90,
+            controls: [
+                {
+                    key: 'ufoBaseHeight',
+                    label: '土台の高さ',
+                    canvasSlider: true,
+                    default: .68,
+                    min: .26,
+                    max: (o) => ufoCatcherGeom(o).maxBase,
+                    step: .02,
+                    unit: 'm',
+                    get: (o) => ufoCatcherGeom(o).baseH,
+                    handle: (o, v) => {
+                        const g = ufoCatcherGeom(o);
+                        return { anchor: [g.w * .22, -g.d / 2, 0], sample: [g.w * .22, -g.d / 2, v], probe: [g.w * .22, -g.d / 2, v + 1], fallback: { x: 0, y: -1 } };
+                    },
+                },
+                {
+                    key: 'ufoBevel',
+                    label: '角のベベル',
+                    type: 'range',
+                    canvasSlider: true,
+                    default: .070,
+                    min: .01,
+                    max: (o) => ufoCatcherGeom(o).maxBevel,
+                    step: .005,
+                    unit: 'm',
+                    get: (o) => ufoCatcherGeom(o).bevel,
+                    handle: (o, v) => {
+                        const g = ufoCatcherGeom(o);
+                        return { anchor: [g.w / 2, -g.d / 2, g.baseH * .82], sample: [g.w / 2 - v, -g.d / 2, g.baseH * .82], probe: [g.w / 2 - v - 1, -g.d / 2, g.baseH * .82], fallback: { x: -1, y: 0 } };
+                    },
+                },
+                {
+                    key: 'ufoConsoleWidth',
+                    label: 'ボタン操作台の幅',
+                    canvasSlider: true,
+                    default: .22,
+                    min: .10,
+                    max: (o) => ufoCatcherGeom(o).maxConsoleW,
+                    step: .01,
+                    unit: 'm',
+                    get: (o) => ufoCatcherGeom(o).consoleW,
+                    handle: (o, v) => {
+                        const g = ufoCatcherGeom(o),
+                            y = -g.d / 2 - g.consoleProj,
+                            z = g.consoleFrontZ * .62;
+                        return { anchor: [g.cx0, y, z], sample: [g.cx0 + v, y, z], probe: [g.cx0 + v + 1, y, z], fallback: { x: 1, y: 0 } };
+                    },
+                },
+                {
+                    key: 'ufoChuteWidth',
+                    label: '取り出し口の幅',
+                    canvasSlider: true,
+                    default: .28,
+                    min: .10,
+                    max: (o) => ufoCatcherGeom(o).maxChuteW,
+                    step: .01,
+                    unit: 'm',
+                    get: (o) => ufoCatcherGeom(o).chuteW,
+                    handle: (o, v) => {
+                        const g = ufoCatcherGeom(o),
+                            z = (g.chuteZ0 + g.chuteZ1) / 2;
+                        return { anchor: [g.chuteMidX, -g.d / 2, z], sample: [g.chuteMidX + v / 2, -g.d / 2, z], probe: [g.chuteMidX + (v + 1) / 2, -g.d / 2, z], fallback: { x: 1, y: 0 } };
+                    },
+                },
+                {
+                    key: 'ufoChuteHeight',
+                    label: '取り出し口の高さ',
+                    canvasSlider: true,
+                    default: .22,
+                    min: .08,
+                    max: (o) => ufoCatcherGeom(o).maxChuteH,
+                    step: .01,
+                    unit: 'm',
+                    get: (o) => ufoCatcherGeom(o).chuteH,
+                    handle: (o, v) => {
+                        const g = ufoCatcherGeom(o);
+                        return { anchor: [g.chuteMidX, -g.d / 2, g.chuteZ0], sample: [g.chuteMidX, -g.d / 2, g.chuteZ0 + v], probe: [g.chuteMidX, -g.d / 2, g.chuteZ0 + v + 1], fallback: { x: 0, y: -1 } };
+                    },
+                },
+                {
+                    key: 'ufoChuteX',
+                    label: '取り出し口の左右位置',
+                    canvasSlider: true,
+                    default: 0,
+                    min: (o) => -ufoCatcherGeom(o).maxChuteOffX,
+                    max: (o) => ufoCatcherGeom(o).maxChuteOffX,
+                    step: .01,
+                    unit: 'm',
+                    get: (o) => ufoCatcherGeom(o).chuteOffX,
+                    handle: (o, v) => {
+                        const g = ufoCatcherGeom(o),
+                            z = g.chuteZ0;
+                        return { anchor: [g.defaultChuteMidX, -g.d / 2, z], sample: [g.defaultChuteMidX + v, -g.d / 2, z], probe: [g.defaultChuteMidX + v + 1, -g.d / 2, z], fallback: { x: 1, y: 0 } };
+                    },
+                },
+                {
+                    key: 'ufoChuteZ',
+                    label: '取り出し口の上下位置',
+                    canvasSlider: true,
+                    default: 0,
+                    min: (o) => ufoCatcherGeom(o).minChuteOffZ,
+                    max: (o) => ufoCatcherGeom(o).maxChuteOffZ,
+                    step: .01,
+                    unit: 'm',
+                    get: (o) => ufoCatcherGeom(o).chuteOffZ,
+                    handle: (o, v) => {
+                        const g = ufoCatcherGeom(o),
+                            x = g.chuteX0;
+                        return { anchor: [x, -g.d / 2, g.defaultChuteMidZ], sample: [x, -g.d / 2, g.defaultChuteMidZ + v], probe: [x, -g.d / 2, g.defaultChuteMidZ + v + 1], fallback: { x: 0, y: -1 } };
+                    },
+                },
+                {
+                    key: 'ufoClawX',
+                    label: 'クレーンの左右位置',
+                    canvasSlider: true,
+                    default: 0,
+                    min: (o) => -ufoCatcherGeom(o).maxClawX,
+                    max: (o) => ufoCatcherGeom(o).maxClawX,
+                    step: .02,
+                    unit: 'm',
+                    get: (o) => ufoCatcherGeom(o).clawX,
+                    handle: (o, v) => {
+                        const g = ufoCatcherGeom(o),
+                            z = g.roofBottom - g.clawDrop - .04;
+                        return { anchor: [0, -g.d * .04, z], sample: [v, -g.d * .04, z], probe: [v + 1, -g.d * .04, z], fallback: { x: 1, y: 0 } };
+                    },
+                },
+                {
+                    key: 'ufoClawDrop',
+                    label: 'クレーンの下がり量',
+                    canvasSlider: true,
+                    default: .30,
+                    min: .10,
+                    max: (o) => ufoCatcherGeom(o).maxDrop,
+                    step: .02,
+                    unit: 'm',
+                    get: (o) => ufoCatcherGeom(o).clawDrop,
+                    handle: (o, v) => {
+                        const g = ufoCatcherGeom(o),
+                            top = g.roofBottom - .04;
+                        return { anchor: [g.clawX, -g.d * .04, top], sample: [g.clawX, -g.d * .04, top - v], probe: [g.clawX, -g.d * .04, top - v - 1], fallback: { x: 0, y: 1 } };
+                    },
+                },
+                {
+                    key: 'ufoCount',
+                    label: '横に並べる数',
+                    type: 'range',
+                    canvasSlider: true,
+                    default: 1,
+                    min: 1,
+                    max: 10,
+                    step: 1,
+                    integer: true,
+                    unit: '台',
+                    get: (o) => ufoCatcherGeom(o).count,
+                    handle: (o, v) => {
+                        const g = ufoCatcherGeom(o),
+                            x = g.w / 2,
+                            z = g.h * .55;
+                        return { anchor: [x - .12, -g.d / 2, z], sample: [x + .05, -g.d / 2, z], probe: [x + 1.05, -g.d / 2, z], fallback: { x: 1, y: 0 }, pixelsPerUnit: 26 };
+                    },
+                },
+                { key: 'ufoGap', label: '並べる間隔', type: 'range', canvasSlider: true, default: 0, min: 0, max: 1, step: .02, unit: 'm' },
+                { key: 'ufoTopSign', label: '上の看板プレート', type: 'boolean', default: true },
+            ],
+        },
+        (o, K) => ufoCatcherBuild(o, K),
+    );
+
+    ASSET_KIT.define(
+        'gachaMachine',
+        {
+            label: 'ガチャ',
+            glyph: '◓',
+            group: 'street',
+            w: .38,
+            d: .44,
+            h: .68,
+            accent: '#e0568b',
+            minHalfWidth: () => .11,
+            minHalfDepth: () => .12,
+            minHeight: () => .36,
+            controls: [
+                {
+                    key: 'gachaStack',
+                    label: '上に積む段数',
+                    type: 'range',
+                    canvasSlider: true,
+                    default: 1,
+                    min: 1,
+                    max: 6,
+                    step: 1,
+                    integer: true,
+                    unit: '段',
+                    get: (o) => gachaMachineGeom(o).stack,
+                    handle: (o, v) => {
+                        const g = gachaMachineGeom(o),
+                            x = -g.w * .28,
+                            z = g.h;
+                        return { anchor: [x, -g.d / 2, z - .10], sample: [x, -g.d / 2, z + .05], probe: [x, -g.d / 2, z + 1.05], fallback: { x: 0, y: -1 }, pixelsPerUnit: 28 };
+                    },
+                },
+                {
+                    key: 'gachaCount',
+                    label: '横に並べる数',
+                    type: 'range',
+                    canvasSlider: true,
+                    default: 1,
+                    min: 1,
+                    max: 10,
+                    step: 1,
+                    integer: true,
+                    unit: '台',
+                    get: (o) => gachaMachineGeom(o).count,
+                    handle: (o, v) => {
+                        const g = gachaMachineGeom(o),
+                            x = g.w / 2,
+                            z = g.h * .55;
+                        return { anchor: [x - .08, -g.d / 2, z], sample: [x + .04, -g.d / 2, z], probe: [x + 1.04, -g.d / 2, z], fallback: { x: 1, y: 0 }, pixelsPerUnit: 28 };
+                    },
+                },
+                {
+                    key: 'gachaChuteWidth',
+                    label: '取り出し口の幅',
+                    canvasSlider: true,
+                    default: .17,
+                    min: .08,
+                    max: (o) => gachaMachineGeom(o).maxChuteW,
+                    step: .01,
+                    unit: 'm',
+                    get: (o) => gachaMachineGeom(o).chuteW,
+                    handle: (o, v) => {
+                        const g = gachaMachineGeom(o),
+                            z = g.chuteMidZ;
+                        return { anchor: [g.chuteMidX, -g.d / 2, z], sample: [g.chuteMidX + v / 2, -g.d / 2, z], probe: [g.chuteMidX + (v + 1) / 2, -g.d / 2, z], fallback: { x: 1, y: 0 } };
+                    },
+                },
+                {
+                    key: 'gachaChuteHeight',
+                    label: '取り出し口の高さ',
+                    canvasSlider: true,
+                    default: .11,
+                    min: .05,
+                    max: (o) => gachaMachineGeom(o).maxChuteH,
+                    step: .01,
+                    unit: 'm',
+                    get: (o) => gachaMachineGeom(o).chuteH,
+                    handle: (o, v) => {
+                        const g = gachaMachineGeom(o);
+                        return { anchor: [g.chuteMidX, -g.d / 2, g.chuteFloorZ], sample: [g.chuteMidX, -g.d / 2, g.chuteFloorZ + v], probe: [g.chuteMidX, -g.d / 2, g.chuteFloorZ + v + 1], fallback: { x: 0, y: -1 } };
+                    },
+                },
+                {
+                    key: 'gachaChuteX',
+                    label: '取り出し口の左右位置',
+                    canvasSlider: true,
+                    default: 0,
+                    min: (o) => -gachaMachineGeom(o).maxChuteOffX,
+                    max: (o) => gachaMachineGeom(o).maxChuteOffX,
+                    step: .005,
+                    unit: 'm',
+                    get: (o) => gachaMachineGeom(o).chuteOffX,
+                    handle: (o, v) => {
+                        const g = gachaMachineGeom(o),
+                            z = g.chuteFloorZ;
+                        return { anchor: [0, -g.d / 2, z], sample: [v, -g.d / 2, z], probe: [v + 1, -g.d / 2, z], fallback: { x: 1, y: 0 } };
+                    },
+                },
+                {
+                    key: 'gachaChuteZ',
+                    label: '取り出し口の上下位置',
+                    canvasSlider: true,
+                    default: 0,
+                    min: (o) => gachaMachineGeom(o).minChuteOffZ,
+                    max: (o) => gachaMachineGeom(o).maxChuteOffZ,
+                    step: .005,
+                    unit: 'm',
+                    get: (o) => gachaMachineGeom(o).chuteOffZ,
+                    handle: (o, v) => {
+                        const g = gachaMachineGeom(o),
+                            x = g.chuteX0,
+                            z0 = g.defaultFloorZ + g.chuteH / 2;
+                        return { anchor: [x, -g.d / 2, z0], sample: [x, -g.d / 2, z0 + v], probe: [x, -g.d / 2, z0 + v + 1], fallback: { x: 0, y: -1 } };
+                    },
+                },
+                {
+                    key: 'gachaWaistRatio',
+                    label: '下胴の高さ割合',
+                    canvasSlider: true,
+                    default: .47,
+                    min: .36,
+                    max: .60,
+                    step: .02,
+                    get: (o) => gachaMachineGeom(o).waistRatio,
+                    handle: (o, v) => {
+                        const g = gachaMachineGeom(o),
+                            x = -g.w * .24;
+                        return { anchor: [x, -g.d / 2, 0], sample: [x, -g.d / 2, g.h * v], probe: [x, -g.d / 2, g.h * (v + 1)], fallback: { x: 0, y: -1 } };
+                    },
+                },
+            ],
+        },
+        (o, K) => gachaMachineBuild(o, K),
+    );
+})();
+

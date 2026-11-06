@@ -99,6 +99,7 @@ const ASSETS = {
         h: 9.11,
         recessedFloorCount: 4,
         recessedFloorHeight: 2.1,
+        recessedFirstFloorHeight: 2.45,
         recessedFirstFloorExtra: 0.35,
         recessedFloorGap: 1.25,
         recessedCornerBevel: 0.45,
@@ -704,8 +705,14 @@ function recessedStackedBuildingParams(o) {
         d = Math.max(0.5, Math.abs(finite(o?.rb, 1.8)) * 2),
         floorCount = clamp(Math.round(finite(o?.recessedFloorCount, 4)), 1, 30),
         floorHeight = clamp(finite(o?.recessedFloorHeight, 2.1), 0.5, 30),
-        firstFloorExtra = clamp(finite(o?.recessedFirstFloorExtra, 0.35), 0, 5),
-        firstFloorHeight = clamp(floorHeight + firstFloorExtra, 0.5, 30),
+        firstFloorHeight = clamp(
+            Number.isFinite(Number(o?.recessedFirstFloorHeight))
+                ? Number(o.recessedFirstFloorHeight)
+                : floorHeight + clamp(finite(o?.recessedFirstFloorExtra, 0.35), -29.5, 30),
+            0.5,
+            30,
+        ),
+        firstFloorExtra = firstFloorHeight - floorHeight,
         floorGap = clamp(finite(o?.recessedFloorGap, 0.12), 0, 5),
         insetMax = recessedMaxInset(w, d),
         cornerBevel = clamp(finite(o?.recessedCornerBevel, 0.45), 0, insetMax),
@@ -793,14 +800,25 @@ function recessedHandlePatch(o, kind, value) {
             return { recessedWindowDepth: value };
         case "recessed-corner-bevel":
             return { recessedCornerBevel: value };
-        case "recessed-floor-height":
-            return { recessedFloorHeight: value };
+        case "recessed-floor-height": {
+            const nextFloorH = clamp(value, 0.5, 30);
+            return {
+                recessedFloorHeight: nextFloorH,
+                recessedFirstFloorHeight: q.firstFloorHeight,
+                recessedFirstFloorExtra: q.firstFloorHeight - nextFloorH,
+            };
+        }
         case "recessed-floor-gap":
             // 接合部の高さ＝窓の高さなので、ここだけで両方が決まる。
             return { recessedFloorGap: value };
-        case "recessed-first-floor-height":
-            // ハンドルは1Fの実寸。差分だけを格納する。
-            return { recessedFirstFloorExtra: Math.max(0, value - q.floorHeight) };
+        case "recessed-first-floor-height": {
+            // 1階の高さは上階の階高とは独立して保持する。
+            const nextFirstH = clamp(value, 0.5, 30);
+            return {
+                recessedFirstFloorHeight: nextFirstH,
+                recessedFirstFloorExtra: nextFirstH - q.floorHeight,
+            };
+        }
         default:
             return null;
     }
@@ -1194,13 +1212,29 @@ function pathPipeMesh(o) {
         sides = clamp(Math.round(Number(o?.pipeSides) || 10), 6, 24),
         rings = [],
         triangles = [];
+    let prevSide = null,
+        prevTangent = null;
     centerline.forEach((center, i) => {
         const before = centerline[Math.max(0, i - 1)],
             after = centerline[Math.min(centerline.length - 1, i + 1)],
-            tangent = pathVecUnit(pathVecSub(after, before)),
-            reference = Math.abs(tangent[2]) > 0.92 ? [0, 1, 0] : [0, 0, 1],
-            side = pathVecUnit(pathVecCross(tangent, reference), [1, 0, 0]),
-            binormal = pathVecUnit(pathVecCross(tangent, side), [0, 1, 0]);
+            tangent = pathVecUnit(pathVecSub(after, before));
+        let side;
+        if (!prevSide) {
+            const reference = Math.abs(tangent[2]) > 0.92 ? [0, 1, 0] : [0, 0, 1];
+            side = pathVecUnit(pathVecCross(tangent, reference), [1, 0, 0]);
+        } else {
+            const axis = pathVecCross(prevTangent, tangent),
+                sinA = pathVecLength(axis),
+                cosA = clamp(pathVecDot(prevTangent, tangent), -1, 1),
+                moved =
+                    sinA > 1e-6
+                        ? pathRotateAroundAxis(prevSide, pathVecScale(axis, 1 / sinA), Math.atan2(sinA, cosA))
+                        : prevSide;
+            side = pathVecUnit(pathVecAdd(moved, tangent, -pathVecDot(moved, tangent)), prevSide);
+        }
+        const binormal = pathVecUnit(pathVecCross(tangent, side), [0, 1, 0]);
+        prevSide = side;
+        prevTangent = tangent;
         rings.push(
             Array.from({ length: sides }, (_, j) => {
                 const angle = (j / sides) * Math.PI * 2,
@@ -2261,20 +2295,161 @@ function linesBeveledBox(ctx) {
 }
 
 // --- パスパイプ ---
-// 丸めた中心線のリングを描き、リング間の縦線でパイプらしさを出す。
+// パイプ表面の不要な分割線や内部リングは描かず、視点に応じた外側シルエット線と両端（および角丸0時の折れ目）の可視リングだけを描く。
 function linesPathPipe(ctx) {
-    const { o, w, d, h, c, a, out } = ctx;
-    const mesh = pathPipeMesh(o);
-    mesh.rings.forEach((ring) => out.push(polyA(o, ring, c, 0.95)));
-    for (let j = 0; j < mesh.sides; j++)
-        out.push(
-            lineA(
-                o,
-                mesh.rings.map((ring) => ring[j]),
-                c,
-                0.85,
-            ),
-        );
+    const { o, c, out } = ctx,
+        mesh = pathPipeMesh(o),
+        { rings, centerline, sides } = mesh,
+        M = rings.length;
+    if (M < 2) return;
+    const worldRings = rings.map((r) => r.map((p) => L2W(o, ...p))),
+        worldCenter = centerline.map((p) => L2W(o, ...p)),
+        view = orthView ? orthBasis().depth.map((v) => -v) : null,
+        camera = camPos(),
+        sideFacing = [],
+        pushLine = (pts, width = 0.9) => {
+            if (pts.length < 2) return;
+            const ln = lineA(o, pts, c, width);
+            ln.preciseTubeEdge = true;
+            ln.onFace = true;
+            ln.tubeContourView = orthView || "3d";
+            out.push(ln);
+        };
+    for (let i = 0; i < M - 1; i++) {
+        const segMid = pathVecScale(pathVecAdd(worldCenter[i], worldCenter[i + 1]), 0.5),
+            facing = [];
+        for (let j = 0; j < sides; j++) {
+            const k = (j + 1) % sides,
+                A = worldRings[i][j],
+                B = worldRings[i][k],
+                C = worldRings[i + 1][k],
+                D = worldRings[i + 1][j],
+                quadMid = [
+                    (A[0] + B[0] + C[0] + D[0]) * 0.25,
+                    (A[1] + B[1] + C[1] + D[1]) * 0.25,
+                    (A[2] + B[2] + C[2] + D[2]) * 0.25,
+                ];
+            let normal = pathVecCross(pathVecSub(B, A), pathVecSub(D, A));
+            if (pathVecDot(normal, pathVecSub(quadMid, segMid)) < 0) normal = pathVecScale(normal, -1);
+            facing.push(pathVecDot(normal, view || pathVecSub(camera, quadMid)) > 1e-12);
+        }
+        sideFacing.push(facing);
+    }
+    // 1) パイプ側面のシルエット線（表裏が切り替わる境界辺を同じ極性どうしで滑らかに連結）
+    const silhouetteChains = [];
+    let activeChains = [];
+    for (let i = 0; i < M - 1; i++) {
+        const facing = sideFacing[i],
+             transitions = [];
+        for (let j = 0; j < sides; j++) {
+            const pf = facing[(j + sides - 1) % sides],
+                cf = facing[j];
+            if (pf !== cf) transitions.push({ j, pol: cf ? 1 : -1 });
+        }
+        const nextChains = [],
+            usedPrev = new Set();
+        for (const { j, pol } of transitions) {
+            let bestIdx = -1,
+                bestDist = Infinity,
+                bestStep = 0;
+            activeChains.forEach((prev, idx) => {
+                if (usedPrev.has(idx) || prev.pol !== pol) return;
+                const fwd = (j - prev.j + sides) % sides,
+                    bwd = (prev.j - j + sides) % sides,
+                    dist = Math.min(fwd, bwd);
+                if (dist <= Math.floor(sides / 3) && dist < bestDist) {
+                    bestDist = dist;
+                    bestIdx = idx;
+                    bestStep = fwd <= bwd ? 1 : -1;
+                }
+            });
+            let pts = null;
+            if (bestIdx >= 0) {
+                pts = activeChains[bestIdx].pts;
+                usedPrev.add(bestIdx);
+                let curJ = activeChains[bestIdx].j;
+                while (curJ !== j) {
+                    curJ = (curJ + bestStep + sides) % sides;
+                    pts.push(rings[i][curJ]);
+                }
+            } else {
+                pts = [rings[i][j]];
+                silhouetteChains.push(pts);
+            }
+            const a = rings[i][j],
+                b = rings[i + 1][j],
+                segLen = pathVecLength(pathVecSub(b, a)),
+                subSteps = Math.max(1, Math.min(12, Math.ceil(segLen / 0.22)));
+            for (let s = 1; s <= subSteps; s++) {
+                const t = s / subSteps;
+                pts.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]);
+            }
+            nextChains.push({ j, pol, pts });
+        }
+        activeChains = nextChains;
+    }
+    silhouetteChains.forEach((pts) => pushLine(pts, 0.9));
+    // 2) 両端のキャップリングと、角丸半径0（直角折れ）のときの折れ目リング
+    const emitVisibleRing = (ringIdx, edgeVisible) => {
+        const r = rings[ringIdx];
+        if (!r) return;
+        if (edgeVisible.every(Boolean)) {
+            pushLine([...r, r[0]], 0.95);
+            return;
+        }
+        if (!edgeVisible.some(Boolean)) return;
+        let start = 0;
+        for (let j = 0; j < sides; j++) {
+            if (edgeVisible[j] && !edgeVisible[(j + sides - 1) % sides]) {
+                start = j;
+                break;
+            }
+        }
+        let cur = null;
+        for (let step = 0; step < sides; step++) {
+            const j = (start + step) % sides,
+                k = (j + 1) % sides;
+            if (edgeVisible[j]) {
+                if (!cur) cur = [r[j], r[k]];
+                else cur.push(r[k]);
+            } else if (cur) {
+                pushLine(cur, 0.95);
+                cur = null;
+            }
+        }
+        if (cur) pushLine(cur, 0.95);
+    };
+    const capFacingAt = (ringIdx, outwardDir) => {
+        const c3 = worldCenter[ringIdx],
+            wRing = worldRings[ringIdx];
+        let n = pathVecCross(pathVecSub(wRing[1], c3), pathVecSub(wRing[0], c3));
+        if (pathVecDot(n, outwardDir) < 0) n = pathVecScale(n, -1);
+        return pathVecDot(n, view || pathVecSub(camera, c3)) > 1e-12;
+    };
+    const startCapVis = capFacingAt(0, pathVecSub(worldCenter[0], worldCenter[1])),
+        endCapVis = capFacingAt(M - 1, pathVecSub(worldCenter[M - 1], worldCenter[M - 2]));
+    emitVisibleRing(
+        0,
+        Array.from({ length: sides }, (_, j) => startCapVis || sideFacing[0][j]),
+    );
+    emitVisibleRing(
+        M - 1,
+        Array.from({ length: sides }, (_, j) => endCapVis || sideFacing[M - 2][j]),
+    );
+    // 曲がり半径が0（角が直線折れ）のときだけ、折れ点の可視リングを描く
+    const cornerRadius = Math.max(0, Number.isFinite(Number(o?.cornerRadius)) ? Number(o.cornerRadius) : 0.55);
+    if (cornerRadius <= 1e-5) {
+        for (let i = 1; i < M - 1; i++) {
+            const u0 = pathVecUnit(pathVecSub(centerline[i], centerline[i - 1])),
+                u1 = pathVecUnit(pathVecSub(centerline[i + 1], centerline[i]));
+            if (pathVecDot(u0, u1) < 0.995) {
+                emitVisibleRing(
+                    i,
+                    Array.from({ length: sides }, (_, j) => sideFacing[i - 1][j] || sideFacing[i][j]),
+                );
+            }
+        }
+    }
 }
 
 // --- 凹窓階層建物 ---
@@ -3734,6 +3909,7 @@ function normalizedAsset(o) {
             h: params.totalH,
             recessedFloorCount: params.floorCount,
             recessedFloorHeight: params.floorHeight,
+            recessedFirstFloorHeight: params.firstFloorHeight,
             recessedFirstFloorExtra: params.firstFloorExtra,
             recessedFloorGap: params.floorGap,
             recessedCornerBevel: params.cornerBevel,
@@ -4138,16 +4314,46 @@ obBounds = function (o) {
     }
     const lo = [Infinity, Infinity, Infinity],
         hi = [-Infinity, -Infinity, -Infinity];
-    pts.forEach((v) =>
-        v.forEach((n, i) => {
-            lo[i] = Math.min(lo[i], n);
-            hi[i] = Math.max(hi[i], n);
-        }),
-    );
+    for (let k = 0; k < pts.length; k++) {
+        const v = pts[k];
+        if (v[0] < lo[0]) lo[0] = v[0];
+        if (v[0] > hi[0]) hi[0] = v[0];
+        if (v[1] < lo[1]) lo[1] = v[1];
+        if (v[1] > hi[1]) hi[1] = v[1];
+        if (v[2] < lo[2]) lo[2] = v[2];
+        if (v[2] > hi[2]) hi[2] = v[2];
+    }
     return { lo, hi };
 };
-// 配列全体の範囲を、選択・フィット・スナップ・出力範囲に反映する。
-const boundsWithoutArray = obBounds, arrayBoundsCache = new WeakMap();
+// 単体・配列全体の範囲をキャッシュし、選択・フィット・スナップ・ギズモでの再計算を省く。
+const rawBoundsWithoutArray = obBounds,
+    singleBoundsCache = new WeakMap(),
+    arrayBoundsCache = new WeakMap();
+const boundsWithoutArray = function (o) {
+    if (!o || typeof o !== "object" || o.type === "compound") return rawBoundsWithoutArray(o);
+    const q = o.attachment ? syncAttachedPart(o) : o,
+        key = typeof surfaceCacheKey === "function" ? surfaceCacheKey(q) : "";
+    if (key) {
+        const hit = singleBoundsCache.get(o);
+        if (hit && hit.key === key) {
+            return {
+                lo: [hit.bounds.lo[0], hit.bounds.lo[1], hit.bounds.lo[2]],
+                hi: [hit.bounds.hi[0], hit.bounds.hi[1], hit.bounds.hi[2]],
+            };
+        }
+    }
+    const b = rawBoundsWithoutArray(o);
+    if (key && b) {
+        singleBoundsCache.set(o, {
+            key,
+            bounds: {
+                lo: [b.lo[0], b.lo[1], b.lo[2]],
+                hi: [b.hi[0], b.hi[1], b.hi[2]],
+            },
+        });
+    }
+    return b;
+};
 obBounds = function (o) {
     const b = boundsWithoutArray(o), spec = arrayModifierSpec(o);
     if (!b || !spec || spec.count < 2) return b;

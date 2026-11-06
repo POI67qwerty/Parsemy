@@ -138,15 +138,19 @@ function addExportBoxFaces(out, o, w, d, z0, z1) {
 // 値が1つでも変われば作り直すので、編集結果が古いまま残ることはない。
 const surfaceTriCache = new WeakMap();
 function surfaceCacheKey(o) {
-    const seen = new Set();
-    return JSON.stringify(o, (key, value) => {
-        if (typeof value === "function") return undefined;
-        if (value && typeof value === "object") {
-            if (seen.has(value)) return undefined;
-            seen.add(value);
-        }
-        return value;
-    });
+    try {
+        return JSON.stringify(o);
+    } catch (e) {
+        const seen = new Set();
+        return JSON.stringify(o, (key, value) => {
+            if (typeof value === "function") return undefined;
+            if (value && typeof value === "object") {
+                if (seen.has(value)) return undefined;
+                seen.add(value);
+            }
+            return value;
+        });
+    }
 }
 function surfaceTriangles(o) {
     if (!o || typeof o !== "object") return exportSurfaceTriangles(o);
@@ -985,7 +989,7 @@ let depthBuffer = null,
 // 面を選び直しただけ・ハンドルに触れただけの描き直しでは、この計算（実測20ms前後）が丸ごと省ける。
 // キー作りは JSON.stringify 30個で 0.04ms 程度なので、毎回作っても十分安い。
 function exportDepthKey(cw, ch, tf, seen) {
-    let key = cw + "," + ch + "," + (tf ? tf.join(",") : "") + "," + sigNow() + "," + JSON.stringify(P) + "|";
+    let key = cw + "," + ch + "," + (tf ? tf.join(",") : "") + "," + T + "," + sigNow() + "," + JSON.stringify(P) + "|";
     S.forEach((s) => {
         const o = s && s.ob;
         if (!o || !objectVisible(o) || seen.has(o.id)) return;
@@ -1191,7 +1195,7 @@ function buildExportDepth(cw, ch, tf) {
         // 入れないと、3Dで作った奥行きをそのまま使ってしまい、正面・横・上では
         // 「奥の建物が手前の面に隠れて」線がほぼ全部消える（実測：面ONの線が 1/50 になった）。
         ctxKey =
-            cw + "," + ch + "," + (tf ? tf.join(",") : "") + "," + orthoProjectionKey() + "," +
+            cw + "," + ch + "," + (tf ? tf.join(",") : "") + "," + T + "," + orthoProjectionKey() + "," +
             sigNow() + "," + JSON.stringify(P),
         objs = [],
         seen = new Set();
@@ -1632,8 +1636,12 @@ function seamEdgeScore(a, b, depth, cw, ch) {
             x0 = a.x + dx * t,
             y0 = a.y + dy * t,
             zLine = a.depth + (b.depth - a.depth) * t;
-        // (1) 左右で奥行きが大きく違う＝輪郭。
-        if (Math.abs(at(x0, y0, SEAM_OFF) - at(x0, y0, -SEAM_OFF)) >= Math.max(0.25, Math.abs(mz) * 0.04)) edge++;
+        const jump = Math.max(0.25, Math.abs(mz) * 0.04);
+        // (1) 左右で奥行きが大きく違う＝輪郭。ベベル帯が狭いとき複数の候補線が 5px 以内に並ぶため、
+        //     より外縁ギリギリ（±1px / ±2px でも奥行き差が出る本当のシルエット線）を高く評価する。
+        if (Math.abs(at(x0, y0, SEAM_OFF) - at(x0, y0, -SEAM_OFF)) >= jump) {
+            edge += Math.abs(at(x0, y0, 1) - at(x0, y0, -1)) >= jump ? 1.35 : Math.abs(at(x0, y0, 2) - at(x0, y0, -2)) >= jump ? 1.2 : 1;
+        }
         // (2) 左右で面の番号が違う＝面と面の折れ目（丸めた角の縦線はこちら）。
         else {
             const f1 = faceAt(x0, y0, SEAM_OFF),
@@ -1697,15 +1705,20 @@ function layerLineWidth(s) {
 // 面と線の奥行きがずれる。線の試験点に対して実際の三角面への光線を使う。
 let fishLineOccluders = null, fishBvhCache = null, fishBlockedPixels = null, fishBlockedWidth = 0, fishBlockedHeight = 0, fishOcclusionEpoch = 0, fishVisiblePixels = null, fishLineSerial = 0, fishCurrentLine = 0;
 function prepareFishLineOccluders() {
-    const seen = new Set(), objects = [];
-    S.forEach((s) => {
-        if (!s.ob || !objectVisible(s.ob) || seen.has(s.ob.id)) return;
-        seen.add(s.ob.id);
-        // syncAttachedPart は新しいオブジェクトを返す。親が非表示でも位置を同期し、
-        // 同期後の値をBVHのキーと三角面の両方に使う。
-        objects.push(s.ob.attachment && typeof syncAttachedPart === "function" ? syncAttachedPart(s.ob) : s.ob);
-    });
-    const key = objects.map((o) => o.id + ":" + JSON.stringify(o)).join("|"), cam = camPos();
+    const cam = camPos();
+    // 線分数ではなく一意なオブジェクト数だけ走査して状態を確認する。
+    // S同一のままオブジェクト値が直接変更された場合も、シリアライズキーで取りこぼさない。
+    const sourceObjects = typeof sceneObjects === "function"
+            ? sceneObjects()
+            : [...new Map(S.filter(s => s?.ob).map(s => [s.ob.id, s.ob])).values()],
+        objects = [];
+        for (const o of sourceObjects) {
+            if (!o || !objectVisible(o)) continue;
+            // syncAttachedPart は新しいオブジェクトを返す。親の移動後に更新された値を
+            // 三角面生成へ渡す。オブジェクト単位で走査し、線の重複数に影響されない。
+            objects.push(o.attachment && typeof syncAttachedPart === "function" ? syncAttachedPart(o) : o);
+        }
+    const key = objects.map((o) => o.id + ":" + surfaceCacheKey(o)).join("|");
     if (!fishBvhCache || fishBvhCache.key !== key) {
         const records = [];
         for (const o of objects) for (const t of surfaceTriangles(o)) {
@@ -1729,12 +1742,16 @@ function prepareFishLineOccluders() {
             const mid=items.length>>1;
             return {lo,hi,left:makeNode(items.slice(0,mid)),right:makeNode(items.slice(mid))};
         };
-        fishBvhCache = {key,records,root:makeNode(records.slice())};
+        fishBvhCache = {scene:S,key,records,root:makeNode(records.slice()),camKey:""};
     }
-    for (const r of fishBvhCache.records) {
-        const v=V.add(cam,r.a,1,-1), e1=r.e1, e2=r.e2,
-            q=[v[1]*e1[2]-v[2]*e1[1],v[2]*e1[0]-v[0]*e1[2],v[0]*e1[1]-v[1]*e1[0]];
-        r.v=v;r.q=q;r.n=e2[0]*q[0]+e2[1]*q[1]+e2[2]*q[2];
+    const camKey = cam[0] + "," + cam[1] + "," + cam[2];
+    if (fishBvhCache.camKey !== camKey) {
+        fishBvhCache.camKey = camKey;
+        for (const r of fishBvhCache.records) {
+            const v=[cam[0]-r.a[0],cam[1]-r.a[1],cam[2]-r.a[2]], e1=r.e1, e2=r.e2,
+                q=[v[1]*e1[2]-v[2]*e1[1],v[2]*e1[0]-v[0]*e1[2],v[0]*e1[1]-v[1]*e1[0]];
+            r.v=v;r.q=q;r.n=e2[0]*q[0]+e2[1]*q[1]+e2[2]*q[2];
+        }
     }
     fishLineOccluders={root:fishBvhCache.root,cam};
     fishOcclusionEpoch++;
@@ -3196,6 +3213,11 @@ function renderSoon() {
         render();
     });
 }
+let lastObjectGeometryScene = null,
+    lastObjectGeometrySignature = null,
+    lastObjectGeometryLength = -1,
+    lastObjectGeometryFirst = null,
+    lastObjectGeometryLast = null;
 function render() {
     // 予約済みの描画は、この同期描画1回にまとめる（二重に描かない）。
     if (RAF) {
@@ -3209,7 +3231,27 @@ function render() {
     // sigNow()は描画1回につき一度だけ計算する。以前は線ごとに再計算していたため、
     // アセットや線が多いシーンほど不要な文字列計算が増えていた。
     const currentSignature = sigNow();
-    if (S.some((s) => s.ob && (s.cs !== currentSignature || (s.signalPoleTopRing && s.signalPoleContourView !== (orthView || "3d")) || (s.preciseTubeEdge && s.tubeContourView !== (orthView || "3d"))))) regenObjects();
+    // S（シーン配列）または生成依存シグネチャが変わったときだけ、古い生成線が
+    // 混ざっていないか走査する。視点をドラッグする毎フレームの全線走査を避ける。
+    const sceneLength = S.length,
+        sceneFirst = sceneLength ? S[0] : null,
+        sceneLast = sceneLength ? S[sceneLength - 1] : null;
+    if (
+        lastObjectGeometryScene !== S ||
+        lastObjectGeometrySignature !== currentSignature ||
+        lastObjectGeometryLength !== sceneLength ||
+        lastObjectGeometryFirst !== sceneFirst ||
+        lastObjectGeometryLast !== sceneLast
+    ) {
+        if (S.some((s) => s.ob && (s.cs !== currentSignature || (s.signalPoleTopRing && s.signalPoleContourView !== (orthView || "3d")) || (s.preciseTubeEdge && s.tubeContourView !== (orthView || "3d"))))) {
+            regenObjects();
+        }
+        lastObjectGeometryScene = S;
+        lastObjectGeometrySignature = currentSignature;
+        lastObjectGeometryLength = S.length;
+        lastObjectGeometryFirst = S.length ? S[0] : null;
+        lastObjectGeometryLast = S.length ? S[S.length - 1] : null;
+    }
     syncSel();
     T === "f" ? calcF() : calc();
     const c = ctx;
