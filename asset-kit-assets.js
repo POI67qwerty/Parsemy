@@ -944,8 +944,11 @@ function pedSignalHoodControls() {
 function signalArmParts(o,K,g,headParts) {
     if(!g.suspended)return headParts;
     const moved=K.moveParts(headParts,g.headX,0,0).map(p=>p.signalSmoothSide?signalSmoothSides(p,o,K):p),
-        arm=K.box(K.rectPath(g.headX+g.poleR*2,g.armThickness,g.headX/2,0),g.H-g.armThickness,g.H);
-    return [arm,...moved];
+        arm=K.box(K.rectPath(g.headX+g.poleR*2,g.armThickness,g.headX/2,0),g.H-g.armThickness,g.H),
+        lowerSupport=o.asset==="pedSignal"&&o.pedSignalLowerSupport===true
+            ? K.box(K.rectPath(g.headX+g.poleR*2,g.armThickness*.7,g.headX/2,0),g.headBottom-.045,g.headBottom,{pedSignalLowerSupport:true})
+            : null;
+    return [arm,...(lowerSupport?[lowerSupport]:[]),...moved];
 }
 // --- 1) 車両用信号機（横3灯）---
 ASSET_KIT.define(
@@ -1019,7 +1022,7 @@ ASSET_KIT.define(
         h: 2.4,
         accent: "#5c6b73",
         geometryBounds: true,
-        controls: [...pedSignalHoodControls(), depthBevelControl("spDepthBevel", 0.05, true), signalArmControl()],
+        controls: [...pedSignalHoodControls(), depthBevelControl("spDepthBevel", 0.05, true), signalArmControl(), {key:"pedSignalLowerSupport",label:"下側の支え",type:"boolean",default:false,canvasToggle:true}],
         spHeadH: 0.66,
         spPoleR: 0.038,
         spBaseR: 0.15,
