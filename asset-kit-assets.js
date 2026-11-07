@@ -271,15 +271,10 @@ ASSET_KIT.define(
         const p = wallSignParams(o),
             half = p.thickness * 0.5,
             parts = [K.box(wallSignFacePoints(p), -half, half, { axis: "y" })];
-        wallSignBrackets(p).forEach((b) =>
-            parts.push(
-                K.box(
-                    K.rectPath(b.x1 - b.x0, b.y1 - b.y0, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2),
-                    b.z - b.h * 0.5,
-                    b.z + b.h * 0.5,
-                ),
-            ),
-        );
+        wallSignBrackets(p).forEach((b) => {
+            const bw=b.x1-b.x0,bd=b.y1-b.y0,bevel=Math.max(.003,Math.min(bw,bd)*.22),path=beveledBoxFootprint(bw,bd,bevel,2).map(([x,y])=>[x+(b.x0+b.x1)/2,y+(b.y0+b.y1)/2]);
+            parts.push(K.box(path,b.z-b.h*.5,b.z+b.h*.5,{sideVerticals:path.map((_,i)=>i),seamMarks:[null,null,...path.map((_,i)=>beveledEdgeMark(i,bevel,2,'wall-sign-bracket'))]}));
+        });
         return parts;
     },
     { replace: true },
@@ -1317,6 +1312,42 @@ ASSET_KIT.define(
     },
 );
 
+// 直方体アセットと同じZ押し出しベベル。丸めた上下縁ではなく、XY断面の角だけを処理する。
+function beveledPrismPart(K,path,z0,z1,amount,segments=4,extra={}) {
+    const bevel=Math.max(0,Number(amount)||0);
+    if(bevel<=1e-5)return K.box(path,z0,z1,extra);
+    const xs=path.map(p=>p[0]),ys=path.map(p=>p[1]),x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys),
+        rect=path.length===4&&path.every(p=>([x0,x1].some(x=>Math.abs(p[0]-x)<1e-5)&&[y0,y1].some(y=>Math.abs(p[1]-y)<1e-5))),
+        rounded=rect?beveledBoxFootprint(x1-x0,y1-y0,bevel,segments).map(([x,y])=>[x+(x0+x1)/2,y+(y0+y1)/2]):bevelPolygonPath(path,bevel,segments),
+        group=extra.seamGroup??0,
+        marks=rect?K.bevelMarks(rounded,bevel,segments,group):[null,null,...(rounded._bevelMarks||[]).map(m=>m?{...m,key:`${group}:${m.key}`} : null)],
+        {seamGroup,...partExtra}=extra;
+    return K.box(rounded,z0,z1,{...partExtra,sideVerticals:rounded.map((_,i)=>i),seamMarks:marks});
+}
+function bevelPolygonPath(path,amount,segments=4) {
+    const n=path.length,b=Math.max(0,Number(amount)||0),steps=Math.max(1,Math.min(4,Math.round(segments)||4));
+    if(n<3||b<1e-5)return path.map(p=>p.slice());
+    const area=path.reduce((s,p,i)=>{const q=path[(i+1)%n];return s+p[0]*q[1]-q[0]*p[1];},0),orient=Math.sign(area)||1,out=[],marks=[];
+    for(let i=0;i<n;i++){
+        const p=path[i],prev=path[(i+n-1)%n],next=path[(i+1)%n],
+            e1=[prev[0]-p[0],prev[1]-p[1]],e2=[next[0]-p[0],next[1]-p[1]],
+            l1=Math.hypot(...e1),l2=Math.hypot(...e2),u=e1.map(x=>x/(l1||1)),v=e2.map(x=>x/(l2||1)),
+            cross=u[0]*v[1]-u[1]*v[0],dot=Math.max(-1,Math.min(1,u[0]*v[0]+u[1]*v[1])),theta=Math.acos(dot);
+        // 凹角は尖ったまま残す。凸角だけを丸め、L/U字の内側角を崩さない。
+        if(cross*orient>=-1e-6||theta<1e-4||Math.PI-theta<1e-4){out.push(p.slice());marks.push(null);continue;}
+        const tangent=Math.min(b/Math.tan(theta/2),l1*.42,l2*.42),radius=tangent*Math.tan(theta/2),
+            a=[p[0]+u[0]*tangent,p[1]+u[1]*tangent],c=[p[0]+v[0]*tangent,p[1]+v[1]*tangent],
+            bis=[u[0]+v[0],u[1]+v[1]],bl=Math.hypot(...bis)||1,
+            center=[p[0]+bis[0]/bl*radius/Math.sin(theta/2),p[1]+bis[1]/bl*radius/Math.sin(theta/2)],
+            start=Math.atan2(a[1]-center[1],a[0]-center[0]),end=Math.atan2(c[1]-center[1],c[0]-center[0]),
+            dir=cross<0?1:-1;
+        let sweep=end-start;if(dir>0){while(sweep<0)sweep+=Math.PI*2;}else{while(sweep>0)sweep-=Math.PI*2;}
+        const key=`corner:${i}`;
+        for(let j=0;j<=steps;j++){const t=j/steps,ang=start+sweep*t;out.push([center[0]+radius*Math.cos(ang),center[1]+radius*Math.sin(ang)]);marks.push({key,apex:j===Math.round(steps/2)});}
+    }
+    Object.defineProperty(out,'_bevelMarks',{value:marks});return out;
+}
+
 // ===== カウンター（薄い天板＋どっしりした土台）=====
 // 参考写真の「上は薄い板、下は厚い箱」のカウンター。普通／L字／コの字の3種は
 // 足元の輪郭（footprint）だけが違うので、天板の多角形を作り、
@@ -1328,13 +1359,13 @@ function counterParts(o, K) {
         // 土台は天板より内側。張り出しの分だけ細くして、天板の縁が線として出るようにする。
         base = K.insetPath(foot, g.overhang);
     return [
-        // 1) 天板：薄い板（輪郭はそのまま）
-        K.box(foot, g.H - g.topT, g.H),
-        // 2) 土台：床から天板の裏まで、内側へ引いた箱
-        K.box(base, 0, g.H - g.topT),
+        // 天板と土台は同じZ押し出しベベル方式。凹角は保持して外角だけ丸める。
+        beveledPrismPart(K,foot,g.H-g.topT,g.H,Math.max(0,Number(o.ctBevel)||0),4),
+        beveledPrismPart(K,base,0,g.H-g.topT,Math.max(0,Number(o.ctBevel)||0),4),
     ];
 }
 
+function counterBevelControl(){return {key:'ctBevel',label:'Z軸辺のベベル',type:'range',canvasSlider:true,default:0,min:0,max:o=>{const g=counterGeometry(o);return Math.max(0,Math.min(g.W,g.D,g.arm)*.22);},step:.005,unit:'m',handle:(o,v)=>{const g=counterGeometry(o);return {anchor:[g.W/2,-g.D/2,g.H],sample:[g.W/2-v,-g.D/2,g.H],probe:[g.W/2-v-1,-g.D/2,g.H],fallback:{x:-1,y:0}};}};}
 // --- 普通（まっすぐ）---
 ASSET_KIT.define(
     "counter",
@@ -1349,6 +1380,7 @@ ASSET_KIT.define(
         ctTopT: 0.06, // 天板の厚さ
         ctArm: 0.55, // L字・コの字の腕の幅（普通は未使用）
         ctOverhang: 0.06, // 天板の張り出し（土台を内側へ引く量）
+        controls: [counterBevelControl()],
     },
     counterParts,
 );
@@ -1367,6 +1399,7 @@ ASSET_KIT.define(
         ctTopT: 0.06,
         ctArm: 0.55,
         ctOverhang: 0.06,
+        controls: [counterBevelControl()],
     },
     counterParts,
 );
@@ -1385,6 +1418,7 @@ ASSET_KIT.define(
         ctTopT: 0.06,
         ctArm: 0.55,
         ctOverhang: 0.06,
+        controls: [counterBevelControl()],
     },
     counterParts,
 );
@@ -1989,8 +2023,9 @@ ASSET_KIT.define('bezierCable',{
   {key:'squarePoleRadius',label:'支柱の半径',default:.04,min:.005,max:2,step:.005,unit:'m',
    handle:(o,v)=>({anchor:[0,0,o.h*.5],sample:[v,0,o.h*.5],probe:[v+1,0,o.h*.5],fallback:{x:1,y:0}})},
   {key:'squareBaseRadius',label:'台座の半径',min:.01,max:2,step:.01,unit:'m',get:chairBaseRadius,
-   handle:(o,v)=>({anchor:[0,0,chairBase(o)],sample:[v,0,chairBase(o)],probe:[v+1,0,chairBase(o)],fallback:{x:1,y:0}})}
- ]},(o,K)=>{const {w,d,h}=S(o),seat=chairSeat(o),bh=chairBase(o),br=chairBaseRadius(o),r=chairPoleRadius(o);return [K.box(K.rectPath(w,d),h-seat,h,flags),streetRoundPart(o,K,[[r,r,bh],[r,r,h-seat]]),streetRoundPart(o,K,[[br,br,0],[br,br,bh]])];});
+   handle:(o,v)=>({anchor:[0,0,chairBase(o)],sample:[v,0,chairBase(o)],probe:[v+1,0,chairBase(o)],fallback:{x:1,y:0}})},
+  {key:'squareSeatBevel',label:'座面のベベル',type:'range',canvasSlider:true,default:0,min:0,max:o=>Math.min(o.ra,o.rb)*.45,step:.01,unit:'m',handle:(o,v)=>({anchor:[o.ra,-o.rb,o.h],sample:[o.ra-v,-o.rb,o.h],probe:[o.ra-v-1,-o.rb,o.h],fallback:{x:-1,y:0}})}
+ ]},(o,K)=>{const {w,d,h}=S(o),seat=chairSeat(o),bh=chairBase(o),br=chairBaseRadius(o),r=chairPoleRadius(o),bevel=Math.max(0,Math.min(Number(o.squareSeatBevel)||0,Math.min(w,d)*.45));return [beveledPrismPart(K,K.rectPath(w,d),h-seat,h,bevel,4,flags),streetRoundPart(o,K,[[r,r,bh],[r,r,h-seat]]),streetRoundPart(o,K,[[br,br,0],[br,br,bh]])];});
  const wardrobeRows=o=>Math.round(V(o,'wardrobeRows',2,1,8)),
   wardrobeSplit=o=>V(o,'wardrobeSplit',48,15,85)/100,
   wardrobeBoardMax=(o,full)=>{const {w,d,h}=S(o),n=wardrobeRows(o),r=wardrobeSplit(o),cell=full?1/n:Math.min(r/n,1-r);return Math.max(.004,Math.min(w*.12,d*.2,h*cell*.3));},
@@ -2156,8 +2191,9 @@ ASSET_KIT.define('guardPoleHalf',{
  // 山を連続した一枚の断面から押し出す。表面と裏面は同じ波形。
  ASSET_KIT.define('corrugatedRoof',{label:'トタン屋根の板',glyph:'▰',group:'buildingParts',w:1,d:1.4,h:.08,accent:'#a8aaa4',
   minHalfWidth:()=>.05,minHalfDepth:()=>.05,minHeight:()=>.02,controls:[
-   {key:'roofWaveCount',label:'蛇腹（波）の数',type:'range',default:8,min:1,max:24,step:1,integer:true,unit:'山'},
-   {key:'roofSheetThickness',label:'板の厚さ',default:.01,min:.003,max:o=>Math.max(.003,Math.min(.08,o.h*.45)),step:.005,unit:'m',
+   {key:'roofWaveCount',label:'蛇腹（波）の数',type:'range',canvasSlider:true,default:8,min:1,max:24,step:1,integer:true,unit:'山',
+    handle:(o,v)=>{const step=2*Math.abs(o.ra)/24,x=-Math.abs(o.ra)+v*step;return {anchor:[-Math.abs(o.ra),-Math.abs(o.rb),o.h],sample:[x,-Math.abs(o.rb),o.h],probe:[x+step,-Math.abs(o.rb),o.h],fallback:{x:1,y:0}};}},
+   {key:'roofSheetThickness',label:'板の厚さ',type:'range',canvasSlider:true,default:.01,min:.003,max:o=>Math.max(.003,Math.min(.08,o.h*.45)),step:.005,unit:'m',
     handle:(o,x)=>({anchor:[-o.ra,-o.rb,0],sample:[-o.ra,-o.rb,x],probe:[-o.ra,-o.rb,x+1],fallback:{x:0,y:-1}})}
   ]},(o,K)=>{
    const w=Math.max(.1,2*Math.abs(o.ra)),d=Math.max(.1,2*Math.abs(o.rb)),h=Math.max(.02,o.h),
@@ -2166,25 +2202,31 @@ ASSET_KIT.define('guardPoleHalf',{
    const bottom=top.map(([x,z])=>[x,z-t]).reverse();
    return [K.box([...top,...bottom],-d/2,d/2,{axis:'y',...flag})];
   });
- // 4面ひさし部品をそのまま使い、前方の円形レンズと壁取り付け脚を組む。
- const stem=o=>v(o,'cameraStemHeight',.12,.04,2);
+ // 4面ひさし部品。傾き・枠の奥行き・つばの長さ・厚さを親アセットからも編集できる。
+ const stem=o=>v(o,'cameraStemHeight',.12,.04,2),
+  securityCameraHoodParams=o=>{
+   const w=Math.max(.14,Math.abs(o.ra)*2),d=Math.max(.2,Math.abs(o.rb)*2),h=Math.max(stem(o)+.22,o.h),base=.10+stem(o),hh=h-base,hoodH=hh*.92,
+    maxT=Math.max(.005,Math.min(w*.4,hoodH*.28)),frame=Math.max(.005,Math.min(.035,d*.08)),brim=Math.max(.01,d*.26),t=v(o,'cameraHoodThickness',Math.max(.005,Math.min(w,hh)*.055),.005,maxT),
+    frameDepth=v(o,'cameraHoodFrameLength',frame,.005,Math.max(.01,d*.8)),brimLength=v(o,'cameraHoodBrimLength',brim,0,Math.max(.01,d*1.5)),
+    knee=v(o,'cameraHoodTilt',hoodH*.55,t+.001,hoodH-t-.001);
+   return {w,d,h,base,hh,hoodH,t,frameDepth,brimLength,length:frameDepth+brimLength,knee,maxT,kneeMin:t+.001,kneeMax:hoodH-t-.001};
+  };
  ASSET_KIT.define('securityCamera',{label:'監視カメラ',glyph:'◉',group:'street',w:.34,d:.55,h:.50,accent:'#a3aba8',
   minHalfWidth:()=>.07,minHalfDepth:()=>.1,minHeight:o=>stem(o)+.22,controls:[
-   {key:'cameraStemHeight',label:'支柱の長さ',default:.12,min:.04,max:2,step:.01,unit:'m',
-    patch:(o,x)=>({cameraStemHeight:x,h:o.h+x-stem(o)}),
-    handle:(o,x)=>({anchor:[0,0,.10],sample:[0,0,.10+x],probe:[0,0,1.10+x],fallback:{x:0,y:-1}})}
+   {key:'cameraStemHeight',label:'支柱の長さ',default:.12,min:.04,max:2,step:.01,unit:'m',patch:(o,x)=>({cameraStemHeight:x,h:o.h+x-stem(o)}),handle:(o,x)=>({anchor:[0,0,.10],sample:[0,0,.10+x],probe:[0,0,1.10+x],fallback:{x:0,y:-1}})},
+   ...ASSET_KIT.hoodControls('cameraHood',securityCameraHoodParams,{frameMax:(o)=>Math.max(.01,Math.abs(o.rb)*1.6),brimMax:(o)=>Math.max(.01,Math.abs(o.rb)*3)})
   ]},(o,K)=>{
    const w=Math.max(.14,Math.abs(o.ra)*2),d=Math.max(.2,Math.abs(o.rb)*2),h=Math.max(stem(o)+.22,o.h),
     base=.10+stem(o),hh=h-base,front=-d*.32,back=d*.45,headD=back-front,headY=(front+back)/2,
     lensR=Math.min(w*.27,hh*.30),hoodW=w,hoodH=hh*.92,hoodBase=base+hh*.04,
-    frame=Math.max(.005,Math.min(.035,d*.08)),brim=Math.max(.01,d*.26),hoodY=front+frame/2-brim/2,
-    t=Math.max(.005,Math.min(w,hh)*.055),b=Math.min(w,hh)*.12;
+    hood=securityCameraHoodParams(o),frame=hood.frameDepth,brim=hood.brimLength,hoodY=front+frame/2-brim/2,
+    t=hood.t,b=Math.min(w,hh)*.12;
    const parts=[
     K.box(K.rectPath(w*.68,.025,0,d*.48),0,Math.max(.16,base*.78),flag),
     K.box(K.rectPath(w*.58,d*.46,0,d*.20),.07,.095,flag),
     K.cylinder(Math.min(w*.13,.045),.095,base,{seg:12,verts:4,...flag}),
     K.box(K.rectPath(w*.80,headD,0,headY),base,h-hh*.06,flag),
-    ...K.moveParts(K.part('screenHood',{w:hoodW,h:hoodH,frameDepth:frame,brimLength:brim,knee:hoodH*.55,t,bevel:b}),0,hoodY,hoodBase),
+    ...K.moveParts(K.part('screenHood',{w:hoodW,h:hoodH,frameDepth:frame,brimLength:brim,knee:hood.knee,t,bevel:b}),0,hoodY,hoodBase),
     ...K.moveParts([K.cylinder(lensR*1.15,front-.035,front+.005,{axis:'y',seg:20,verts:4,...flag}),
                     K.cylinder(lensR*.78,front-.048,front-.036,{axis:'y',seg:20,verts:4,...flag})],0,0,base+hh*.52)
    ];return parts;
@@ -3881,3 +3923,121 @@ function gachaMachineBuild(o, K = ASSET_KIT) {
     );
 })();
 
+
+// ===== リクエスト追加家具・街設備（2026-11）=====
+(function(){
+ const V=(o,k,d)=>Number.isFinite(Number(o?.[k]))?Number(o[k]):d,
+       box=(K,w,d,z0,z1,x=0,y=0,extra={})=>K.box(K.rectPath(w,d,x,y),z0,z1,extra);
+ // 参照写真の路上用変圧器。二枚扉・換気スリット・注意プレートを少数の線で表す。
+ const transformerGeom=o=>{const w=2*Math.abs(o.ra),d=2*Math.abs(o.rb),h=o.h,
+  pw=Math.max(.12,Math.min(w*.44,V(o,'transformerPanelWidth',w*.37))),
+  ph=Math.max(.12,Math.min(h*.68,V(o,'transformerPanelHeight',h*.62))),
+  px=Math.max(-w*.12,Math.min(w*.12,V(o,'transformerPanelX',0))),
+  pz=Math.max(ph/2+.12,Math.min(h-ph/2-.11,V(o,'transformerPanelZ',h*.53))),
+  b=Math.max(0,Math.min(V(o,'transformerBevel',.035),Math.min(w,d)*.22));
+  return {w,d,h,pw,ph,px,pz,b,front:-d/2-.012};};
+ const transformerControls=[
+  {key:'transformerBevel',label:'Z軸辺のベベル',type:'range',canvasSlider:true,default:.035,min:0,max:o=>Math.min(Math.abs(o.ra),Math.abs(o.rb))*.22,step:.005,unit:'m',get:o=>transformerGeom(o).b,handle:(o,v)=>{const g=transformerGeom(o);return{anchor:[g.w/2,-g.d/2,g.h],sample:[g.w/2-v,-g.d/2,g.h],probe:[g.w/2-v-1,-g.d/2,g.h],fallback:{x:-1,y:0}};}},
+  {key:'transformerPanelWidth',label:'内側の四角の幅',type:'range',canvasSlider:true,default:.33,min:.12,max:o=>Math.max(.12,2*Math.abs(o.ra)*.44),step:.01,unit:'m',get:o=>transformerGeom(o).pw,handle:(o,v)=>{const g=transformerGeom(o);return{anchor:[g.px,g.front,g.pz],sample:[g.px+v/2,g.front,g.pz],probe:[g.px+v/2+1,g.front,g.pz],fallback:{x:1,y:0}};}},
+  {key:'transformerPanelHeight',label:'内側の四角の高さ',type:'range',canvasSlider:true,default:.65,min:.12,max:o=>Math.max(.12,o.h*.68),step:.01,unit:'m',get:o=>transformerGeom(o).ph,handle:(o,v)=>{const g=transformerGeom(o);return{anchor:[g.px,g.front,g.pz-v/2],sample:[g.px,g.front,g.pz+v/2],probe:[g.px,g.front,g.pz+v/2+1],fallback:{x:0,y:-1}};}},
+  {key:'transformerPanelX',label:'内側の四角の左右位置',type:'range',canvasSlider:true,default:0,min:o=>-Math.abs(o.ra)*.1,max:o=>Math.abs(o.ra)*.1,step:.01,unit:'m',get:o=>transformerGeom(o).px,handle:(o,v)=>{const g=transformerGeom(o);return{anchor:[0,g.front,g.pz],sample:[v,g.front,g.pz],probe:[v+1,g.front,g.pz],fallback:{x:1,y:0}};}},
+  {key:'transformerPanelZ',label:'内側の四角の上下位置',type:'range',canvasSlider:true,default:.55,min:o=>.18,max:o=>o.h-.18,step:.01,unit:'m',get:o=>transformerGeom(o).pz,handle:(o,v)=>{const g=transformerGeom(o);return{anchor:[g.px,g.front,0],sample:[g.px,g.front,v],probe:[g.px,g.front,v+1],fallback:{x:0,y:-1}};}}
+ ];
+ ASSET_KIT.define('utilityCabinet',{label:'変圧器',glyph:'▣',group:'street',w:.9,d:.58,h:1.05,accent:'#b9b7a7',minHalfWidth:()=>.12,minHalfDepth:()=>.1,minHeight:()=>.3,controls:transformerControls},(o,K)=>{
+  const g=transformerGeom(o),{w,d,h,pw,ph,px,pz,b,front}=g,out=[],t=.055,cap=.075;
+  out.push(beveledPrismPart(K,K.rectPath(w,d),0,h-cap,b,4,{seamGroup:'transformer-body'}));
+  // 上の薄い張り出し蓋と下の台輪（大きな箱を重ねず、接合線だけを残す）
+  out.push(beveledPrismPart(K,K.rectPath(w+.035,d+.035),h-cap,h,b,4,{seamGroup:'transformer-cap'}));
+  out.push(box(K,w+.025,d+.025,0,t));
+  const doorGap=.018,doorCx=pw/2+doorGap/2;
+  for(const sx of [-1,1]){
+   const cx=px+sx*doorCx;
+   out.push(box(K,pw,.014,pz-ph/2,pz+ph/2,cx,front));
+   // 四本の短い換気スリットをそれぞれの扉上部へ
+   for(let i=0;i<4;i++)out.push(box(K,pw*.46,.008,pz+ph*.23+i*.023,pz+ph*.245+i*.023,cx,front-.012));
+   out.push(box(K,.016,.025,pz-ph*.08,pz+ph*.08,cx-sx*(pw*.38),front-.024));
+  }
+  // 左扉の注意表示（細い三角枠と中央の警告線）。文字のような細線は増やさない。
+  const warnW=Math.min(pw*.5,.14),warnH=Math.min(ph*.23,.17),wx=px-doorCx, wz=pz-ph*.18;
+  out.push(K.box([[wx-warnW*.5,wz-warnH*.45],[wx+warnW*.5,wz-warnH*.45],[wx,wz+warnH*.55]],front-.025,front-.018,{axis:'y',width:2,noSides:true}));
+  // 三角の外形だけにして中央の細い警告線を省き、線画の欠けと細密化を避ける。
+  return out;
+ });
+ // 参考画像に寄せた木造鳥居：円柱状の控えめな柱、反りのある笠木、島木、貫、額束。
+ ASSET_KIT.define('torii',{label:'鳥居',glyph:'⛩',group:'street',w:3.4,d:.42,h:3.2,toriiPostHeight:2.56,toriiPostThickness:.235,accent:'#8b4d34',minHalfWidth:()=>.5,minHalfDepth:()=>.08,minHeight:()=>1,controls:[
+  {key:'toriiPostHeight',label:'柱の高さ',type:'range',canvasSlider:true,default:2.56,min:1,max:o=>Math.max(1,o.h*.94),step:.01,unit:'m',get:o=>V(o,'toriiPostHeight',o.h*.8),handle:(o,v)=>({anchor:[-o.ra*.32,0,0],sample:[-o.ra*.32,0,v],probe:[-o.ra*.32,0,v+1],fallback:{x:0,y:-1}})},
+  {key:'toriiPostThickness',label:'柱の太さ',type:'range',canvasSlider:true,default:.235,min:.08,max:o=>Math.max(.08,Math.min(o.rb*1.5,o.ra*.3)),step:.005,unit:'m',get:o=>V(o,'toriiPostThickness',Math.min(o.ra*.11,o.rb*.56)*2),handle:(o,v)=>({anchor:[-o.ra*.32,-o.rb*.28,V(o,'toriiPostHeight',o.h*.8)],sample:[-o.ra*.32+v/2,-o.rb*.28,V(o,'toriiPostHeight',o.h*.8)],probe:[-o.ra*.32+v/2+1,-o.rb*.28,V(o,'toriiPostHeight',o.h*.8)],fallback:{x:1,y:0}})},
+  {key:'toriiPlaqueWidth',label:'中央額の幅',type:'range',canvasSlider:true,min:.1,max:o=>Math.max(.1,o.ra*1.2),step:.01,unit:'m',get:o=>V(o,'toriiPlaqueWidth',Math.abs(o.ra)*.54),handle:(o,v)=>{const p=V(o,'toriiPostHeight',o.h*.8),z=o.h*.765+(p-2.56);return {anchor:[0,-o.rb*.55,z],sample:[v/2,-o.rb*.55,z],probe:[v/2+1,-o.rb*.55,z],fallback:{x:1,y:0}};}},
+  {key:'toriiPlaqueHeight',label:'中央額の高さ',type:'range',canvasSlider:true,min:.08,max:o=>Math.max(.08,o.h*.3),step:.01,unit:'m',get:o=>V(o,'toriiPlaqueHeight',.42),handle:(o,v)=>{const p=V(o,'toriiPostHeight',o.h*.8),z=o.h*.70+(p-2.56);return {anchor:[0,-o.rb*.55,z],sample:[0,-o.rb*.55,z+v],probe:[0,-o.rb*.55,z+v+1],fallback:{x:0,y:-1}};}}
+ ]},(o,K)=>{
+  const w=2*Math.abs(o.ra),d=2*Math.abs(o.rb),h=o.h,postH=Math.min(h*.94,V(o,'toriiPostHeight',h*.8)),topShift=postH-2.56,topH=Math.max(.2,Number(o.toriiHeadHeight)||h),plaqueW=clamp(V(o,'toriiPlaqueWidth',w*.27),.1,w*.6),plaqueH=clamp(V(o,'toriiPlaqueHeight',.42),.08,topH*.3),r=Math.min(V(o,'toriiPostThickness',Math.min(w*.055,d*.28)*2)/2,d*.38),px=w*.32,out=[];
+  const postCylinder=(radius,z0,z1,cx)=>({...K.cylinder(radius,z0,z1,{seg:24,verts:2,cx}),preciseTubeEdge:true,onFace:true});
+  for(const x of [-px,px]){
+   out.push(postCylinder(r,0,postH,x),postCylinder(r*1.28,0,Math.min(postH*.2,r*.75),x),
+    postCylinder(r*1.08,postH*.84,postH*.89,x),postCylinder(r*1.08,postH*.96,postH,x));
+  }
+  // 笠木は中央がわずかに高く、両端が反り上がる長い板として押し出す。
+  const beamPath=(width,zTop,thick)=>{const a=width/2;return [[-a,zTop-.04],[-a*.92,zTop-.015],[-a*.72,zTop+.025],[-a*.4,zTop+.045],[0,zTop+.05],[a*.4,zTop+.045],[a*.72,zTop+.025],[a*.92,zTop-.015],[a,zTop-.04],[a*.98,zTop-thick],[a*.65,zTop-thick+.012],[0,zTop-thick+.018],[-a*.65,zTop-thick+.012],[-a*.98,zTop-thick]];};
+  out.push(K.box(beamPath(w*1.16,topShift+topH*.96,topH*.12),-d*.58,d*.58,{axis:'y'}));
+  // 柱高を変えても上部部品の寸法は変えず、柱頭にまとまったまま追従する。
+  out.push(K.box(beamPath(w*.98,topShift+topH*.82,topH*.075),-d*.52,d*.52,{axis:'y'}));
+  out.push(box(K,w*.76,d*.82,topShift+topH*.61,topShift+topH*.68,0,0));
+  // 中央の額束と額（額の幅・高さは独立調整）。
+  out.push(box(K,w*.075,d*.82,topShift+topH*.69,topShift+topH*.83,0,0),box(K,plaqueW,d*.11,topShift+topH*.70,topShift+topH*.70+plaqueH,0,-d*.52));
+  return out;
+ });
+ // コンクリート電柱：頭部キャップ、金属バンド、腕金・碍子、側面の柱上変圧器を追加。
+ ASSET_KIT.define('utilityPole',{label:'電柱',glyph:'⚡',group:'street',w:.42,d:.42,h:5.5,accent:'#77766e',minHalfWidth:()=>.08,minHalfDepth:()=>.08,minHeight:()=>1,controls:[
+  {key:'poleArms',label:'腕金の段数',type:'range',canvasSlider:true,default:2,min:1,max:4,step:1,integer:true,unit:'段'},
+  {key:'transformerZ',label:'変圧器の上下位置',type:'range',canvasSlider:true,gizmoMode:'moveZ',min:o=>Math.max(.1,o.h*.1),max:o=>Math.max(.1,o.h*.9),step:.02,unit:'m',get:o=>V(o,'transformerZ',o.h*.47),handle:(o,v)=>({anchor:[o.ra*.35,-o.rb*.4,v],sample:[o.ra*.35,-o.rb*.4,v],probe:[o.ra*.35,-o.rb*.4,v+1],fallback:{x:0,y:-1}})},
+  {key:'poleDiameter',label:'電柱の太さ',type:'range',canvasSlider:true,min:.08,max:o=>Math.max(.08,Math.min(o.ra,o.rb)*1.9),step:.005,unit:'m',get:o=>V(o,'poleDiameter',Math.min(o.ra,o.rb)*1.64),handle:(o,v)=>({anchor:[0,-o.rb*.4,o.h*.55],sample:[v/2,-o.rb*.4,o.h*.55],probe:[v/2+1,-o.rb*.4,o.h*.55],fallback:{x:1,y:0}})}
+ ]},(o,K)=>{
+  const h=o.h,poleDiameter=clamp(V(o,'poleDiameter',Math.min(Math.abs(o.ra),Math.abs(o.rb))*1.64),.08,Math.min(Math.abs(o.ra),Math.abs(o.rb))*1.9),r=poleDiameter/1.64,n=Math.round(V(o,'poleArms',2)),span=r*7.2,out=[];
+  const tube=(radius,z0,z1,opt={})=>({...K.cylinder(radius,z0,z1,{seg:24,...opt}),preciseTubeEdge:true,onFace:true});
+  out.push(tube(r*.82,0,h*.99,{verts:2}),tube(r*.96,0,h*.045),tube(r*.7,h*.98,h));
+  // バンドは装飾線を増やしすぎず、実物の接合位置にだけ入れる。
+  for(const f of [.28,.51,.76])out.push(tube(r*1.015,h*f,h*f+.025));
+  for(let i=0;i<n;i++){
+   const z=h*(.74+i*.055),armD=r*.52;
+   out.push(box(K,span,armD,z,z+r*.20),box(K,r*.34,armD*1.4,z-r*.04,z+r*.06,-span*.36),box(K,r*.34,armD*1.4,z-r*.04,z+r*.06,span*.36));
+   for(const x of [-span*.34,0,span*.34]){
+    out.push(tube(r*.20,z+r*.18,z+r*.28,{seg:16,verts:2,cx:x}),tube(r*.11,z+r*.28,z+r*.42,{seg:16,verts:2,cx:x}));
+    const wireSpan=Math.max(r*9,.75),edgeZ=z+r*.43,midZ=z+r*.22;
+    // 細い実体のある電線として掃引し、円柱と同じカメラ方向の輪郭稜線を出す。
+    // 二次ベジェ制御点を合わせ、元の中央が垂れる線形状を維持する。
+    out.push(K.quadraticTube(o,[[x,-wireSpan/2,edgeZ],[x,0,2*midZ-edgeZ],[x,wireSpan/2,edgeZ]],Math.max(.003,r*.055),{sides:10,steps:20}));
+   }
+  }
+  // 柱上変圧器の円筒タンクと2本の取付バンド
+  const tx=r*1.55,tr=r*1.02,th=h*.16,tz=clamp(V(o,'transformerZ',h*.47),th/2,h-th/2);
+  out.push(box(K,r*1.65,r*.7,tz-.07,tz+.07,tx,-r*.24),tube(tr,tz-th/2,tz+th/2,{verts:2,cx:tx,cy:-r*.4}));
+  out.push(tube(tr*1.04,tz-th*.32,tz-th*.27,{cx:tx,cy:-r*.4}),tube(tr*1.04,tz+th*.27,tz+th*.32,{cx:tx,cy:-r*.4}));
+  return out;
+ });
+ // 空のラーメン鉢。回転断面で内側のくぼみを表現、中身なし。
+ ASSET_KIT.define('ramenBowl',{label:'ラーメン鉢（空）',glyph:'◉',group:'furniture',w:.28,d:.28,h:.11,accent:'#5b4237',minHalfWidth:()=>.05,minHalfDepth:()=>.05,minHeight:()=>.035,controls:[]},(o,K)=>{
+  const r=Math.min(Math.abs(o.ra),Math.abs(o.rb)),h=o.h;
+  // 外側の丸い椀形、厚い口縁、内側の底面までを一続きの断面で回転。中身は置かない。
+  return [K.revolution([[r*.52,0],[r*.60,h*.045],[r*.69,h*.14],[r*.86,h*.40],[r*.98,h*.82],[r,h*.92],[r*.92,h],[r*.83,h*.965],[r*.77,h*.84],[r*.69,h*.55],[r*.55,h*.30],[0,h*.26]],{seg:32,rings:[1,4,5,6,9],verts:2,preciseTubeEdge:true,onFace:true,capEnd:false})];
+ });
+ // T脚机。天板は四角・円・racetrack、四角天板は丸み量（ベベル）を調整可能。
+ ASSET_KIT.define('tLegTable',{label:'T字脚テーブル',glyph:'▱',group:'furniture',w:1.5,d:.8,h:.74,accent:'#9d7350',minHalfWidth:()=>.25,minHalfDepth:()=>.2,minHeight:()=>.35,controls:[
+  {key:'tableTopShape',label:'天板形状',type:'select',default:'square',options:[{value:'square',label:'四角'},{value:'circle',label:'円'},{value:'racetrack',label:'トラック（racetrack）'}]},
+  {key:'tableTopBevel',label:'四角天板のベベル',type:'range',canvasSlider:true,default:0,min:0,max:o=>o.tableTopShape==='square'?Math.min(o.ra,o.rb)*.45:0,step:.01,unit:'m',handle:(o,v)=>({anchor:[o.ra,-o.rb,o.h],sample:[o.ra-v,-o.rb,o.h],probe:[o.ra-v-1,-o.rb,o.h],fallback:{x:-1,y:0}})},
+  {key:'tableTopWidth',label:'天板の横幅',type:'range',canvasSlider:true,min:.4,max:8,step:.05,unit:'m',get:o=>2*Math.abs(o.ra),patch:(o,v)=>({ra:v/2}),handle:(o,v)=>({anchor:[0,0,o.h],sample:[v/2,0,o.h],probe:[v/2+1,0,o.h],fallback:{x:1,y:0}})},
+  {key:'tableTopDepth',label:'天板の縦幅',type:'range',canvasSlider:true,min:.4,max:8,step:.05,unit:'m',get:o=>2*Math.abs(o.rb),patch:(o,v)=>({rb:v/2}),handle:(o,v)=>({anchor:[0,0,o.h],sample:[0,v/2,o.h],probe:[0,v/2+1,o.h],fallback:{x:0,y:1}})},
+  {key:'tableLegHeight',label:'脚の高さ',type:'range',canvasSlider:true,gizmoMode:'moveZ',default:.67,min:.2,max:o=>Math.max(3,o.h-.025),step:.01,unit:'m',get:o=>V(o,'tableLegHeight',Math.max(.2,o.h-V(o,'tableTopThickness',.07))),patch:(o,v)=>({tableLegHeight:v,h:v+V(o,'tableTopThickness',.07)}),handle:(o,v)=>({anchor:[-o.ra*.35,0,0],sample:[-o.ra*.35,0,v],probe:[-o.ra*.35,0,v+1],fallback:{x:0,y:-1}})},
+  {key:'tableFootLength',label:'脚の横棒の長さ',type:'range',canvasSlider:true,default:.58,min:.1,max:o=>Math.max(.1,2*Math.abs(o.rb)),step:.01,unit:'m',get:o=>V(o,'tableFootLength',Math.max(.1,2*Math.abs(o.rb)*.72)),patch:(o,v)=>({tableFootLength:v}),handle:(o,v)=>({anchor:[-Math.abs(o.ra)*.35,0,.06],sample:[-Math.abs(o.ra)*.35,v/2,.06],probe:[-Math.abs(o.ra)*.35,v/2+1,.06],fallback:{x:0,y:1}})},
+  {key:'tableTopThickness',label:'天板厚さ',type:'range',canvasSlider:true,default:.07,min:.025,max:o=>Math.max(.025,o.h*.45),step:.005,unit:'m',get:o=>V(o,'tableTopThickness',.07),patch:(o,v)=>{const leg=V(o,'tableLegHeight',Math.max(.2,o.h-V(o,'tableTopThickness',.07)));return {tableTopThickness:v,h:leg+v};},handle:(o,v)=>({anchor:[o.ra*.35,-o.rb*.3,o.h],sample:[o.ra*.35,-o.rb*.3,o.h-v],probe:[o.ra*.35,-o.rb*.3,o.h-v-1],fallback:{x:0,y:1}})}
+]},(o,K)=>{
+  const w=2*Math.abs(o.ra),d=2*Math.abs(o.rb),t=Math.max(.025,V(o,'tableTopThickness',.07)),legH=Math.max(.2,V(o,'tableLegHeight',Math.max(.2,o.h-t))),h=legH+t,shape=o.tableTopShape||'square',bevel=V(o,'tableTopBevel',0),z=legH,out=[];
+  let path=shape==='circle'?K.circlePath(Math.min(w,d)/2,28):shape==='racetrack'?K.roundRectPath(w,d,Math.min(d/2,w/2),8):K.rectPath(w,d);
+  if(shape==='circle') out.push(K.cylinder(Math.min(w,d)/2,z,h,{seg:28}));
+  else if(shape==='racetrack') out.push(K.box(path,z,h,{sideVerticals:[0,8,9,17,18,26,27,35]}));
+  else out.push(beveledPrismPart(K,K.rectPath(w,d),z,h,bevel,4));
+  // two end frames: upright stem and transverse T foot
+  const postW=.055, footW=.075, footL=Math.max(.1,Math.min(Math.max(.1,d),V(o,'tableFootLength',.576))), legSpacing=Math.max(.4,Math.min(Math.max(.4,w-.1),V(o,'tableLegSpacing',1.05)));
+  for(const x of [-legSpacing/2,legSpacing/2]){out.push(box(K,postW,postW,.07,z,x,0),box(K,footW,footL,0,.07,x,0));}
+  return out;
+ });
+})();

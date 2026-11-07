@@ -21,9 +21,66 @@
 // これを読み取り、ra/rb/h などのオブジェクト値へ変換する。
 // 基本プリミティブを先頭にまとめ、その後に街並み用アセットを並べる。
 // 円柱は円の押し出しで作れるため、アセット棚からは外している。
+function f1AwningTinControls() {
+    const awningVisible=()=>window.__f1EditFeature==="awning",tinVisible=o=>awningVisible()&&o?.f1AwningType==="corrugated";
+    return [
+        {key:"f1AwningType",label:"テントの種類",type:"select",default:"fabric",options:[{value:"fabric",label:"テント"},{value:"corrugated",label:"トタン"}],handleOnly:true,canvasVisible:awningVisible,f1Feature:"awning"},
+        {key:"f1AwningSheetThickness",label:"トタン板の厚さ",type:"range",default:.01,min:.003,max:.08,step:.002,unit:"m",handleOnly:true,canvasSlider:true,canvasVisible:tinVisible,f1Feature:"awning",
+            get:o=>o.f1AwningSheetThickness==null?0.01:Number(o.f1AwningSheetThickness),handle:(o,v)=>({anchor:[0,-Math.abs(Number(o.rb)||1.5)*.7,Number(o.h)||3],sample:[v, -Math.abs(Number(o.rb)||1.5)*.7,Number(o.h)||3],probe:[v+1,-Math.abs(Number(o.rb)||1.5)*.7,Number(o.h)||3],fallback:{x:1,y:0}})},
+        {key:"f1AwningWaveCount",label:"トタンの蛇腹数",type:"range",default:8,min:1,max:24,step:1,integer:true,unit:"山",handleOnly:true,canvasSlider:true,canvasVisible:tinVisible,f1Feature:"awning",
+            get:o=>Math.round(Number(o.f1AwningWaveCount)||8),handle:(o,v)=>({anchor:[-Math.abs(Number(o.ra)||2),-Math.abs(Number(o.rb)||1.5),Number(o.h)||3],sample:[-Math.abs(Number(o.ra)||2)+v*.08,-Math.abs(Number(o.rb)||1.5),Number(o.h)||3],probe:[-Math.abs(Number(o.ra)||2)+v*.08+1,-Math.abs(Number(o.rb)||1.5),Number(o.h)||3],fallback:{x:1,y:0}})}
+    ];
+}
+function f1FacadeControls() {
+    const visible=()=>window.__f1EditFeature==="facade", base={type:"range",handleOnly:true,canvasSlider:true,canvasVisible:visible,f1Feature:"facade",unit:"m",step:.02};
+    return [
+        {key:"facadeSides",label:"ファサードを側面にも回す",type:"boolean",default:false,canvasVisible:visible,f1Feature:"facade",handleOnly:true},
+        {...base,key:"facadeWidth",label:"ファサード幅",default:4,min:.2,max:o=>Math.max(.2,Math.abs(Number(o.ra)||2)*2),get:o=>Number(o.facadeWidth)||Math.abs(Number(o.ra)||2)*2,
+            handle:(o,v)=>({anchor:[0,-Math.abs(Number(o.rb)||1.5),o.h],sample:[v/2,-Math.abs(Number(o.rb)||1.5),o.h],probe:[v/2+1,-Math.abs(Number(o.rb)||1.5),o.h],fallback:{x:1,y:0}})},
+        {...base,key:"facadeHeight",label:"ファサード高さ",default:.7,min:.05,max:o=>Math.max(.05,Number(o.h)||3),get:o=>Number(o.facadeHeight)||Math.min(.7,(Number(o.h)||3)*.22),
+            handle:(o,v)=>({anchor:[0,-Math.abs(Number(o.rb)||1.5),o.h-v],sample:[0,-Math.abs(Number(o.rb)||1.5),o.h],probe:[0,-Math.abs(Number(o.rb)||1.5),o.h+1],fallback:{x:0,y:-1}})},
+        {...base,key:"facadeProjection",label:"ファサード出幅",default:.18,min:.02,max:2,get:o=>Number(o.facadeProjection)||.18,
+            handle:(o,v)=>({anchor:[0,-Math.abs(Number(o.rb)||1.5),o.h*.9],sample:[0,-Math.abs(Number(o.rb)||1.5)-v,o.h*.9],probe:[0,-Math.abs(Number(o.rb)||1.5)-v-1,o.h*.9],fallback:{x:0,y:-1}})}
+    ];
+}
+function f1PartControls(kind) {
+    const awning = kind === "awning", prefix = awning ? "f1Awning" : "f1Sign";
+    const label = awning ? "テント" : "看板";
+    const dim = (suffix, title, min, max, step, fallback, handle) => ({
+        key: prefix + suffix, label: awning && ["FrontZ","Depth"].includes(suffix) ? title : `${label}${title}`, type: "range", default: typeof fallback === "function" ? undefined : fallback,
+        gizmoMode: ["BackZ","Z"].includes(suffix) ? "moveZ" : undefined,
+        get: o => o?.[prefix + suffix] ?? (typeof fallback === "function" ? fallback(o) : fallback),
+        min, max, step, unit: "m", handleOnly: true, canvasSlider: true,
+        patch2: awning && suffix==="FrontZ" ? (o,v)=>({f1AwningDepth:v}) : undefined,
+        canvasVisible: () => window.__f1EditFeature === (awning ? "awning" : "sign"),
+        f1Feature: awning ? "awning" : "sign", handle
+    });
+    const size = o => Math.max(.2, Math.abs(Number(o.ra)||2) * 1.9);
+    const H = o => Math.max(.2, Math.abs(Number(o.h)||3));
+    const D = o => Math.max(.2, Math.abs(Number(o.rb)||1.5));
+    if (awning) return [
+        {key:"f1AwningBaseZ",label:"Z",type:"range",default:3.6,min:0,max:o=>Math.max(0,H(o)-1),step:.05,unit:"m",get:o=>o.f1AwningBaseZ==null?3.6:Number(o.f1AwningBaseZ),patch:(o,v)=>{const base=o.f1AwningBaseZ==null?3.6:Number(o.f1AwningBaseZ),delta=v-base;return {f1AwningBaseZ:v,f1AwningBackZ:(Number(o.f1AwningBackZ)||4.6)+delta,f1AwningFrontZ:(Number(o.f1AwningFrontZ)||4.6)+delta};},gizmoMode:"moveZ",canvasSlider:true,canvasVisible:()=>window.__f1EditFeature==="awning",f1Feature:"awning",handle:(o,v)=>({anchor:[0,-D(o),v],sample:[0,-D(o),v+.1],probe:[0,-D(o),v+1],fallback:{x:0,y:-1}})},
+        dim("Width", "幅", .2, size, .05, 3, (o,v)=>({anchor:[0,-D(o)*.78,H(o)*.62],sample:[v/2,-D(o)*.78,H(o)*.62],probe:[v/2+1,-D(o)*.78,H(o)*.62],fallback:{x:1,y:0}})),
+        dim("OffsetX", "左右位置", o=>-size(o)/2, o=>size(o)/2, .05, 0, (o,v)=>({anchor:[0,-D(o)*.6,H(o)*.62],sample:[v,-D(o)*.6,H(o)*.62],probe:[v+1,-D(o)*.6,H(o)*.62],fallback:{x:1,y:0}})),
+
+        dim("BackZ", "壁側高さ", o=>.1, H, .05, o=>Math.min(H(o),4.6), (o,v)=>({anchor:[0,-D(o)/2,v],sample:[0,-D(o)/2,v],probe:[0,-D(o)/2,v+1],fallback:{x:0,y:-1}})),
+        dim("FrontZ", "前縁の高さ", o=>Number(o.f1AwningBaseZ??3.6), H, .05, o=>Math.min(H(o),4.6), (o,v)=>{const y=-D(o)+(Number(o.f1AwningDepth??-.5))-.5;return {anchor:[0,y,v],sample:[0,y,v+.1],probe:[0,y,v+1],sample2:[0,y+.1,v],probe2:[0,y+1,v],start2:Number(o.f1AwningDepth??-.5),min2:-.5,max2:.5,fallback:{x:0,y:-1},color:"#ffb347"};}),
+        dim("Depth", "前縁の前後", -.5, .5, .05, -.5, (o,v)=>({anchor:[0,-D(o),H(o)*.62],sample:[0,-D(o)+v,H(o)*.62],probe:[0,-D(o)+v+1,H(o)*.62],fallback:{x:0,y:1}})), 
+    ];
+    return [
+        dim("Width", "幅", .2, size, .05, 3, (o,v)=>({anchor:[0,-D(o)*.55,H(o)*.82],sample:[v/2,-D(o)*.55,H(o)*.82],probe:[v/2+1,-D(o)*.55,H(o)*.82],fallback:{x:1,y:0}})),
+        dim("Height", "高さ", .1, o=>H(o)*.4, .05, 1, (o,v)=>({anchor:[0,-D(o)*.55,H(o)*.78],sample:[0,-D(o)*.55,H(o)*.78+v],probe:[0,-D(o)*.55,H(o)*.78+v+1],fallback:{x:0,y:-1}})),
+        dim("OffsetX", "左右位置", o=>-size(o)/2, o=>size(o)/2, .05, 0, (o,v)=>({anchor:[0,-D(o)*.55,H(o)*.82],sample:[v,-D(o)*.55,H(o)*.82],probe:[v+1,-D(o)*.55,H(o)*.82],fallback:{x:1,y:0}})),
+        dim("Z", "上下位置", o=>0, o=>H(o), .05, 3.6, (o,v)=>({anchor:[0,-D(o)*.55,v],sample:[0,-D(o)*.55,v],probe:[0,-D(o)*.55,v+1],fallback:{x:0,y:-1}})),
+        dim("Depth", "壁からの出", .02, 1, .01, .5, (o,v)=>({anchor:[0,-D(o)/2,H(o)*.82],sample:[0,-D(o)/2-v,H(o)*.82],probe:[0,-D(o)/2-v-1,H(o)*.82],fallback:{x:0,y:-1}})),
+        {key:"f1SignBracketLength",label:"金具の長さ",type:"range",default:.36,min:.05,max:5,step:.01,unit:"m",get:o=>Number(o.f1SignBracketLength)||.36,patch:(o,v)=>({f1SignBracketLength:v}),handle:(o,v)=>{const w=clamp(Number(o.f1SignWidth)||3,.2,Math.abs(Number(o.ra)||2)*1.9),z=clamp(o.f1SignZ===undefined?3.6:Number(o.f1SignZ),0,H(o)),hh=clamp(Number(o.f1SignHeight)||1,.1,H(o)*.4),depth=clamp(Number(o.f1SignDepth)||.5,.02,1),x=clamp(Number(o.f1SignOffsetX)||0,-w*.45,w*.45)-w*.35,y=-D(o)-depth;return {anchor:[x,y,z+hh/2],sample:[x,y,z+hh/2],probe:[x,y+1,z+hh/2],fallback:{x:0,y:1},color:"#ffd34d"};},canvasSlider:true,canvasVisible:()=>window.__f1EditFeature==="sign",f1Feature:"sign"}, 
+        {key:"f1SignBevelOffset",label:"ベベル幅",type:"range",default:.18,min:0,max:o=>{const w=clamp(Number(o.f1SignWidth)||3,.2,Math.abs(Number(o.ra)||2)*1.9),h=clamp(Number(o.f1SignHeight)||1,.1,H(o)*.4);return Math.max(0,Math.min(w,h)*.45-.001);},step:.005,unit:"m",get:o=>o.f1SignBevelOffset==null ? .18 : Number(o.f1SignBevelOffset),patch:(o,v)=>({f1SignBevelOffset:v}),handle:(o,v)=>{const w=clamp(Number(o.f1SignWidth)||3,.2,Math.abs(Number(o.ra)||2)*1.9),d=clamp(Number(o.f1SignDepth)||.5,.02,1),z=clamp(o.f1SignZ===undefined?3.6:Number(o.f1SignZ),0,H(o)),hh=clamp(Number(o.f1SignHeight)||1,.1,H(o)*.4),y=-D(o)-d,x=clamp(Number(o.f1SignOffsetX)||0,-w*.45,w*.45);return {anchor:[x+w/2,y,z+hh],sample:[x+w/2-v,y,z+hh-v],probe:[x+w/2-v-1,y,z+hh-v-1],fallback:{x:-1,y:1},color:"#ff6b7c"};},canvasSlider:true,canvasVisible:()=>window.__f1EditFeature==="sign",f1Feature:"sign"}
+    ];
+}
+
 const ASSETS = {
     rect: { label: "長方形", glyph: "□", w: 1.5, d: 1.0, h: 0, accent: "#66e3c8" },
-    box: { label: "直方体", glyph: "▣", w: 3.2, d: 2.4, h: 1.8, accent: "#7dd8ff" },
+    box: { label: "直方体", glyph: "▣", w: 3.2, d: 2.4, h: 1.8, bevelOffset: 0, bevelSegments: 4, controls: [{ key: "bevelOffset", label: "ベベル", type: "range", canvasSlider: true, default: 0, min: 0, max: o => Math.min(Math.abs(o.ra), Math.abs(o.rb)) * 0.49, step: 0.01, unit: "m", handle: (o,v) => { const x=Math.abs(Number(o.ra)||.5), y=-Math.abs(Number(o.rb)||.5), z=Math.max(.01,Number(o.h)||.01); return {anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}}; } }], accent: "#7dd8ff" },
     beveledBox: {
         label: "ベベル直方体",
         glyph: "⬡",
@@ -58,6 +115,8 @@ const ASSETS = {
     wallSign: { label: "壁付け看板（単体）", glyph: "▤", w: 1.6, d: 0.26, h: 1.8, accent: "#76d9ff" },
     // 棚には表示しないが、建物横壁へ接着する専用看板の描画・JSON互換用定義。
     wallSideSign: { label: "横壁看板", glyph: "▥", w: 1.5, d: 0.16, h: 1.8, accent: "#76d9ff" },
+    // F1親子一覧用の編集プロキシ。実形状は親建物の部品線を使い、極小ストロークだけ保持する。
+    f1Accessory: { label: "F1付属物", glyph: "◇", w: 0.001, d: 0.001, h: 0.001, accent: "#8ce6c2", internalOnly: true },
     awning: { label: "台形", glyph: "▱", w: 3, d: 1, h: 0.35, accent: "#d98b68" },
     balcony: { label: "壁付けベランダ", glyph: "▱", w: 3.2, d: 1.8, h: 1.25, accent: "#e6a36f" },
     // コの字をZ軸（高さ方向）へ押し出した壁。前面＋左右の3枚で、床スラブは無い。
@@ -84,13 +143,22 @@ const ASSETS = {
     pathPipe: { label: "パスパイプ", glyph: "◉", w: 4.8, d: 4.2, h: 1.5, accent: "#ff9f68" },
     person: { label: "人物", glyph: "♙", w: 0.46, d: 0.3, h: 1.7, accent: "#ad9cff" },
     stairs: { label: "階段", glyph: "▰", w: 1.45, d: 2.4, h: 0.78, accent: "#ffb36f" },
-    building: { label: "開口のある建物", glyph: "▣", w: 4, d: 3, h: 5, accent: "#8ce6c2" },
-    buildingAwning: { label: "テント付き建物", glyph: "▣", w: 4, d: 3, h: 5, accent: "#d98b68" },
-    // テント付き建物の開口版。本体は開口のある建物、子はテント（店舗テントと同じ部品）。
-    buildingAwningOpen: { label: "テント付き開口建物", glyph: "▤", w: 4, d: 3, h: 5, accent: "#e3a06c" },
-    buildingSign: { label: "看板付き開口建物", glyph: "▣", w: 4, d: 3, h: 5, accent: "#76d9ff" },
+    building: { label: "F1建物", glyph: "▣", w: 4, d: 3, h: 5, openingEnabled: true, f1AwningEnabled: false, f1SignEnabled: false, bevelOffset: 0, controls: [
+        { key: "openingEnabled", label: "開口をつける", type: "boolean", default: true },
+        { key: "f1AwningEnabled", label: "テントをつける", type: "boolean", default: false, handleOnly: true },
+        { key: "f1SignEnabled", label: "正面看板をつける", type: "boolean", default: false, handleOnly: true },
+        { key: "wallSideSignEnabled", label: "横壁看板をつける", type: "boolean", default: false, handleOnly: true },
+        { key: "facadeEnabled", label: "ファサード看板をつける", type: "boolean", default: false, handleOnly: true },
+        { key: "facadeSides", label: "ファサードを横壁にも回す", type: "boolean", default: false, handleOnly: true },
+        ...f1PartControls("awning"), ...f1AwningTinControls(), ...f1PartControls("sign"), ...f1FacadeControls(),
+        { key: "bevelOffset", label: "Z軸辺のベベル", type: "range", canvasSlider: true, default: 0, min: 0, max: o => Math.min(Math.abs(o.ra), Math.abs(o.rb)) * 0.22, step: 0.01, unit: "m", handle: (o,v) => { const x=Math.abs(Number(o.ra)||2), y=-Math.abs(Number(o.rb)||1.5), z=Math.max(.01,Number(o.h)||.01); return {anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}}; } }
+    ], accent: "#8ce6c2" },
+    // 旧保存データ用。新規作成の棚には載せず、F1建物のオプションへ統合する。
+    buildingAwning: { label: "テント付き建物（旧）", glyph: "▣", w: 4, d: 3, h: 5, accent: "#d98b68" },
+    buildingAwningOpen: { label: "テント付き開口建物（旧）", glyph: "▤", w: 4, d: 3, h: 5, accent: "#e3a06c" },
+    buildingSign: { label: "看板付き開口建物（旧）", glyph: "▣", w: 4, d: 3, h: 5, accent: "#76d9ff" },
     cornerCutStackedBuilding: { label: "隅切りの縁付き階層建物", glyph: "▧", w: 4.2, d: 3.6, h: 8.98, cornerOffset: 0.8, accent: "#8ed7e8" },
-    stackedBuilding: { label: "縁付き階層建物", glyph: "▥", w: 4, d: 3, h: 8.98, accent: "#8ce6c2" },
+    stackedBuilding: { label: "縁付き階層建物", glyph: "▥", w: 4, d: 3, h: 8.98, bevelOffset: 0, bevelSegments: 4, controls: [{ key: "bevelOffset", label: "各階のベベル", type: "range", canvasSlider: true, default: 0, min: 0, max: o => Math.min(Math.abs(o.ra), Math.abs(o.rb)) * 0.49, step: 0.01, unit: "m", patch: (o,v) => ({ bevelOffset: v, floors: (o.floors||[]).map(f => ({ ...f, bevelOffset: v })) }), handle: (o,v) => { const f=(o.floors||[]).at(-1)||{}, x=Math.abs(Number(f.w)||Math.abs(Number(o.ra)||2)*2)/2, y=-Math.abs(Number(f.d)||Math.abs(Number(o.rb)||1.5)*2)/2, z=(Number(f.z)||0)+(Number(f.h)||2.2); return {anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}}; } }], accent: "#8ce6c2" },
     recessedStackedBuilding: {
         label: "凹窓階層建物",
         glyph: "▤",
@@ -469,7 +537,7 @@ function wallSignParams(o) {
         bracketLength = clamp(Math.abs(Number(o?.wallSignBracketLength) || 0.36), 0.05, 5),
         bracketArm = clamp(Math.min(width, height) * 0.07, 0.04, 0.16),
         plateThickness = 0.03,
-        beveled = o?.wallSignShape === "beveled",
+        beveled = true,
         // ベベルは板の表裏の輪郭（幅×高さ）の4隅へ付ける。
         // 輪郭を丸めた多角形を板厚方向へ押し出した形になる。
         bevelMax = Math.max(0, Math.min(width, height) * 0.45 - 0.001),
@@ -667,8 +735,8 @@ function stackedOpeningParams(o, f = o?.floors?.[0]) {
         maxW = Math.max(0.1, w - 0.1),
         maxH = Math.max(0.1, h - rimHeight - 0.01),
         openingW = clamp(Number(o?.openingW) || w * 0.56, 0.1, maxW),
-        bevelRaw = Number.isFinite(Number(f?.bevelOffset)) ? Number(f.bevelOffset) : Number(o?.bevelOffset) || 0.28,
-        bevel = o?.asset === "beveledStackedBuilding" ? Math.max(0, Math.min(bevelRaw, Math.min(w,d)/2 - 0.001)) : 0,
+        bevelRaw = Number.isFinite(Number(f?.bevelOffset)) ? Number(f.bevelOffset) : Number.isFinite(Number(o?.bevelOffset)) ? Number(o.bevelOffset) : o?.asset === "beveledStackedBuilding" ? 0.28 : 0,
+        bevel = Math.max(0, Math.min(bevelRaw, Math.min(w,d)/2 - 0.001)),
         offsetLimit = Math.max(0, (w - openingW) / 2 - bevel - 0.05),
         openingOffset = clamp(Number(o?.openingOffset) || 0, -offsetLimit, offsetLimit),
         openingH = clamp(Number(o?.openingH) || h * 0.66, 0.1, maxH),
@@ -687,7 +755,7 @@ function stackedFloorGeometry(o,f,index,defaults) {
         h=Math.max(.05,Math.abs(Number(f.h)||defaults.h)),
         rimHeight=clamp(Math.abs(Number(f.rimHeight)||Number(o.rimHeight)||.16),.01,h),
         rimOverhang=Math.max(0,Math.abs(Number(f.rimOverhang)||Number(o.rimOverhang)||.18)),
-        bevelOffset=Number.isFinite(Number(f.bevelOffset))?Number(f.bevelOffset):Number(o.bevelOffset)||.28,
+        bevelOffset=Number.isFinite(Number(f.bevelOffset))?Number(f.bevelOffset):Number.isFinite(Number(o.bevelOffset))?Number(o.bevelOffset):o.asset === "beveledStackedBuilding" ? 0.28 : 0,
         bevelSegments=beveledBoxSegments(f.bevelSegments,f.bevelEdges,beveledBoxSegments(o.bevelSegments,o.bevelEdges)),
         opening=index===0 && stackedOpeningEnabled(o)?stackedOpeningParams(o,f):null;
     return {w,d,h,rimHeight,rimOverhang,bevelOffset,bevelSegments,opening};
@@ -2040,7 +2108,7 @@ function assetEditorControls(o) {
             return {anchor:[a[0],a[1],a[2]+q.height*.5], sample:[a[0],a[1],a[2]+q.height*.5],
                 probe:[a[0]+t[0],a[1]+t[1],a[2]+q.height*.5], color:"#ffd56b", fallback:{x:1,y:0}}; }
     });
-    return list.filter(c => c && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(c.key || "") && ["number","boolean","range"].includes(c.type || "number"));
+    return list.filter(c => c && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(c.key || "") && ["number","boolean","range","select"].includes(c.type || "number"));
 }
 function assetControlLimit(value, o, fallback) {
     const raw = typeof value === "function" ? value(o) : value;
@@ -2049,13 +2117,14 @@ function assetControlLimit(value, o, fallback) {
 function assetControlValue(o, control) {
     const raw = typeof control.get === "function" ? control.get(o) : o?.[control.key] ?? control.default;
     if (control.type === "boolean") return !!raw;
+    if (control.type === "select") return String(raw ?? control.options?.[0]?.value ?? "");
     const n=Number(raw), min=assetControlLimit(control.min,o,-Infinity), max=assetControlLimit(control.max,o,Infinity);
     return clamp(Number.isFinite(n)?n:0,min,max);
 }
 function assetControlDefaults(info) {
     const out={};
     for(const c of Array.isArray(info?.controls)?info.controls:[])
-        if(c && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(c.key||"") && ["number","boolean","range"].includes(c.type||"number") && c.default!==undefined)
+        if(c && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(c.key||"") && ["number","boolean","range","select"].includes(c.type||"number") && c.default!==undefined)
             out[c.key]=c.default;
     return out;
 }
@@ -2107,7 +2176,13 @@ function assetLines(o) {
     if (build) build(ctx);
     return ctx.out;
 }
+function linesF1Accessory(ctx) {
+    const {o,c,out}=ctx,x=o.f1Feature==="awning"?-.001:o.f1Feature==="sign"?0:.001,
+        stroke=lineA(o,[[x,0,0],[x+.0001,0,0]],c);
+    stroke.f1AccessoryPlaceholder=true;out.push(stroke);
+}
 const ASSET_LINE_BUILDERS = {
+    f1Accessory: linesF1Accessory,
     custom: linesCustom,
     box: linesBox,
     cornerCutBox: linesCornerCutBox,
@@ -2193,6 +2268,7 @@ function linesCustom(ctx) {
 // ベベルなしの基準形状。ベベル直方体とは別アセットとして選べる。
 function linesBox(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
+    if (Number(o.bevelOffset) > 1e-5) { linesBeveledBox(ctx); return; }
     out.push(...wireBoxA(o, 0, 0, w, d, 0, Math.max(0.01, h), c));
     appendFacadeWindows(o, out, w, d, Math.max(0.01, h), a);
 }
@@ -2226,7 +2302,7 @@ function linesWallSideSign(ctx) {
         bracketV = Math.max(0.06, Math.min(0.18, boardH * 0.1)),
         bracketSpan = bracketLength + clearance,
         bracketCenter = -(boardW * 0.5 + bracketSpan * 0.5),
-        beveled = o.wallSideSignShape === "beveled",
+        beveled = true,
         bevelOffset = clamp(
             Number(o.wallSideSignBevelOffset) || 0.06,
             0.01,
@@ -2243,8 +2319,8 @@ function linesWallSideSign(ctx) {
     for (let i = 0; i < bracketCount; i++) {
         const t = (i + 1) / (bracketCount + 1),
             x = -boardH * 0.5 + boardH * t;
-        // ベベルは看板本体だけに適用し、取付金具は普通の直方体で描く。
-        out.push(...wireBoxA(o, x, bracketCenter, bracketV, bracketSpan, -thickness * 0.5, thickness * 0.5, c));
+        const metalBevel=Math.max(.005,Math.min(bevelOffset*.35,bracketV*.24,bracketSpan*.24));
+        out.push(...beveledWireBoxA(o,x,bracketCenter,bracketV,bracketSpan,-thickness*.5,thickness*.5,metalBevel,bevelSegments,c));
     }
 }
 
@@ -2496,6 +2572,7 @@ function linesStackedBuilding(ctx) {
             ],
             toWorld = (q) => [q[0] + ox, q[1] + oy, q[2] + oz];
         // 面ごとに輪郭を足すと共有辺が2回描かれるため、箱の12辺を一度だけ描く。
+        const verticalH = Number.isFinite(Number(caps.verticalHeight)) ? clamp(Number(caps.verticalHeight), 0, h) : h;
         [
             ...(caps.bottom ? [[0, 1, 2, 3, 0]] : []),
             ...(caps.top ? [[4, 5, 6, 7, 4]] : []),
@@ -2507,7 +2584,7 @@ function linesStackedBuilding(ctx) {
             out.push(
                 customLineA(
                     o,
-                    edge.map((i) => toWorld(v[i])),
+                    edge.map((i) => toWorld(edge.length === 2 && i >= 4 ? [v[i][0], v[i][1], z + verticalH] : v[i])), 
                     color,
                 ),
             ),
@@ -2531,7 +2608,8 @@ function linesStackedBuilding(ctx) {
             oy = Number(f.y || 0),
             oz = Number(f.z || 0),
             bottom = footprint.map(([x, y]) => [x + ox, y + oy, z + oz]),
-            top = footprint.map(([x, y]) => [x + ox, y + oy, z + h + oz]);
+            top = footprint.map(([x, y]) => [x + ox, y + oy, z + h + oz]),
+            verticalH = Number.isFinite(Number(caps.verticalHeight)) ? clamp(Number(caps.verticalHeight), 0, h) : h;
         if (caps.bottom) out.push(customLineA(o, [...bottom, bottom[0]], color));
         if (caps.top) out.push(customLineA(o, [...top, top[0]], color));
         // ベベルの弧の途中は縦辺を描かない（面だけで見せる）。
@@ -2543,7 +2621,7 @@ function linesStackedBuilding(ctx) {
                     o,
                     [
                         [x + ox, y + oy, z + oz],
-                        [x + ox, y + oy, z + h + oz],
+                        [x + ox, y + oy, z + verticalH + oz],
                     ],
                     color,
                 );
@@ -2662,13 +2740,13 @@ function linesStackedBuilding(ctx) {
             else append(cornerCutWireBoxA(part,w,d,0,h,cq.cornerOffset,cq.cornerCutCorner,f.c||c,o.cutColor||"#e24b4b"));
             const rimOffset=cq.cornerOffset+(2-Math.SQRT2)*ro;
             append(cornerCutWireBoxA(part,w+2*ro,d+2*ro,h-rh,h,rimOffset,cq.cornerCutCorner,f.rimColor||a,f.rimColor||a));
-        } else if (kind === "beveledStackedBuilding") {
-            addBeveledBox(f, w, d, 0, h, bevelOffset, bevelSegments, f.c || c, { bottom: i === 0, top: false });
+        } else if (bevelOffset > 1e-5) {
+            addBeveledBox(f, w, d, 0, h, bevelOffset, bevelSegments, f.c || c, { bottom: i === 0, top: false, verticalHeight: h - rh });
             if (opening) addOpeningWire(f, w, d, h, opening);
             // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
             addBeveledBox(f, w + ro * 2, d + ro * 2, h - rh, rh, bevelOffset, bevelSegments, f.rimColor || a);
         } else {
-            addBox(f, w, d, 0, h, f.c || c, { bottom: i === 0, top: false });
+            addBox(f, w, d, 0, h, f.c || c, { bottom: i === 0, top: false, verticalHeight: h - rh });
             if (opening) addOpeningWire(f, w, d, h, opening);
             // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
             addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
@@ -3451,7 +3529,8 @@ function buildingFacadeAllowed(o) {
     return !!o && !(o.asset === "building" && ["buildingAwningOpen", "buildingSign"].includes(o.linkedAsset));
 }
 function buildingFasciaGeometry(o) {
-    const w=Math.max(.1,Math.abs(Number(o.ra)||2)*2), d=Math.max(.05,Math.abs(Number(o.rb)||.5)*2), h=Math.max(.01,Math.abs(Number(o.h)||3)),
+    const fullW=Math.max(.1,Math.abs(Number(o.ra)||2)*2), w=clamp(Number(o.facadeWidth)||fullW,.2,fullW),
+        d=Math.max(.05,Math.abs(Number(o.rb)||.5)*2), h=Math.max(.01,Math.abs(Number(o.h)||3)),
         height=clamp(Number.isFinite(Number(o.facadeHeight)) ? Number(o.facadeHeight) : Math.min(.7,h*.22), Math.min(.05,h), h),
         projection=clamp(Number.isFinite(Number(o.facadeProjection)) ? Number(o.facadeProjection) : .18, .02, 2);
     return {w,d,h,height,projection,z0:h-height,z1:h,enabled:o.facadeEnabled===true && buildingFacadeAllowed(o),side:!!o.facadeSides,color:/^#[0-9a-f]{6}$/i.test(o.facadeColor||"")?o.facadeColor:"#2f73bc"};
@@ -3490,26 +3569,91 @@ function cornerCutFasciaParts(o) {
 }
 function appendBuildingFascia(o,out) {
     const g=buildingFasciaGeometry(o); if(!g.enabled) return;
-    // 建物と一体の押し出し。文字やロゴは生成しない。
-    out.push(...wireBoxA(o,0,-g.d/2-g.projection/2,g.w,g.projection,g.z0,g.z1,o.c||"#222222"));
-    if(g.side) for(const sign of [-1,1])
-        out.push(...wireBoxA(o,sign*(g.w/2+g.projection/2),-g.projection/2,g.projection,g.d+g.projection,g.z0,g.z1,o.c||"#222222"));
+    const start=out.length,b=clamp(Number(o.bevelOffset)||0,0,Math.min(g.projection,g.z1-g.z0,g.w)*.45),
+        box=(x,y,w,d,z0,z1)=>b>1e-5?beveledWireBoxA(o,x,y,w,d,z0,z1,b,4,o.c||"#222222"):wireBoxA(o,x,y,w,d,z0,z1,o.c||"#222222");
+    out.push(...box(0,-g.d/2-g.projection/2,g.w,g.projection,g.z0,g.z1));
+    if(g.side) for(const sign of [-1,1])out.push(...box(sign*(g.w/2+g.projection/2),-g.projection/2,g.projection,g.d+g.projection,g.z0,g.z1));
+    for(let i=start;i<out.length;i++)out[i].f1Feature="facade";
+}
+// F1建物のテント・正面看板は建物自身の部品として描き、別オブジェクトへ分離しない。
+function f1AwningPanels(o,w,d,h) {
+    const width=clamp(Number(o.f1AwningWidth)||3,.2,w*.95),cx=clamp(Number(o.f1AwningOffsetX)||0,-w*.45,w*.45),
+        depth=1,backY=-d/2-.015,baseY=backY-depth,frontY=backY+clamp(Number(o.f1AwningDepth??-.5),-depth/2,depth/2)-depth/2,
+        backZ=clamp(Number(o.f1AwningBackZ)||Math.min(h,4.6),.1,h),frontZ=clamp(Number(o.f1AwningFrontZ)||Math.min(h,4.6),.05,h),baseZ=clamp(o.f1AwningBaseZ==null?3.6:Number(o.f1AwningBaseZ),0,h-.05),
+        tin=o.f1AwningType==="corrugated"||o.f1AwningCorrugated===true,
+        sheet=clamp(Number(o.f1AwningSheetThickness)||.01,.003,.08),count=tin?clamp(Math.round(Number(o.f1AwningWaveCount)||8),1,24):1,
+        segments=tin?count*4:1,x0=cx-width/2,amp=tin?sheet*1.5:0,th=tin?sheet:Math.max(.02,backZ-baseZ),
+        topBack=[],bottomBack=[],ridgeLines=[];
+    for(let i=0;i<=segments;i++){
+        const u=i/segments,x=x0+width*u,wave=tin?amp*Math.cos(Math.PI*2*count*u):0;
+        topBack.push([x,backY,backZ+wave]);bottomBack.push([x,backY,tin?backZ+wave-th:baseZ]);
+    }
+    const topFront=topBack.map(([x,,z])=>[x,frontY,z+(frontZ-backZ)]),
+        bottomFront=topFront.map(([x,,z])=>[x,baseY,tin?z-th:baseZ]);
+    if(tin)for(let i=0;i<=count;i++){const u=i/count,j=Math.min(segments,Math.round(u*segments));ridgeLines.push([topBack[j],topFront[j]]);}
+    const top=[],underside=[],front=[],sides=[],back=[];
+    for(let i=1;i<=segments;i++){
+        top.push([topBack[i-1],topBack[i],topFront[i],topFront[i-1]]);
+        underside.push([bottomBack[i-1],bottomFront[i-1],bottomFront[i],bottomBack[i]]);
+        front.push([bottomFront[i-1],topFront[i-1],topFront[i],bottomFront[i]]);
+    }
+    sides.push([topBack[0],topFront[0],bottomFront[0],bottomBack[0]],[topBack.at(-1),topFront.at(-1),bottomFront.at(-1),bottomBack.at(-1)]);
+    back.push([bottomBack[0],topBack[0],topBack.at(-1),bottomBack.at(-1)]);
+    return {width,cx,depth,backY,baseY,frontY,backZ,frontZ,baseZ,th,tin,count,top,underside,front,sides,back,topBack,topFront,bottomBack,bottomFront,ridgeLines};
+}
+function appendF1BuildingOptions(o,out,w,d,h,c=o.c||"#222222") {
+    const sg=()=>({width:clamp(Number(o.f1SignWidth)||3,.2,w*.95),height:clamp(Number(o.f1SignHeight)||1,.1,h*.4),
+        x:clamp(Number(o.f1SignOffsetX)||0,-w*.45,w*.45),z:clamp(o.f1SignZ===undefined?3.6:Number(o.f1SignZ),0,h),depth:clamp(Number(o.f1SignDepth)||.5,.02,1),bracket:clamp(Number(o.f1SignBracketLength)||.36,.05,5)});
+    if(o.f1AwningEnabled===true){
+        const g=f1AwningPanels(o,w,d,h),start=out.length;
+        // 旧テントと同様、上面・下面・前面・左右側面をそれぞれ閉じた輪郭線で描く。
+        [...g.top,...g.underside,...g.front,...g.sides,...g.back].forEach(face=>out.push(polyA(o,face,c,1.1)));
+        g.ridgeLines.forEach(edge=>out.push(lineA(o,edge,c)));
+        for(let i=start;i<out.length;i++)out[i].f1Feature="awning";
+    }
+    if(o.f1SignEnabled===true){
+        const g=sg(),start=out.length,bevel=clamp(o.f1SignBevelOffset==null ? .18 : Number(o.f1SignBevelOffset),0,Math.max(0,Math.min(g.width,g.height)*.45-.001));
+        const zc=g.z+g.height/2;
+        const outline=wallSignFacePoints({width:g.width,height:g.height,beveled:true,bevelOffset:bevel,bevelSegments:4}),frontY=-d/2-g.depth,backY=frontY+g.depth;
+        for(let i=0;i<outline.length;i++){const a=outline[i],b=outline[(i+1)%outline.length],ax=g.x+a[0],az=zc+a[1],bx=g.x+b[0],bz=zc+b[1];out.push(lineA(o,[[ax,frontY,az],[bx,frontY,bz]],c),lineA(o,[[ax,backY,az],[bx,backY,bz]],c),lineA(o,[[ax,frontY,az],[ax,backY,az]],c));}
+        for(let i=start;i<out.length;i++)out[i].f1Feature="sign";
+    }
 }
 
+// 開口＋Z軸辺ベベルのF1建物。前面底辺は開口をまたがず、角の縦線は角ごとに1本だけ。
+function linesF1BeveledOpening(ctx) {
+    const {o,w,d,h,c,out}=ctx,b=Math.max(0,Number(o.bevelOffset)||0),fp=beveledBoxFootprint(w,d,b,4),g=buildingGeometry(o),yf=-d/2,yb=d/2,
+        x0=g.openingOffset-g.openingW/2,x1=g.openingOffset+g.openingW/2,z=g.openingH,
+        seam=(a,mark)=>{const q=lineA(o,a,c);if(mark){q.seam=mark.key;q.seamApex=!!mark.apex;}out.push(q);};
+    for(let i=0;i<fp.length;i++){
+        const a=fp[i],v=fp[(i+1)%fp.length],front=Math.abs(a[1]-yf)<1e-6&&Math.abs(v[1]-yf)<1e-6;
+        if(!front){seam([[a[0],a[1],0],[v[0],v[1],0]]);seam([[a[0],a[1],h],[v[0],v[1],h]]);}
+        else {seam([[a[0],yf,0],[Math.min(v[0],x0),yf,0]]);seam([[Math.max(a[0],x1),yf,0],[v[0],yf,0]]);seam([[a[0],yf,h],[v[0],yf,h]]);}
+    }
+    fp.forEach((p,i)=>{const mark=beveledEdgeMark(i,b,4,'f1-building'),q=lineA(o,[[p[0],p[1],0],[p[0],p[1],h]],c);if(mark){q.seam=mark.key;q.seamApex=!!mark.apex;}out.push(q);});
+    seam([[x0,yf,0],[x0,yf,z]]);seam([[x0,yf,z],[x1,yf,z]]);seam([[x1,yf,z],[x1,yf,0]]);
+    const backY=Number.isFinite(Number(g.backY))?g.backY:yb;
+    for(const x of [x0,x1]){seam([[x,yf,0],[x,backY,0]]);seam([[x,yf,z],[x,backY,z]]);seam([[x,backY,0],[x,backY,z]]);}
+    seam([[x0,backY,z],[x1,backY,z]]);if(Math.abs(backY-yb)>.01)seam([[x0,backY,0],[x1,backY,0]]);
+}
 // --- 開口のある建物 ---
 // 外枠に加え、開口の左右柱・上梁・内側面・奥面を描く。
 function linesBuilding(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
     // チェックを外したリンク建物は、開口のない通常の閉じた箱へ戻す。
     if (o.openingEnabled === false) {
-        // 閉じた箱は形が別なので、専用の関数の結果をそのまま返す。
-        out.push(...closedBuildingLines(o, w, d, h, c));
-        appendFacadeWindows(o, out, w, d, h, a);
+        if(Number(o.bevelOffset)>1e-5)linesBeveledBox(ctx);
+        else out.push(...closedBuildingLines(o,w,d,h,c));
+        appendFacadeWindows(o,out,w,d,h,a);
         appendBuildingFascia(o,out);
+        appendF1BuildingOptions(o,out,w,d,h,c);
         return;
     }
-    // 外側は直方体の輪郭を保ちながら、正面から背面まで抜ける開口を作る。
-    // 左右の柱＋上梁として分けて描くので、開口の左右・上面・奥行きも編集対象になる。
+    if(Number(o.bevelOffset)>1e-5){
+        linesF1BeveledOpening(ctx);
+        const g=buildingGeometry(o);appendFacadeWindows(o,out,w,d,h,a,{w:g.openingW,h:g.openingH,offset:g.openingOffset});
+        appendBuildingFascia(o,out);appendF1BuildingOptions(o,out,w,d,h,c);return;
+    }
     const bp = buildingParams(o),
         ow = bp.openingW,
         oh = bp.openingH,
@@ -3622,8 +3766,9 @@ function linesBuilding(ctx) {
             1.0,
         ),
     );
-    appendFacadeWindows(o, out, w, d, h, a, { w: ow, h: oh, offset: dx });
+    appendFacadeWindows(o,out,w,d,h,a,{w:ow,h:oh,offset:dx});
     appendBuildingFascia(o,out);
+    appendF1BuildingOptions(o,out,w,d,h,c);
 }
 
 // --- 店舗テント ---
@@ -3878,7 +4023,7 @@ function normalizedAsset(o) {
             h: Math.max(0.01, Math.abs(Number(q.h) || 0.01)),
         };
     }
-    if (q && q.asset === "beveledBox") {
+    if (q && ["box", "beveledBox"].includes(q.asset)) {
         const width = Math.max(0.01, Math.abs(Number(q.ra) || 0.01) * 2),
             depth = Math.max(0.01, Math.abs(Number(q.rb) || 0.01) * 2),
             max = Math.max(0, Math.min(width, depth) * 0.5 - 0.001),
@@ -3931,13 +4076,13 @@ function normalizedAsset(o) {
         const source = Array.isArray(q.floors) && q.floors.length ? q.floors : [],
             first = source[0] || { w: Number(q.ra) * 2 || 4, d: Number(q.rb) * 2 || 3, h: 2.2, rimHeight: 0.16 },
             opening = stackedOpeningParams(q, first),
-            baseOffset = Number.isFinite(Number(q.bevelOffset)) ? Number(q.bevelOffset) : 0.28,
+            baseOffset = Number.isFinite(Number(q.bevelOffset)) ? Number(q.bevelOffset) : q.asset === "beveledStackedBuilding" ? 0.28 : 0,
             baseSegments = beveledBoxSegments(q.bevelSegments, q.bevelEdges),
             floors = source.map((f) => {
                 const w = Math.max(0.01, Math.abs(Number(f.w) || Number(q.ra) * 2 || 4)),
                     d = Math.max(0.01, Math.abs(Number(f.d) || Number(q.rb) * 2 || 3)),
                     max = Math.max(0, Math.min(w, d) * 0.5 - 0.001),
-                    offset = clamp(Number.isFinite(Number(f.bevelOffset)) ? Number(f.bevelOffset) : baseOffset, 0, max),
+                    offset = clamp(q.asset === "stackedBuilding" && Number.isFinite(Number(q.bevelOffset)) ? baseOffset : Number.isFinite(Number(f.bevelOffset)) ? Number(f.bevelOffset) : baseOffset, 0, max),
                     segments = beveledBoxSegments(f.bevelSegments, f.bevelEdges, baseSegments);
                 return { ...f, bevelOffset: offset, bevelSegments: segments };
             });

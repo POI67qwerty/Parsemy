@@ -495,6 +495,25 @@ function pick(a, p) {
 // 通常の3Dキャンバス操作の入口。
 // 間取りモードではstudio-ui.jsの専用pointerdownが先に処理し、
 // __cityFloorPlanPreempt が付いたイベントはここで通常処理をスキップする。
+cv.addEventListener("dblclick", e => {
+    const selected=sel?obOf(sel):null;
+    if(!selected || selected.asset!=="building")return;
+    const p=rawOf(e.clientX,e.clientY),shift=viewShift(),tf=[Z,0,0,Z,shift[0],shift[1]],
+        target=selected,near={d:Infinity,feature:null};
+    for(const line of (Array.isArray(S)?S:[])){
+        if(line?.ob!==target || !line.f1Feature || !Array.isArray(line.p) || line.p.length<2)continue;
+        for(let i=1;i<line.p.length;i++){
+            const a=projPoint(line.p[i-1],tf),b=projPoint(line.p[i],tf);if(!a.ok||!b.ok)continue;
+            const dx=b.x-a.x,dy=b.y-a.y,t=clamp(((p.x-a.x)*dx+(p.y-a.y)*dy)/(dx*dx+dy*dy||1),0,1),
+                d=Math.hypot(p.x-a.x-t*dx,p.y-a.y-t*dy);
+            if(d<near.d)near.d=d,near.feature=line.f1Feature;
+        }
+    }
+    if(near.d>12||!near.feature)return;
+    const exiting=window.__f1EditFeature===near.feature;window.__f1EditFeature=exiting?null:near.feature;window.__f1EditOwner=exiting?null:target.id;
+    syncSel();render();
+    flashHint(window.__f1EditFeature?`${near.feature==="awning"?"テント":"正面看板"}の編集：キャンバス上の幅・位置・寸法を調整できます（同じ部品をダブルクリックで解除）`:"部品編集を解除しました");
+});
 cv.onpointerdown = (e) => {
     // 間取りのポインター処理はstudio-ui.jsが正面／横／上の専用ギズモを
     // 先に判定する。先行するtargetハンドラが通常編集へ入らないようにする。

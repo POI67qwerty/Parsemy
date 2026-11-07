@@ -514,67 +514,77 @@
     // 表示切替・選択・グループ操作の入口もここで各行へ接続する。
     const escapeObjectText = value => String(value).replace(/[&<>"']/g, c => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[c]));
     const objectDisplayName = o => typeof o.displayName === "string" && o.displayName.trim() ? o.displayName.trim() : assetLabel(o);
-    let outlinerKey = null, outlinerRows = new Map(), outlinerSelection = new Set(), outlinerActive = null;
+    let outlinerKey = null, outlinerRows = new Map(), outlinerSelection = new Set(), outlinerActive = null, lastFeatureClick=null;
+    const outlinerCollapsed = new Set();
+    const outlinerInitializedParents = new Set();
     function updateOutliner() {
         if (!list) return;
         normalizeSelection();
-        const objects = sceneObjects(),
-            key = JSON.stringify(objects.map(o=>[o.id, assetLabel(o), objectDisplayName(o), assetGlyph(o), o.type, o.asset,
-                o.groupId || "", o.type === "compound" ? (o.parts?.length || 0) : null,
-                o.asset === "person" ? Number(o.h).toFixed(2) : null, objectVisible(o), obLocked(o)]));
-        if (!window.__legacyOutlinerRebuild && key === outlinerKey) {
-            // 一覧の内容が同じならDOMを破棄せず、選択が変わった行だけ更新。
-            // カメラの移動・オブジェクトドラッグ中に数百行を毎回再構築しない。
-            const changed = new Set([...outlinerSelection, ...selIds]);
-            if (outlinerActive) changed.add(outlinerActive);
-            if (sel) changed.add(sel);
-            for (const id of changed) {
-                const row=outlinerRows.get(id);if(!row)continue;
-                const selected=selIds.has(id);
-                row.classList.toggle("selected",selected);
-                row.classList.toggle("activeObject",sel===id);
-                const check=row.querySelector(".objectCheck");if(check)check.checked=selected;
+        // Migrate saved F1 buildings too: each optional part becomes a real hidden child object.
+        const existingObjects=sceneObjects(),created=[];
+        for(const parent of existingObjects.filter(o=>o.asset==="building")){
+            const kids=existingObjects.filter(o=>o.attachment?.parentId===parent.id);
+            const features=new Set(kids.map(o=>o.attachment?.f1Feature).filter(Boolean));
+            for(const [feature,label] of [["awning","テント"],["sign","正面看板"],["facade","ファサード"]])if(!features.has(feature)&&typeof window.cityGridCreateF1Accessory==="function")created.push(...genShape(window.cityGridCreateF1Accessory(parent,feature,label)));
+            if(!kids.some(o=>o.attachment?.wallSideSign)&&typeof window.cityGridCreateWallSideSign==="function"){
+                const sign=window.cityGridCreateWallSideSign(parent,1);sign.visible=!!parent.wallSideSignEnabled;created.push(...genShape(sign));
             }
-            outlinerSelection=new Set(selIds);outlinerActive=sel;
-            syncGroupActions();
-            return;
         }
-        // isolation状態は一覧内容と同じ状態キーで変わるため、内容変更時だけDOMへ反映する。
+        if(created.length){S.push(...created);outlinerKey=null;}
+        const objects=sceneObjects(),byId=new Map(objects.map(o=>[o.id,o])),children=new Map(),childParent=new Map();
+        for(const child of objects){
+            const parent=child.attachment?.parentId?byId.get(child.attachment.parentId):null;
+            if(parent?.asset==="building"){
+                childParent.set(child.id,parent.id);
+                if(!children.has(parent.id))children.set(parent.id,[]);
+                children.get(parent.id).push(child);
+            }
+        }
+        for(const parent of objects.filter(o=>o.asset==="building")){
+            const existing=children.get(parent.id)||[],hasSideSign=existing.some(child=>child.attachment?.wallSideSign),present=new Set(existing.map(child=>child.attachment?.f1Feature).filter(Boolean));
+            const rows=[...(!present.has('awning')?[['awning','f1AwningEnabled','テント']]:[]),...(!present.has('sign')?[['sign','f1SignEnabled','正面看板']]:[]),...(!present.has('facade')?[['facade','facadeEnabled','ファサード']]:[]),...(!hasSideSign?[['wallSideSign','wallSideSignEnabled','横壁看板']]:[])];
+            for(const [feature,key,label] of rows){
+                const row={id:`virtual:${parent.id}:${feature}`,__featureRow:true,feature,key,label,owner:parent};
+                childParent.set(row.id,parent.id);
+                if(!children.has(parent.id))children.set(parent.id,[]);
+                children.get(parent.id).push(row);
+            }
+        }
+        children.forEach((kids,parentId)=>{if(!outlinerInitializedParents.has(parentId)){outlinerCollapsed.add(parentId);outlinerInitializedParents.add(parentId);}});
+        const key=JSON.stringify([objects.map(o=>[o.id,assetLabel(o),objectDisplayName(o),assetGlyph(o),o.type,o.asset,o.groupId||"",
+            o.attachment?.parentId||"",o.type==="compound"?(o.parts?.length||0):null,o.asset==="person"?Number(o.h).toFixed(2):null,
+            o.f1AwningEnabled,o.f1SignEnabled,o.facadeEnabled,objectVisible(o),obLocked(o)]),
+            [...outlinerCollapsed].sort(),window.__f1EditFeature||"",window.__f1SelectedFeature||"",window.__f1EditOwner||""]);
+        if (!window.__legacyOutlinerRebuild && key === outlinerKey) {
+            const changed=new Set([...outlinerSelection,...selIds]);if(outlinerActive)changed.add(outlinerActive);if(sel)changed.add(sel);
+            for(const id of changed){const row=outlinerRows.get(id);if(!row)continue;const selected=selIds.has(id);row.classList.toggle("selected",selected);row.classList.toggle("activeObject",sel===id);const check=row.querySelector(".objectCheck");if(check)check.checked=selected;}
+            outlinerSelection=new Set(selIds);outlinerActive=sel;syncGroupActions();return;
+        }
         syncIsolationButton(objects);
-        const listScroll = list.scrollTop;
-        list.innerHTML = objects.length
-            ? objects
-                  .map((o, i) => {
-                      const group =
-                          o.type === "compound"
-                              ? `<span class="compoundMark">結合</span>`
-                              : o.groupId
-                                ? `<span class="groupMark">グループ</span>`
-                                : "";
-                      const detail =
-                          o.type === "compound"
-                              ? `${Array.isArray(o.parts) ? o.parts.length : 0}パーツ・複合オブジェクト`
-                              : o.type === "asset" && o.asset === "person"
-                                ? Number(o.h).toFixed(2) + " m"
-                                : o.type === "asset"
-                                  ? "low-poly asset"
-                                  : "vector shape";
-                      const visible = objectVisible(o),
-                          locked = obLocked(o);
-                      // 鍵ボタンは「ロック中でも押せる」唯一の入口。ここから解除できる。
-                      return `<div class="objectRow ${selIds.has(o.id) ? "selected" : ""} ${sel === o.id ? "activeObject" : ""} ${visible ? "" : "hiddenObject"} ${locked ? "lockedObject" : ""}" data-object="${o.id}"><button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible ? "オブジェクトを非表示" : "オブジェクトを表示"}" aria-label="${visible ? "非表示" : "表示"}">${visible ? "◉" : "○"}</button><button type="button" class="objectLock ${locked ? "isLocked" : ""}" data-object-lock="${o.id}" title="${locked ? "ロックを解除（⌘/Ctrl+L）" : "ロックする（⌘/Ctrl+L）"}" aria-label="${locked ? "ロック解除" : "ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked ? "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" : "M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${selIds.has(o.id) ? "checked" : ""} aria-label="${escapeObjectText(objectDisplayName(o))}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta"><span class="objectName">${escapeObjectText(objectDisplayName(o))}${typeof o.displayName === "string" && o.displayName.trim() ? "" : ` ${i + 1}`}</span> ${group}<small>${detail}</small></span><button type="button" class="objectRename" data-object-rename="${o.id}" title="名前を変更" aria-label="${escapeObjectText(objectDisplayName(o))}の名前を変更">✎</button></div>`;
-                  })
-                  .join("")
-            : '<div class="emptyList">まだオブジェクトがありません</div>';
-        list.scrollTop = listScroll;
-        outlinerKey=key;
+        const listScroll=list.scrollTop,display=[];
+        objects.forEach((o,i)=>{
+            if(childParent.has(o.id))return;
+            const kids=children.get(o.id)||[];display.push({o,i,kids,depth:0});
+            if(kids.length&&!outlinerCollapsed.has(o.id))kids.forEach(child=>display.push({o:child,i:objects.indexOf(child),kids:[],depth:1}));
+        });
+        list.innerHTML=display.length?display.map(({o,i,kids,depth})=>{
+            if(o.__featureRow){const owner=o.owner,on=!!owner[o.key],active=window.__f1EditFeature===o.feature;return `<div class="objectRow objectChildRow objectFeatureRow ${active?"activeObject":""}" data-feature-child="${o.feature}" data-feature-owner="${owner.id}" style="margin-left:18px"><button type="button" class="objectVisibility" data-feature-visibility="${o.feature}" title="${on?"部品を非表示":"部品を表示"}" aria-label="${on?"非表示":"表示"}">${on?"◉":"○"}</button><span class="objectDisclosureSpacer"></span><input class="objectCheck" type="checkbox" data-feature-select="${o.feature}" ${(active||window.__f1SelectedFeature===o.feature)?"checked":""} aria-label="${o.label}を選択"><span class="objectIcon">◇</span><span class="objectMeta"><span class="objectName">${o.label}</span><small>${on?"表示 · 選択／ダブルクリックで編集":"非表示"}</small></span></div>`;}
+            const group=o.type==="compound"?'<span class="compoundMark">結合</span>':o.groupId?'<span class="groupMark">グループ</span>':'',
+                detail=o.type==="compound"?`${Array.isArray(o.parts)?o.parts.length:0}パーツ・複合オブジェクト`:o.type==="asset"&&o.asset==="person"?Number(o.h).toFixed(2)+" m":o.type==="asset"?"low-poly asset":"vector shape",
+                visible=objectVisible(o),locked=obLocked(o),childButton=kids.length?`<button type="button" class="objectDisclosure" data-object-collapse="${o.id}" aria-expanded="${!outlinerCollapsed.has(o.id)}" title="${outlinerCollapsed.has(o.id)?"子パーツを展開":"子パーツを折りたたむ"}">${outlinerCollapsed.has(o.id)?"▸":"▾"}</button>`:'<span class="objectDisclosureSpacer"></span>';
+            const childFocused=o.asset==="f1Accessory"&&window.__f1EditFeature===o.f1Feature,ownerFocused=o.asset==="building"&&window.__f1EditOwner===o.id;
+            return `<div class="objectRow ${depth?"objectChildRow":""} ${(selIds.has(o.id)&&!ownerFocused)||childFocused?"selected":""} ${(sel===o.id&&!ownerFocused)||childFocused?"activeObject":""} ${visible?"":"hiddenObject"} ${locked?"lockedObject":""}" data-object="${o.id}" style="${depth?"margin-left:18px;":""}">${childButton}<button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible?"オブジェクトを非表示":"オブジェクトを表示"}" aria-label="${visible?"非表示":"表示"}">${visible?"◉":"○"}</button><button type="button" class="objectLock ${locked?"isLocked":""}" data-object-lock="${o.id}" title="${locked?"ロックを解除（⌘/Ctrl+L）":"ロックする（⌘/Ctrl+L）"}" aria-label="${locked?"ロック解除":"ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked?"M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5":"M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${(selIds.has(o.id)||(o.asset==="f1Accessory"&&window.__f1SelectedFeature===o.f1Feature))?"checked":""} aria-label="${escapeObjectText(objectDisplayName(o))}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta"><span class="objectName">${escapeObjectText(objectDisplayName(o))}${typeof o.displayName==="string"&&o.displayName.trim()?"":` ${i+1}`}</span> ${group}<small>${kids.length?`${kids.length} 子パーツ · `:""}${detail}</small></span><button type="button" class="objectRename" data-object-rename="${o.id}" title="名前を変更" aria-label="${escapeObjectText(objectDisplayName(o))}の名前を変更">✎</button></div>`;
+        }).join(""):'<div class="emptyList">まだオブジェクトがありません</div>';
+        list.scrollTop=listScroll;outlinerKey=key;
         outlinerRows=new Map([...list.querySelectorAll("[data-object]")].map(row=>[row.dataset.object,row]));
-        outlinerSelection=new Set(selIds);outlinerActive=sel;
-        syncGroupActions();
+        outlinerSelection=new Set(selIds);outlinerActive=sel;syncGroupActions();
     }
     function deleteSelectedScene() {
         const ids = new Set();
         selectedObjects().forEach((o) => linkedMemberIds(o.id).forEach((member) => ids.add(member)));
+        // F1建物を削除すると、横壁看板など attachment で親に接続した実子も削除する。
+        let expanded=true;
+        while(expanded){expanded=false;for(const stroke of S){const child=stroke?.ob,parentId=child?.attachment?.parentId;if(child&&parentId&&ids.has(parentId)&&!ids.has(child.id)){ids.add(child.id);expanded=true;}}}
         // ロック中のものは消さない（engine-core の deleteSelectedObjects と同じ約束）。
         [...ids].forEach((id) => {
             if (obLocked(obOf(id))) ids.delete(id);
@@ -795,10 +805,60 @@
     }
     el("centerChildSel").onclick = centerAttachedChildOnParent;
     list.addEventListener("click", (e) => {
+        const featureRow=e.target.closest("[data-feature-child]");
+        if(featureRow){
+            const feature=featureRow.dataset.featureChild,ownerId=featureRow.dataset.featureOwner,owner=obOf(ownerId),visibility=e.target.closest("[data-feature-visibility]"),selectBox=e.target.closest("[data-feature-select]"),now=performance.now(),doubleFeatureClick=lastFeatureClick?.feature===feature&&now-lastFeatureClick.time<500;
+            lastFeatureClick={feature,time:now};
+            if(owner&&feature){
+                const key=feature==="awning"?"f1AwningEnabled":feature==="sign"?"f1SignEnabled":"facadeEnabled";
+                if(visibility){
+                    if(feature==="wallSideSign"){
+                        const check=el("wallSideSign");if(check){check.checked=!check.checked;check.dispatchEvent(new Event("change",{bubbles:true}));}
+                    }else{HU.push(S);RD=[];const shown=!owner[key];setOb(ownerId,{[key]:shown});if(!shown&&window.__f1EditFeature===feature){window.__f1EditFeature=null;window.__f1EditOwner=null;}}
+                }else if(e.detail>=2||doubleFeatureClick){
+                    if(feature==="wallSideSign"){
+                        const child=sceneObjects().find(o=>o.attachment?.parentId===ownerId&&o.attachment?.wallSideSign);
+                        if(child){window.__f1EditFeature=null;setSelection(child.id,false);}
+                    }else if(owner[key]){
+                        window.__f1SelectedFeature=feature;
+                        const exiting=window.__f1EditFeature===feature;window.__f1EditFeature=exiting?null:feature;window.__f1EditOwner=exiting?null:ownerId;
+                        setSelection(ownerId,false);
+                    }
+                }else if(selectBox){
+                    window.__f1SelectedFeature=selectBox.checked?feature:null;
+                    setSelection(ownerId,false);
+                }else{
+                    window.__f1SelectedFeature=feature;setSelection(ownerId,false);
+                }
+                syncSel();render();
+            }
+            e.preventDefault();e.stopPropagation();return;
+        }
         const b = e.target.closest("[data-object]");
         if (!b) return;
         const id = b.dataset.object,
             chosen = obOf(id);
+        if(chosen?.asset==="f1Accessory"){
+            const feature=chosen.f1Feature||chosen.attachment?.f1Feature,owner=obOf(chosen.attachment?.parentId),key=feature==="awning"?"f1AwningEnabled":feature==="sign"?"f1SignEnabled":"facadeEnabled",now=performance.now(),controlClick=!!e.target.closest("[data-object-check], [data-object-visibility], [data-object-lock], [data-object-rename]"),doubleClick=!controlClick&&lastFeatureClick?.feature===feature&&now-lastFeatureClick.time<500;
+            lastFeatureClick=controlClick?null:{feature,time:now};
+            if(owner&&feature){
+                if(e.target.closest("[data-object-visibility]")){
+                    e.preventDefault();e.stopPropagation();const shown=!objectVisible(chosen);HU.push(S);RD=[];setOb(owner.id,{[key]:shown});setOb(id,{visible:shown});window.__f1EditFeature=null;window.__f1EditOwner=null;syncSel();render();return;
+                }
+                if(e.target.matches("[data-object-check]")||!e.target.closest("[data-object-lock], [data-object-rename]")){
+                    e.preventDefault();e.stopPropagation();window.__f1SelectedFeature=feature;
+                    if(doubleClick&&owner[key]&&!obLocked(chosen)){
+                        const exiting=window.__f1EditFeature===feature;window.__f1EditFeature=exiting?null:feature;window.__f1EditOwner=exiting?null:owner.id;
+                    }
+                    setSelection(owner.id,false);tool="edit";setMode("draw");syncSel();render();return;
+                }
+            }
+        }
+        if(e.target.closest("[data-object-collapse]")){
+            e.preventDefault();e.stopPropagation();
+            if(outlinerCollapsed.has(id))outlinerCollapsed.delete(id);else outlinerCollapsed.add(id);
+            outlinerKey=null;updateOutliner();return;
+        }
         if (e.target.closest("[data-object-rename]")) {
             e.preventDefault(); e.stopPropagation();
             if (!chosen || obLocked(chosen) || b.querySelector(".objectNameInput")) return;
@@ -1121,7 +1181,7 @@
             scope = el("wallSideSignScope"),
             scopeRow = el("wallSideSignScopeRow"),
             bevel = el("wallSideSignBevelOffset"),
-            shapeValue = parent?.wallSideSignShape ?? child?.wallSideSignShape ?? "box",
+            shapeValue = "beveled",
             bevelValue = clamp(
                 Number(parent?.wallSideSignBevelOffset ?? child?.wallSideSignBevelOffset ?? 0.06),
                 0.01,
@@ -1144,7 +1204,7 @@
             side.value = String(Number(parent.wallSideSignSide ?? child?.attachment?.wallSideSignSide) < 0 ? -1 : 1);
         if (brace && document.activeElement !== brace) brace.checked = count > 0;
         if (brackets && document.activeElement !== brackets) brackets.value = String(count);
-        if (shape && document.activeElement !== shape) shape.value = shapeValue === "beveled" ? "beveled" : "box";
+        if (shape && document.activeElement !== shape) shape.value = "beveled";
         if (scope && document.activeElement !== scope) scope.value = scopeValue;
         if (bevel && document.activeElement !== bevel) bevel.value = bevelValue.toFixed(2);
         syncWallSideSignFloorSelect(parent, children, scopeValue);
@@ -1209,10 +1269,15 @@
             isBuilding = !!o;
         if (!panel) return;
         panel.style.display = isBuilding ? "" : "none";
-        const openingRow = el("linkedBuildingOpeningRow"),
-            openingCheck = el("linkedBuildingOpening");
+        const openingRow = el("linkedBuildingOpeningRow"),openingCheck = el("linkedBuildingOpening"),openingEnabledRow=el("buildingOpeningEnabledRow"),openingEnabledCheck=el("buildingOpeningEnabled");
         if (openingRow) openingRow.style.display = linked ? "" : "none";
+        if(openingEnabledRow) openingEnabledRow.style.display=isBuilding&&!linked?"":"none";
         if (!isBuilding) return;
+        if(openingEnabledCheck)openingEnabledCheck.checked=o.openingEnabled!==false;
+        const awningCheck=el("buildingF1AwningEnabled"),signCheck=el("buildingF1SignEnabled"),awningType=el("buildingF1AwningType");
+        if(awningCheck)awningCheck.checked=!!o.f1AwningEnabled;
+        if(signCheck)signCheck.checked=!!o.f1SignEnabled;
+        if(awningType)awningType.value=o.f1AwningType==="corrugated"?"corrugated":"fabric";
         const fascia=buildingFasciaGeometry(o), check=el("buildingFacadeEnabled"), controls=el("buildingFacadeControls");
         if(el("buildingFacadeRow")) el("buildingFacadeRow").style.display=buildingFacadeAllowed(o)?"":"none";
         if(check) check.checked=fascia.enabled;
@@ -1265,6 +1330,25 @@
     const linkedBuildingOpening = el("linkedBuildingOpening");
     if (linkedBuildingOpening)
         linkedBuildingOpening.onchange = () => applyLinkedBuildingOpening(linkedBuildingOpening.checked);
+    function applyBuildingF1Feature(feature,value){
+        const o=buildingPanelObject();if(!o)return;
+        const key=feature==="awning"?"f1AwningEnabled":"f1SignEnabled",shown=!!value;
+        HU.push(S);RD=[];setOb(o.id,{[key]:shown});
+        const child=sceneObjects().find(q=>q.attachment?.parentId===o.id&&q.attachment?.f1Feature===feature);
+        if(child)setOb(child.id,{visible:shown});
+        if(!shown&&window.__f1EditFeature===feature){window.__f1EditFeature=null;window.__f1EditOwner=null;}
+        render();
+    }
+    const openingEnabled=el("buildingOpeningEnabled");
+    if(openingEnabled)openingEnabled.onchange=()=>{const o=buildingPanelObject();if(!o)return;HU.push(S);RD=[];setOb(o.id,{openingEnabled:openingEnabled.checked});render();};
+    const buildingF1AwningEnabled=el("buildingF1AwningEnabled"),buildingF1SignEnabled=el("buildingF1SignEnabled"),buildingF1AwningType=el("buildingF1AwningType");
+    if(buildingF1AwningEnabled)buildingF1AwningEnabled.onchange=()=>applyBuildingF1Feature("awning",buildingF1AwningEnabled.checked);
+    if(buildingF1SignEnabled)buildingF1SignEnabled.onchange=()=>applyBuildingF1Feature("sign",buildingF1SignEnabled.checked);
+    if(buildingF1AwningType)buildingF1AwningType.onchange=()=>{const o=buildingPanelObject();if(!o)return;HU.push(S);RD=[];setOb(o.id,{f1AwningType:buildingF1AwningType.value});render();};
+    const centerF1Feature=feature=>{const o=buildingPanelObject();if(!o)return;HU.push(S);RD=[];setOb(o.id,{[feature==="awning"?"f1AwningOffsetX":"f1SignOffsetX"]:0});render();};
+    const centerF1Awning=el("buildingF1CenterAwning"),centerF1Sign=el("buildingF1CenterSign");
+    if(centerF1Awning)centerF1Awning.onclick=()=>centerF1Feature("awning");
+    if(centerF1Sign)centerF1Sign.onclick=()=>centerF1Feature("sign");
     const wallSideSignCheck = el("wallSideSign"),
         wallSideSignSide = el("wallSideSignSide"),
         wallSideSignBrace = el("wallSideSignBrace"),
@@ -1283,7 +1367,7 @@
                     : wallSideSignScopeValue(parent, children),
             count = wallSideSignBrace?.checked ? clamp(Math.round(Number(wallSideSignBrackets?.value) || 0), 0, 3) : 0,
             length = clamp(Math.abs(Number(parent.wallSideSignBracketLength) || 0.36), 0.05, 5),
-            shape = wallSideSignShape?.value === "beveled" ? "beveled" : "box",
+            shape = "beveled",
             bevel = clamp(Number(wallSideSignBevelOffset?.value) || 0.06, 0.01, 1),
             flags = floorFlagsOverride || wallSideSignFlags(parent, children);
         window.cityGridWallSideSignToggle(
@@ -2417,7 +2501,7 @@
     if (wallSignShape)
         wallSignShape.onchange = () => {
             applyWallSignPatch({
-                wallSignShape: wallSignShape.value === "beveled" ? "beveled" : "box",
+                wallSignShape: "beveled",
                 wallSignBevelSegments: 4,
             });
             wallSignEditSession = false;
@@ -2816,8 +2900,9 @@
         if(genericAssetPanelKind!==o.asset || genericAssetPanelId!==o.id){
             genericAssetPanelKind=o.asset;genericAssetPanelId=o.id;genericAssetEditSession=false;fields.replaceChildren();
             controls.forEach(c=>{
-                const label=document.createElement("label"),input=document.createElement("input"),name=document.createElement("span");
-                name.textContent=c.label||c.key;input.type=c.type==="boolean"?"checkbox":c.type==="range"?"range":"number";input.dataset.assetControl=c.key;
+                const label=document.createElement("label"),input=document.createElement(c.type==="select"?"select":"input"),name=document.createElement("span");
+                name.textContent=c.label||c.key;if(c.type!=="select")input.type=c.type==="boolean"?"checkbox":c.type==="range"?"range":"number";input.dataset.assetControl=c.key;
+                if(c.type==="select"){for(const option of c.options||[]){const node=document.createElement("option");node.value=String(option.value);node.textContent=option.label;input.append(node);}}
                 if(input.type==="number"||input.type==="range") {input.step=String(c.step ?? .05);input.style.width=input.type==="range"?"140px":"100px";}
                 label.append(name,input);
                 if(input.type==="range"){const value=document.createElement("output");value.dataset.assetRangeValue=c.key;label.append(value);}
@@ -2829,6 +2914,7 @@
             const input=fields.querySelector(`[data-asset-control="${c.key}"]`);if(!input)return;
             const value=assetControlValue(o,c);
             if(input.type==="checkbox") input.checked=value;
+            else if(c.type==="select") input.value=String(value);
             else {
                 const min=assetControlLimit(c.min,o,-Infinity),max=assetControlLimit(c.max,o,Infinity);
                 if(Number.isFinite(min))input.min=String(min);else input.removeAttribute("min");
@@ -2844,6 +2930,7 @@
         if(!control)return;
         let value;
         if(control.type==="boolean") value=!!input.checked;
+        else if(control.type==="select") value=input.value;
         else {if(input.value.trim()===""||!Number.isFinite(Number(input.value)))return;
             const v=Number(input.value), lo=assetControlLimit(control.min,o,-Infinity), hi=assetControlLimit(control.max,o,Infinity);
             value=clamp(control.integer ? Math.round(v) : v,lo,hi);}

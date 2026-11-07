@@ -34,7 +34,7 @@ const { chromium } = require("playwright");
     await p.goto("file://" + __dirname + "/cyberpunk-city-studio.html");
     await p.waitForTimeout(900);
 
-    const kinds = await p.evaluate(() => Object.keys(ASSETS));
+    const kinds = await p.evaluate(() => Object.keys(ASSETS).filter(k => !ASSETS[k]?.internalOnly));
     await p.evaluate(() => {
         const t = document.querySelector("#assetToggle");
         if (t.getAttribute("aria-expanded") !== "true") t.click();

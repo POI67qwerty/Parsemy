@@ -165,7 +165,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             };
         }
         if (kind === "stackedBuilding" || kind === "beveledStackedBuilding" || kind === "cornerCutStackedBuilding") {
-            const beveled = kind === "beveledStackedBuilding",
+            const beveled = kind === "beveledStackedBuilding" || (kind === "stackedBuilding" && Number(info.bevelOffset) > 0),
                 floorHeight = 2.2,
                 floorGap = 0.06,
                 floors = Array.from({ length: 4 }, (_, i) => ({
@@ -234,6 +234,8 @@ window.cityGridInstallAssetUI = function (bridge) {
                 ra: info.w / 2,
                 rb: info.d / 2,
                 h: height,
+                bevelOffset: info.bevelOffset || 0,
+                bevelSegments: info.bevelSegments || 4,
                 extrude: true,
             };
         if (kind === "beveledBox")
@@ -617,6 +619,14 @@ window.cityGridInstallAssetUI = function (bridge) {
         return true;
     };
     // 通常アセット、ベランダ、接続アセットを入口で振り分ける配置関数。
+    function newF1Accessory(parent,feature,label){
+        const child=newAsset("f1Accessory",null,[0,0,0]);
+        child.assetName=label;child.displayName=label;child.visible=!!parent[feature==="awning"?"f1AwningEnabled":feature==="sign"?"f1SignEnabled":"facadeEnabled"];
+        child.f1Feature=feature;child.attachment={parentId:parent.id,f1Feature:feature};
+        child.w=parent.w;child.rot=parent.rot;child.off=[...(parent.off||[0,0,0])];
+        return child;
+    }
+    window.cityGridCreateF1Accessory=newF1Accessory;
     function placeAsset(kind, p) {
         if (kind === "buildingAwning" || kind === "buildingAwningOpen" || kind === "buildingSign")
             return placeLinkedAssetInstance(kind, p);
@@ -625,8 +635,16 @@ window.cityGridInstallAssetUI = function (bridge) {
         const before = S.slice(),
             wasFloor = !!window.cityFloorPlanActive;
         try {
-            const o = newAsset(kind, p),
-                lines = genShape(o);
+            const o = newAsset(kind, p);
+            let lines = genShape(o);
+            // 新規F1建物には横壁看板の子オブジェクトを最初から用意する。
+            // 初期は非表示だが、シーン内オブジェクト一覧の親子に現れ、一覧の目で表示できる。
+            if(kind==="building"){
+                const sideSign=newWallSideSign(o,1);sideSign.visible=false;
+                lines=[...lines,...genShape(sideSign)];
+                for(const [feature,label] of [["awning","テント"],["sign","正面看板"],["facade","ファサード"]])
+                    lines.push(...genShape(newF1Accessory(o,feature,label)));
+            }
             if (!lines.length || lines.some((s) => !validStroke(s)))
                 throw new Error("asset geometry is empty or malformed");
             HU.push(S);
@@ -1018,6 +1036,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         };
         return syncAttachedPart(sign, parent);
     }
+    window.cityGridCreateWallSideSign=newWallSideSign;
     function toggleWallSideSign(
         parentId,
         enabled,
@@ -1110,11 +1129,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             kinds: [
                 "building",
                 "cornerCutBox",
-                "buildingAwning",
-                "buildingAwningOpen",
-                "buildingSign",
                 "stackedBuilding",
-                "beveledStackedBuilding",
                 "cornerCutStackedBuilding",
                 "recessedStackedBuilding",
                 "stall",
@@ -1153,8 +1168,6 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "pathPipe",
                 "bezierCable",
                 "vendingMachine",
-                "ufoCatcher",
-                "gachaMachine",
             ],
         },
         {
@@ -1194,16 +1207,17 @@ window.cityGridInstallAssetUI = function (bridge) {
             ],
         },
         // 家具：椅子・スツール → カウンター → タンス・棚の順。
-        { key: "furniture", label: "家具", kinds: ["stool", "squareStool", "counter", "counterL", "counterU", "shopWardrobe", "shopWardrobe2", "displayShelf", "displayShelf2"] },
+        { key: "furniture", label: "家具", kinds: ["stool", "squareStool", "counter", "counterL", "counterU", "shopWardrobe", "shopWardrobe2", "displayShelf", "displayShelf2", "ufoCatcher", "gachaMachine", "tLegTable", "ramenBowl"] },
         { key: "train", label: "電車", kinds: ["trainBench", "trainSeat", "trainDividedBench", "trainDividedSeat", "trainStraps", "trainPole", "trainHandrail", "trainWindowWall", "trainSlidingDoor"] },
         { key: "person", label: "人間", kinds: ["person"] },
         // 車（人物の隣）。キャブは五角形の立体、荷台は直方体、タイヤは円柱で作る。
         // 寸法はすべて画面上の専用ハンドルで変えられる（engine-gizmo.js の vehicleGizmo）。
         { key: "vehicle", label: "車", kinds: ["keiTruck", "keiVan", "sedan", "sedan2"] },
+        // 互換用の旧アセットは棚の最後にまとめ、新しい通常カテゴリには混ぜない。
+        { key: "old", label: "旧", kinds: ["buildingAwning", "buildingAwningOpen", "buildingSign", "sign", "wallSideSign", "shopFront", "guardPoleHalf", "beveledBox", "beveledStackedBuilding"] },
     ];
-    // 看板は「壁付け看板（単体）」へ統合した。asset=sign と asset=wallSideSign
-    // （建物へ接着する専用形状）は既存JSONの読み込み・表示用に定義だけ残し、棚からは外す。
-    const trayKinds = Object.keys(ASSETS).filter((k) => k !== "sign" && k !== "wallSideSign" && k !== "shopFront" && k !== "guardPoleHalf");
+    // 旧IDは互換性を保ったまま「旧」カテゴリにだけ配置する。
+    const trayKinds = Object.keys(ASSETS);
     ASSET_GROUPS.forEach((g) => {
         g.kinds = g.kinds.filter((k) => trayKinds.includes(k));
     });
@@ -1263,7 +1277,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         activeGroups = group.key;
         trayScroll.dataset.group = group.key;
         trayCards.forEach((card) => {
-            card.hidden = card.dataset.group !== group.key;
+            card.hidden = card.dataset.group !== group.key || card.dataset.legacy === "true";
         });
         trayScroll.scrollLeft = 0;
         trayTabs.forEach((b) => {
@@ -1326,7 +1340,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     assetAxisTrayInput.onchange = () => setAssetAxis(assetAxisTrayInput.value);
     if (bridge.syncAssetAxis) bridge.syncAssetAxis();
     tray.addEventListener("click", (e) => {
-        const tab = e.target.closest("[data-asset-group]");
+        const tab = e.target.closest(".assetTrayTab[data-asset-group]");
         if (tab) {
             if (tab.dataset.assetGroup !== activeGroups) showAssetGroup(tab.dataset.assetGroup);
             return;

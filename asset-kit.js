@@ -208,6 +208,8 @@ const ASSET_KIT = (function () {
             capEnd: opts.capEnd ?? last > 1e-4,
             ringLines: (opts.rings || []).filter((k) => k > 0 && k < pts.length - 1),
             verts: Math.max(0, Math.round(opts.verts || 0)),
+            preciseTubeEdge: !!opts.preciseTubeEdge,
+            onFace: !!opts.onFace,
         });
     }
 
@@ -432,6 +434,19 @@ const ASSET_KIT = (function () {
 
     // ===== 部品 → 線 =====
     const closedLoop = (path, axis, w) => [...path, path[0]].map(([u, v]) => toP3(axis, u, v, w));
+    // 円筒の縦稜線は固定角ではなく、現在の視点から見たシルエット位置を選ぶ。
+    // 円柱プリミティブと同じく、隠線判定で背面を落としつつ、カメラ左右の輪郭を必ず候補にする。
+    function cameraContourIndices(path, axis, owner) {
+        if(!Array.isArray(path)||path.length<3||!owner||typeof L2W!=="function")return null;
+        const u=path.reduce((s,p)=>s+p[0],0)/path.length,v=path.reduce((s,p)=>s+p[1],0)/path.length,
+            center=L2W(owner,...toP3(axis,u,v,0)),
+            view=orthView&&typeof orthBasis==="function"?orthBasis().depth.map(x=>-x):camPos().map((x,i)=>x-center[i]),
+            facing=path.map(p=>{const q=L2W(owner,...toP3(axis,p[0],p[1],0));return q.reduce((s,x,i)=>s+(x-center[i])*view[i],0);}),
+            front=facing.map((x,i)=>x>=0?i:-1).filter(i=>i>=0),back=facing.map((x,i)=>x<0?i:-1).filter(i=>i>=0);
+        if(!front.length||!back.length)return [0,Math.floor(path.length/2)];
+        const nearest=ids=>ids.reduce((best,i)=>Math.abs(facing[i])<Math.abs(facing[best])?i:best,ids[0]);
+        return [...new Set([nearest(front),nearest(back)])];
+    }
     function partEdges(part) {
         // 任意のメッシュも線と面を一つの部品にまとめる。
         if (Array.isArray(part.meshEdges)) return part.meshEdges;
@@ -451,17 +466,12 @@ const ASSET_KIT = (function () {
             (part.ringLines || []).forEach((k) => {
                 if (rings[k]) out.push(closedLoop(rings[k].path, axis, rings[k].w));
             });
-            const n = rings[0].path.length;
-            (part.verticals || []).forEach((k) => {
+            const n = rings[0].path.length,
+                viewContour=part.preciseTubeEdge?cameraContourIndices(rings[0].path,axis,part.__owner):null,
+                verticals = viewContour || (Array.isArray(part.verticals) ? part.verticals : Array.from({length:Math.max(0,Math.round(part.verts||0))},(_,k)=>Math.round(k*n/Math.max(1,Math.round(part.verts||0)))));
+            verticals.forEach((k) => {
                 const idx = ((Math.round(k) % n) + n) % n;
-                for (let i = 0; i < rings.length - 1; i++) {
-                    const a = rings[i],
-                        b = rings[i + 1];
-                    out.push([
-                        toP3(axis, a.path[idx][0], a.path[idx][1], a.w),
-                        toP3(axis, b.path[idx][0], b.path[idx][1], b.w),
-                    ]);
-                }
+                out.push(rings.map(r=>toP3(axis,r.path[idx][0],r.path[idx][1],r.w)));
             });
             return out;
         }
@@ -482,7 +492,8 @@ const ASSET_KIT = (function () {
         // 縦線は verts 本（0 なら無し）だけを等間隔で足す。
         if (part.smooth) {
             const n = Math.max(0, Math.round(part.verts || 0)),
-                indices = Array.isArray(part.verticals) ? part.verticals : Array.from({length:n}, (_,k) => Math.round((k * path.length) / n) % path.length);
+                viewContour=part.preciseTubeEdge?cameraContourIndices(path,axis,part.__owner):null,
+                indices = viewContour || (Array.isArray(part.verticals) ? part.verticals : Array.from({length:n}, (_,k) => Math.round((k * path.length) / n) % path.length));
             for (const idx of indices) {
                 const [u, v] = path[((Math.round(idx) % path.length) + path.length) % path.length];
                 out.push([toP3(axis, u, v, part.z0), toP3(axis, u, v, part.z1)]);
@@ -868,7 +879,7 @@ const ASSET_KIT = (function () {
                 const color = part.color || ctx.c,
                     width = part.width || ctx.o.w;
                 let edgeIndex = 0;
-                for (const seg of partEdges(part)) {
+                for (const seg of partEdges({...part,__owner:ctx.o})) {
                     const line=lineA(ctx.o, seg, color, width);
                     if (part.signalPoleTopRing && edgeIndex === 1) {
                         line.signalPoleTopRing = true;
@@ -944,6 +955,22 @@ const ASSET_KIT = (function () {
         const adjustment=[dot(delta,cross(columns[1],columns[2]))/det,dot(delta,cross(columns[2],columns[0]))/det,dot(delta,cross(columns[0],columns[1]))/det];
         return {...patch,off:off.map((x,i)=>x+adjustment[i])};
     }
+    // 埋め込みひさしを持つアセット向けの標準編集項目。
+    // 呼び出し側は部品寸法から {knee,frameDepth,brimLength,t,maxT,h} を返し、
+    // 形状ビルダー側も同じキー群を読む。これで傾き・枠・つば・厚さの操作を再利用できる。
+    function hoodControls(prefix, read, limits={}) {
+        const specs=[
+            {suffix:"Tilt",field:"knee",label:"ひさしの傾き",axis:"z",min:p=>p.kneeMin??(p.t||0)+.001,max:p=>p.kneeMax??p.h-(p.t||0)-.001},
+            {suffix:"FrameLength",field:"frameDepth",label:"ひさし枠の長さ",axis:"y",min:()=>.005,max:(o,p)=>typeof limits.frameMax==="function"?limits.frameMax(o,p):(limits.frameMax??p.maxFrameDepth??5)},
+            {suffix:"BrimLength",field:"brimLength",label:"ひさしのつばの長さ",axis:"y",min:()=>0,max:(o,p)=>typeof limits.brimMax==="function"?limits.brimMax(o,p):(limits.brimMax??p.maxBrimLength??5)},
+            {suffix:"Thickness",field:"t",label:"ひさしの厚さ",axis:"x",min:()=>.005,max:(o,p)=>p.maxT??.5}
+        ];
+        return specs.map(s=>({key:prefix+s.suffix,label:s.label,type:"range",canvasSlider:true,unit:"m",step:.005,
+            get:o=>read(o)[s.field],min:o=>s.min(read(o),o),max:o=>s.max(o,read(o)),
+            handle:(o,v)=>{const p=read(o),a=s.axis,anchor=a==="x"?[-p.w/2,0,p.h*.7]:a==="y"?[0,p.length/2,0]:[0,0,0],sample=[...anchor],probe=[...anchor];
+                sample[a==="x"?0:a==="y"?1:2]=a==="x"?-p.w/2+v:a==="y"?p.length/2-v:v;probe[a==="x"?0:a==="y"?1:2]+=(a==="x"?1:a==="y"?-1:1);
+                return {anchor,sample,probe,fallback:a==="x"?{x:1,y:0}:{x:0,y:-1}};}}));
+    }
     const API = {
         // 登録
         define,
@@ -987,7 +1014,7 @@ const ASSET_KIT = (function () {
         textPart,
         glyphs: () => Object.keys(GLYPHS),
         axisHandle,
-        quadraticPoint, quadraticEditor, quadraticTube,
+        quadraticPoint, quadraticEditor, quadraticTube, hoodControls,
         // 検査用
         toP3,
         isConvex,

@@ -138,8 +138,17 @@ window.CityCanvasControls = (function () {
     function list(o) {
         if(!o || (o.type!=='asset' && o.type!=='circ'))return [];
         const sg=typeof specialGizmo==='function'?specialGizmo(o):null,
-            handles=collectHandles(sg),result=[],seen=new Set(),controls=assetEditorControls(o);
+            handles=collectHandles(sg),result=[],seen=new Set(),controls=assetEditorControls(o).filter(c=>{
+                const activeF1=o.asset==="building"?window.__f1EditFeature:null;
+                if(activeF1&&c.f1Feature!==activeF1)return false;
+                if(activeF1==="awning"&&["f1AwningWidth","f1AwningOffsetX","f1AwningBackZ","f1AwningThickness","f1AwningDepth"].includes(c.key))return false;
+                return typeof c.canvasVisible!=="function"||c.canvasVisible(o);
+            });
         for(const c of controls){
+            if(c.type==='select'&&c.canvasSelect===true){
+                const id='select:'+c.key,value=assetControlValue(o,c);
+                result.push({id,label:c.label||c.key,value,options:c.options||[],control:c,select:true});seen.add(id);continue;
+            }
             if(!['number','range'].includes(c.type||'number'))continue;
             const h=handles.find(q=>q.paramKey===c.key);
             if(!h && c.canvasSlider!==true && !(c.type==='range' && typeof c.handle!=='function'))continue;
@@ -200,7 +209,7 @@ window.CityCanvasControls = (function () {
     }
     function toggles(o) {
         if(!o || (o.type!=='asset' && o.type!=='circ'))return [];
-        return assetEditorControls(o).filter(c=>c.type==='boolean' && c.canvasToggle===true).map(c=>({
+        return assetEditorControls(o).filter(c=>c.type==='boolean' && c.canvasToggle===true && (!c.f1Feature||(o.asset==="building"&&window.__f1EditFeature===c.f1Feature)) && (typeof c.canvasVisible!=="function"||c.canvasVisible(o))).map(c=>({
             id:'toggle:'+c.key,
             label:c.label||c.key,
             checked:!!assetControlValue(o,c),
@@ -247,10 +256,14 @@ window.CityCanvasControls = (function () {
             rowMap.clear();
             controls.forEach(c=>{
                 const row=document.createElement('label');row.className='canvasAssetRow';row.dataset.controlId=c.id;
-                const label=document.createElement('span'),slider=document.createElement('input');
+                const label=document.createElement('span'),slider=document.createElement(c.select?'select':'input');
                 label.className='canvasAssetControlLabel';label.textContent=c.label;slider.dataset.controlId=c.id;slider.setAttribute('aria-label',c.label);
                 if(c.toggle){
                     slider.type='checkbox';slider.dataset.assetToggle=c.control.key;
+                    row.append(label,slider);
+                }else if(c.select){
+                    slider.dataset.assetSelect=c.control.key;
+                    for(const option of c.options){const node=document.createElement('option');node.value=String(option.value);node.textContent=option.label||String(option.value);slider.append(node);}
                     row.append(label,slider);
                 }else{
                     const out=document.createElement('output'),unit=document.createElement('span');
@@ -331,13 +344,14 @@ window.CityCanvasControls = (function () {
                     ref.slider.checked=!!c.checked;ref.slider.disabled=locked;
                     return;
                 }
+                if(c.select){ref.slider.value=String(c.value);ref.slider.disabled=locked;return;}
                 ref.unit.textContent=c.unit;
                 ref.slider.min=String(c.min);ref.slider.max=String(c.max);ref.slider.step=c.integer?'1':'any';ref.slider.value=String(c.value);ref.slider.disabled=locked||c.min>=c.max;
                 ref.out.textContent=String(+c.value.toFixed(4));
             });
         }
         items.addEventListener('input',event=>{
-            const input=event.target;if(!(input instanceof HTMLInputElement)||!input.dataset.controlId)return;
+            const input=event.target;if(!(input instanceof HTMLInputElement)&&!(input instanceof HTMLSelectElement)||!input.dataset.controlId)return;
             if(typeof mode!=='undefined'&&mode==='view'&&input.dataset.cameraControl){
                 if(typeof cameraLock!=='undefined'&&cameraLock){
                     if(typeof notifyLocked==='function')notifyLocked('カメラは固定されています');
@@ -360,9 +374,17 @@ window.CityCanvasControls = (function () {
             if(!o||o.id!==selectedId||obLocked(o))return;
             const item=[...toggles(o),...list(o),...faces(o)].find(c=>c.id===input.dataset.controlId);
             if(!item)return;
+            if(item.select){
+                const value=String(input.value),c=item.control;if(value===String(item.value))return;
+                HU.push(S);RD=[];session=null;setOb(o.id,typeof c.patch==='function'?c.patch(o,value):{[c.key]:value});render();return;
+            }
             if(item.toggle){
                 const value=!!input.checked,c=item.control;
                 if(value===item.checked)return;
+                if(o.asset==='building'&&c.key==='wallSideSignEnabled'){
+                    const sideCheck=document.getElementById('wallSideSign');
+                    if(sideCheck){sideCheck.checked=value;sideCheck.dispatchEvent(new Event('change',{bubbles:true}));return;}
+                }
                 HU.push(S);RD=[];session=null;
                 setOb(o.id,typeof c.patch==='function'?c.patch(o,value):{[c.key]:value});
                 render();

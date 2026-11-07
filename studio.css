@@ -614,6 +614,14 @@ canvas {
 .objectRow:hover {
     border-color: #5c9b95 !important;
 }
+.objectDisclosure, .objectDisclosureSpacer {
+    flex: none; width: 18px; height: 22px; display: inline-grid; place-items: center;
+    padding: 0 !important; border: 0 !important; background: transparent !important;
+    color: #a9c6c5 !important; font-size: 14px !important; line-height: 1;
+}
+.objectDisclosure:hover { color: #fff !important; }
+.objectChildRow { border-style: dashed !important; background: #111a20 !important; }
+.objectChildRow .objectMeta small { color: #8fa9a9; }
 .objectRow.selected {
     border-color: var(--orange) !important;
     background: #382b27 !important;

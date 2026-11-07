@@ -2495,7 +2495,7 @@ function specialGizmo(o) {
               : isStackedBuildingAsset(o)
                 ? stackedBuildingGizmo(o)
                 : o && o.type === "asset" && o.asset === "building"
-                  ? buildingGizmo(o)
+                  ? (window.__f1EditFeature ? null : buildingGizmo(o))
                   : o && o.type === "asset" && o.asset === "awning"
                     ? awningGizmo(o)
                     : o && o.type === "asset" && o.asset === "balcony"
@@ -2530,15 +2530,22 @@ function specialGizmo(o) {
     if (o && typeof assetEditorControls === "function") {
         const registered=[];
         for(const c of assetEditorControls(o)) {
+            // F1 child edit is isolated: retain opening controls, but suppress every unrelated building handle.
+            const activeF1= o.asset==="building" ? window.__f1EditFeature : null;
+            if(activeF1 && c.f1Feature!==activeF1)continue;
+            if(activeF1==="awning"&&["f1AwningWidth","f1AwningOffsetX","f1AwningBackZ","f1AwningThickness","f1AwningDepth"].includes(c.key))continue;
+            if(typeof c.canvasVisible==="function"&&!c.canvasVisible(o))continue;
             if(!["number","range"].includes(c.type||"number") || typeof c.handle!=="function")continue;
             const value=assetControlValue(o,c), spec=c.handle(o,value);
             if(!spec || ![spec.anchor,spec.sample,spec.probe].every(v=>Array.isArray(v)&&v.length===3&&v.every(Number.isFinite)))continue;
             const h=screenHandle(o,"asset-param-"+c.key,spec.anchor,spec.sample,spec.probe,value,
                 assetControlLimit(c.min,o,-Infinity),assetControlLimit(c.max,o,Infinity),c.label||c.key,
                 spec.fallback||{x:1,y:0},spec.color||"#8ce6c2");
-            h.paramKey=c.key;h.unit=c.unit||"";h.integer=!!c.integer;
+            h.paramKey=c.key;h.unit=c.unit||"";h.integer=!!c.integer;h.gizmoMode=c.gizmoMode;
+            if(c.gizmoMode==="moveZ"&&h.s?.ok){h.color="#4b9cff";h.s={...h.s,x:h.s.x+h.dir.x*30/Z,y:h.s.y+h.dir.y*30/Z};}
             if(Number.isFinite(spec.pixelsPerUnit) && spec.pixelsPerUnit>0)h.scale=spec.pixelsPerUnit/Z;
             else if(Number.isFinite(spec.scaleFactor) && spec.scaleFactor>0)h.scale=Math.max(60/Z,h.scale*spec.scaleFactor);
+            if(spec.sample2&&spec.probe2&&[spec.sample2,spec.probe2].every(v=>Array.isArray(v)&&v.length===3&&v.every(Number.isFinite))){const a=scrW(pt(o,...spec.sample2)),b=scrW(pt(o,...spec.probe2)),dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy);if(len>.01){h.dir2={x:dx/len,y:dy/len};h.scale2=Math.max(60,len);h.start2=spec.start2;h.min2=spec.min2;h.max2=spec.max2;}}
             registered.push(h);
         }
         if(registered.length){
@@ -3320,17 +3327,24 @@ function drawSpecialGizmo(c, o) {
             font = opt.font || 12,
             textColor = opt.textColor || "#fff0b0",
             gap = font > 11 ? 9 : 8;
-        if (h.anchor && h.anchor.ok) {
-            c.setLineDash([dash[0] / Z, dash[1] / Z]);
-            c.strokeStyle = color;
-            c.lineWidth = width / Z;
-            c.beginPath();
-            c.moveTo(h.anchor.x, h.anchor.y);
-            c.lineTo(h.s.x, h.s.y);
-            c.stroke();
-            c.setLineDash([]);
+        if(h.gizmoMode==="moveZ"){
+            const dx=h.dir?.x||0,dy=h.dir?.y||-1,px=-dy,py=dx,tail={x:h.s.x-dx*38/Z,y:h.s.y-dy*38/Z},head={x:h.s.x-dx*10/Z,y:h.s.y-dy*10/Z};
+            c.setLineDash([]);c.strokeStyle=color;c.fillStyle=color;c.lineWidth=2.6/Z;
+            c.beginPath();c.moveTo(tail.x,tail.y);c.lineTo(head.x,head.y);c.stroke();
+            c.beginPath();c.moveTo(h.s.x,h.s.y);c.lineTo(head.x+px*5/Z,head.y+py*5/Z);c.lineTo(head.x-px*5/Z,head.y-py*5/Z);c.closePath();c.fill();
+        }else{
+            if (h.anchor && h.anchor.ok) {
+                c.setLineDash([dash[0] / Z, dash[1] / Z]);
+                c.strokeStyle = color;
+                c.lineWidth = width / Z;
+                c.beginPath();
+                c.moveTo(h.anchor.x, h.anchor.y);
+                c.lineTo(h.s.x, h.s.y);
+                c.stroke();
+                c.setLineDash([]);
+            }
+            sq(h.s, color, opt.diamond !== false);
         }
-        sq(h.s, color, opt.diamond !== false);
         if (!label) return;
         gzLabel(c, label, h.s.x + gap / Z, h.s.y - (gap - 1) / Z, color, font);
     };
@@ -3541,15 +3555,18 @@ function drawSpecialGizmo(c, o) {
                 frame.forEach((q, i) => (i ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y)));
                 c.stroke();
             }
+            if(!center?.ok)return;
             c.strokeStyle = col;
             c.beginPath();
             keys.forEach((k) => {
+                if(!h[k]?.s?.ok)return;
                 c.moveTo(center.x, center.y);
                 c.lineTo(h[k].s.x, h[k].s.y);
             });
             c.stroke();
-            keys.forEach((k) => sq(h[k].s, col));
-            gzLabel(c, label === "front" ? "開口W/H" : "奥の開口", h[keys[1]].s.x + 8 / Z, h[keys[1]].s.y - 7 / Z, col, 12);
+            keys.forEach((k) => h[k]?.s?.ok&&sq(h[k].s,col));
+            const labelPoint=h[keys[1]]?.s;
+            if(labelPoint?.ok)gzLabel(c,label === "front" ? "開口W/H" : "奥の開口",labelPoint.x+8/Z,labelPoint.y-7/Z,col,12);
         });
         if (sg.panelFrame && sg.panelFrame.every((q) => q && q.ok)) {
             c.fillStyle = "rgba(255,179,111,.18)";
@@ -4177,6 +4194,8 @@ function gizmo() {
     if (selected?.attachment?.wallSideSign) return wallSideSignGizmo(selected);
     const o = sel && obOf(sel);
     if (!o) return null;
+    // F1付属物を編集中は親建物の移動・回転・寸法ギズモを消し、部品専用ハンドルだけを残す。
+    if(o.asset==="building"&&window.__f1EditFeature)return null;
     if (o.type === "compound") return compoundGizmo(o);
     // 積層建物も3Dの移動・回転ギズモは表示する。ただし、
     // ra/rb/hへ書き込む汎用の面ハンドルは使わず、寸法編集は階別ギズモへ渡す。
@@ -4625,6 +4644,7 @@ function hitGizmo(p) {
         const registered=nearestHandleOf(special.registeredHandles,p,R),
             registeredHit=handleOrFace(registered,q=>({t:q.handle.kind,sign:q.handle,g:{o:active,C3:special.C3}}));
         if(registeredHit)return registeredHit;
+        if(active.asset==="building"&&window.__f1EditFeature)return null;
         if (active.asset === "wallSideSign") {
             const handles = [
                     { t: "wallSideSign-bracket-length", h: special.bracketHandle },
@@ -5398,7 +5418,7 @@ function dragEdit(p, freeRotation = false) {
     };
     if (ed.t.startsWith("asset-param-")) {
         const h=ed.sign, control=assetEditorControls(o).find(c=>c.key===h.paramKey);
-        if(control) { const raw=screenHandleDragValue(h,p,ed.p0), value=control.integer ? clamp(Math.round(raw),h.min,h.max) : raw;patch=typeof control.patch === "function" ? control.patch(o,value) : {[h.paramKey]:value}; }
+        if(control) { const raw=screenHandleDragValue(h,p,ed.p0), value=control.integer ? clamp(Math.round(raw),h.min,h.max) : raw;patch=typeof control.patch === "function" ? control.patch(o,value) : {[h.paramKey]:value};if(h.dir2&&typeof control.patch2==="function"){const dx=p.x-ed.p0.x,dy=p.y-ed.p0.y,v2=clamp(h.start2+(dx*h.dir2.x+dy*h.dir2.y)/(h.scale2||1),h.min2,h.max2);patch={...patch,...control.patch2(o,v2)};} }
     } else if (ed.t === "cornerCut-offset") {
         patch = { cornerOffset: screenHandleDragValue(ed.sign,p,ed.p0) };
     } else if (ed.t.startsWith("cornerCut-facade-")) {
@@ -5747,12 +5767,13 @@ function dragEdit(p, freeRotation = false) {
             floor[key] = clamp(h.start + amount, h.min, h.max);
             if (!stackedIndividualEdit(o) && h.floorIndex === 0 && ["w", "d", "h"].includes(key))
                 floors.forEach((f) => (f[key] = floor[key]));
-            if (o.asset === "cornerCutStackedBuilding" && key === "h") {
-                // 階高を変えても上下の階が重ならないよう、元の各階間隔を保って上階を積み直す。
-                // 幅・奥行き・XY位置は変えない。個別編集なら変更した階より上だけを移動。
+            if (key === "h") {
+                // 階高変更後も既存の階間隔だけを保ち、上階を積み直す。
+                // 1Fを低くした時に元のz位置だけが残って生じる大きな空洞を防ぐ。
+                // 個別編集では変更階より上だけ、通常編集では1Fの新しい高さから全階を再配置。
                 for (let i=h.floorIndex+1;i<floors.length;i++) {
-                    const previous=o.floors[i-1], current=o.floors[i],
-                        gap=(Number(current.z)||0)-(Number(previous.z)||0)-(Number(previous.h)||0);
+                    const previous=o.floors[i-1],current=o.floors[i],
+                        gap=Math.max(0,(Number(current.z)||0)-(Number(previous.z)||0)-(Number(previous.h)||0));
                     floors[i].z=(Number(floors[i-1].z)||0)+(Number(floors[i-1].h)||0)+gap;
                 }
             }

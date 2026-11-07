@@ -559,7 +559,7 @@ function exportSurfaceTrianglesBase(o) {
         }
         return out;
     }
-    if (kind === "beveledBox" && typeof beveledBoxFootprint === "function") {
+    if ((kind === "beveledBox" || (kind === "box" && Number(o.bevelOffset) > 1e-5)) && typeof beveledBoxFootprint === "function") {
         const q = beveledBoxParams(o),
             footprint = beveledBoxFootprint(q.w, q.d, q.bevelOffset, q.bevelSegments),
             z0 = 0,
@@ -606,7 +606,7 @@ function exportSurfaceTrianglesBase(o) {
                     rim={...part,ra:(fw+2*ro)/2,rb:(fd+2*ro)/2,h:rh,cornerOffset:offset,cornerCutOpeningEnabled:false},
                     rimBase=customPt(o,0,0,fh-rh), origin=customPt(o,0,0,0), rimShift=rimBase.map((v,j)=>v-origin[j]);
                 surfaceTriangles(rim).forEach(t=>out.push(t.map(p=>p.map((v,j)=>v+shift[j]+rimShift[j]))));
-            } else if (kind === "beveledStackedBuilding") {
+            } else if (kind === "beveledStackedBuilding" || bevelOffset > 1e-5) {
                 if (opening) beveledOpeningAt(fx, fy, fw, fd, fz, fz + fh, bevelOffset, bevelSegments, opening);
                 else beveledAt(fx, fy, fw, fd, fz, fz + fh, bevelOffset, bevelSegments);
                 // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
@@ -643,33 +643,39 @@ function exportSurfaceTrianglesBase(o) {
         return out;
     }
     if (kind === "building") {
+        const addF1Options=()=>{
+            if(o.f1AwningEnabled===true){const aw=f1AwningPanels(o,w,d,h);
+                aw.top.forEach(q=>quad(...q));aw.underside.forEach(q=>quad(...q));aw.front.forEach(q=>quad(...q));aw.sides.forEach(q=>quad(...q));aw.back.forEach(q=>quad(...q));}
+            if(o.f1SignEnabled===true){const sw=clamp(Number(o.f1SignWidth)||3,.2,w*.95),sh=clamp(Number(o.f1SignHeight)||1,.1,h*.4),sd=clamp(Number(o.f1SignDepth)||.5,.02,1),sx=clamp(Number(o.f1SignOffsetX)||0,-w*.45,w*.45),z0=clamp(o.f1SignZ===undefined?3.6:Number(o.f1SignZ),0,h),sb=clamp(o.f1SignBevelOffset==null ? .18 : Number(o.f1SignBevelOffset),0,Math.max(0,Math.min(sw,sh)*.45-.001)),frontY=-d/2-sd,backY=frontY+sd,zc=z0+sh/2,outline=beveledBoxFootprint(sw,sh,sb,4),frontCenter=[sx,frontY,zc],backCenter=[sx,backY,zc];for(let i=0;i<outline.length;i++){const j=(i+1)%outline.length,a=outline[i],b=outline[j],fa=[sx+a[0],frontY,zc+a[1]],fb=[sx+b[0],frontY,zc+b[1]],ba=[sx+a[0],backY,zc+a[1]],bb=[sx+b[0],backY,zc+b[1]];tri(frontCenter,fa,fb);tri(backCenter,bb,ba);quad(fa,ba,bb,fb);}}
+        };
         const facade=buildingFasciaGeometry(o);
         if (facade.enabled) {
-            const mark=out.length;
-            boxAt(0,-facade.d/2-facade.projection/2,facade.w,facade.projection,facade.z0,facade.z1);
-            if(facade.side) for(const sign of [-1,1]) boxAt(sign*(facade.w/2+facade.projection/2),-facade.projection/2,facade.projection,facade.d+facade.projection,facade.z0,facade.z1);
+            const mark=out.length,fb=clamp(Number(o.bevelOffset)||0,0,Math.min(facade.projection,facade.z1-facade.z0,facade.w)*.45),
+                fasciaBox=(x,y,bw,bd,z0,z1)=>fb>1e-5?beveledAt(x,y,bw,bd,z0,z1,fb,4):boxAt(x,y,bw,bd,z0,z1);
+            fasciaBox(0,-facade.d/2-facade.projection/2,facade.w,facade.projection,facade.z0,facade.z1);
+            if(facade.side) for(const sign of [-1,1]) fasciaBox(sign*(facade.w/2+facade.projection/2),-facade.projection/2,facade.projection,facade.d+facade.projection,facade.z0,facade.z1);
             // 面表示だけ看板色を使う。深度・隠線処理では通常の三角形として扱う。
             for(let i=mark;i<out.length;i++) out[i].surfaceColor=facade.color;
         }
         // 開口OFFでは面表示も通常の閉じた直方体へ戻す。
         if (o.openingEnabled === false) {
-            boxAt(0, 0, w, d, 0, h);
+            const bevel=clamp(Number(o.bevelOffset)||0,0,Math.min(w,d)*.22);
+            if(bevel>1e-5)beveledAt(0,0,w,d,0,h,bevel,4);else boxAt(0,0,w,d,0,h);
+            addF1Options();
             return out;
         }
         const g = buildingGeometry(o),
             leftEdge = g.openingOffset - g.openingW / 2, rightEdge = g.openingOffset + g.openingW / 2,
             leftW = leftEdge + g.w / 2, rightW = g.w / 2 - rightEdge,
-            panelY = g.backY;
-        boxAt((-g.w / 2 + leftEdge) / 2, 0, leftW, g.d, 0, g.h);
-        boxAt((rightEdge + g.w / 2) / 2, 0, rightW, g.d, 0, g.h);
-        boxAt(0, 0, g.w, g.d, g.openingH, g.h);
-        // 開口はトンネルではなく、奥側に閉じた内壁を持つ。外側の奥行きと同じ位置へ置く。
-        if (!o.doorEnabled) quad(
-            [leftEdge, panelY, 0],
-            [rightEdge, panelY, 0],
-            [rightEdge, panelY, g.openingH],
-            [leftEdge, panelY, g.openingH],
-        );
+            panelY = g.backY,bevel=clamp(Number(o.bevelOffset)||0,0,Math.min(w,d)*.22);
+        if(bevel>1e-5)beveledOpeningAt(0,0,g.w,g.d,0,g.h,bevel,4,{...g,openingBack:g.backY});
+        else {
+            boxAt((-g.w/2+leftEdge)/2,0,leftW,g.d,0,g.h);
+            boxAt((rightEdge+g.w/2)/2,0,rightW,g.d,0,g.h);
+            boxAt(0,0,g.w,g.d,g.openingH,g.h);
+            if(!o.doorEnabled)quad([leftEdge,panelY,0],[rightEdge,panelY,0],[rightEdge,panelY,g.openingH],[leftEdge,panelY,g.openingH]);
+        }
+        addF1Options();
         return out;
     }
     if (kind === "wallSideSign") {
@@ -682,7 +688,7 @@ function exportSurfaceTrianglesBase(o) {
             span = length + clearance,
             centerY = -(boardW * 0.5 + span * 0.5),
             barV = Math.max(0.06, Math.min(0.18, boardH * 0.1)),
-            beveled = o.wallSideSignShape === "beveled",
+            beveled = true,
             bevelOffset = clamp(
                 Number(o.wallSideSignBevelOffset) || 0.06,
                 0.01,
@@ -696,7 +702,7 @@ function exportSurfaceTrianglesBase(o) {
         for (let i = 0; i < count; i++) {
             const t = (i + 1) / (count + 1),
                 x = -boardH * 0.5 + boardH * t;
-            boxAt(x, centerY, barV, span, -thickness * 0.5, thickness * 0.5);
+            beveledAt(x,centerY,barV,span,-thickness*.5,thickness*.5,Math.max(.001,Math.min(bevelOffset*.35,barV*.24,span*.24)),4);
         }
         return out;
     }

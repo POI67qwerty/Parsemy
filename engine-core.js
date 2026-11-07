@@ -154,6 +154,8 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>方向</span><select id=arrayAxis><option value=x>X（左右）</option><option value=y>Y（地面の奥行き）</option><option value=z>Z（高さ）</option></select></label>
 <div class=note>間隔は中心から中心までの距離。マイナスで反対方向に並びます。方向はギズモと同じワールド軸です（位置欄のY・Zとは表記が異なります）。複数選択した場合は全てに適用します。複雑な形状や多数のコピーは表示が重くなる場合があります。</div>
 </div></div>
+<label id=buildingOpeningEnabledRow style="display:none"><input type=checkbox id=buildingOpeningEnabled> 開口をつける</label>
+<label id=linkedBuildingOpeningRow style="display:none"><input type=checkbox id=linkedBuildingOpening> 開口をつける</label>
 <div id=buildingDoorP style="display:none"><h3>開口の扉</h3>
 <label id=buildingOpeningPositionRow><span>開口の左右</span><input type=number id=buildingOpeningOffset step=0.05 style="width:100px"><span class=un>m</span></label>
 <button id=buildingDoorCenter type=button>扉を中央へ</button>
@@ -175,8 +177,13 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>絵枠の幅</span><input type=number class=nv id=ov_faceW step=0.01 style="width:100px"><span class=un>m</span></label>
 <label><span>絵枠の高さ</span><input type=number class=nv id=ov_faceH step=0.01 style="width:100px"><span class=un>m</span></label>
 </div>
-<div id=buildingP style="display:none"><h3>建物の開口</h3>
-<label id=linkedBuildingOpeningRow style="display:none"><input type=checkbox id=linkedBuildingOpening> 開口をつける</label>
+<div id=buildingP style="display:none"><h3>建物の開口・付属物</h3>
+<div id=buildingF1Options>
+<label><input type=checkbox id=buildingF1AwningEnabled> テントをつける</label>
+<label><span>テントの種類</span><select id=buildingF1AwningType><option value=fabric>テント</option><option value=corrugated>トタン</option></select></label>
+<label><input type=checkbox id=buildingF1SignEnabled> 正面看板をつける</label>
+<div class="buildingF1CenterActions"><button type="button" id="buildingF1CenterAwning">テント／トタンを中央に</button><button type="button" id="buildingF1CenterSign">正面看板を中央に</button></div>
+</div>
 <label id=buildingFacadeRow><input type=checkbox id=buildingFacadeEnabled> ファサード看板をつける</label>
 <div id=buildingFacadeControls style="display:none">
 <label><input type=checkbox id=buildingFacadeSides> 左右の側面にも回す</label>
@@ -193,7 +200,7 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>取付側</span><select id=wallSideSignSide><option value="-1">左側の横壁</option><option value="1">右側の横壁</option></select></label>
 <label><input type=checkbox id=wallSideSignBrace checked> 取付金具を付ける</label>
 <label><span>取付金具の本数</span><select id=wallSideSignBrackets><option value="0">なし</option><option value="1">1本</option><option value="2">2本</option><option value="3" selected>3本</option></select></label>
-<label><span>看板・金具形状</span><select id=wallSideSignShape><option value="box">普通の直方体</option><option value="beveled">ベベル直方体</option></select></label>
+<label><span>看板・金具形状</span><select id=wallSideSignShape><option value="beveled" selected>ベベルのみ</option></select></label>
 <label id=wallSideSignScopeRow style="display:none"><span>階層看板</span><select id=wallSideSignScope><option value="first">1Fだけ</option><option value="all">全部の階</option><option value="individual">階ごとに選択</option></select></label>
 <div id=wallSideSignFloorSelect style="display:none"></div>
 <label><span>ベベル幅</span><input type=number class=nv id=wallSideSignBevelOffset min=0 max=1 step=0.01 style="width:100px"><span class=un>m</span></label>
@@ -247,7 +254,7 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><input type=checkbox id=wallSignBrace checked> 取付金具を付ける</label>
 <label><span>取付金具の本数</span><select id=wallSignBrackets><option value="1">1本</option><option value="2">2本</option><option value="3" selected>3本</option></select></label>
 <label><span>取付金具の長さ</span><input type=number class=nv id=wallSignBracketLength min=0.05 step=0.01 style="width:100px"><span class=un>m</span></label>
-<label><span>看板の形状</span><select id=wallSignShape><option value="box">普通の直方体</option><option value="beveled">ベベル（角丸）</option></select></label>
+<label><span>看板の形状</span><select id=wallSignShape><option value="beveled" selected>ベベルのみ</option></select></label>
 <label><span>ベベル幅</span><input type=number class=nv id=wallSignBevelOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
 <label><span>ベベル分割数</span><input type=number class=nv id=wallSignBevelSegments min=1 max=4 step=1 style="width:100px"><span class="un">分割</span></label>
 <div class="note">看板は板を立てた形状で、取付金具は裏側の壁へ向かって出ます。幅・奥行き（板厚）・高さは共通の面ハンドルまたは数値欄で編集できます。金具の長さとベベル幅は画面上のハンドルからも変更できます。</div>
@@ -1621,6 +1628,7 @@ function normalizeSelection() {
     if (sel && !selIds.has(sel)) selIds.add(sel);
 }
 function setSelection(id, add = false, allowLocked = false) {
+    if(window.__f1EditOwner&&id!==window.__f1EditOwner){window.__f1EditFeature=null;window.__f1EditOwner=null;}
     // 一覧からはロック中も選択できる。キャンバス上では従来どおり誤選択を防ぐ。
     if (id && obLocked(obOf(id)) && !allowLocked) {
         if (typeof window.flashHint === "function") window.flashHint("ロック中のオブジェクトです（一覧の鍵で解除）");
@@ -1641,6 +1649,7 @@ function setSelection(id, add = false, allowLocked = false) {
     if (typeof window.cityGridObjectSelection === "function") window.cityGridObjectSelection(sel, !!id && !!sel);
 }
 function clearSelection() {
+    window.__f1EditFeature=null;window.__f1EditOwner=null;
     sel = null;
     selIds.clear();
     if (typeof window.cityGridObjectSelection === "function") window.cityGridObjectSelection(null);
@@ -1686,6 +1695,9 @@ function setOb(id, patch) {
     if (patch?.doorEnabled === true && patch.openingBack == null && o.asset === "building" && o.openingBack == null && typeof buildingGeometry === "function")
         patch = { ...patch, openingBack: buildingGeometry(o).backY };
     let next = { ...o, ...patch };
+    // テーブル全高の面ハンドルからの編集も脚高へ反映し、保存済み脚高に上書きされないよう同期する。
+    if(o.asset==="tLegTable"&&patch&&Object.prototype.hasOwnProperty.call(patch,"h")&&!Object.prototype.hasOwnProperty.call(patch,"tableLegHeight")&&!Object.prototype.hasOwnProperty.call(patch,"tableTopThickness"))
+        next.tableLegHeight=Math.max(.2,Number(next.h)-Math.max(.025,Number(next.tableTopThickness)||.07));
     // 開口幅の編集では、すでに動かした開口の中心を可能な限り固定する。
     if (typeof buildingOpeningEditConstraint === "function") next = buildingOpeningEditConstraint(next, o, patch || {});
     // 登録アセットが寸法の安全範囲を宣言した場合、数値欄とギズモの双方で守る。
