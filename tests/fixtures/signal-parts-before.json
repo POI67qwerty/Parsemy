@@ -1,0 +1,86 @@
+[
+  {
+    "kind": "trafficSignal",
+    "patch": {},
+    "poleE": 12,
+    "poleT": 156,
+    "headE": 44,
+    "headT": 140,
+    "linesHash": "ae01e20134a3ab5fe95a97888d851741a964d17a31d99dd4500de3380166238a",
+    "trisHash": "5bc724d96b4504278a666d55766a2aad1fd3b464abdd6b84bb9f190bb66c2a6c"
+  },
+  {
+    "kind": "trafficSignal",
+    "patch": {
+      "ra": 0.8,
+      "rb": 0.23,
+      "h": 4,
+      "spHeadH": 0.9,
+      "rot": 37
+    },
+    "poleE": 12,
+    "poleT": 156,
+    "headE": 44,
+    "headT": 140,
+    "linesHash": "310e6f336a78b1a7449b66961432da1d914306730af41f493aeb84f07ba29055",
+    "trisHash": "b3dbcb6957767413e4031654887231bb5528a1d1314e128f0bddab7eb858abbe"
+  },
+  {
+    "kind": "trafficSignal",
+    "patch": {
+      "ra": 0.4,
+      "rb": 0.18,
+      "h": 2.8,
+      "spHeadH": 0.4,
+      "rot": 90
+    },
+    "poleE": 12,
+    "poleT": 156,
+    "headE": 44,
+    "headT": 140,
+    "linesHash": "0e744cf4ed940e31d370ebb632fbe234a2c9f55c64dbd6e69d25cb26ec5eb752",
+    "trisHash": "c31058d6a600152f1ceac27d4f5cc393ae5a4fc8d07cd18fe6f71a0b81bdee52"
+  },
+  {
+    "kind": "pedSignal",
+    "patch": {},
+    "poleE": 12,
+    "poleT": 156,
+    "headE": 44,
+    "headT": 140,
+    "linesHash": "b2d463efe21f2b54d313e67838a4bd9e3a1d2decbd4813dd9f87f8f2edd5989e",
+    "trisHash": "9931d2a148455bfde67f9a8318cd92e1f20466741513595d0751bde0bee99e86"
+  },
+  {
+    "kind": "pedSignal",
+    "patch": {
+      "ra": 0.8,
+      "rb": 0.23,
+      "h": 4,
+      "spHeadH": 0.9,
+      "rot": 37
+    },
+    "poleE": 12,
+    "poleT": 156,
+    "headE": 44,
+    "headT": 140,
+    "linesHash": "07dd07aaa9f1b2467b6855e7d3e3dae95e6ffe19de06bb00a16e3c110175ca13",
+    "trisHash": "ed61f7009485116341cf341db0eb8ffce34be323246de92a0f81271e2d7ca06a"
+  },
+  {
+    "kind": "pedSignal",
+    "patch": {
+      "ra": 0.4,
+      "rb": 0.18,
+      "h": 2.8,
+      "spHeadH": 0.4,
+      "rot": 90
+    },
+    "poleE": 12,
+    "poleT": 156,
+    "headE": 44,
+    "headT": 140,
+    "linesHash": "7fe7b2bc9d7360f7223ba62ef570c2cf5df53ca35c34c0e8907ddc2b276c4d74",
+    "trisHash": "794999de841cbe8c1ae59cb596217df6fca4345ef4b20cb5ad38680974abf911"
+  }
+]

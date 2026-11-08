@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASSET_KIT ガイド — アセットを「1つの記述」から作る</title>
+<style>
+:root{
+  --ink:#20272f; --sub:#5b6672; --line:#dbe2ea; --bg:#ffffff; --tint:#f5f8fc;
+  --navy:#12304f; --blue:#1565c0; --red:#d32f2f; --green:#2e7d32; --amber:#ffd54f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:#eef2f7; color:var(--ink);
+  font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",
+              "Meiryo",system-ui,-apple-system,sans-serif;
+  line-height:1.95; font-size:16px; letter-spacing:.01em;
+}
+.page{max-width:940px; margin:0 auto; background:var(--bg);
+  padding:54px 62px 90px; box-shadow:0 2px 24px rgba(20,40,70,.10);}
+@media (max-width:700px){ .page{padding:28px 20px 60px} body{font-size:15px} }
+
+/* ---- 見出し ---- */
+h1{
+  font-size:2.0em; line-height:1.5; margin:0 0 .2em; letter-spacing:.02em; color:var(--navy);
+  border-bottom:4px solid var(--navy); padding-bottom:.35em;
+}
+h1::before{
+  content:var(--kicker, "REFERENCE"); display:block; font-size:.34em; letter-spacing:.28em;
+  color:var(--blue); font-weight:700; margin-bottom:.9em;
+}
+h2{
+  font-size:1.42em; margin:2.6em 0 .9em; padding:.42em .0em .42em .6em; color:#fff;
+  background:linear-gradient(90deg,var(--navy),#2f6f9e 70%,#4b93c0);
+  border-radius:6px; letter-spacing:.02em;
+}
+h3{
+  font-size:1.14em; margin:2.0em 0 .7em; padding:.1em 0 .3em .55em;
+  color:var(--navy); border-left:7px solid var(--blue); border-bottom:1px dotted var(--line);
+}
+h4{ font-size:1.02em; margin:1.5em 0 .5em; color:var(--blue); }
+h2+*, h3+*, h4+*{ margin-top:.2em }
+
+p{ margin:.75em 0; text-align:justify; }
+strong{ color:var(--navy); }
+a{ color:var(--blue); text-decoration:none; border-bottom:1px solid #b8d4f0; }
+
+/* ---- マーカー・色文字 ---- */
+.mk{ background:linear-gradient(transparent 58%, var(--amber) 58%, #ffe680 96%, transparent 96%);
+     font-weight:700; padding:0 .06em; }
+.rd{ color:var(--red); font-weight:700; }
+.bl{ color:var(--blue); font-weight:700; }
+.gr{ color:var(--green); font-weight:700; }
+
+/* ---- コード ---- */
+code{
+  background:#fdf0f3; color:#b3135a; border:1px solid #f6d3dd; border-radius:4px;
+  padding:.06em .38em; font-size:.9em; font-weight:600; white-space:nowrap;
+  font-family:"SFMono-Regular",Consolas,"Courier New",monospace;
+}
+pre{
+  background:#10192b; color:#e6edf6; border-radius:8px; padding:16px 20px;
+  overflow-x:auto; line-height:1.65; border-left:6px solid var(--blue);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.06); margin:1em 0;
+}
+pre code{ background:none; border:0; color:inherit; padding:0; font-weight:400; white-space:pre;
+  font-size:.86em; }
+
+/* ---- 表 ---- */
+table{ width:100%; border-collapse:separate; border-spacing:0; margin:1.1em 0;
+  font-size:.9em; background:#fff; border:1px solid var(--line); border-radius:8px;
+  overflow:hidden; }
+thead th{ background:var(--navy); color:#fff; text-align:left; padding:10px 12px;
+  font-weight:700; font-size:.95em; letter-spacing:.02em; border-right:1px solid rgba(255,255,255,.15); }
+thead th:last-child{ border-right:0 }
+tbody td{ padding:9px 12px; border-top:1px solid var(--line); vertical-align:top; }
+tbody tr:nth-child(even){ background:#f7fafd; }
+tbody tr:hover{ background:#eef6ff; }
+td code{ white-space:normal; word-break:break-word }
+
+/* ---- 引用＝呼び出しボックス ---- */
+blockquote{
+  margin:1.1em 0; padding:14px 18px 14px 46px; position:relative;
+  background:var(--tint); border-left:6px solid var(--blue); border-radius:6px;
+  color:#33404e;
+}
+blockquote::before{
+  content:"▶"; position:absolute; left:16px; top:13px; color:var(--blue); font-size:.9em;
+}
+blockquote p{ margin:.3em 0 }
+blockquote.warn{ background:#fff5f5; border-left-color:var(--red) }
+blockquote.warn::before{ content:"!"; font-weight:900; color:var(--red); left:20px;
+  border:2px solid var(--red); border-radius:50%; width:15px; height:15px; line-height:14px;
+  text-align:center; font-size:.7em; top:17px; }
+blockquote.point{ background:#fffdf0; border-left-color:#e0a800 }
+blockquote.point::before{ content:"★"; color:#e0a800 }
+blockquote.term{ background:#f2f6ff; border-left-color:#5c6bc0 }
+blockquote.term::before{ content:"?"; font-weight:900; color:#3949ab }
+blockquote.calc{ background:#f4fbf6; border-left-color:var(--green) }
+blockquote.calc::before{ content:"f(x)"; font-weight:700; color:var(--green); font-size:.72em }
+
+/* ---- リスト ---- */
+ul,ol{ margin:.7em 0 .9em; padding-left:1.6em }
+li{ margin:.32em 0 }
+li::marker{ color:var(--blue); font-weight:700 }
+ul ul,ol ol,ul ol,ol ul{ margin:.25em 0 }
+
+hr{ border:0; border-top:2px dashed #cfd9e4; margin:2.4em 0 }
+
+/* ---- 目次 ---- */
+.toc{ background:var(--tint); border:1px solid var(--line); border-radius:10px;
+  padding:18px 26px 22px; margin:1.6em 0 2.4em; }
+.toc h2{ background:none; color:var(--navy); font-size:1.05em; padding:0;
+  border-bottom:2px solid var(--blue); border-radius:0; margin:.1em 0 .8em; }
+.toc ul{ margin:.2em 0 .4em; padding-left:1.35em; line-height:1.7 }
+.toc li{ margin:.12em 0 }
+.toc > ul > li{ margin:.3em 0 }
+.toc ul ul{ margin:.1em 0 .3em }
+.toc a{ border-bottom:none }
+.toc a:hover{ text-decoration:underline }
+
+/* ---- ページ先頭の小物 ---- */
+.lead{ color:var(--sub); font-size:.95em }
+.badge{ display:inline-block; background:var(--navy); color:#fff; font-size:.72em;
+  padding:.1em .6em; border-radius:99px; margin-right:.5em; letter-spacing:.08em }
+
+@media print{
+  body{ background:#fff } .page{ box-shadow:none; max-width:none; padding:0 }
+  pre{ box-shadow:none } h2{ -webkit-print-color-adjust:exact; print-color-adjust:exact }
+}
+</style>
+</head>
+<body>
+<div class="page" style="--kicker:'ASSET.JS REFERENCE';">
+<h1 id="asset_kit-ガイド--アセットを1つの記述から作る">ASSET_KIT ガイド — アセットを「1つの記述」から作る</h1>
+<p>
+新しいアセットを足すとき、これまでは同じ形を<strong>2か所</strong>に書く必要があった。
+</p>
+<table><thead><tr><th>書く場所</th><th>何のため</th></tr></thead><tbody>
+<tr><td><code>asset.js</code> の <code>ASSET_LINE_BUILDERS[kind]</code></td><td>線画（線）</td></tr>
+<tr><td><code>engine-render.js</code> の <code>exportSurfaceTriangles()</code></td><td>面（塗り・隠線・シルエット判定）</td></tr>
+</tbody></table>
+<p>
+<code>asset-kit.js</code> は、この2つを<strong>部品（parts）の一覧1つ</strong>にまとめる。
+<br>
+部品を書けば、線も面も同じ記述から作られる。片方だけ直して食い違う<span class="rd">事故</span>が起きない。
+</p>
+<ul>
+<li>実装：<code>asset-kit.js</code>
+</li>
+<li>部品カタログ：<code>asset-kit-parts.js</code>（窓・扉・室外機・ベンチ・日よけ・車輪・配管・看板。→ §12）
+</li>
+<li>作ったアセット：<code>asset-kit-assets.js</code>
+<ul>
+<li>新規：電光看板 <code>lightboxSign</code>、自販機 <code>vendingMachine</code>、店先 <code>shopFront</code>（部品カタログの見本）、
+<br>
+室外機 <code>outdoorUnit</code>（丸いファン＋ガード＋側面ルーバー＋脚）
+</li>
+<li>既存から移した：コの字壁 <code>uWall</code>・壁付け看板 <code>wallSign</code>（線も面も）、
+<br>
+屋台 <code>stall</code>・壁付けベランダ <code>balcony</code>・丸椅子 <code>stool</code>・手すり <code>railing</code>（面のみ）
+</li>
+</ul>
+</li>
+<li>点検：<code>node check-all-assets.js</code>（棚の全カード＝キット製も含む）と <code>bash tests/run.sh tests/kit-assets.js</code>
+</li>
+</ul>
+<hr>
+<h2 id="1-30秒でわかる例">1. 30秒でわかる例</h2>
+<pre><code class="language-js">ASSET_KIT.define(
+    "lightboxSign",                                        // 種類の名前（JSONの asset に入る）
+    { label: "電光看板", glyph: "▤", w: 1.0, d: 0.36, h: 1.2, accent: "#ff5a7a",
+      lightboxFrame: 0.055 },                              // ← 固有値もここに書ける
+    (o, K) =&gt; {
+        const W = Math.abs(2 * o.ra),                       // 幅（画面の寸法がそのまま入る）
+            D = Math.abs(2 * o.rb),                         // 奥行き
+            H = Math.abs(o.h),                              // 高さ
+            frame = K.param(o, "lightboxFrame", 0.055);     // 画面で変えた値 &gt; 初期値
+        return [
+            K.box(K.roundRectPath(W, D, 0.05, 2), 0.34, H), // 板（丸めた長方形を押し出す）
+            K.box(K.rectPath(0.055, 0.055, W / 2, 0), 0.04, H), // 右脚
+            K.box(K.rectPath(0.055, 0.055, -W / 2, 0), 0.04, H), // 左脚
+        ];
+    },
+);</code></pre>
+<p>
+これだけで、次が全部そろう。
+</p>
+<ul>
+<li><strong>アセット棚に並ぶ</strong>（<code>ASSET_LINE_BUILDERS</code> 未登録の種類は自動で「街・パーツ」に入る）
+</li>
+<li><strong>線画が出る</strong>（部品の稜線がそのまま線になる）
+</li>
+<li><strong>面が塗られる</strong>（奥行きバッファに乗るので、隠線・シルエット判定・面の内側の線の除去が効く）
+</li>
+<li><strong>回転・生成面（k）・接着に追従</strong>（座標変換は <code>L2W()</code> に任せるので自動）
+</li>
+<li><strong>JSON 保存・読み込み・複製</strong>（<code>asset</code> 名と寸法だけ持つので既存の仕組みにそのまま乗る）
+</li>
+</ul>
+<hr>
+<h2 id="2-座標のきまり">2. 座標のきまり</h2>
+<p>
+<code>asset.js</code> の既存アセットと同じ。
+</p>
+<ul>
+<li><code>x</code> … 左右（＋が右）
+</li>
+<li><code>y</code> … 奥行き（＋が奥）
+</li>
+<li><code>z</code> … 高さ（＋が上、<code>0</code> が接地）
+</li>
+<li>原点は部品の中心。<code>o.ra</code> / <code>o.rb</code> / <code>o.h</code> は<strong>画面の寸法欄の値</strong>なので、そのまま使う。
+</li>
+</ul>
+<p>
+ワールドへの変換（回転・生成面・接着・傾き）は <strong>必ず <code>K</code> の部品を通す</strong>こと。
+<br>
+自分で <code>L2W</code> を呼ばなくてよい。
+</p>
+<hr>
+<h2 id="3-部品parts">3. 部品（parts）</h2>
+<table><thead><tr><th>書き方</th><th>できる形</th></tr></thead><tbody>
+<tr><td><code>K.box(path, z0, z1)</code></td><td>2Dの道筋を <code>z0</code>〜<code>z1</code> へ押し出した柱・箱</td></tr>
+<tr><td><code>K.sheet(path, z0, z1)</code></td><td>上下の面だけ（板・シート。側面の線を出さない）</td></tr>
+<tr><td><code>K.face3([[x,y,z],…])</code></td><td>自由な3Dの面（斜めのガラス・屋根・面取り）</td></tr>
+<tr><td><code>K.roundedBox(w, d, h, r)</code></td><td><strong>曲面</strong>：上下の縁と四隅を丸めた直方体（冷蔵ケースなど）</td></tr>
+<tr><td><code>K.depthBeveledBox(w, d, h, r, {z0, seg})</code></td><td>前後方向の4辺だけを丸めた箱。x-zの角を丸め、y軸へ押し出す</td></tr>
+<tr><td><code>K.loft([{path, w}, …])</code></td><td>断面を積み上げる（曲面を自分で設計したいとき）</td></tr>
+<tr><td><code>K.cylinder(r, z0, z1, {seg})</code></td><td><strong>円柱</strong>：脚・ポール・棒・タイヤ（断面は正円の n 角形）</td></tr>
+<tr><td><code>K.revolution(断面, {seg})</code></td><td><strong>回転体</strong>：球・円錐・脚・植木鉢（断面 <code>[[r, z], …]</code> を z 軸まわりに回す）</td></tr>
+<tr><td><code>K.repeat(本数, fn)</code></td><td><strong>同じ形を等間隔に並べる</strong>（階段の段・柱・縞）</td></tr>
+<tr><td><code>K.grid(行, 列, fn)</code></td><td><strong>格子に並べる</strong>（窓・ブロック塀）</td></tr>
+<tr><td><code>K.count(値, 既定, 最小, 最大)</code></td><td>本数を整数へ丸めて範囲に収める</td></tr>
+</tbody></table>
+<h3 id="穴あけブーリアン差">穴あけ（ブーリアン差）</h3>
+<pre><code class="language-js">K.box(K.rectPath(0.9, 0.7), -0.03, 0.03, {
+    axis: "y",                                  // 正面を向いた板（厚みは y）
+    holes: [K.rectPath(0.6, 0.4, 0, 1.1)],      // 板の中心から (0, 1.1) に 0.6×0.4 の穴
+    holeSides: true,                            // 穴の内側の壁も作る（奥行きが出る）
+})</code></pre>
+<p>
+<code>holes</code> は何個でも書ける。外側の道筋の穴の位置に、橋渡し（bridge）を入れて
+<br>
+1本の多角形にしてから三角形分割するので、<strong>穴の中は面で埋まらない</strong>（＝向こうが透ける）。
+</p>
+<h3 id="円柱kcylinder">円柱（<code>K.cylinder</code>）</h3>
+<pre><code class="language-js">K.cylinder(0.18, 0, 1.2, { seg: 20 })                  // 立てた柱（座面・脚・台座）
+K.cylinder(0.05, -1.5, 1.5, { seg: 12, axis: "y" })   // 奥へ寝かせた棒（手すり・配管）
+K.cylinder(0.3, 0, 0.02, { seg: 24, caps: true })     // 薄い円盤（タイヤの縁）</code></pre>
+<table><thead><tr><th>オプション</th><th>既定</th><th>意味</th></tr></thead><tbody>
+<tr><td><code>seg</code></td><td><code>20</code></td><td>断面の角数（8〜24 くらい。大きいほど滑らか）</td></tr>
+<tr><td><code>axis</code></td><td><code>"z"</code></td><td>押し出す向き（<code>"z"</code>＝立てる、<code>"y"</code>＝奥、<code>"x"</code>＝横）。<code>z0, z1</code> はその向きの範囲</td></tr>
+<tr><td><code>cx</code> / <code>cy</code></td><td><code>0</code></td><td>断面の中心（<code>axis</code> に垂直な面内）</td></tr>
+<tr><td><code>caps</code></td><td><code>true</code></td><td>上下の面を出すか。<code>false</code> にすると筒だけ（側面だけ）</td></tr>
+<tr><td><code>verts</code></td><td><code>0</code></td><td>側面に足す縦線の本数</td></tr>
+</tbody></table>
+<ul>
+<li>円の面は<strong>中心から扇状に</strong>分割する（既存アセットの円柱と同じ作り）。
+</li>
+<li>線は<strong>上下の輪だけ</strong>（<code>verts</code> を足すとその本数だけ縦線）。全頂点に縦線を出すと筒が縞になるため。
+</li>
+<li>視線に直角な位置の「シルエットの線」は視線で決まるので、部品の一覧からは作れない。
+<br>
+そこまで揃えたいアセット（丸椅子など）は <code>lines: false</code> で線を既存のまま残す。
+</li>
+</ul>
+<h3 id="並べる道具repeat--grid--count">並べる道具（<code>repeat</code> / <code>grid</code> / <code>count</code>）</h3>
+<pre><code class="language-js">const n = K.count(o.steps || 6, 6, 2, 24);     // 段数（整数へ丸めて 2〜24 に収める）
+K.repeat(n, (i, t) =&gt; K.box(K.rectPath(w, sd, 0, cy(i)), 0, z(i)));   // 段を並べる
+K.grid(3, 4, (r, c, u, v) =&gt; K.box(K.rectPath(0.4, 0.3, x(c), y(r)), 0, 1)); // 窓を格子に</code></pre>
+<ul>
+<li><code>t</code> / <code>u</code> / <code>v</code> は <strong>0→1 の進み具合</strong>（1個だけなら 0）。段の高さ・柱の位置をここで決める。
+</li>
+<li>返すのは<strong>部品でも線でもよい</strong>。既存アセットの「線の選び方」を変えずに、繰り返しだけを畳める。
+</li>
+</ul>
+<pre><code class="language-js">// 既存の線画（asset.js）でも同じ道具が使える
+out.push(...K.repeat(n, (i) =&gt; lineA(o, [[x, y0(i), z0], [x, y0(i), z]], a, 0.9)));</code></pre>
+<h3 id="回転体krevolution">回転体（<code>K.revolution</code>）</h3>
+<pre><code class="language-js">K.revolution([[0.5, 0], [0, 1]], { seg: 12 })            // 円錐（先端が軸上なら上面は出さない）
+K.revolution([[0, 0], [0.5, 0.5], [0, 1]], { seg: 16, rings: [1] })  // 球（赤道の線を1本足す）</code></pre>
+<p>
+断面は <code>[[半径, 高さ], …]</code> を<strong>下から上へ</strong>。<code>r = 0</code> の点は軸上（頂点）として扱い、そこには面を出さない。
+<br>
+<code>rings</code> に断面の番号を入れると、その高さの輪の線を足せる（球の赤道・壺の肩など）。
+</p>
+<h3 id="押し出す向きaxis">押し出す向き（<code>axis</code>）</h3>
+<table><thead><tr><th><code>axis</code></th><th>道筋の2D座標</th><th>押し出す向き</th><th>使いどころ</th></tr></thead><tbody>
+<tr><td><code>"z"</code>（既定）</td><td><code>x, y</code></td><td>上（z）</td><td>箱・柱・接地する部品</td></tr>
+<tr><td><code>"y"</code></td><td><code>x, z</code></td><td>奥（y）</td><td>正面を向いた板・壁・窓枠</td></tr>
+<tr><td><code>"x"</code></td><td><code>y, z</code></td><td>横（x）</td><td>横向きの板</td></tr>
+</tbody></table>
+<p>
+道筋の点は <code>axis</code> に垂直な面内の座標になる（<code>"y"</code> なら <code>[x, z]</code>）。
+<br>
+最後の2引数 <code>z0, z1</code> は<strong>押し出す範囲</strong>（<code>axis</code> に沿った座標）。
+</p>
+<h3 id="文字線のフォント">文字（線のフォント）</h3>
+<pre><code class="language-js">...K.textPart("FROZEN FRESHNESS", {
+    face: "front",   // front / back / left / right / top
+    plane: -0.42,    // その面の位置（front なら y）
+    u: 0, v: 1.5,    // 面内の中心（front の u は x、v は z）
+    height: 0.12,    // 文字の高さ（m）
+    stroke: 0.018,   // 線の太さ（m）
+    proud: 0.012,    // 面から手前へ出す量（板に隠されないように）
+})</code></pre>
+<p>
+英大文字・数字・<code>- . , : / + ! ? &amp; ( ) ' *</code> と空白に対応。文字は「細い板（面）」として
+<br>
+出るので、縁が線になり、面の内側の線の判定にも乗る（＝板に貼っても消えない）。
+<br>
+日本語は未対応（必要になったら <code>GLYPHS</code> に足すか、線の組み合わせで描く）。
+</p>
+<p>
+部品には任意で次を付けられる。
+</p>
+<pre><code class="language-js">K.box(path, 0, 1, { color: "#ff5a7a", width: 3, noTop: true, noBottom: true, noSides: true })</code></pre>
+<table><thead><tr><th>フィールド</th><th>意味</th></tr></thead><tbody>
+<tr><td><code>color</code> / <code>width</code></td><td>その部品の線の色・太さ（省略時はアセットの色・太さ）</td></tr>
+<tr><td><code>noTop</code> / <code>noBottom</code></td><td>その面（と、その輪の線）を出さない</td></tr>
+<tr><td><code>noSides</code></td><td>側面を出さない（上下だけ）</td></tr>
+<tr><td><code>sheet</code></td><td><code>noSides</code> ＋ 縦の辺の線も出さない</td></tr>
+</tbody></table>
+<h3 id="道筋pathを作る道具">道筋（path）を作る道具</h3>
+<pre><code class="language-js">K.rectPath(w, d)                       // 長方形
+K.roundRectPath(w, d, r, seg)          // 角を丸めた長方形（seg=1 で面取り）
+K.circlePath(r, n)                     // 円（n角形）
+K.offsetPath(path, dx, dy)             // 平行移動
+K.scalePath(path, sx, sy)              // 伸縮
+K.rotatePath(path, deg)                // 回転（度）</code></pre>
+<p>
+道筋は <code>[[x, y], …]</code> の配列で、<strong>自動で閉じる</strong>（最後の点から最初へ戻る線が出る）。
+<br>
+凹んだ形（L字・コの字）も書ける。面は耳切りで三角形分割される。
+</p>
+<hr>
+<h2 id="4-値の持ち方画面から変えられるようにする">4. 値の持ち方（画面から変えられるようにする）</h2>
+<pre><code class="language-js">K.param(o, "lightboxPanelBottom", 0.34)</code></pre>
+<ol>
+<li><code>o.lightboxPanelBottom</code>（画面・JSONで変えた値）
+</li>
+<li><code>ASSETS[kind].lightboxPanelBottom</code>（<code>define</code> の meta に書いた初期値）
+</li>
+<li>第3引数（最後の決め打ち）
+</li>
+</ol>
+<p>
+の順で読む。つまり <strong>meta に書いておけば、<code>asset-controller.js</code> を触らなくても初期値を持つ</strong>。
+<br>
+画面の数値欄・ハンドルを付けたいときだけ、<code>asset-controller.js</code> の <code>newAsset()</code> と
+<br>
+<code>engine-gizmo.js</code> の <code>specialGizmo()</code> に1か所ずつ足す（既存アセットと同じやり方）。
+</p>
+<hr>
+<h2 id="5-線と面はどう描かれるか既存の描画ルールに乗る">5. 線と面はどう描かれるか（既存の描画ルールに乗る）</h2>
+<ul>
+<li><strong>線</strong>：部品の上下の輪と縦の辺が、1本ずつの折れ線として出る。
+</li>
+<li><strong>面</strong>：上下の面＋側面が三角形で出る → 奥行きバッファに入り、隠線判定の対象になる。
+</li>
+<li>そのため、<strong>面の内側を通る線は自動で消え、外形の線は残る</strong>（<code>CITY_GRID_STUDIO.md</code> 5Z-19）。
+<br>
+キット側で「消す線」を選ぶ必要はない。
+</li>
+<li>面の段差（板の上に一回り小さい板を重ねる等）を作ると、その縁は外形として線が残る。
+<br>
+写真のような「フレーム＋印刷面」は、この段差で表現するのが簡単。
+</li>
+</ul>
+<hr>
+<h2 id="6-既存アセットをキットへ移すreplace">6. 既存アセットをキットへ移す（<code>replace</code>）</h2>
+<pre><code class="language-js">ASSET_KIT.define("uWall", { label: "コの字壁" }, (o, K) =&gt; [
+    K.box(profile, -hd, hd, { axis: "y" }),
+], { replace: true });                 // 線も面もキットの記述から作る
+
+ASSET_KIT.define("stall", { label: "屋台" }, (o, K) =&gt; [...],
+    { replace: true, lines: false });  // 面だけキット。線は今の描き方を残す</code></pre>
+<ul>
+<li><code>replace: true</code> … 既にあるアセットを置き換える。<strong>ASSETS の初期値（寸法・固有値）は既存を優先</strong>するので、
+<br>
+棚の見た目・既定値・保存済み JSON は変わらない。
+</li>
+<li><code>lines: false</code> … 線は <code>ASSET_LINE_BUILDERS</code> の今の関数をそのまま使い、<strong>面だけ</strong>キットから作る。
+<br>
+既存アセットは「描かない線」を手で選んでいる（内側の稜線・床の縁など）ので、
+<br>
+線まで置き換えると面OFF（線画のみ）の見た目が変わる。形の計算（<code>uWallGeometry</code> など）を
+<br>
+共有していれば、面だけ移しても形は食い違わない。
+</li>
+<li>移したら、<strong>面ONと面OFFの両方</strong>を画素で比べる（<code>チェック手順</code>参照）。差が出たら理由を確かめてから採る。
+</li>
+</ul>
+<h2 id="7-新しいアセットを足す手順">7. 新しいアセットを足す手順</h2>
+<ol>
+<li><code>asset-kit-assets.js</code> に <code>ASSET_KIT.define(...)</code> を1つ書く
+</li>
+<li><code>bash build.sh</code>（構文チェック＋単体HTML生成）
+</li>
+<li><code>bash tests/run.sh tests/kit-assets.js</code>（キット製アセットの点検）
+</li>
+<li><code>node check-all-assets.js</code>（棚の全アセットの点検。新しい種類も自動で対象になる）
+</li>
+<li>アプリで棚から置いて、拡大・回転・面ON/OFFを確認
+</li>
+</ol>
+<p>
+<code>ASSET_KIT.define</code> の第2引数に書ける <code>w</code> / <code>d</code> / <code>h</code> は<strong>メートル</strong>。既存アセットと同じ目安
+<br>
+（人 1.7m、店の看板 2m、屋台 2.4m など）。
+</p>
+<hr>
+<h2 id="8-例冷凍ショーケース斜めのガラス戸">8. 例：冷凍ショーケース（斜めのガラス戸）</h2>
+<p>
+<code>face3</code> は「自由な3Dの面」なので、斜めのガラスもそのまま書ける。
+</p>
+<pre><code class="language-js">ASSET_KIT.define(
+    "freezerCase",
+    { label: "冷凍ショーケース", glyph: "▯", w: 1.6, d: 0.9, h: 1.15, accent: "#f4f6f8" },
+    (o, K) =&gt; {
+        const W = Math.abs(2 * o.ra), D = Math.abs(2 * o.rb), H = Math.abs(o.h),
+            bodyH = H * 0.62,                 // 胴（下の箱）
+            lidH = H - bodyH,                 // ガラスの傾き分の高さ
+            back = D / 2, front = -D / 2;
+        return [
+            K.box(K.rectPath(W, D), 0, bodyH),                      // 胴
+            K.box(K.rectPath(W, 0.06, 0, front + 0.03), bodyH, H),  // 手前の見返し
+            // 斜めのガラス戸（前が低く、奥が高い）
+            K.face3([
+                [-W / 2, front + 0.08, bodyH],
+                [W / 2, front + 0.08, bodyH],
+                [W / 2, back, bodyH + lidH],
+                [-W / 2, back, bodyH + lidH],
+            ]),
+        ];
+    },
+);</code></pre>
+<p>
+ガラスは「面」があるので、その上を横切る線（中に入れた商品の線など）は
+<br>
+面の内側の線として消える。見せたい線は段差か別部品にして、外形へ出す。
+</p>
+<hr>
+<h2 id="9-例自販機前後辺のベベルと穴あけ中の寸法は割合で持つ">9. 例：自販機（前後辺のベベルと穴あけ。中の寸法は「割合」で持つ）</h2>
+<p>
+<code>asset-kit-assets.js</code> の <code>vendingMachine</code> がそのまま動く作例（棚に入っています）。
+</p>
+<pre><code class="language-js">ASSET_KIT.define("vendingMachine", { label: "自販機", w: 1.0, d: 0.75, h: 1.83 }, (o, K) =&gt; {
+    const W = Math.abs(2 * o.ra), D = Math.abs(2 * o.rb), H = Math.abs(o.h),
+        front = -D / 2,
+        panel = (pw, ph, cz, holes, cx = 0) =&gt;            // 前面の板（穴あき）
+            K.box(K.rectPath(pw, ph, cx, cz), front - 0.015, front + 0.05,
+                  { axis: "y", holes, holeSides: true });
+    return [
+        K.depthBeveledBox(W, D, H, K.param(o, "vmDepthBevel", 0.03), {seg: 3}), // 前後方向の4辺だけ丸める
+        panel(W * 0.78, H * 0.44, H * 0.54, [K.rectPath(W * 0.62, H * 0.35, 0, H * 0.54)]), // 商品の窓（穴）
+    ];
+});
+
+// 幅・高さを変えると、窓・看板・小銭入れ・取り出し口も一緒に伸び縮みする。
+// 中の寸法は meta に「割合（0〜1）」で持たせ、W・H へ掛ける。</code></pre>
+<p>
+窓の穴からは向こうが透け、中に薄い棚を入れると奥行きが出る。看板の板は無地（文字は入れていない）。
+</p>
+<h2 id="10-できないこと今の範囲">10. できないこと（今の範囲）</h2>
+<ul>
+<li><strong>自由な曲面（球・ラッパ状）は無い</strong>。<code>roundedBox</code>（上下の縁＋四隅）と <code>loft</code>（断面の積み上げ）まで。
+<br>
+球・円錐は既存アセットの機能として残っている。
+</li>
+<li><strong>ブーリアンは「穴あけ」だけ</strong>（外側−穴）。部品どうしの合体・交差は無い。
+<br>
+重なりは「重ねて置く」で表現する（面の段差になるので線は自然に出る）。
+</li>
+<li><strong>日本語の文字は無い</strong>（英大文字・数字・記号のみ）。
+</li>
+<li><strong>テクスチャ（写真の貼り付け）は無い</strong>。
+</li>
+<li><strong>凹んだ面は耳切り分割</strong>。極端に自己交差した道筋を渡すと面が崩れるので、
+<br>
+道筋は交差しないようにする。
+</li>
+</ul>
+<hr>
+<h2 id="11-参考内部の決まり">11. 参考：内部の決まり</h2>
+<ul>
+<li><code>ASSET_KIT.define(kind, meta, build)</code> は <code>registerAsset()</code> を呼び、<code>build(o, K)</code> の戻り（部品配列）から
+<br>
+線を作る。面は <code>engine-render.js</code> の <code>exportSurfaceTriangles()</code> が
+<br>
+<code>window.assetKitTriangles(o)</code> を通して同じ部品配列から作る（形の記述は1か所）。
+</li>
+<li>面のキャッシュ（<code>surfaceTriCache</code>）はオブジェクト全体の JSON をキーにしているので、
+<br>
+固有値（<code>lightboxFrame</code> など）を変えても面は作り直される。
+</li>
+<li>三角形の向き（表裏）は描画では問わない（奥行きだけで判定するため）。
+</li>
+</ul>
+<hr>
+<h2 id="12-部品カタログasset-kit-partsjs">12. 部品カタログ（<code>asset-kit-parts.js</code>）</h2>
+<p>
+よく使う小物は<strong>部品</strong>として登録してあり、アセットはそれを並べるだけで作れる。
+</p>
+<pre><code class="language-js">...K.part("window", { w: 0.9, h: 0.6, at: [-0.6, 0, 1.1] })
+...K.part("door",   { w: 0.55, h: 1.0, at: [0.3, 0, 0.5] })
+...K.part("signBoard", { text: "", at: [0, -0.1, 2.1] })   // 無地の看板</code></pre>
+<table><thead><tr><th>部品</th><th>できる形</th><th>主な指定</th></tr></thead><tbody>
+<tr><td><code>window</code></td><td>枠（穴あき）＋ガラス＋縦桟</td><td><code>w</code> <code>h</code> <code>frame</code> <code>d</code> <code>glass</code> <code>mullion</code></td></tr>
+<tr><td><code>door</code></td><td>枠＋扉板＋取っ手</td><td><code>w</code> <code>h</code> <code>frame</code> <code>d</code> <code>handle</code></td></tr>
+<tr><td><code>acUnit</code></td><td>室外機（本体＋ファン＋十字＋ガラリ＋脚）</td><td><code>w</code> <code>h</code> <code>d</code></td></tr>
+<tr><td><code>bench</code></td><td>座面＋背もたれ＋脚</td><td><code>w</code> <code>h</code> <code>d</code> <code>t</code> <code>back</code></td></tr>
+<tr><td><code>awning</code></td><td>日よけ（斜めの幕＋垂れ＋腕）</td><td><code>w</code> <code>d</code> <code>drop</code> <code>t</code> <code>z</code></td></tr>
+<tr><td><code>wheel</code></td><td>タイヤ＋ハブ＋スポーク</td><td><code>r</code> <code>t</code></td></tr>
+<tr><td><code>pipeRun</code></td><td>管＋フランジ2枚</td><td><code>len</code> <code>r</code> <code>axis</code></td></tr>
+<tr><td><code>signBoard</code></td><td>板＋文字（<code>text: ""</code> なら無地の板）</td><td><code>w</code> <code>h</code> <code>t</code> <code>text</code> <code>textScale</code></td></tr>
+<tr><td><code>pentaPrism</code></td><td><strong>五角形の立体</strong>（前の面→斜め→上面→背面を左右へ押し出した塊）</td><td><code>w</code> <code>L</code> <code>frontY</code> <code>backY</code> <code>edgeH</code> <code>roofH</code> <code>slant</code></td></tr>
+<tr><td><code>tire</code></td><td>タイヤ1本（左右向きの円柱。地面に接する高さへ自動で置く）</td><td><code>r</code> <code>t</code> <code>x</code> <code>axleY</code> <code>seg</code></td></tr>
+</tbody></table>
+<p>
+どの部品も <code>at: [x, y, z]</code> で置ける。部品は<strong>原点中心・正面 −Y</strong>で作ってあるので、
+<br>
+壁（<code>axis:"y"</code> の板）に貼るだけなら <code>at</code> の y を少し手前へずらす。
+</p>
+<h3 id="部品を足す">部品を足す</h3>
+<p>
+<code>asset-kit-parts.js</code> に <code>registerPart</code> を1つ増やすだけ。返すのは部品の配列。
+</p>
+<pre><code class="language-js">K.registerPart("vent", (o) =&gt; [
+    K.box(K.rectPath(o.w || 0.4, o.h || 0.3), -0.02, 0.02, { axis: "y" }),
+    ...K.repeat(3, (i) =&gt; K.box(K.rectPath(0.36, 0.02), -0.03, -0.02, { axis: "y" })),
+]);</code></pre>
+<h3 id="例店先shopfront-44行で6つの部品">例：店先（<code>shopFront</code>）= 44行で6つの部品</h3>
+<pre><code class="language-js">K.box(K.offsetPath(K.rectPath(W, H), 0, H / 2), -T / 2, T / 2, {
+    axis: "y",
+    holes: [扉の穴, 窓の穴], holeSides: true,
+}),
+...K.part("door",   { w: dw, h: dh, at: [doorX, 0, dh / 2] }),
+...K.part("window", { w: ww, h: wh, at: [winX, 0, winZ] }),
+...K.part("awning", { w: dw + 0.7, d: 0.62, z: dh + 0.42, at: [doorX, -0.31, 0] }),
+...K.part("acUnit", { at: [W * 0.36, -T / 2 - 0.16, 0.06] }),
+...K.part("signBoard", { text: "", at: [winX, -T / 2 - 0.04, H - 0.28] }),</code></pre>
+<p>
+線166本／面472三角形。扉・窓・室外機・文字の中身は部品側にあるので、この44行には現れない。
+</p>
+<h2 id="室外機のファン位置oufanx">室外機のファン位置（<code>ouFanX</code>）</h2>
+<p>
+<code>ouFanX</code> は<strong>ファン中心の左右位置を m（実寸）で持つ</strong>。幅 <code>W</code> を変えても値はそのままなので、
+<br>
+胴を広げても狭めても円は動かない。動かせる範囲は <code>±(W/2 − fanR)</code>（円が胴からはみ出さない所）で、
+<br>
+これを超える位置は自動で内側へ寄る。3Dビューでは円の右外側に出る<strong>左右矢印のハンドル</strong>で横移動だけできる。
+</p>
+<p>
+形を決める計算は <code>outdoorUnitGeometry(o)</code>（<code>engine-gizmo.js</code>）に集約してあり、
+<br>
+線画（<code>outdoorUnit</code>）とハンドルは同じ値を使う。寸法を足すときはこの関数へ入れ、
+<br>
+<code>asset-kit-assets.js</code> 側では受け取るだけにする。
+</p>
+<h2 id="信号機・標識ポールもの">信号機・標識（ポールもの）</h2>
+<p>
+街パーツの4種は「台座＋ポール＋頭」の同じ骨格で、違うのは頭の中身だけ。
+</p>
+<table><thead><tr><th>アセット</th><th>頭</th><th>既定寸法（幅×奥行×高さ）</th></tr></thead><tbody>
+<tr><td><code>trafficSignal</code></td><td>車両用：横3灯＋ひさし</td><td>1.05 × 0.24 × 2.8</td></tr>
+<tr><td><code>pedSignal</code></td><td>歩行者用：縦2灯（止まれ／進めの人型）＋灯ごとのひさし</td><td>0.36 × 0.22 × 2.4</td></tr>
+<tr><td><code>signPost</code></td><td>丸標識（二重丸＋横帯）</td><td>0.42 × 0.06 × 2.6</td></tr>
+<tr><td><code>signPost2</code></td><td>標識2枚（丸＋四角）</td><td>0.42 × 0.06 × 2.8</td></tr>
+<tr><td><code>signTriangle</code></td><td>逆三角形の標識</td><td>0.46 × 0.05 × 2.6</td></tr>
+<tr><td><code>signDiamond</code></td><td>ひし形の標識</td><td>0.44 × 0.05 × 2.6</td></tr>
+<tr><td><code>signCombo</code></td><td>標識2枚（逆三角＋丸）</td><td>0.46 × 0.05 × 2.9</td></tr>
+<tr><td><code>crossingSign</code></td><td>踏切のX標識＋警報灯2つ</td><td>0.50 × 0.10 × 2.6</td></tr>
+</tbody></table>
+<p>
+<strong>ひさし（フード）</strong>
+</p>
+<ul>
+<li>車両用（<code>trafficSignal</code>）・歩行者用（<code>pedSignal</code>）とも、各灯のまわりに <code>K.part("screenHood", ...)</code> による<strong>上が長く手前へ張り出し、下が斜めに引っ込むサンバイザー形状のひさし</strong>を配置する（車両用は <code>circular: true</code> の円形断面＋<code>signalSmoothSides</code> による上下輪郭線、歩行者用は角丸四角形断面＋四隅ベベル輪郭線）。
+</li>
+<li><code>controls</code> により、左パネルおよび上部キャンバス調整バーの<strong>「ひさし」チェックボックス</strong>（<code>signalHood</code>）で ON/OFF を切り替えられるほか、プリミティブの「ひさし」と同じく<strong>「ひさしのつばの長さ」</strong>（<code>psHoodLength</code> / <code>tsHoodLength</code>）と<strong>「ひさしの傾き（折れ点の高さ）」</strong>（<code>psHoodKnee</code> / <code>tsHoodKnee</code>）を 3D 菱形ハンドル・上部スライダー・左パネル数値欄で調整できる。
+</li>
+</ul>
+<p>
+<strong>標識の形と枚数（<code>signParts</code> / <code>signPlateParts</code>）</strong>
+</p>
+<p>
+標識6種（<code>signPost</code> / <code>signPost2</code> / <code>signTriangle</code> / <code>signDiamond</code> / <code>signCombo</code> / <code>crossingSign</code> のうち
+<br>
+<code>signPost</code>〜<code>signCombo</code> の5種）は共通の組み立てで、<code>signShape</code> / <code>signCount</code> / <code>signShape2</code> の3つで見た目が決まる。
+</p>
+<table><thead><tr><th>固有値</th><th>意味</th></tr></thead><tbody>
+<tr><td><code>signCount</code></td><td>板の<strong>枚数</strong>（1／2）</td></tr>
+<tr><td><code>signShape</code></td><td><strong>下</strong>の板の形（<code>circle</code> 丸／<code>triangle</code> 逆三角形／<code>rect</code> 四角／<code>diamond</code> ひし形）</td></tr>
+<tr><td><code>signShape2</code></td><td><strong>上</strong>の板の形（2枚のときだけ使う）</td></tr>
+</tbody></table>
+<ul>
+<li>2枚のときは <code>plateH = (頭の高さ − すき間) / 2</code>、すき間は頭の高さの 6%。板の幅は1枚のときと同じ。
+</li>
+<li>内側の縁の割合は形ごとに変える（丸 0.72／四角・2枚 0.70／逆三角 0.58／ひし形 0.56）。
+<br>
+丸だけ内側に帯（<code>snBand</code>）を足して二重丸にする。
+</li>
+<li>既定は <code>signPost</code>＝丸1枚、<code>signPost2</code>＝丸＋四角、<code>signTriangle</code>＝逆三角1枚、
+<br>
+<code>signDiamond</code>＝ひし形1枚、<code>signCombo</code>＝逆三角＋丸の2枚。
+</li>
+<li>選ぶと右パネルに<strong>「標識の形」</strong>（板の枚数／板の形／2枚目の形）が出て、置いた後でも切り替えられる。
+<br>
+2枚にしたとき板が潰れる既定高さ（0.4m 未満）のときだけ、頭の高さを 0.4m まで広げる。
+</li>
+<li><code>crossingSign</code>（踏切）はX印の専用形なので、このパネルは出ない。
+</li>
+</ul>
+<p>
+寸法は <code>signalGeometry(o)</code>（<code>engine-gizmo.js</code>）に集約してある。<code>w</code>（＝左右の面ハンドル）は頭の幅、
+<br>
+<code>h</code> は<strong>頭の上端</strong>で、ポールはその下に付く。だから <code>h</code> を伸ばすとポールが伸びて頭が上がる。
+</p>
+<p>
+<strong>ポールの長さを画面上で変える</strong>
+</p>
+<p>
+アセットを選ぶと、頭の横に<strong>上下の矢印が付いた四角</strong>（<code>signal-pole-h</code>）が出る。
+<br>
+同じ並びに<strong>頭の幅</strong>（<code>signal-head-w</code>・左右）と<strong>奥行き</strong>（<code>signal-head-d</code>・前後）も出る。
+<br>
+上下にドラッグすると <code>h</code> がそのまま変わる（画面の 1m と指の移動量が 1:1）。
+<br>
+上の面ハンドル・数値欄・保存／読み込みは同じ <code>h</code> を見るので、どこから変えても食い違わない。
+</p>
+<ul>
+<li>範囲は 0.9〜6.0m（<code>signalGizmo()</code> の <code>min</code> / <code>max</code>）。
+</li>
+<li>細い棒を線画で見せるコツ：縦線は<strong>2本</strong>（<code>verts: 2</code>）入れる。1本だと片側の輪郭しか出ず、
+<br>
+のっぺりした1本線に見える。<code>K.revolution()</code> は <code>verts</code> を受け取らないので、
+<br>
+戻り値へ <code>verticals: [0, 7]</code> のように向かい合う2点を足して縦線を出す。
+</li>
+<li>頭の高さは固有値 <code>spHeadH</code>、ポールの太さは <code>spPoleR</code>、台座は <code>spBaseR</code> / <code>spBaseH</code>。
+</li>
+<li>灯器の中の絵は <code>signalWalkerParts()</code>。灯の大きさを基準にした割合で作るので、
+<br>
+灯器を大きくすれば絵も付いてくる。<strong>板の中に埋めると隠れ線として消える</strong>ので、必ず板より手前に出す。
+</li>
+</ul>
+<h2 id="カウンターcounter--counterl--counteru">カウンター（<code>counter</code> / <code>counterL</code> / <code>counterU</code>）</h2>
+<p>
+「薄い天板＋どっしりした土台」。3種は<strong>足元の輪郭（footprint）だけ</strong>が違うので、
+<br>
+天板の多角形を作り、土台は <code>K.insetPath(foot, overhang)</code> で内側へ縮めて作る（<code>counterParts</code>）。
+</p>
+<table><thead><tr><th>固有値</th><th>意味</th></tr></thead><tbody>
+<tr><td><code>ctTopT</code></td><td>天板の厚さ（既定 0.06）</td></tr>
+<tr><td><code>ctArm</code></td><td>L字・コの字の<strong>腕の太さ</strong>（棒の幅。既定 0.55）。<code>min(幅, 奥行き) × 0.62</code> で頭打ち。画面の「腕の太さ」ハンドルでも変えられる</td></tr>
+<tr><td><code>ctOverhang</code></td><td>天板の張り出し＝土台を内側へ引く量（既定 0.06）</td></tr>
+</tbody></table>
+<p>
+画面のハンドルは4本（L字・コの字は<strong>腕の太さ</strong>を足して5本）：<strong>幅</strong>（<code>ra</code>）／<strong>奥行き</strong>（<code>rb</code>。L字・コの字の腕の長さはこちらに連動）／
+<br>
+<strong>天板の厚さ</strong>（<code>ctTopT</code>。倍率3.5倍でゆっくり、全体の高さは変えない）／
+<br>
+<strong>土台の高さ</strong>（<code>h</code> を同じだけ変える＝天板が土台の上に載る）。
+<br>
+棚では「建物」グループに入る。
+<br>
+寸法は <code>counterGeometry(o)</code>（<code>engine-gizmo.js</code>）に集約し、線画・面・ハンドルが同じ値を使う。
+</p>
+<h2 id="125-五角形の立体と車pentabox--keitruck--keivan--sedan">12.5 五角形の立体と車（<code>pentaBox</code> / <code>keiTruck</code> / <code>keiVan</code> / <code>sedan</code>）</h2>
+<p>
+「前の面 → 斜め → 上面 → 背面 → 床」の<strong>五角形</strong>を左右へ押し出した立体を、部品
+<br>
+<code>pentaPrism</code> として1つにまとめてある。車のキャブも、建物の塊（<code>pentaBox</code>）も、同じ部品。
+</p>
+<pre><code class="language-js">...K.part("pentaPrism", { w, L, frontY, backY, edgeH, roofH, slant })  // (u,v)=(y,z) を x へ押し出す</code></pre>
+<table><thead><tr><th>値</th><th>意味</th><th>画面のハンドル</th></tr></thead><tbody>
+<tr><td><code>roofH</code></td><td><strong>上の面</strong>（屋根）の高さ＝アセットの高さ <code>h</code></td><td>「上の面」（上下）</td></tr>
+<tr><td><code>edgeH</code></td><td><strong>前の面の上端</strong>＝「下がってる線」の高さ（<code>vhFrontH</code>）</td><td>「下がってる線」（上下）</td></tr>
+<tr><td><code>frontY</code></td><td><strong>一番前の長方形</strong>の前後（<code>vhNose</code> だけ前へ出る）</td><td>「前の面」（前後）</td></tr>
+<tr><td><code>slant</code></td><td>斜めの面の長さ（自動：<code>(H − edgeH) × 0.55</code>）</td><td>—</td></tr>
+<tr><td><code>backY</code></td><td>背面の前後（荷台があるときは荷台の前まで）</td><td>—</td></tr>
+</tbody></table>
+<p>
+車は<strong>五角形のキャブ＋荷台（直方体）＋タイヤ4本</strong>で、寸法は <code>pentaGeometry(o)</code>
+<br>
+（<code>engine-gizmo.js</code>）が1か所で決める。線画（<code>asset-kit-assets.js</code> の <code>vehicleParts</code>）と
+<br>
+ハンドルは同じ値を見るので、幅を変えたのにタイヤだけ動く、が起きない。
+</p>
+<table><thead><tr><th>アセット</th><th>構成</th><th>ハンドル</th></tr></thead><tbody>
+<tr><td><code>pentaBox</code> 五角形の立体</td><td>五角形だけ（荷台・タイヤなし）</td><td>3本（上の面／下がってる線／前の面）</td></tr>
+<tr><td><code>keiTruck</code> 軽トラ</td><td>キャブ＋荷台＋タイヤ4本</td><td>9本（＋荷台の高さ・長さ、タイヤの大きさ・太さ・左右・前後）</td></tr>
+<tr><td><code>keiVan</code> 軽バン</td><td>背の高い五角形＋タイヤ4本</td><td>7本（荷台なし）</td></tr>
+<tr><td><code>sedan</code> 乗用車</td><td><strong>前も後ろも斜めに落とした六角形</strong>＋タイヤ4本</td><td>8本（＋後ろの下がってる線）</td></tr>
+<tr><td><code>sedan2</code> 乗用車2</td><td><strong>低い前の直方体＋高い後ろの直方体</strong>（L字の断面）＋タイヤ4本</td><td>8本（前後の箱の高さ・前後の面）</td></tr>
+</tbody></table>
+<p>
+タイヤの4本は「太さ（左右）」「大きさ（半径）」「前後の間隔（<code>vhWb</code>）」「上下（<code>vhTireZ</code>）」が
+<br>
+<strong>それぞれ独立</strong>。
+</p>
+<ul>
+<li><strong>前後の間隔</strong>は真ん中（<code>wheelMid</code>）を動かさず、前のタイヤは後ろへ・後ろのタイヤは前へ、
+<br>
+<strong>同じ量だけ寄る</strong>（間隔を縮める／広げる）。ホイールベースを直接 <code>vhWb</code> で持つ。
+</li>
+<li><strong>上下</strong>は <code>vhTireZ</code>（0 で地面に接する）。上げると4本とも浮く。
+</li>
+<li>「タイヤの左右の間隔（<code>vhTrack</code>）」のハンドルは依頼で廃止し、<strong>「タイヤの上下」へ置き換えた</strong>
+<br>
+（値そのものは残っていて、既定は <code>W + 0.04</code>＝車体の少し外）。
+</li>
+<li>太さ・大きさを変えても車体の幅は変わらない。
+</li>
+</ul>
+<p>
+断面の形は <code>mode</code> で決まる。
+</p>
+<table><thead><tr><th><code>mode</code></th><th>断面</th><th>使うアセット</th></tr></thead><tbody>
+<tr><td><code>penta</code></td><td>5点（前だけ斜め）または6点（<code>vhRearH</code> &gt; 0 で後ろも斜め）</td><td><code>pentaBox</code> <code>keiTruck</code> <code>keiVan</code>（5点）、<code>sedan</code>（6点）</td></tr>
+<tr><td><code>step</code></td><td>6点のL字（低い前の箱＋高い後ろの箱）</td><td><code>sedan2</code></td></tr>
+</tbody></table>
+<p>
+触っていない値は比率の既定値なので、屋根を上げれば荷台・タイヤも比例して大きくなる
+<br>
+（触った値は保存され、そのまま残る）。
+</p>
+<p>
+棚では<strong>「車」グループ</strong>（人物の隣）に入る。<code>pentaBox</code> は「建物パーツ」。
+</p>
+<h2 id="新規アセットの共通登録・設定・画面ハンドル2026-11-03">新規アセットの共通登録・設定・画面ハンドル（2026-11-03）</h2>
+<p>
+従来の <code>ASSET_KIT.define(kind, meta, build)</code> の <code>meta</code> に <code>group</code> と <code>controls</code> を追加できる。既存アセットの専用UI・線画は変更せず、新方式で宣言したものだけ共通の設定欄を生成する。
+</p>
+<pre><code class="language-js">ASSET_KIT.define("example", {
+    label: "例", glyph: "▤", w: 1.4, d: 1.1, h: 2,
+    group: "building", // primitive / building / buildingParts / street / person / vehicle
+    controls: [{
+        key: "postLength", label: "ポールの長さ", type: "number",
+        default: 0.4, min: 0.1, max: 1.2, step: 0.05, unit: "m",
+        // アセットの形に応じて基準点を渡す。増加方向は z（高さ）。
+        handle: (o, v) =&gt; ASSET_KIT.axisHandle("z", [0, 0, o.h], v),
+    }, { key: "withCap", label: "頭部", type: "boolean", default: true }],
+}, (o, K) =&gt; [
+    K.box(K.rectPath(1, 1), 0, o.h),
+    K.box(K.rectPath(.12, .12), o.h, o.h + K.param(o, "postLength", .4)),
+]);</code></pre>
+<ul>
+<li><code>controls</code> は <code>number</code> と <code>boolean</code> に対応し、数値の <code>min</code>・<code>max</code> は数値または <code>(o) =&gt; 数値</code>。入力とドラッグはUndo/Redoに対応し、値はオブジェクトJSONに保存される。
+</li>
+<li>数値の <code>handle</code> は <code>(o, value) =&gt; ({anchor, sample, probe, fallback, color})</code>。最初の3つはローカル3D座標で、<code>sample</code> が現在のつまみ、<code>probe</code> は値を1増やす方向の点。<code>ASSET_KIT.axisHandle(axis, anchor, value, sign)</code> は軸方向に動く定番形。視線方向へ重なったときは画面上の代替方向で操作する。複雑な制約や左右対称の編集は従来の専用ギズモを使う。
+</li>
+<li>新方式では種類名を高さハンドルのリストへ追加せず、通常の立体に上下面ハンドルを表示する。専用ハンドルを持つ例外は登録情報の <code>heightControl: "custom"</code> で指定する。ポール付きアセットではポールの長さの画面ハンドルも定義する。
+</li>
+<li><code>controls</code> を宣言した新方式は、線・面の部品頂点から選択範囲を作る（<code>geometryBounds:false</code> で従来方式を明示可能）。既存アセットの境界は一括変更しない。
+</li>
+<li>棚グループは従来の明示リストが優先。リストにない新しい登録は <code>group</code> を利用し、未指定なら街パーツへ入る。静的登録は <code>asset-kit-assets.js</code> の中で、棚が作られる前に行う。
+</li>
+<li>テスト用の登録をアプリへ恒久追加せず <code>tests/asset-registration.js</code> から挿入して、登録・部品の<span class="bl">外接範囲</span>・UI・保存値・Undo/Redo・高さ／ポールハンドルの実ドラッグを検査する。
+</li>
+</ul>
+<h2 id="蛇腹の配置とトラック型">蛇腹の配置とトラック型</h2>
+<p>
+<code>ASSET_KIT.accordionBands(height, count, duty, depth)</code> は、全高を保ちながら段と溝の範囲を交互に返す。<code>count</code> は段数（1〜48）、<code>duty</code> は段の厚さの割合、<code>depth</code> は断面の内側への引っ込み量。<code>ASSET_KIT.accordionLoft(profile, options)</code> は、<code>profile(z, inset)</code> が返す一定頂点数の断面から部品を作る。具体的なアセットは断面を用意し、線と面を同じリングから生成する。隅切りの開口はその高さでリングを分割し、開口と元の縁も維持する。
+</p>
+<p>
+アプリ上では対応する既存の直方体・ベベル直方体・隅切り直方体・三角柱・円を押し出した円柱・トラック型を選び、「アセット設定」の「蛇腹」をONにする。段数、段の厚さ（割合）、溝の深さを調整できる。長方形／直方体では角丸の半径、分割数と4角それぞれのON/OFFを指定できる。平面は先に「立体化」するか高さを付ける。三角柱は既存プリミティブと同じ、横から見て三角形の向き。
+</p>
+<p>
+「トラック型」は中央の長方形と両端の半円。左パネルと画面の専用ハンドルで直線部分の長さと幅を別々に調整でき、幅を変えても直線部分の長さは維持する。面ハンドルや「立体化」で高さを付けられる。
+</p>
+<h3 id="自販機・信号機の前後方向ベベル">自販機・信号機の前後方向ベベル</h3>
+<p>
+自販機の胴、車両用・歩行者用信号機の灯器は、前後に沿う4辺だけを丸める。画面の「前後辺のベベル」ハンドルまたは数値で半径を調整でき、0では直角に戻る。灯・ひさしやポール、自販機の窓・棚・取り出し口は別部品のまま。
+</p>
+<h3 id="蛇腹の画面操作">蛇腹の画面操作</h3>
+<p>
+蛇腹をONにした立体の柱を選択すると、「蛇腹の段数」「段の厚さ（割合）」「溝の深さ」のハンドルをドラッグできる。段の厚さは長さではなく段と溝の周期に対する割合。段数は整数で、全高はそのまま。既存の数値欄も使える。蛇腹OFF時や高さのない平面ではハンドルは表示されない。
+</p>
+<h2 id="14-ベジェの共通編集とケーブル部品">14. ベジェの共通編集とケーブル部品</h2>
+<p>
+3点の二次ベジェを将来の紐・ケーブル・装飾に使える。<code>quadraticEditor</code> が保存用の数値項目（始点・曲げ点・終点のXYZ）、画面ハンドル、制御点の破線表示、幅ハンドル用のX座標スケーリングをまとめる。高さZの値はオブジェクトの <code>h</code> からの差。<code>points(o)</code> は高さを反映済みのローカル3D制御点、<code>curve(o,t)</code> は曲線上の点（0〜1）を返す。
+</p>
+<pre><code class="language-js">const wire = ASSET_KIT.quadraticEditor('wire', [
+  [-1.5, 0, 0], [0, 0, -0.45], [1.5, 0, 0]
+]);
+ASSET_KIT.define('exampleWire', {
+  label: 'ケーブル例', group: 'street', w: 3, d: .3, h: 1.5,
+  bezierEditor: wire, constrainEdit: wire.constrainWidth,
+  controls: [...wire.controls]
+}, (o, K) =&gt; [K.quadraticTube(o, wire.points(o), .02, {steps: 24, sides: 10})]);</code></pre>
+<ul>
+<li>キーは例なら <code>wireStartX</code>〜<code>wireEndZ</code>。各値は通常のJSON保存・Undo/Redo対象。
+</li>
+<li><code>K.quadraticPoint(points, t)</code> は3点の二次ベジェ補間。<code>K.quadraticTube(o, points, radius, opts)</code> は円断面の面と、カメラに応じた外輪郭を同時に作る。<code>steps</code> は4〜96、<code>sides</code> は6〜20に制限。全制御点が一致した場合は潰れた線のみを返す。
+</li>
+<li>輪郭は視点依存なので、配置したい位置の制御点を<strong>先に移動してから</strong> <code>quadraticTube</code> を生成する。任意メッシュを作成後に <code>K.moveParts</code> で移動する使い方には対応しない。
+</li>
+<li>提灯の紐は同じ <code>quadraticEditor('lantern')</code> を使用し、以前のJSONキーを維持する。ベジェケーブルは <code>quadraticEditor('cable')</code> と円断面を使用する。
+</li>
+<li>参考資料：ユーザーが添付したBlenderアドオン Cablerator（Sergey Kritskiy、GPL-3.0-or-later）の端点・曲線・太さを分けて編集する考え方を参照。Blender用Pythonコードはアプリに組み込まず、上記Kitは独自に実装した。
+</li>
+</ul>
+<h2 id="店先パーツの単体化">店先パーツの単体化</h2>
+<p>
+従来の <code>shopFront</code> は旧保存互換のため定義を残し、棚から非表示にした。カタログの <code>awning</code> と <code>window</code> を使う独立アセットは <code>shopAwning</code> / <code>shopWindow</code>。通常の寸法ハンドルに追従し、窓の中央桟は <code>mullion:true</code> で幅が狭くても残せる。日よけ部品には <code>valanceH</code>、<code>armBelow</code>、<code>armAbove</code> の任意値を追加しており、省略時は従来の固定値を使う。
+</p>
+<h2 id="スライダーと動的な外接範囲">スライダーと動的な<span class="bl">外接範囲</span></h2>
+<p>
+登録型 <code>controls</code> の <code>type:'range'</code> は数値項目と同様に <code>min</code> / <code>max</code> / <code>step</code> / <code>default</code> を持ち、設定パネルにスライダーと現在値を表示する。<code>handle</code> があればキャンバス上でもドラッグできる。段ボール <code>streetParcel</code> の <code>parcelOpen</code> が例。開いたふたのように基準寸法の外に出る部分は <code>geometryBounds:true</code> として、実際の面と線から範囲を計算する。
+</p>
+<p>
+<code>geometryBounds</code> は真偽値のほか、オブジェクトを受け取る関数も使用可能。手すりは実形状を使い、以前の画素基準との検証時だけ旧範囲を使う。円形の縦棒は <code>streetRoundPart</code> の実面と輪郭を線画・面で共通にする。
+</p>
+<p>
+四角椅子の <code>squareLegLength</code> は座面・台座の厚みを保ち、中央の支柱の長さと全高を連動して変更する。
+</p>
+<h2 id="鉢・四角椅子・階段2・タンスの再調整">鉢・四角椅子・階段2・タンスの再調整</h2>
+<p>
+<code>streetPlantBox</code> は葉を持たない中空の四角鉢で、<code>h</code> が鉢そのものの高さ。<code>squareStool</code> は <code>ra/rb</code> を座面の半幅／半奥行きに使い、座面厚、支柱の半径・長さ、台座の高さ・半径を別々に保持する。足が座面より大きい場合も実形状の範囲を使う。<code>pictureStairs</code> は左右の脇枠の幅と、斜面からの追加高さを共通の寸法として持つ。
+</p>
+<p>
+<code>shopWardrobe</code> と <code>shopWardrobe2</code> は共通生成処理から、外側の板・水平棚板・縦仕切り・後退した奥面を作る。<code>wardrobeRows</code> は上側または全体の段数、<code>wardrobeSplit</code> は上側の高さ割合（15〜85%）、<code>wardrobeBoard</code> と <code>wardrobeRecess</code> は実寸。2種類とも前面を実際に開口させるため、手前に全体を覆う箱を置かない。開口の奥行き上限は板厚と本体奥行きから決まり、端部まで押しても範囲外へ出ない。
+</p>
+<p>
+片側車止め <code>guardPoleHalf</code> は新規配置から外したが、すでに保存されたシーンの読込互換のため登録を残す。
+</p>
+<h2 id="ベベル線画の共通ルール">ベベル線画の共通ルール</h2>
+<p>
+今後追加・修正するベベルは、ベベル直方体と同じ線画方式を標準とする。対象軸に垂直な断面で <code>beveledBoxFootprint</code> を使い、上下（押し出し両端）の輪郭は実際の多角形に沿わせる。縦の稜線は全てを無条件に描かず、<code>beveledEdgeMark</code> で角ごとに候補として登録し、面ONではシルエット、線のみでは各角の代表1本を用いる。複数部品は部品ごとにグループを分け、配列でもコピーごとに候補が競合しないようにする。<code>ASSET_KIT</code> の <code>seamMarks</code> は部品の <code>partEdges</code> と同じ順番で候補の印を指定できる。棚2はこの使い方の実例。実面・隠線・出力と、異なるカメラ方向を合わせて検査する。
+</p>
+<h2 id="画面用ひさし部品-screenhood">画面用ひさし部品 <code>screenHood</code></h2>
+<p>
+モニターの上下左右を囲む、前後に開口した枠。上側のつばが正面に張り出し、左右側面の折れ点から下は短い一定の出幅になる。左右の折れ点は同じ高さで連動する。四隅の前後方向の辺は、ベベル直方体と同じ4分割の輪郭点・角ごとのseam選択で線画化する。
+</p>
+<pre><code class="language-js">// 背面を y=0 にするには、at の y を -(frameDepth + brimLength)/2 にする。
+const hood = K.part('screenHood', {
+    w: 1.1, h: 0.8, frameDepth: 0.10, brimLength: 0.30, t: 0.04,
+    knee: 0.44, bevel: 0.10,
+    at: [0, -0.2, 0], color: '#30383d', width: 1,
+});</code></pre>
+<p>
+埋め込みひさしを持つアセットは、同じパラメータ読取関数を形状ビルダーと <code>K.hoodControls(prefix, read, limits)</code> の両方で共有し、傾き・枠の長さ・つばの長さ・厚さをキャンバス編集可能にする。監視カメラはこの共通コントロール生成関数を使用する。
+</p>
+<ul>
+<li><code>w</code>／<code>h</code> は背面の外寸。<code>frameDepth</code> は背面から折れ点以下の枠前面までの出幅、<code>brimLength</code> は枠前面から上端までの追加張り出し（0以上）。枠とつばは独立して編集できる。背面から上端までの合計は両者の和。旧 <code>length</code> だけを指定した部品や旧保存は、互換のため枠を合計の1/4、追加つばを3/4として再現する。
+</li>
+<li><code>knee</code> は背面の下端から測る左右共通の折れ点の高さ（m）。上端から折れ点へは直線、折れ点から下端へは出幅一定。角の丸みと板厚のため上下端には制限がある。
+</li>
+<li><code>t</code> は枠の厚さ、<code>bevel</code> は上下4角に共通する面取り量（m）。<code>at</code>、<code>color</code>、<code>width</code> は部品位置と線スタイル。前後の輪郭と三角面は同じメッシュから作る。
+</li>
+<li>以前の3面版の <code>angle</code> は使用しない。既存の信号機の筒型ひさしはこの部品に置換しない。
+</li>
+<li><code>keepAnchorPatch</code> は、独立オブジェクトの寸法変更時に背面などの取付点を固定する共通補助。接着オブジェクトは対象外。
+</li>
+</ul>
+<h2 id="タイル舗道の縁石">タイル舗道の縁石</h2>
+<p>
+<code>streetPavement</code> は <code>pavementCurbEnabled</code> でタイル外側四辺の縁石をON/OFFする。<code>pavementCurbWidth</code> は外側への幅、<code>pavementCurbHeight</code> は舗道上面からの高さ、<code>pavementCurbBevel</code> は外側四隅のベベル量（最大は縁石幅）。3項目を画面ハンドルと数値で編集できる。タイル面は覆わず、各辺にタイル間隔の目地を描く。外角の点列・線候補はベベル直方体と同じ方式。旧データやOFF時は従来どおり。
+</p>
+<h2 id="部品を重ねる・横に並べる">部品を重ねる・横に並べる</h2>
+<p>
+<code>K.repeatParts(parts, {axis:'z', spacing:height, count:3, group:'crate'})</code> は部品群をローカルX/Y/Zの指定軸に等間隔で配置する。元を含む個数・符号付き間隔で、部品・メッシュ・面の移動を <code>K.moveParts</code> に委ねる。ベベルの線候補はコピーごとに独立したキーにする。同じアセット内で複数の反復群を作る場合は <code>group</code> を別名にする。飲料コンテナの縦積みで使用する。
+</p>
+<p>
+オブジェクト全体の編集可能な繰り返しには、別途共通の配列機能（<code>arrayModifierSpec</code>）を使う。こちらはワールド軸・中心間隔で、個数・間隔・方向を選択中のオブジェクト欄から編集できる。
+</p>
+<h3 id="編集画面上部の共通スライダー">編集画面上部の共通スライダー</h3>
+<p>
+<code>studio-canvas-controls.js</code> は菱形ハンドルと登録controlから、メインバー直下に横並びのスライダーを共通生成する。移動・回転は対象外。登録controlの <code>type:"range"</code> と <code>canvasSlider:true</code> も表示対象。白い面ハンドルの寸法スライダーには既存の <code>facePatch</code> 等を再利用し、片側編集の挙動を揃える。条件付き項目、寸法制約、ロック、Undo/Redoと保存に連動する。左端の接地・リセットは固定、スライダー部分だけ横スクロールする。
+</p>
+<p>
+リセットは <code>asset-controller.js</code> の初期定義を使って形状を戻し、位置・向き・線色・配列・グループなどを保持する。アセット棚と正投影操作バーは描画領域の外にあり、領域サイズの変更は <code>ResizeObserver</code> でキャンバスへ反映する。新しい登録型アセットは既存controlの定義を利用できる。
+</p>
+<h3 id="建物の扉と開口奥壁">建物の扉と開口奥壁</h3>
+<p>
+扉ONの建物では <code>buildingDoorOpening</code> の奥壁座標を扉面に使い、<code>buildingDoorLines</code> の線はその手前2mmに置く。面生成時は元の奥壁面を扉面で置き換える。既存奥壁ハンドルと上部の「開口の凹み」は同じ位置を編集する。直線建物の内部 <code>openingBack</code> は符号付き座標を維持し、UIでは正面からの距離に変換する。隅切り建物は従来の奥行き値を使う。扉ON時の未保存奥壁位置は固定して視点変更で動かないようにする。扉OFFでは従来の奥壁に戻る。
+</p>
+<p>
+浅い凹みでも建物の縁線を正確に遮蔽するため、扉ONの建物線は <code>onFace</code>・<code>preciseTubeEdge</code> と現在の <code>tubeContourView</code> を持つ。扉OFF時の既存表示は変更しない。検証は5建物の奥行・3種類の扉・保存／操作、0.15mの凹みの画面・出力における独立レイ判定、および扉OFF時の旧版との画素比較を含む。
+</p>
+<h2 id="電車の内装">電車の内装</h2>
+<p>
+<code>train</code> グループに連続座面・区切り座面の長椅子と1人掛け、つり革、縦ポール、横手すり、窓付き壁、車内ドアを <code>ASSET_KIT.define</code> で登録する。9種類はいずれも線と面を同じ部品から生成し、寸法・生成面・回転・保存に従う。区切り席やつり革は個数を共通スライダーで変更し、ポールの長さは専用の画面ハンドルも持つ。
+</p>
+<p>
+つり革と窓・扉の縁は、外周と内周を対応させた環状メッシュで構築し、穴の中を面で塞がない。稜線は輪郭だけを生成して、面の分割線を出さない。窓付き壁と扉の窓は透明面ではなく開口。扉の開き幅に応じて見える扉幅を縮め、中央を開く。
+</p>
+<h3 id="曲線椅子と一括配置">曲線椅子と一括配置</h3>
+<p>
+区切り1人掛け <code>trainDividedSeat</code> はY-Z断面を横方向へ押し出した連続シェル。座面のくぼみから背もたれへ曲線状に立ち上げ、内外輪郭と前後端だけを描き、面分割による不要な横線は描かない。区切り長椅子も同じ断面で席を並べる。電車椅子の曲面は不要な輪郭候補を省き、面と主要な外形・区切り線を保つ。寸法や座面高さに対して断面が追従する。
+</p>
+<p>
+<code>asset-controller.js</code> の <code>placeTrainPreset</code> は独立した通常オブジェクトを作ってからまとめて線を追加する。2種類のボタンは電車棚先頭のみ表示され、既存アセットの一覧には含めない。1操作分の履歴としてUndo/Redoし、既存シーンや生成面設定は保持する。車内全体の位置・向きはカメラ方向に対して決定し、地面上に生成する。
+</p>
+<p>
+席数の編集では <code>constrainEdit</code> が従来の総幅／席数から1席幅を求め、中心を変えずに新しい総幅を計算する。明示的に幅も渡された場合は上書きしない。座席の隙間から見える支えの極短線には <code>preciseTinyGaps</code> を指定し、その線のみ細かいレイ判定と短い可視点の描画を行う。
+</p>
+<h3 id="電車ドア窓の左右連動">電車ドア窓の左右連動</h3>
+<p>
+<code>trainSlidingDoor</code> は <code>trainDoorWindowWidth</code> と <code>trainDoorWindowHeight</code> を一組の共通寸法として持ち、左右両方の窓の実開口・枠へ使用する。菱形ハンドルは左窓を操作し、上部スライダーと設定欄からも編集可能。<code>doorGeom</code> で寸法の上限・各扉の位置・開口形状を共通計算する。扉が狭い場合は表示寸法だけを制限し、保存値を壊さない。値がない旧データは以前の <code>leaf*.64</code> と <code>h*.48</code> を使用する。
+</p>
+<h3 id="電車窓・扉窓の縁の線画">電車窓・扉窓の縁の線画</h3>
+<p>
+窓付き壁と左右の扉窓は <code>beveledBoxFootprint</code> と同じ4分割の外周を開口部と枠で共有する。枠内周は枠幅に合わせて角半径を減らし、頂点を対応させて環状メッシュを作る。接する壁と枠の外周後端は同じ線を重複生成しない。開口・枠外側・枠内側の奥行き線には、それぞれ <code>beveledEdgeMark</code> による独立した角の輪郭候補を付ける。非常に小さい窓は輪郭生成時だけ比例拡大してから元に戻し、輪郭の最小寸法で開口が膨らむことを防ぐ。つり革の輪は変更しない。
+</p>
+<h3 id="金網フェンスchainfence">金網フェンス（chainFence）</h3>
+<p>
+<code>chainFence</code> は上角に半径 <code>1.2 * d</code> の90°曲げを持つパイプ外枠と、面を持たない線のみのひし形金網（<code>meshTriangles: []</code>）を返す。直線長 <code>fenceStraight</code> や全体幅 <code>ra</code>・高さ <code>h</code> を変えても角の曲げ半径は <code>fenceDiameter</code> のみから決まり変化しない。ひし形金網は上枠内縁中央を基準に傾き <code>±1</code>・間隔 <code>fenceMeshPitch</code> の直線群を枠の内側輪郭（上角の内側円弧を含む）で解析的にクリップして生成するため、伸縮時は網目が伸び縮みせず本数が増減する。<code>fenceCount</code>（横に並べる数、画面ハンドル付き）と <code>fenceGap</code>（並べる間隔）に応じ、1枚分の外寸幅 <code>L + 2*b + d</code> に間隔を加えたピッチで横方向へ並べ、各パネルの実座標でパイプの輪郭とリング可視性を計算する。<code>fenceBottomBar</code>（既定ON）がONのときは指定された高さ <code>fenceBottomHeight</code>（下パイプの高さ、画面ハンドル付き）で左右支柱との交線（Steinmetz曲線）により下横パイプをT字接合し、支柱の内側縦線を交差区間の上下に分割して脚を残しつつ、網目下端を下パイプ上縁（<code>zBot + r</code>）へ追従させる。
+</p>
+<h3 id="2026-11家具ベベル・設備の円柱線・f1建物">2026-11：家具ベベル・設備の円柱線・F1建物</h3>
+<ul>
+<li>四角スツール座面、四角T字脚天板、直線/L字/U字カウンターは <code>beveledPrismPart</code> でZ軸方向へ押し出す角ベベルを共有する。ベベル部の縦稜線は角ごとの seam 候補としてまとめ、各部品には <code>seamGroup</code> を分けて隣接・重なりによる線の競合を避ける。
+</li>
+<li><code>ASSET_KIT.cylinder</code> の <code>verts</code> は滑らかな円柱のZ方向生成線数。<code>revolution</code>／<code>loft</code> の断面積層にも <code>verts</code> を適用し、各生成線を連続ポリラインとして作る。鳥居柱・電柱・碍子・柱上変圧器タンク・ラーメン鉢は <code>preciseTubeEdge</code> と <code>onFace</code> を使って隠線判定し、円柱の背面や内側へ線が漏れないようにする。細いモールドに線を増やしすぎず、変圧器警告マークも外形だけにする。
+</li>
+<li>F1建物は従来の <code>building</code> IDを保った単一アセット。<code>openingEnabled</code>、<code>f1AwningEnabled</code>、<code>f1SignEnabled</code>、<code>wallSideSignEnabled</code>、<code>facadeEnabled</code>、<code>facadeSides</code> を <code>canvasToggle</code> に登録し、選択中オブジェクトのキャンバス調整UIにチェックボックスを表示する。ファサード・横壁看板の専用UIとデータ互換は維持し、旧リンク建物は保存読込用として残すが新規カードから除外。
+</li>
+<li>F1建物の開口ON時は丸めた外周と内側の開口リビールを別々に描画する。開口OFF時は通常のZ軸角ベベル箱へ戻す。テントと正面看板はF1本体内の形状・面として生成し、別アセットを選択しなくてもチェックで追加できる。横壁看板のみ既存の壁面接着UIを使い、キャンバスのチェックから同じ既存処理を呼び出す。
+</li>
+</ul>
+<h3 id="ufoキャッチャーufocatcherとガチャgachamachine">UFOキャッチャー（ufoCatcher）とガチャ（gachaMachine）</h3>
+<p>
+<code>arcadeBeveledBox</code> は <code>beveledBoxFootprint</code> と <code>beveledEdgeMark</code> を使い、角の輪郭1本だけを描くベベル直方体部品を生成する共通ヘルパー。<code>ufoCatcher</code> は四隅ベベル・上下ベベル帯ライン・幅可変の左下斜め操作台・幅/高さ/上下左右の位置が可変の景品取り出し口実凹み開口を一体化した <code>ufoLowerCabinetPart</code>、前方角柱＋後方下部ガセット一体型L字柱の <code>ufoShowcasePosts</code>、四隅ベベル＋上下ベベル帯付きの天井キャノピー＋角丸看板プレート、内部の湾曲2本爪クレーンで構成し、<code>ufoBaseHeight</code>・<code>ufoBevel</code>・<code>ufoConsoleWidth</code>・<code>ufoChuteWidth</code>・<code>ufoChuteHeight</code>・<code>ufoChuteX</code>・<code>ufoChuteZ</code>・<code>ufoClawX</code>・<code>ufoClawDrop</code>・<code>ufoCount</code> を画面の菱形ハンドルとスライダーで編集する。<code>gachaMachine</code> は前方へ斜めにせり出す下部ベース・幅/高さ/上下左右の位置が可変の段差付きカプセル取り出し口凹み・側面と背面に水平分割線を出さない一体型外装・厚み付き角丸コの字型（C字）側面窓切り欠き・上部額を一体化した <code>gachaLowerBodyPart</code>、縦方向・横方向とも手前へ膨らむ3D曲面カプセルドーム（<code>yDrumAtX</code>）とそれに沿って湾曲する商品見本台紙、下胴上端レッジへ回り込むU字シールド型ハンドル台座・内側リム弧付き円盤ダイヤル・つまみ・スリット入りコイン投入口・ラベル枠付きアーチ型プレート・取り出し口上のアーチ段差線・上部額の角丸タイトルバッジ枠、上端45°ベベル面取り付きの天板キャップで構成し、<code>K.repeatParts</code> により <code>gachaStack</code>（Z方向の段積み）・<code>gachaCount</code>（X方向の横並び）に加え <code>gachaChuteWidth</code>・<code>gachaChuteHeight</code>・<code>gachaChuteX</code>・<code>gachaChuteZ</code>・<code>gachaWaistRatio</code> を画面の菱形ハンドルとスライダーで編集する。またカウンター系3種（<code>counter</code>, <code>counterL</code>, <code>counterU</code>）は <code>furniture</code>（「家具」グループ）に配置する。
+</p>
+<h2 id="2026-11-07-追加街設備・家具・形状統合">2026-11-07 追加：街設備・家具・形状統合</h2>
+<p>
+追加された登録型アセット：<code>utilityCabinet</code>（地上設置型変圧器／電気設備箱）、<code>torii</code>（鳥居）、<code>utilityPole</code>（腕金と碍子の簡略電柱）、<code>ramenBowl</code>（具なしの空ラーメン鉢）、<code>tLegTable</code>（簡略T字脚テーブル）。T字脚テーブルは四角・円・両端半円のracetrack天板を選択でき、四角のベベル量を調整できる。既存の<code>ufoCatcher</code>と<code>gachaMachine</code>は家具グループへ移動した。<code>squareStool</code>には座面ベベルを追加。
+</p>
+<p>
+<code>box</code>と<code>stackedBuilding</code>はベベル量を持つ単一アセットへ統合した。ベベル0では従来の直方体形状、正の値ではベベル形状になる。<code>beveledBox</code>と<code>beveledStackedBuilding</code>は保存データ・スクリプト互換のため内部定義のみ維持し、棚には重複表示しない。統合後も72ケースのスタック幾何基準、10ケースの画素基準が一致することを確認する。
+</p>
+</div>
+</body>
+</html>

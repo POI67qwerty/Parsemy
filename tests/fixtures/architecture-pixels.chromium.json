@@ -1,0 +1,12 @@
+{
+  "building:home:false": "1f58186c6ea5c5e82a2a4154065760160aa716a921dd9d63df17d787d20abd59",
+  "cornerCutBox:home:true": "d2946d7ad6bd969e3e7c2c30018fb7c4bf19f7d7882c07c12643ae0b6554f80d",
+  "cornerCutBox:top:true": "e00f92e366e561f54b280c26cdb1492c39c32994bebaf833e2d74604d81a70ba",
+  "cornerCutStackedBuilding:home:false": "07e4e5e90218d623d92fd4923d6eb6b5eebdce652ef63ffe45618e5000212cbd",
+  "beveledStackedBuilding:side:false": "76516152a34061ee25813a099a6241ec9cb31eb431c0e3ff67ae955458e21970",
+  "recessedStackedBuilding:home:false": "9288075ee1da3c3e37c177a4005dda5e2488e92c65d2ab37db0fbe466681159b",
+  "railing:home:true": "a67f3e181e32440e7f23a2bfebfe13b85dab338be5aa9d19060976571bda4d3c",
+  "sedan:side:true": "738577dd985b11a00dc185ae21eae54045e2eb88422ff43c7ece7ad3628ce02b",
+  "sphere:home:true": "88c22db7e061d67338f62bcd98bb5ef8432dac99750c48e668305ca1a57fd924",
+  "stall:home:true": "b1b8d67a7590f6ccbc3a31044f6d895c65cc7b5692c1b910cad4e1909ede0df4"
+}

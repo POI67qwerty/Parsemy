@@ -1,0 +1,40 @@
+[
+  {
+    "patch": {},
+    "parts": 7,
+    "hash": "7b7002652523909712d31b3ab38720b3d8b7abd87cc737155ff92bc834b705a8"
+  },
+  {
+    "patch": {
+      "ra": 0.32,
+      "rb": 0.27,
+      "h": 1.2,
+      "rot": 37
+    },
+    "parts": 7,
+    "hash": "750df865a9c4fddf7012fa32d884f4380fee66dec5d9b614a05673fa6e9cd82b"
+  },
+  {
+    "patch": {
+      "ra": 1,
+      "rb": 0.62,
+      "h": 2.8,
+      "rot": 90
+    },
+    "parts": 7,
+    "hash": "5517aa80137329f1a47bbab494b9bb5bc6c98cfc184f125ca4faa10764ff5011"
+  },
+  {
+    "patch": {
+      "ra": 0.8,
+      "rb": 0.48,
+      "h": 2.1,
+      "vmWindowWRatio": 0.4,
+      "vmOutletWRatio": 0.7,
+      "vmCoinWRatio": 0.12,
+      "rot": 173
+    },
+    "parts": 10,
+    "hash": "50ad27c84c74fb9d9a0671a3d06353a1326c7f39a17f03236d69d6ec30ee914a"
+  }
+]
