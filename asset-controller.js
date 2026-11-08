@@ -118,6 +118,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             w: MASTER_W,
             accent: info.accent,
         };
+        if(kind==="roomShell")return {...base,type:"asset",asset:kind,assetId:kind,assetName:info.label,k:1,d:-1,ra:1.8,rb:1.8,h:3.6};
         const height = kind === "person" ? Number(P.hm) || 1.7 : info.h;
         if (kind === "recessedStackedBuilding") {
             const floorCount = Math.max(1, Math.min(30, Math.round(Number(info.recessedFloorCount) || 4))),

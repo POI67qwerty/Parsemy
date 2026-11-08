@@ -203,6 +203,28 @@ function moveBy(o, vec, keepAttachedOffset = false) {
     const [iu, iv] = PL[o.k];
     return { ca: o.ca + v[iu], cb: o.cb + v[iv], lift: o.lift - o.d * v[o.k] };
 }
+// 家具を部屋内で動かすと、床または壁上端（屋根面の高さ）へ自動吸着する。
+// 吸着圏は0.7m。部屋の回転・寸法に追従し、部屋の外では通常移動のまま。
+function citySnapFurnitureToRoom(o, movementPatch = {}) {
+    const isFurniture=window.cityGridAssetGroups?.().some(g=>g.key==="furniture"&&g.kinds.includes(o?.asset));
+    if(!o||o.type!=="asset"||o.k!==1||o.asset==="roomShell"||!isFurniture||o.attachment)return movementPatch;
+    const moved={...o,...movementPatch},base=L2W(moved,0,0,0),rooms=sceneObjects().filter(r=>r.asset==="roomShell"&&r.id!==o.id),candidates=[];
+    for(const room of rooms){
+        const origin=L2W(room,0,0,0),dx=base[0]-origin[0],dz=base[2]-origin[2],a=(Number(room.rot)||0)*DG,cs=Math.cos(a),sn=Math.sin(a),lx=dz*cs+dx*sn,ly=-dz*sn+dx*cs,
+            padX=Math.min(Math.max(.12,Math.hypot(Number(moved.ra)||.25,Number(moved.rb)||.25)),Math.max(.12,Math.abs(Number(room.ra)||4)-.05)),
+            padY=Math.min(Math.max(.12,Math.hypot(Number(moved.ra)||.25,Number(moved.rb)||.25)),Math.max(.12,Math.abs(Number(room.rb)||4.5)-.05));
+        if(Math.abs(lx)>Math.abs(Number(room.ra)||4)-padX||Math.abs(ly)>Math.abs(Number(room.rb)||4.5)-padY)continue;
+        const floorY=origin[1],roofY=L2W(room,0,0,Math.abs(Number(room.h)||2.94))[1];
+        for(const [surface,y] of [["floor",floorY],["roof",roofY]]){const distance=Math.abs(base[1]-y);if(distance<=.7)candidates.push({room,surface,y,distance});}
+    }
+    candidates.sort((a,b)=>a.distance-b.distance);
+    const hit=candidates[0];if(!hit)return movementPatch;
+    const vertical=moveBy(moved,[0,hit.y-base[1],0]);
+    snapHit=new Set([hit.room.id]);
+    window.cityLastRoomSnap={roomId:hit.room.id,surface:hit.surface};
+    return {...movementPatch,...vertical};
+}
+window.citySnapFurnitureToRoom=citySnapFurnitureToRoom;
 // 間取りの回転ハンドルで、地面上の複合オブジェクトを一体回転する。
 // 子パーツの定義を壊さず、現在位置をいったんワールド座標へ展開してから戻す。
 // 複合オブジェクトを回すときの軸（ワールド座標）。
@@ -5849,7 +5871,10 @@ function dragEdit(p, freeRotation = false) {
             if (ed.group && ed.group.length > 1) {
                 ed.moveDelta = [q[0], q[1], q[2]];
                 patch = moveBy(o, ed.moveDelta);
-            } else patch = moveBy(o, q); /* 間取りではca/cbだけを変え、Y方向のliftとoffは保持する。 */
+            } else {
+                const movement=moveBy(o,q);
+                patch=typeof window.citySnapFurnitureToRoom==="function"?window.citySnapFurnitureToRoom(o,movement):movement;
+            } /* ふだんは表示面内を保ち、家具が部屋床／屋根の近くに入ったときだけ高さを吸着する。 */
         }
     } else if (ed.t === "axis") {
         let amount = null;

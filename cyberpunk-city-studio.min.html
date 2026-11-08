@@ -4114,6 +4114,26 @@ function moveBy(o, vec, keepAttachedOffset = false) {
     const [iu, iv] = PL[o.k];
     return { ca: o.ca + v[iu], cb: o.cb + v[iv], lift: o.lift - o.d * v[o.k] };
 }
+function citySnapFurnitureToRoom(o, movementPatch = {}) {
+    const isFurniture=window.cityGridAssetGroups?.().some(g=>g.key==="furniture"&&g.kinds.includes(o?.asset));
+    if(!o||o.type!=="asset"||o.k!==1||o.asset==="roomShell"||!isFurniture||o.attachment)return movementPatch;
+    const moved={...o,...movementPatch},base=L2W(moved,0,0,0),rooms=sceneObjects().filter(r=>r.asset==="roomShell"&&r.id!==o.id),candidates=[];
+    for(const room of rooms){
+        const origin=L2W(room,0,0,0),dx=base[0]-origin[0],dz=base[2]-origin[2],a=(Number(room.rot)||0)*DG,cs=Math.cos(a),sn=Math.sin(a),lx=dz*cs+dx*sn,ly=-dz*sn+dx*cs,
+            padX=Math.min(Math.max(.12,Math.hypot(Number(moved.ra)||.25,Number(moved.rb)||.25)),Math.max(.12,Math.abs(Number(room.ra)||4)-.05)),
+            padY=Math.min(Math.max(.12,Math.hypot(Number(moved.ra)||.25,Number(moved.rb)||.25)),Math.max(.12,Math.abs(Number(room.rb)||4.5)-.05));
+        if(Math.abs(lx)>Math.abs(Number(room.ra)||4)-padX||Math.abs(ly)>Math.abs(Number(room.rb)||4.5)-padY)continue;
+        const floorY=origin[1],roofY=L2W(room,0,0,Math.abs(Number(room.h)||2.94))[1];
+        for(const [surface,y] of [["floor",floorY],["roof",roofY]]){const distance=Math.abs(base[1]-y);if(distance<=.7)candidates.push({room,surface,y,distance});}
+    }
+    candidates.sort((a,b)=>a.distance-b.distance);
+    const hit=candidates[0];if(!hit)return movementPatch;
+    const vertical=moveBy(moved,[0,hit.y-base[1],0]);
+    snapHit=new Set([hit.room.id]);
+    window.cityLastRoomSnap={roomId:hit.room.id,surface:hit.surface};
+    return {...movementPatch,...vertical};
+}
+window.citySnapFurnitureToRoom=citySnapFurnitureToRoom;
 function compoundSpinPivot(o) {
     const sp = o?.spinPivot;
     if (sp && Number.isFinite(sp[0]) && Number.isFinite(sp[2])) return [sp[0], sp[1], sp[2]];
@@ -9195,7 +9215,10 @@ function dragEdit(p, freeRotation = false) {
             if (ed.group && ed.group.length > 1) {
                 ed.moveDelta = [q[0], q[1], q[2]];
                 patch = moveBy(o, ed.moveDelta);
-            } else patch = moveBy(o, q);
+            } else {
+                const movement=moveBy(o,q);
+                patch=typeof window.citySnapFurnitureToRoom==="function"?window.citySnapFurnitureToRoom(o,movement):movement;
+            }
         }
     } else if (ed.t === "axis") {
         let amount = null;
@@ -9429,16 +9452,28 @@ function roomShellCameraSides(o) {
     let vx,vy;
     if(orthView){const v=orthBasis().depth.map(x=>-x);vx=v[0];vy=v[2];}
     else {const cam=camPos(),origin=L2W(o,0,0,0);vx=cam[0]-origin[0];vy=cam[2]-origin[2];}
-    const a=(Number(o.rot)||0)*DG,c=Math.cos(a),s=Math.sin(a),lx=vx*c+vy*s,ly=-vx*s+vy*c,hw=Math.abs(Number(o.ra)||2.5),hd=Math.abs(Number(o.rb)||2.5);
+    const a=(Number(o.rot)||0)*DG,c=Math.cos(a),s=Math.sin(a),lx=vx*c+vy*s,ly=-vx*s+vy*c,hw=Math.abs(Number(o.ra)||1.8),hd=Math.abs(Number(o.rb)||1.8);
     if(lx>hw*.32)sides.add("right");else if(lx< -hw*.32)sides.add("left");
     if(ly>hd*.32)sides.add("back");else if(ly< -hd*.32)sides.add("front");
     return sides;
+}
+function roomShellCameraCuts(o){
+    const walls=roomShellCameraSides(o),floor=false,ceiling=false;
+    if(o?.asset!=="roomShell")return{walls,floor,ceiling};
+    if(orthView){
+        ["front","back","left","right"].forEach(x=>walls.add(x));
+        if(["front","back","side","right","left"].includes(orthView))return{walls,floor:true,ceiling:true};
+        if(orthView==="top")return{walls,floor:false,ceiling:true};
+        if(orthView==="bottom")return{walls,floor:true,ceiling:false};
+    }
+    const origin=L2W(o,0,0,0),cam=camPos(),top=L2W(o,0,0,Math.abs(Number(o.h)||3.6))[1];
+    return{walls,floor:cam[1]<origin[1]-.03,ceiling:cam[1]>top+.03};
 }
 const surfaceTriCache = new WeakMap();
 function surfaceCacheKey(o) {
     try {
         const key=JSON.stringify(o);
-        return o?.asset==="roomShell"?`${key}|room:${[...roomShellCameraSides(o)].sort().join(",")}`:key;
+        return o?.asset==="roomShell"?`${key}|room:${JSON.stringify({walls:[...roomShellCameraCuts(o).walls].sort(),floor:roomShellCameraCuts(o).floor,ceiling:roomShellCameraCuts(o).ceiling})}`:key;
     } catch (e) {
         const seen = new Set();
         return JSON.stringify(o, (key, value) => {
@@ -9458,7 +9493,7 @@ function surfaceTriangles(o) {
         hit = surfaceTriCache.get(o);
     if (hit && hit.key === key) return hit.tris;
     let base = exportSurfaceTriangles(source);
-    if(source.asset==="roomShell"){const open=roomShellCameraSides(source);base=base.filter(t=>!open.has(t.roomShellWallSide));}
+    if(source.asset==="roomShell"){const cut=roomShellCameraCuts(source);base=base.filter(t=>!cut.walls.has(t.roomShellWallSide)&&!(cut.floor&&t.roomShellFloor)&&!(cut.ceiling&&t.roomShellCeiling));}
     const spec = arrayModifierSpec(source), tris = spec && spec.count > 1 ? [...base] : base;
     if (spec && spec.count > 1 && base.length) {
         for (let i = 1; i < spec.count; i++) {
@@ -10998,7 +11033,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         strokeW(c, s);
         return;
     }
-    const wallAlpha=c.globalAlpha;if(s.roomShellWallSide&&roomShellCameraSides(s.ob).has(s.roomShellWallSide))c.globalAlpha=wallAlpha*.12;
+    const wallAlpha=c.globalAlpha;if(s.roomShellWallSide&&roomShellCameraCuts(s.ob).walls.has(s.roomShellWallSide))c.globalAlpha=wallAlpha*.12;
     c.strokeStyle = s.c;
     c.lineWidth = layerLineWidth(s);
     c.lineCap = c.lineJoin = "round";
@@ -11613,7 +11648,7 @@ function stroke(c, s) {
     c.strokeStyle = s.c;
     c.lineWidth = effectiveLineWidth(s);
     c.lineCap = c.lineJoin = "round";
-    const oldAlpha=c.globalAlpha;if(s.roomShellWallSide&&roomShellCameraSides(s.ob).has(s.roomShellWallSide))c.globalAlpha=oldAlpha*.12;
+    const oldAlpha=c.globalAlpha;if(s.roomShellWallSide&&roomShellCameraCuts(s.ob).walls.has(s.roomShellWallSide))c.globalAlpha=oldAlpha*.12;
     c.beginPath();
     c.moveTo(s.p[0].x, s.p[0].y);
     for (let i = 1; i < s.p.length; i++) c.lineTo(s.p[i].x, s.p[i].y);
@@ -18477,6 +18512,8 @@ const ASSET_KIT = (function () {
                 for (const seg of partEdges({...part,__owner:ctx.o})) {
                     const line=lineA(ctx.o, seg, color, width);
                     if (part.roomShellWallSide) line.roomShellWallSide=part.roomShellWallSide;
+                    if (part.roomShellFloor) line.roomShellFloor=true;
+                    if (part.roomShellCeiling) line.roomShellCeiling=true;
                     if (part.signalPoleTopRing && edgeIndex === 1) {
                         line.signalPoleTopRing = true;
                         line.signalPoleContourView = orthView || "3d";
@@ -18521,7 +18558,7 @@ const ASSET_KIT = (function () {
         KIT_TRIS[kind] = (o) => {
             const parts = build(o, API) || [],
                 tris = [];
-            for (const part of parts) for (const t of partTris(part)) { const tri=[L2W(o,...t[0]),L2W(o,...t[1]),L2W(o,...t[2])]; if(part.roomShellWallSide)tri.roomShellWallSide=part.roomShellWallSide; tris.push(tri); }
+            for (const part of parts) for (const t of partTris(part)) { const tri=[L2W(o,...t[0]),L2W(o,...t[1]),L2W(o,...t[2])]; if(part.roomShellWallSide)tri.roomShellWallSide=part.roomShellWallSide; if(part.roomShellFloor)tri.roomShellFloor=true; if(part.roomShellCeiling)tri.roomShellCeiling=true; tris.push(tri); }
             return tris;
         };
         return true;
@@ -20564,20 +20601,23 @@ function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
   if(enabled){parts.push(pavementCurbRing(w,d,cw,b,bevel,bevelSegments,0,h+ch,h));
    parts.push({meshTriangles:[],meshEdges:curbEdges,onFace:true,preciseTubeEdge:true});}
   return parts;});
- ASSET_KIT.define('roomShell',{label:'部屋',glyph:'⌂',group:'furniture',w:5,d:5,h:3,accent:'#c9a982',minHeight:()=>1.5,controls:[]},(o,K)=>{
-  const w=Math.max(.5,Math.abs(Number(o.ra)||2.5)*2),d=Math.max(.5,Math.abs(Number(o.rb)||2.5)*2),h=Math.max(1.5,Math.abs(Number(o.h)||3)),t=Math.min(.18,Math.max(.06,Math.min(w,d)*.025)),parts=[];
-  parts.push(K.box(K.rectPath(w,d),-t,0,{color:'#927b60',onFace:true}));
-  const wall=(side,path)=>parts.push(K.box(path,0,h,{roomShellWallSide:side,color:'#c9a982',onFace:true}));
-  wall('front',K.rectPath(w,t,0,-d/2+t/2));wall('back',K.rectPath(w,t,0,d/2-t/2));
-  wall('left',K.rectPath(t,d-2*t,-w/2+t/2,0));wall('right',K.rectPath(t,d-2*t,w/2-t/2,0));
-  return parts;});
+ ASSET_KIT.define('roomShell',{label:'部屋',glyph:'⌂',group:'furniture',w:3.6,d:3.6,h:3.6,accent:'#c9a982',minHeight:()=>1.5,controls:[]},(o,K)=>{
+  const w=Math.max(.1,Math.abs(Number(o.ra)||1.8)*2),d=Math.max(.1,Math.abs(Number(o.rb)||1.8)*2),h=Math.max(1.5,Math.abs(Number(o.h)||3.6)),t=Math.min(.16,Math.max(.06,Math.min(w,d)*.01)),flags={onFace:true,color:'#c9a982'},parts=[];
+  parts.push(K.box(K.rectPath(w,d),0,.04,{onFace:true,color:'#b9a88c',roomShellFloor:true}));
+  parts.push(K.box(K.rectPath(w,d),h-.08,h,{...flags,roomShellCeiling:true}));
+  parts.push(K.box(K.rectPath(w,t,0,-d/2+t/2),0,h,{...flags,roomShellWallSide:'front'}));
+  parts.push(K.box(K.rectPath(w,t,0,d/2-t/2),0,h,{...flags,roomShellWallSide:'back'}));
+  parts.push(K.box(K.rectPath(t,d,-w/2+t/2,0),0,h,{...flags,roomShellWallSide:'left'}));
+  parts.push(K.box(K.rectPath(t,d,w/2-t/2,0),0,h,{...flags,roomShellWallSide:'right'}));
+  return parts;
+ });
  ASSET_KIT.define('streetCurbRamp',{...common,label:'歩道切下げスロープ',glyph:'▱',group:'traffic',w:1.8,d:1.0,h:.15,accent:'#a3aaa7',minHeight:()=>.02,controls:[
   {key:'curbRampRise',label:'歩道側の段差',default:.15,min:.02,max:1,step:.01,unit:'m',handle:(o,v)=>({anchor:[-o.ra,o.rb,0],sample:[-o.ra,o.rb,v],probe:[-o.ra,o.rb,v+1],fallback:{x:0,y:-1}})}
  ]},(o,K)=>{const {w,d}=size(o),h=val(o,'curbRampRise',o.h,.02,1),x=w/2,y0=-d/2,y1=d/2,
   a=[-x,y0,0],b=[x,y0,0],c=[x,y1,h],e=[-x,y1,h],a0=[-x,y0,0],b0=[x,y0,0],c0=[x,y1,0],e0=[-x,y1,0],
-  triangles=[[a,b,c],[a,c,e],[a0,c0,b0],[a0,e0,c0],[a0,b0,b],[a0,b,a],[c0,e0,e],[c0,e,c],[a0,a,e],[a0,e,e0],[b0,c0,c],[b0,c,b]],
-  edges=[[a,b],[b,c],[c,e],[e,a],[a0,b0],[b0,c0],[c0,e0],[e0,a0],[a0,a],[b0,b],[c0,c],[e0,e]];
-  return {meshTriangles:triangles,meshEdges:edges,onFace:true,preciseTubeEdge:true};});
+  triangles=[[a,b,c],[a,c,e],[a0,c0,b0],[a0,e0,c0],[a0,b0,b],[a0,b,a],[c0,e0,e],[c0,e,c],[a0,a,e],[a0,e,e0],[b0,c0,c],[b0,c,b]].filter(t=>{const u=t[1].map((v,i)=>v-t[0][i]),v=t[2].map((x,i)=>x-t[0][i]);return Math.hypot(u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0])>1e-10;}),
+  edges=[[a,b],[b,c],[c,e],[e,a],[a0,b0],[b0,c0],[c0,e0],[e0,a0],[a0,a],[b0,b],[c0,c],[e0,e]].filter(([p,q])=>Math.hypot(p[0]-q[0],p[1]-q[1],p[2]-q[2])>1e-10);
+  return [{meshTriangles:triangles,meshEdges:edges,onFace:true,preciseTubeEdge:true}];});
  ASSET_KIT.define('streetParcel',{...common,label:'段ボール箱',glyph:'▣',group:'streetObjects',w:.62,d:.46,h:.44,accent:'#cba475',minHeight:()=>.05,controls:[
    {key:'parcelTapeWidth',label:'テープ幅',default:.09,min:.01,max:o=>Math.max(.01,Math.abs(o.ra)*1.7),step:.01,unit:'m',handle:(o,v)=>({anchor:[0,0,o.h+.001],sample:[v/2,0,o.h+.001],probe:[(v+1)/2,0,o.h+.001],fallback:{x:1,y:0}})},
    {key:'parcelOpen',label:'ふたの開き',type:'range',default:0,min:0,max:180,step:1,unit:'°',handle:(o,v)=>({anchor:[-o.ra,0,o.h+.1],sample:[-o.ra+.12+v*.002,0,o.h+.1],probe:[-o.ra+1.12+v*.002,0,o.h+.1],fallback:{x:1,y:0},pixelsPerUnit:1})}
@@ -22648,6 +22688,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             w: MASTER_W,
             accent: info.accent,
         };
+        if(kind==="roomShell")return {...base,type:"asset",asset:kind,assetId:kind,assetName:info.label,k:1,d:-1,ra:1.8,rb:1.8,h:3.6};
         const height = kind === "person" ? Number(P.hm) || 1.7 : info.h;
         if (kind === "recessedStackedBuilding") {
             const floorCount = Math.max(1, Math.min(30, Math.round(Number(info.recessedFloorCount) || 4))),
@@ -24446,6 +24487,7 @@ window.CityCanvasControls = (function () {
         quick.querySelectorAll("[data-workspace-screen]").forEach((screen) => {
             screen.hidden = screen.dataset.workspaceScreen !== tab;
         });
+        if (name === "perspective" && window.cityFloorPlanActive) window.cityFloorPlanExit?.(true);
     }
     quick
         .querySelectorAll("[data-workspace-tab]")
@@ -24454,7 +24496,7 @@ window.CityCanvasControls = (function () {
     let quickSelectedId = null;
     window.cityGridObjectSelection = (id, explicit = false) => {
         if (id && (explicit || id !== quickSelectedId)) {
-            setStudioWorkspace("object");
+            if (!window.cityFloorPlanActive) setStudioWorkspace("object");
             if (editSection) editSection.open = true;
         }
         quickSelectedId = id || null;
@@ -27853,7 +27895,7 @@ window.CityCanvasControls = (function () {
         if (d.floorActive) {
             // 廃止した間取り欄の旧プリセットは「視点」を表示し、正投影はそのまま復元する。
             if (d.ui?.workspace && window.cityStudioWorkspace)
-                window.cityStudioWorkspace(d.ui.workspace === "floorplan" ? "perspective" : d.ui.workspace);
+                window.cityStudioWorkspace(d.ui.workspace);
             window.cityFloorPlanEnter?.(orthView || "top");
             if (Array.isArray(d.floorCenter)) window.cityFloorPlanCenter = [...d.floorCenter];
             if (Number.isFinite(d.floorScale)) window.cityFloorPlanScale = d.floorScale;
@@ -29985,14 +30027,6 @@ window.CityCanvasControls = (function () {
         });
         capturePointer(e.pointerId);
     }
-    cv.addEventListener(
-        "contextmenu",
-        (e) => {
-            if (window.cityFloorPlanActive) e.preventDefault();
-        },
-        true,
-    );
-    // canvasのIDLイベントハンドラ（engine-input.js）がstudio-uiの後付け
     // listenerより先に呼ばれるブラウザでも、間取りの専用経路を優先する。
     document.addEventListener(
         "pointerdown",

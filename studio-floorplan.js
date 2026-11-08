@@ -1839,14 +1839,6 @@
         });
         capturePointer(e.pointerId);
     }
-    cv.addEventListener(
-        "contextmenu",
-        (e) => {
-            if (window.cityFloorPlanActive) e.preventDefault();
-        },
-        true,
-    );
-    // canvasのIDLイベントハンドラ（engine-input.js）がstudio-uiの後付け
     // listenerより先に呼ばれるブラウザでも、間取りの専用経路を優先する。
     document.addEventListener(
         "pointerdown",

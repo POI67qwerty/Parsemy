@@ -141,16 +141,30 @@ function roomShellCameraSides(o) {
     let vx,vy;
     if(orthView){const v=orthBasis().depth.map(x=>-x);vx=v[0];vy=v[2];}
     else {const cam=camPos(),origin=L2W(o,0,0,0);vx=cam[0]-origin[0];vy=cam[2]-origin[2];}
-    const a=(Number(o.rot)||0)*DG,c=Math.cos(a),s=Math.sin(a),lx=vx*c+vy*s,ly=-vx*s+vy*c,hw=Math.abs(Number(o.ra)||2.5),hd=Math.abs(Number(o.rb)||2.5);
+    const a=(Number(o.rot)||0)*DG,c=Math.cos(a),s=Math.sin(a),lx=vx*c+vy*s,ly=-vx*s+vy*c,hw=Math.abs(Number(o.ra)||1.8),hd=Math.abs(Number(o.rb)||1.8);
     if(lx>hw*.32)sides.add("right");else if(lx< -hw*.32)sides.add("left");
     if(ly>hd*.32)sides.add("back");else if(ly< -hd*.32)sides.add("front");
     return sides;
+}
+function roomShellCameraCuts(o){
+    const walls=roomShellCameraSides(o),floor=false,ceiling=false;
+    if(o?.asset!=="roomShell")return{walls,floor,ceiling};
+    if(orthView){
+        // 正投影の6方向では、カメラに重なる壁・床・天井面が家具を覆わないよう
+        // 塗り面をカリングし、線画の輪郭だけを残す断面表示にする。
+        ["front","back","left","right"].forEach(x=>walls.add(x));
+        if(["front","back","side","right","left"].includes(orthView))return{walls,floor:true,ceiling:true};
+        if(orthView==="top")return{walls,floor:false,ceiling:true};
+        if(orthView==="bottom")return{walls,floor:true,ceiling:false};
+    }
+    const origin=L2W(o,0,0,0),cam=camPos(),top=L2W(o,0,0,Math.abs(Number(o.h)||3.6))[1];
+    return{walls,floor:cam[1]<origin[1]-.03,ceiling:cam[1]>top+.03};
 }
 const surfaceTriCache = new WeakMap();
 function surfaceCacheKey(o) {
     try {
         const key=JSON.stringify(o);
-        return o?.asset==="roomShell"?`${key}|room:${[...roomShellCameraSides(o)].sort().join(",")}`:key;
+        return o?.asset==="roomShell"?`${key}|room:${JSON.stringify({walls:[...roomShellCameraCuts(o).walls].sort(),floor:roomShellCameraCuts(o).floor,ceiling:roomShellCameraCuts(o).ceiling})}`:key;
     } catch (e) {
         const seen = new Set();
         return JSON.stringify(o, (key, value) => {
@@ -172,7 +186,7 @@ function surfaceTriangles(o) {
         hit = surfaceTriCache.get(o);
     if (hit && hit.key === key) return hit.tris;
     let base = exportSurfaceTriangles(source);
-    if(source.asset==="roomShell"){const open=roomShellCameraSides(source);base=base.filter(t=>!open.has(t.roomShellWallSide));}
+    if(source.asset==="roomShell"){const cut=roomShellCameraCuts(source);base=base.filter(t=>!cut.walls.has(t.roomShellWallSide)&&!(cut.floor&&t.roomShellFloor)&&!(cut.ceiling&&t.roomShellCeiling));}
     const spec = arrayModifierSpec(source), tris = spec && spec.count > 1 ? [...base] : base;
     // 面の遮蔽も各コピーに存在する。線と同じワールド軸・同じ間隔で展開する。
     if (spec && spec.count > 1 && base.length) {
@@ -1958,7 +1972,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         strokeW(c, s);
         return;
     }
-    const wallAlpha=c.globalAlpha;if(s.roomShellWallSide&&roomShellCameraSides(s.ob).has(s.roomShellWallSide))c.globalAlpha=wallAlpha*.12;
+    const wallAlpha=c.globalAlpha;if(s.roomShellWallSide&&roomShellCameraCuts(s.ob).walls.has(s.roomShellWallSide))c.globalAlpha=wallAlpha*.12;
     c.strokeStyle = s.c;
     c.lineWidth = layerLineWidth(s);
     c.lineCap = c.lineJoin = "round";
@@ -2760,7 +2774,7 @@ function stroke(c, s) {
     c.strokeStyle = s.c;
     c.lineWidth = effectiveLineWidth(s);
     c.lineCap = c.lineJoin = "round";
-    const oldAlpha=c.globalAlpha;if(s.roomShellWallSide&&roomShellCameraSides(s.ob).has(s.roomShellWallSide))c.globalAlpha=oldAlpha*.12;
+    const oldAlpha=c.globalAlpha;if(s.roomShellWallSide&&roomShellCameraCuts(s.ob).walls.has(s.roomShellWallSide))c.globalAlpha=oldAlpha*.12;
     c.beginPath();
     c.moveTo(s.p[0].x, s.p[0].y);
     for (let i = 1; i < s.p.length; i++) c.lineTo(s.p[i].x, s.p[i].y);

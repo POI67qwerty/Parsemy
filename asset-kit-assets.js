@@ -1919,21 +1919,24 @@ function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
    parts.push({meshTriangles:[],meshEdges:curbEdges,onFace:true,preciseTubeEdge:true});}
   return parts;});
  // 家具を配置するための部屋シェル。床＋四面の壁、家具・天井は含めない。
- ASSET_KIT.define('roomShell',{label:'部屋',glyph:'⌂',group:'furniture',w:5,d:5,h:3,accent:'#c9a982',minHeight:()=>1.5,controls:[]},(o,K)=>{
-  const w=Math.max(.5,Math.abs(Number(o.ra)||2.5)*2),d=Math.max(.5,Math.abs(Number(o.rb)||2.5)*2),h=Math.max(1.5,Math.abs(Number(o.h)||3)),t=Math.min(.18,Math.max(.06,Math.min(w,d)*.025)),parts=[];
-  parts.push(K.box(K.rectPath(w,d),-t,0,{color:'#927b60',onFace:true}));
-  const wall=(side,path)=>parts.push(K.box(path,0,h,{roomShellWallSide:side,color:'#c9a982',onFace:true}));
-  wall('front',K.rectPath(w,t,0,-d/2+t/2));wall('back',K.rectPath(w,t,0,d/2-t/2));
-  wall('left',K.rectPath(t,d-2*t,-w/2+t/2,0));wall('right',K.rectPath(t,d-2*t,w/2-t/2,0));
-  return parts;});
+ ASSET_KIT.define('roomShell',{label:'部屋',glyph:'⌂',group:'furniture',w:3.6,d:3.6,h:3.6,accent:'#c9a982',minHeight:()=>1.5,controls:[]},(o,K)=>{
+  const w=Math.max(.1,Math.abs(Number(o.ra)||1.8)*2),d=Math.max(.1,Math.abs(Number(o.rb)||1.8)*2),h=Math.max(1.5,Math.abs(Number(o.h)||3.6)),t=Math.min(.16,Math.max(.06,Math.min(w,d)*.01)),flags={onFace:true,color:'#c9a982'},parts=[];
+  parts.push(K.box(K.rectPath(w,d),0,.04,{onFace:true,color:'#b9a88c',roomShellFloor:true}));
+  parts.push(K.box(K.rectPath(w,d),h-.08,h,{...flags,roomShellCeiling:true}));
+  parts.push(K.box(K.rectPath(w,t,0,-d/2+t/2),0,h,{...flags,roomShellWallSide:'front'}));
+  parts.push(K.box(K.rectPath(w,t,0,d/2-t/2),0,h,{...flags,roomShellWallSide:'back'}));
+  parts.push(K.box(K.rectPath(t,d,-w/2+t/2,0),0,h,{...flags,roomShellWallSide:'left'}));
+  parts.push(K.box(K.rectPath(t,d,w/2-t/2,0),0,h,{...flags,roomShellWallSide:'right'}));
+  return parts;
+ });
  // 横断歩道の歩道切下げ。車道側から歩道側へ高さが上がる一体型スロープ。
  ASSET_KIT.define('streetCurbRamp',{...common,label:'歩道切下げスロープ',glyph:'▱',group:'traffic',w:1.8,d:1.0,h:.15,accent:'#a3aaa7',minHeight:()=>.02,controls:[
   {key:'curbRampRise',label:'歩道側の段差',default:.15,min:.02,max:1,step:.01,unit:'m',handle:(o,v)=>({anchor:[-o.ra,o.rb,0],sample:[-o.ra,o.rb,v],probe:[-o.ra,o.rb,v+1],fallback:{x:0,y:-1}})}
  ]},(o,K)=>{const {w,d}=size(o),h=val(o,'curbRampRise',o.h,.02,1),x=w/2,y0=-d/2,y1=d/2,
   a=[-x,y0,0],b=[x,y0,0],c=[x,y1,h],e=[-x,y1,h],a0=[-x,y0,0],b0=[x,y0,0],c0=[x,y1,0],e0=[-x,y1,0],
-  triangles=[[a,b,c],[a,c,e],[a0,c0,b0],[a0,e0,c0],[a0,b0,b],[a0,b,a],[c0,e0,e],[c0,e,c],[a0,a,e],[a0,e,e0],[b0,c0,c],[b0,c,b]],
-  edges=[[a,b],[b,c],[c,e],[e,a],[a0,b0],[b0,c0],[c0,e0],[e0,a0],[a0,a],[b0,b],[c0,c],[e0,e]];
-  return {meshTriangles:triangles,meshEdges:edges,onFace:true,preciseTubeEdge:true};});
+  triangles=[[a,b,c],[a,c,e],[a0,c0,b0],[a0,e0,c0],[a0,b0,b],[a0,b,a],[c0,e0,e],[c0,e,c],[a0,a,e],[a0,e,e0],[b0,c0,c],[b0,c,b]].filter(t=>{const u=t[1].map((v,i)=>v-t[0][i]),v=t[2].map((x,i)=>x-t[0][i]);return Math.hypot(u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0])>1e-10;}),
+  edges=[[a,b],[b,c],[c,e],[e,a],[a0,b0],[b0,c0],[c0,e0],[e0,a0],[a0,a],[b0,b],[c0,c],[e0,e]].filter(([p,q])=>Math.hypot(p[0]-q[0],p[1]-q[1],p[2]-q[2])>1e-10);
+  return [{meshTriangles:triangles,meshEdges:edges,onFace:true,preciseTubeEdge:true}];});
  ASSET_KIT.define('streetParcel',{...common,label:'段ボール箱',glyph:'▣',group:'streetObjects',w:.62,d:.46,h:.44,accent:'#cba475',minHeight:()=>.05,controls:[
    {key:'parcelTapeWidth',label:'テープ幅',default:.09,min:.01,max:o=>Math.max(.01,Math.abs(o.ra)*1.7),step:.01,unit:'m',handle:(o,v)=>({anchor:[0,0,o.h+.001],sample:[v/2,0,o.h+.001],probe:[(v+1)/2,0,o.h+.001],fallback:{x:1,y:0}})},
    {key:'parcelOpen',label:'ふたの開き',type:'range',default:0,min:0,max:180,step:1,unit:'°',handle:(o,v)=>({anchor:[-o.ra,0,o.h+.1],sample:[-o.ra+.12+v*.002,0,o.h+.1],probe:[-o.ra+1.12+v*.002,0,o.h+.1],fallback:{x:1,y:0},pixelsPerUnit:1})}

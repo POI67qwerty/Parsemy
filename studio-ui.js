@@ -20,7 +20,7 @@
         orthHandleGap = SH.orthHandleGap;
 
     // ===== 1. クイック操作パネルと作業画面 =====
-    // HTMLの既存サイドバーへ、人物・ポーズ・間取り・視点の操作UIを追加する。
+    // HTMLの既存サイドバーへ、人物・視点・オブジェクトの操作UIを追加する。
     if (P.hm == null) P.hm = 1.7;
     if (P.floorOn == null) P.floorOn = true;
     if (P.floorColor == null) P.floorColor = "#7fa8d8";
@@ -36,6 +36,7 @@
       <button type="button" class="workspaceTab" data-workspace-tab="character">人物</button>
       <button type="button" class="workspaceTab active" data-workspace-tab="perspective">視点</button>
       <button type="button" class="workspaceTab" data-workspace-tab="object">オブジェクト</button>
+      
     </nav>
 
     <section class="workspaceScreen" data-workspace-screen="character" hidden>
@@ -111,7 +112,6 @@
     // ===== 2. 作業画面の切り替え =====
     // 1つのパネル内で画面を切り替え、必要な入力だけを表示する。
     function setStudioWorkspace(name) {
-        // 旧プリセットのpose/floorplanを読み込んでも、削除した欄へ切り替えない。
         const tab = name === "character" || name === "pose" ? "character" : name === "object" ? "object" : "perspective";
         quick
             .querySelectorAll("[data-workspace-tab]")
@@ -119,6 +119,7 @@
         quick.querySelectorAll("[data-workspace-screen]").forEach((screen) => {
             screen.hidden = screen.dataset.workspaceScreen !== tab;
         });
+        if (name === "perspective" && window.cityFloorPlanActive) window.cityFloorPlanExit?.(true);
     }
     quick
         .querySelectorAll("[data-workspace-tab]")
@@ -128,7 +129,7 @@
     let quickSelectedId = null;
     window.cityGridObjectSelection = (id, explicit = false) => {
         if (id && (explicit || id !== quickSelectedId)) {
-            setStudioWorkspace("object");
+            if (!window.cityFloorPlanActive) setStudioWorkspace("object");
             if (editSection) editSection.open = true;
         }
         quickSelectedId = id || null;
@@ -3559,7 +3560,7 @@
         if (d.floorActive) {
             // 廃止した間取り欄の旧プリセットは「視点」を表示し、正投影はそのまま復元する。
             if (d.ui?.workspace && window.cityStudioWorkspace)
-                window.cityStudioWorkspace(d.ui.workspace === "floorplan" ? "perspective" : d.ui.workspace);
+                window.cityStudioWorkspace(d.ui.workspace);
             window.cityFloorPlanEnter?.(orthView || "top");
             if (Array.isArray(d.floorCenter)) window.cityFloorPlanCenter = [...d.floorCenter];
             if (Number.isFinite(d.floorScale)) window.cityFloorPlanScale = d.floorScale;
