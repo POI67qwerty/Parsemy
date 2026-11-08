@@ -881,6 +881,7 @@ const ASSET_KIT = (function () {
                 let edgeIndex = 0;
                 for (const seg of partEdges({...part,__owner:ctx.o})) {
                     const line=lineA(ctx.o, seg, color, width);
+                    if (part.roomShellWallSide) line.roomShellWallSide=part.roomShellWallSide;
                     if (part.signalPoleTopRing && edgeIndex === 1) {
                         line.signalPoleTopRing = true;
                         line.signalPoleContourView = orthView || "3d";
@@ -926,7 +927,7 @@ const ASSET_KIT = (function () {
         KIT_TRIS[kind] = (o) => {
             const parts = build(o, API) || [],
                 tris = [];
-            for (const part of parts) for (const t of partTris(part)) tris.push([L2W(o, ...t[0]), L2W(o, ...t[1]), L2W(o, ...t[2])]);
+            for (const part of parts) for (const t of partTris(part)) { const tri=[L2W(o,...t[0]),L2W(o,...t[1]),L2W(o,...t[2])]; if(part.roomShellWallSide)tri.roomShellWallSide=part.roomShellWallSide; tris.push(tri); }
             return tris;
         };
         return true;

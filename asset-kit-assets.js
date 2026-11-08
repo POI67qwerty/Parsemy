@@ -1918,6 +1918,14 @@ function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
   if(enabled){parts.push(pavementCurbRing(w,d,cw,b,bevel,bevelSegments,0,h+ch,h));
    parts.push({meshTriangles:[],meshEdges:curbEdges,onFace:true,preciseTubeEdge:true});}
   return parts;});
+ // 家具を配置するための部屋シェル。床＋四面の壁、家具・天井は含めない。
+ ASSET_KIT.define('roomShell',{label:'部屋',glyph:'⌂',group:'furniture',w:5,d:5,h:3,accent:'#c9a982',minHeight:()=>1.5,controls:[]},(o,K)=>{
+  const w=Math.max(.5,Math.abs(Number(o.ra)||2.5)*2),d=Math.max(.5,Math.abs(Number(o.rb)||2.5)*2),h=Math.max(1.5,Math.abs(Number(o.h)||3)),t=Math.min(.18,Math.max(.06,Math.min(w,d)*.025)),parts=[];
+  parts.push(K.box(K.rectPath(w,d),-t,0,{color:'#927b60',onFace:true}));
+  const wall=(side,path)=>parts.push(K.box(path,0,h,{roomShellWallSide:side,color:'#c9a982',onFace:true}));
+  wall('front',K.rectPath(w,t,0,-d/2+t/2));wall('back',K.rectPath(w,t,0,d/2-t/2));
+  wall('left',K.rectPath(t,d-2*t,-w/2+t/2,0));wall('right',K.rectPath(t,d-2*t,w/2-t/2,0));
+  return parts;});
  // 横断歩道の歩道切下げ。車道側から歩道側へ高さが上がる一体型スロープ。
  ASSET_KIT.define('streetCurbRamp',{...common,label:'歩道切下げスロープ',glyph:'▱',group:'traffic',w:1.8,d:1.0,h:.15,accent:'#a3aaa7',minHeight:()=>.02,controls:[
   {key:'curbRampRise',label:'歩道側の段差',default:.15,min:.02,max:1,step:.01,unit:'m',handle:(o,v)=>({anchor:[-o.ra,o.rb,0],sample:[-o.ra,o.rb,v],probe:[-o.ra,o.rb,v+1],fallback:{x:0,y:-1}})}

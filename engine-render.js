@@ -136,11 +136,21 @@ function addExportBoxFaces(out, o, w, d, z0, z1) {
 // 作り直すのは重いので、オブジェクトごとに結果を保持して使い回す。
 // キーはオブジェクトの現在値（数値・文字列・配列）をそのまま文字列にしたもの。
 // 値が1つでも変われば作り直すので、編集結果が古いまま残ることはない。
+function roomShellCameraSides(o) {
+    const sides=new Set();if(o?.asset!=="roomShell")return sides;
+    let vx,vy;
+    if(orthView){const v=orthBasis().depth.map(x=>-x);vx=v[0];vy=v[2];}
+    else {const cam=camPos(),origin=L2W(o,0,0,0);vx=cam[0]-origin[0];vy=cam[2]-origin[2];}
+    const a=(Number(o.rot)||0)*DG,c=Math.cos(a),s=Math.sin(a),lx=vx*c+vy*s,ly=-vx*s+vy*c,hw=Math.abs(Number(o.ra)||2.5),hd=Math.abs(Number(o.rb)||2.5);
+    if(lx>hw*.32)sides.add("right");else if(lx< -hw*.32)sides.add("left");
+    if(ly>hd*.32)sides.add("back");else if(ly< -hd*.32)sides.add("front");
+    return sides;
+}
 const surfaceTriCache = new WeakMap();
 function surfaceCacheKey(o) {
     try {
         const key=JSON.stringify(o);
-        return key;
+        return o?.asset==="roomShell"?`${key}|room:${[...roomShellCameraSides(o)].sort().join(",")}`:key;
     } catch (e) {
         const seen = new Set();
         return JSON.stringify(o, (key, value) => {
@@ -161,7 +171,9 @@ function surfaceTriangles(o) {
         key = surfaceCacheKey(source),
         hit = surfaceTriCache.get(o);
     if (hit && hit.key === key) return hit.tris;
-    const base = exportSurfaceTriangles(source), spec = arrayModifierSpec(source), tris = spec && spec.count > 1 ? [...base] : base;
+    let base = exportSurfaceTriangles(source);
+    if(source.asset==="roomShell"){const open=roomShellCameraSides(source);base=base.filter(t=>!open.has(t.roomShellWallSide));}
+    const spec = arrayModifierSpec(source), tris = spec && spec.count > 1 ? [...base] : base;
     // 面の遮蔽も各コピーに存在する。線と同じワールド軸・同じ間隔で展開する。
     if (spec && spec.count > 1 && base.length) {
         for (let i = 1; i < spec.count; i++) {
@@ -1946,6 +1958,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         strokeW(c, s);
         return;
     }
+    const wallAlpha=c.globalAlpha;if(s.roomShellWallSide&&roomShellCameraSides(s.ob).has(s.roomShellWallSide))c.globalAlpha=wallAlpha*.12;
     c.strokeStyle = s.c;
     c.lineWidth = layerLineWidth(s);
     c.lineCap = c.lineJoin = "round";
@@ -2302,6 +2315,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     });
     flushRun();
     c.stroke();
+    c.globalAlpha=wallAlpha;
 
 }
 
@@ -2746,10 +2760,12 @@ function stroke(c, s) {
     c.strokeStyle = s.c;
     c.lineWidth = effectiveLineWidth(s);
     c.lineCap = c.lineJoin = "round";
+    const oldAlpha=c.globalAlpha;if(s.roomShellWallSide&&roomShellCameraSides(s.ob).has(s.roomShellWallSide))c.globalAlpha=oldAlpha*.12;
     c.beginPath();
     c.moveTo(s.p[0].x, s.p[0].y);
     for (let i = 1; i < s.p.length; i++) c.lineTo(s.p[i].x, s.p[i].y);
     c.stroke();
+    c.globalAlpha=oldAlpha;
 }
 // 画像全体の面表示。surfaceMode=trueのとき、すべてのオブジェクトを半透明で塗る。
 // 面の三角形は既存の背面線除去用メッシュ定義を共有するので、線画と形状がずれない。

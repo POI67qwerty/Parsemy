@@ -10428,11 +10428,21 @@ function addExportBoxFaces(out, o, w, d, z0, z1) {
 // 作り直すのは重いので、オブジェクトごとに結果を保持して使い回す。
 // キーはオブジェクトの現在値（数値・文字列・配列）をそのまま文字列にしたもの。
 // 値が1つでも変われば作り直すので、編集結果が古いまま残ることはない。
+function roomShellCameraSides(o) {
+    const sides=new Set();if(o?.asset!=="roomShell")return sides;
+    let vx,vy;
+    if(orthView){const v=orthBasis().depth.map(x=>-x);vx=v[0];vy=v[2];}
+    else {const cam=camPos(),origin=L2W(o,0,0,0);vx=cam[0]-origin[0];vy=cam[2]-origin[2];}
+    const a=(Number(o.rot)||0)*DG,c=Math.cos(a),s=Math.sin(a),lx=vx*c+vy*s,ly=-vx*s+vy*c,hw=Math.abs(Number(o.ra)||2.5),hd=Math.abs(Number(o.rb)||2.5);
+    if(lx>hw*.32)sides.add("right");else if(lx< -hw*.32)sides.add("left");
+    if(ly>hd*.32)sides.add("back");else if(ly< -hd*.32)sides.add("front");
+    return sides;
+}
 const surfaceTriCache = new WeakMap();
 function surfaceCacheKey(o) {
     try {
         const key=JSON.stringify(o);
-        return key;
+        return o?.asset==="roomShell"?`${key}|room:${[...roomShellCameraSides(o)].sort().join(",")}`:key;
     } catch (e) {
         const seen = new Set();
         return JSON.stringify(o, (key, value) => {
@@ -10453,7 +10463,9 @@ function surfaceTriangles(o) {
         key = surfaceCacheKey(source),
         hit = surfaceTriCache.get(o);
     if (hit && hit.key === key) return hit.tris;
-    const base = exportSurfaceTriangles(source), spec = arrayModifierSpec(source), tris = spec && spec.count > 1 ? [...base] : base;
+    let base = exportSurfaceTriangles(source);
+    if(source.asset==="roomShell"){const open=roomShellCameraSides(source);base=base.filter(t=>!open.has(t.roomShellWallSide));}
+    const spec = arrayModifierSpec(source), tris = spec && spec.count > 1 ? [...base] : base;
     // 面の遮蔽も各コピーに存在する。線と同じワールド軸・同じ間隔で展開する。
     if (spec && spec.count > 1 && base.length) {
         for (let i = 1; i < spec.count; i++) {
@@ -12238,6 +12250,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         strokeW(c, s);
         return;
     }
+    const wallAlpha=c.globalAlpha;if(s.roomShellWallSide&&roomShellCameraSides(s.ob).has(s.roomShellWallSide))c.globalAlpha=wallAlpha*.12;
     c.strokeStyle = s.c;
     c.lineWidth = layerLineWidth(s);
     c.lineCap = c.lineJoin = "round";
@@ -12594,6 +12607,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     });
     flushRun();
     c.stroke();
+    c.globalAlpha=wallAlpha;
 
 }
 
@@ -13038,10 +13052,12 @@ function stroke(c, s) {
     c.strokeStyle = s.c;
     c.lineWidth = effectiveLineWidth(s);
     c.lineCap = c.lineJoin = "round";
+    const oldAlpha=c.globalAlpha;if(s.roomShellWallSide&&roomShellCameraSides(s.ob).has(s.roomShellWallSide))c.globalAlpha=oldAlpha*.12;
     c.beginPath();
     c.moveTo(s.p[0].x, s.p[0].y);
     for (let i = 1; i < s.p.length; i++) c.lineTo(s.p[i].x, s.p[i].y);
     c.stroke();
+    c.globalAlpha=oldAlpha;
 }
 // 画像全体の面表示。surfaceMode=trueのとき、すべてのオブジェクトを半透明で塗る。
 // 面の三角形は既存の背面線除去用メッシュ定義を共有するので、線画と形状がずれない。
@@ -20778,6 +20794,7 @@ const ASSET_KIT = (function () {
                 let edgeIndex = 0;
                 for (const seg of partEdges({...part,__owner:ctx.o})) {
                     const line=lineA(ctx.o, seg, color, width);
+                    if (part.roomShellWallSide) line.roomShellWallSide=part.roomShellWallSide;
                     if (part.signalPoleTopRing && edgeIndex === 1) {
                         line.signalPoleTopRing = true;
                         line.signalPoleContourView = orthView || "3d";
@@ -20823,7 +20840,7 @@ const ASSET_KIT = (function () {
         KIT_TRIS[kind] = (o) => {
             const parts = build(o, API) || [],
                 tris = [];
-            for (const part of parts) for (const t of partTris(part)) tris.push([L2W(o, ...t[0]), L2W(o, ...t[1]), L2W(o, ...t[2])]);
+            for (const part of parts) for (const t of partTris(part)) { const tri=[L2W(o,...t[0]),L2W(o,...t[1]),L2W(o,...t[2])]; if(part.roomShellWallSide)tri.roomShellWallSide=part.roomShellWallSide; tris.push(tri); }
             return tris;
         };
         return true;
@@ -23169,6 +23186,14 @@ function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
   const parts=[pavementSlab(K,w,d,h,bevel,bevelSegments),{meshTriangles:[],meshEdges:edges,onFace:true,...(enabled||bevel>1e-6?{preciseTubeEdge:true}:{})}];
   if(enabled){parts.push(pavementCurbRing(w,d,cw,b,bevel,bevelSegments,0,h+ch,h));
    parts.push({meshTriangles:[],meshEdges:curbEdges,onFace:true,preciseTubeEdge:true});}
+  return parts;});
+ // 家具を配置するための部屋シェル。床＋四面の壁、家具・天井は含めない。
+ ASSET_KIT.define('roomShell',{label:'部屋',glyph:'⌂',group:'furniture',w:5,d:5,h:3,accent:'#c9a982',minHeight:()=>1.5,controls:[]},(o,K)=>{
+  const w=Math.max(.5,Math.abs(Number(o.ra)||2.5)*2),d=Math.max(.5,Math.abs(Number(o.rb)||2.5)*2),h=Math.max(1.5,Math.abs(Number(o.h)||3)),t=Math.min(.18,Math.max(.06,Math.min(w,d)*.025)),parts=[];
+  parts.push(K.box(K.rectPath(w,d),-t,0,{color:'#927b60',onFace:true}));
+  const wall=(side,path)=>parts.push(K.box(path,0,h,{roomShellWallSide:side,color:'#c9a982',onFace:true}));
+  wall('front',K.rectPath(w,t,0,-d/2+t/2));wall('back',K.rectPath(w,t,0,d/2-t/2));
+  wall('left',K.rectPath(t,d-2*t,-w/2+t/2,0));wall('right',K.rectPath(t,d-2*t,w/2-t/2,0));
   return parts;});
  // 横断歩道の歩道切下げ。車道側から歩道側へ高さが上がる一体型スロープ。
  ASSET_KIT.define('streetCurbRamp',{...common,label:'歩道切下げスロープ',glyph:'▱',group:'traffic',w:1.8,d:1.0,h:.15,accent:'#a3aaa7',minHeight:()=>.02,controls:[
@@ -26541,7 +26566,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             ],
         },
         // 家具：椅子・スツール → カウンター → タンス・棚の順。
-        { key: "furniture", label: "家具", kinds: ["stool", "squareStool", "counter", "counterL", "counterU", "shopWardrobe", "shopWardrobe2", "displayShelf", "displayShelf2", "ufoCatcher", "gachaMachine", "tLegTable", "ramenBowl"] },
+        { key: "furniture", label: "家具", kinds: ["roomShell", "stool", "squareStool", "counter", "counterL", "counterU", "shopWardrobe", "shopWardrobe2", "displayShelf", "displayShelf2", "ufoCatcher", "gachaMachine", "tLegTable", "ramenBowl"] },
         { key: "train", label: "電車", kinds: ["trainBench", "trainSeat", "trainDividedBench", "trainDividedSeat", "trainStraps", "trainPole", "trainHandrail", "trainWindowWall", "trainSlidingDoor"] },
         { key: "person", label: "人間", kinds: ["person"] },
         // 車（人物の隣）。キャブは五角形の立体、荷台は直方体、タイヤは円柱で作る。

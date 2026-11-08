@@ -1220,7 +1220,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             ],
         },
         // 家具：椅子・スツール → カウンター → タンス・棚の順。
-        { key: "furniture", label: "家具", kinds: ["stool", "squareStool", "counter", "counterL", "counterU", "shopWardrobe", "shopWardrobe2", "displayShelf", "displayShelf2", "ufoCatcher", "gachaMachine", "tLegTable", "ramenBowl"] },
+        { key: "furniture", label: "家具", kinds: ["roomShell", "stool", "squareStool", "counter", "counterL", "counterU", "shopWardrobe", "shopWardrobe2", "displayShelf", "displayShelf2", "ufoCatcher", "gachaMachine", "tLegTable", "ramenBowl"] },
         { key: "train", label: "電車", kinds: ["trainBench", "trainSeat", "trainDividedBench", "trainDividedSeat", "trainStraps", "trainPole", "trainHandrail", "trainWindowWall", "trainSlidingDoor"] },
         { key: "person", label: "人間", kinds: ["person"] },
         // 車（人物の隣）。キャブは五角形の立体、荷台は直方体、タイヤは円柱で作る。
