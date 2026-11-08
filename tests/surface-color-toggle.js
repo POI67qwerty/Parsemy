@@ -1,0 +1,6 @@
+const assert=require('assert');const{open,ADD_FN}=require('./lib');
+(async()=>{const{browser,page,errors}=await open();await page.evaluate(ADD_FN);const r=await page.evaluate(()=>{
+ S.length=0;clearSelection();__add('building',1);setOb(sel,{ra:2,rb:1.5,h:3});sel=null;P.surfaceMode=true;window.__surfaceColors=false;const g=document.getElementById('gon'),hz=document.getElementById('hzl');if(g)g.checked=false;if(hz)hz.checked=false;
+ const measure=()=>{render();const d=ctx.getImageData(0,0,W,H).data;let chroma=0,dark=0;for(let i=0;i<d.length;i+=4){if(Math.max(d[i],d[i+1],d[i+2])-Math.min(d[i],d[i+1],d[i+2])>18)chroma++;if(Math.max(d[i],d[i+1],d[i+2])<80)dark++;}return{chroma,dark};};
+ const off=measure(),b=document.getElementById('surfaceColorToggle');b?.click();const on=measure();b?.click();const offAgain=measure();return{surface:P.surfaceMode,off,on,offAgain,button:!!b,text:b?.textContent};
+});console.log(JSON.stringify({r,errors}));assert(r.surface&&r.button);assert(r.off.chroma<r.on.chroma&&r.offAgain.chroma<r.on.chroma);assert(r.off.dark>0&&r.offAgain.dark>0,'hidden-line rendering should remain when fills are off');assert.strictEqual(errors.length,0);await browser.close();console.log('OK: CPU hidden-line mode separates surface color fill from occlusion');})().catch(e=>{console.error(e);process.exit(1)});

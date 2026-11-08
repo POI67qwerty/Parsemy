@@ -34,7 +34,7 @@ function f1AwningTinControls() {
 function f1FacadeControls() {
     const visible=()=>window.__f1EditFeature==="facade", base={type:"range",handleOnly:true,canvasSlider:true,canvasVisible:visible,f1Feature:"facade",unit:"m",step:.02};
     return [
-        {key:"facadeSides",label:"ファサードを側面にも回す",type:"boolean",default:false,canvasVisible:visible,f1Feature:"facade",handleOnly:true},
+        {key:"facadeSides",label:"ファサードを左右の側面にも回す",type:"boolean",default:false,canvasVisible:visible,f1Feature:"facade",handleOnly:true},
         {...base,key:"facadeWidth",label:"ファサード幅",default:4,min:.2,max:o=>Math.max(.2,Math.abs(Number(o.ra)||2)*2),get:o=>Number(o.facadeWidth)||Math.abs(Number(o.ra)||2)*2,
             handle:(o,v)=>({anchor:[0,-Math.abs(Number(o.rb)||1.5),o.h],sample:[v/2,-Math.abs(Number(o.rb)||1.5),o.h],probe:[v/2+1,-Math.abs(Number(o.rb)||1.5),o.h],fallback:{x:1,y:0}})},
         {...base,key:"facadeHeight",label:"ファサード高さ",default:.7,min:.05,max:o=>Math.max(.05,Number(o.h)||3),get:o=>Number(o.facadeHeight)||Math.min(.7,(Number(o.h)||3)*.22),
@@ -99,6 +99,9 @@ const ASSETS = {
         h: 3.6,
         cornerOffset: 0.8,
         cornerCutCorner: "front-left",
+        bevelOffset: 0,
+        bevelSegments: 4,
+        controls: [{ key:"bevelOffset", label:"Z軸辺のベベル", type:"range", canvasSlider:true, default:0, min:0, max:o=>{const w=Math.abs(Number(o.ra)||2.1),d=Math.abs(Number(o.rb)||1.8),cut=Math.abs(Number(o.cornerOffset)||0);return Math.min(Math.min(w,d)*.2,cut>1e-5?cut*.35:Math.min(w,d)*.2);}, step:.01, unit:"m", handle:(o,v)=>{const x=Math.abs(Number(o.ra)||2.1),y=-Math.abs(Number(o.rb)||1.8),z=Math.max(.01,Number(o.h)||.01);return{anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}};} },{key:"facadeSides",label:"ファサードを左右の側面にも回す",type:"boolean",default:false,handleOnly:true,canvasToggle:true,canvasVisible:o=>o?.facadeEnabled===true}],
         cornerCutOpeningW: 0.7,
         cornerCutOpeningH: 2.2,
         cornerCutOpeningDepth: 0.8,
@@ -149,7 +152,7 @@ const ASSETS = {
         { key: "f1SignEnabled", label: "正面看板をつける", type: "boolean", default: false, handleOnly: true },
         { key: "wallSideSignEnabled", label: "横壁看板をつける", type: "boolean", default: false, handleOnly: true },
         { key: "facadeEnabled", label: "ファサード看板をつける", type: "boolean", default: false, handleOnly: true },
-        { key: "facadeSides", label: "ファサードを横壁にも回す", type: "boolean", default: false, handleOnly: true },
+        { key: "facadeSides", label: "ファサードを左右の側面にも回す", type: "boolean", default: false, handleOnly: true, canvasToggle: true, canvasVisible:o=>o?.facadeEnabled===true },
         ...f1PartControls("awning"), ...f1AwningTinControls(), ...f1PartControls("sign"), ...f1FacadeControls(),
         { key: "bevelOffset", label: "Z軸辺のベベル", type: "range", canvasSlider: true, default: 0, min: 0, max: o => Math.min(Math.abs(o.ra), Math.abs(o.rb)) * 0.22, step: 0.01, unit: "m", handle: (o,v) => { const x=Math.abs(Number(o.ra)||2), y=-Math.abs(Number(o.rb)||1.5), z=Math.max(.01,Number(o.h)||.01); return {anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}}; } }
     ], accent: "#8ce6c2" },
@@ -179,8 +182,8 @@ const ASSETS = {
         recessedWindowBottom: 0.48,
         recessedSillHeight: 0.48,
         recessedSideWindowW: 2.4,
-        recessedWindowMarginLeft: 0.85,
-        recessedWindowMarginEnd: 0.75,
+        recessedWindowMarginLeft: 0,
+        recessedWindowMarginEnd: 0,
         recessedJunctionOffset: 0,
         recessedSideWindows: true,
         accent: "#b6d9d5",
@@ -388,44 +391,15 @@ function beveledWireBoxA(o, cx, cy, w, d, z0, z1, offset = 0.06, segments = 3, c
 }
 // 隅切り直方体の底面・上面と縦辺を描く。切り口の辺だけを赤くして、
 // 図面上でも「どこを隅切りしているか」とオフセット方向を読み取りやすくする。
-function cornerCutWireBoxA(o, w, d, z0, z1, offset, corner, color = o.c || "#e7fff4", cutColor = "#e24b4b") {
-    const footprint = cornerCutFootprint(w, d, offset, corner),
-        out = [],
-        cutStart = footprint.length - 1,
-        edgeColor = (index) => (index === cutStart ? cutColor : color);
-    for (let i = 0; i < footprint.length; i++) {
-        const j = (i + 1) % footprint.length;
-        out.push(
-            lineA(
-                o,
-                [
-                    [footprint[i][0], footprint[i][1], z0],
-                    [footprint[j][0], footprint[j][1], z0],
-                ],
-                edgeColor(i),
-            ),
-            lineA(
-                o,
-                [
-                    [footprint[i][0], footprint[i][1], z1],
-                    [footprint[j][0], footprint[j][1], z1],
-                ],
-                edgeColor(i),
-            ),
-        );
+function cornerCutWireBoxA(o,w,d,z0,z1,offset,corner,color=o.c||"#e7fff4",cutColor="#e24b4b",bevel=0,segments=4) {
+    const base=cornerCutFootprint(w,d,offset,corner),data=beveledPolygonData(base,bevel,segments),footprint=data.points,out=[],cutEdge=base.length-1,
+        edgeColor=i=>data.edgeSources[i]===cutEdge?cutColor:color;
+    for(let i=0;i<footprint.length;i++){
+        const j=(i+1)%footprint.length,a=footprint[i],b=footprint[j];
+        out.push(lineA(o,[[a[0],a[1],z0],[b[0],b[1],z0]],edgeColor(i)),lineA(o,[[a[0],a[1],z1],[b[0],b[1],z1]],edgeColor(i)));
     }
-    footprint.forEach(([x, y], index) =>
-        out.push(
-            lineA(
-                o,
-                [
-                    [x, y, z0],
-                    [x, y, z1],
-                ],
-                index === 0 || index === cutStart ? cutColor : color,
-            ),
-        ),
-    );
+    const cutVertices=new Set([0,base.length-1]);
+    data.apexes.forEach((p,i)=>{const line=lineA(o,[[p[0],p[1],z0],[p[0],p[1],z1]],cutVertices.has(i)?cutColor:color);out.push(line);});
     return out;
 }
 // 隅切り面の開口を線画で描く。切り口を分割し、開口内部の側面・上面・奥壁を追加する。
@@ -497,6 +471,24 @@ function beveledBoxFootprint(width, depth, offset, segmentCount) {
         }
     });
     return out;
+}
+// 任意の凸多角形のZ軸辺を丸める。戻り値のedgeSourcesは各輪郭辺が
+// 元多角形のどの辺か（丸みの弧は-1）を示し、隅切り面の色分けに使う。
+function beveledPolygonData(path, offset, segmentCount=4) {
+    const n=path.length,r=Math.max(0,Number(offset)||0),segments=beveledBoxSegments(segmentCount);
+    if(n<3)return{points:path.map(p=>p.slice()),edgeSources:path.map((_,i)=>i),apexes:path.map(p=>p.slice())};
+    if(r<=1e-6)return{points:path.map(p=>p.slice()),edgeSources:path.map((_,i)=>i),apexes:path.map(p=>p.slice())};
+    const area=path.reduce((sum,p,i)=>{const q=path[(i+1)%n];return sum+p[0]*q[1]-q[0]*p[1];},0),turn=area>=0?1:-1,arcs=[];
+    for(let i=0;i<n;i++){
+        const v=path[i],prev=path[(i+n-1)%n],next=path[(i+1)%n],u1=[prev[0]-v[0],prev[1]-v[1]],u2=[next[0]-v[0],next[1]-v[1]],
+            l1=Math.hypot(...u1),l2=Math.hypot(...u2),a=u1.map(x=>x/l1),b=u2.map(x=>x/l2),theta=Math.acos(clamp(a[0]*b[0]+a[1]*b[1],-1,1)),
+            tangent=Math.min(r/Math.max(1e-6,Math.tan(theta/2)),l1*.45,l2*.45),radius=tangent*Math.tan(theta/2),bis=[a[0]+b[0],a[1]+b[1]],bl=Math.hypot(...bis),center=[v[0]+bis[0]/bl*radius/Math.max(1e-6,Math.sin(theta/2)),v[1]+bis[1]/bl*radius/Math.max(1e-6,Math.sin(theta/2))],
+            start=[v[0]+a[0]*tangent,v[1]+a[1]*tangent],startA=Math.atan2(start[1]-center[1],start[0]-center[0]),sweep=turn*(Math.PI-theta);
+        arcs.push(Array.from({length:segments+1},(_,j)=>{const q=startA+sweep*j/segments;return[center[0]+radius*Math.cos(q),center[1]+radius*Math.sin(q)];}));
+    }
+    const points=[],edgeSources=[],apexes=[];
+    arcs.forEach((arc,i)=>{arc.forEach((p,j)=>{points.push(p);if(j<arc.length-1)edgeSources.push(-1);});apexes.push(arc[Math.round(segments/2)].slice());edgeSources.push(i);});
+    return{points,edgeSources,apexes};
 }
 // ベベルの縦の稜線をどう扱うか。
 //
@@ -624,10 +616,13 @@ function cornerCutBoxParams(o) {
         d = Math.max(0.01, Math.abs(Number(o?.rb) || 0.01) * 2),
         max = Math.max(0, Math.min(w, d) * 0.5 - 0.001),
         cornerOffset = clamp(Number(o?.cornerOffset) || 0, 0, max),
+        bevelMax=Math.min(Math.min(w,d)*.2,cornerOffset>1e-5?cornerOffset*.35:Math.min(w,d)*.2),
+        bevelOffset=clamp(Number(o?.bevelOffset)||0,0,bevelMax),
+        bevelSegments=beveledBoxSegments(o?.bevelSegments, null, 4),
         cornerCutCorner = ["front-left", "front-right", "back-right", "back-left"].includes(o?.cornerCutCorner)
             ? o.cornerCutCorner
             : "front-left";
-    return { w, d, max, cornerOffset, cornerCutCorner };
+    return { w, d, max, cornerOffset, cornerCutCorner, bevelOffset, bevelMax, bevelSegments };
 }
 function cornerCutOpeningRayDistance(origin, direction, polygon) {
     const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
@@ -786,8 +781,8 @@ function recessedStackedBuildingParams(o) {
         cornerBevel = clamp(finite(o?.recessedCornerBevel, 0.45), 0, insetMax),
         cornerBevelSegments = clamp(Math.round(finite(o?.recessedCornerBevelSegments, 4)), 1, 8),
         totalH = firstFloorHeight + Math.max(0, floorCount - 1) * (floorHeight + floorGap),
-        frontWindowMax = Math.max(0.2, w - cornerBevel - 0.3),
-        sideWindowMax = Math.max(0.2, d - cornerBevel - 0.3),
+        frontWindowMax = Math.max(0.2, w - cornerBevel),
+        sideWindowMax = Math.max(0.2, d - cornerBevel),
         // 窓帯は建物全体の寸法に追従させ、編集するのは両端の壁幅だけにする。
         // 古いデータ（窓の幅・側面窓の幅）からは端の幅を逆算して引き継ぐ。
         marginLeft = clamp(
@@ -1929,8 +1924,9 @@ function wireCylinderA(o, cx, cy, r, z0, z1, segments = 12, color) {
 }
 // 2D多角形（[[x,y], …]）を z0→z1 へ押し出したワイヤー。
 // 柱・看板の枠・風変わりな建物など「任意の断面」をそのまま立体にできる。
-function wirePrismA(o, polygon, z0, z1, color) {
-    const poly = (polygon || []).filter((q) => Array.isArray(q) && q.length >= 2);
+function wirePrismA(o, polygon, z0, z1, color, bevel=0, segments=4) {
+    const raw = (polygon || []).filter((q) => Array.isArray(q) && q.length >= 2),
+        poly = bevel>1e-6?beveledPolygonData(raw,bevel,segments).points:raw;
     if (poly.length < 3) return [];
     const Z0 = finiteNumber(z0, 0),
         Z1 = finiteNumber(z1, 0),
@@ -1946,18 +1942,8 @@ function wirePrismA(o, polygon, z0, z1, color) {
                 color,
             ),
         ];
-    poly.forEach(([x, y]) =>
-        out.push(
-            lineA(
-                o,
-                [
-                    [x, y, Z0],
-                    [x, y, Z1],
-                ],
-                color,
-            ),
-        ),
-    );
+    const verticals=bevel>1e-6?beveledPolygonData(raw,bevel,segments).apexes:raw;
+    verticals.forEach(([x,y])=>out.push(lineA(o,[[x,y,Z0],[x,y,Z1]],color)));
     return out;
 }
 // 2D多角形を底面にして、1点（apex）へ集めるワイヤー（錐・ドーム・尖塔）。
@@ -2282,10 +2268,13 @@ function linesCornerCutBox(ctx) {
     if (q.enabled) out.push(...cornerCutOpeningWireBoxA(o, q, z1, c, o.cutColor || "#e24b4b"));
     else
         out.push(
-            ...cornerCutWireBoxA(o, q.w, q.d, 0, z1, q.cornerOffset, q.cornerCutCorner, c, o.cutColor || "#e24b4b"),
+            ...cornerCutWireBoxA(o,q.w,q.d,0,z1,q.cornerOffset,q.cornerCutCorner,c,o.cutColor||"#e24b4b",q.bevelOffset,q.bevelSegments),
         );
     const fascia=cornerCutFasciaParts(o);
-    if(fascia.g.enabled) fascia.parts.forEach(part=>out.push(...wirePrismA(o,part,fascia.g.z0,fascia.g.z1,c)));
+    if(fascia.g.enabled){
+        if(!q.enabled&&q.bevelOffset>1e-6)out.push(...cornerCutFasciaBevelWire(o,c));
+        else fascia.parts.forEach(part=>out.push(...wirePrismA(o,part,fascia.g.z0,fascia.g.z1,c)));
+    }
 }
 
 // --- 横壁看板 ---
@@ -3337,7 +3326,9 @@ function personPose(o) {
         kneeAngles = [
             clamp(finiteNumber(q.personKneeL, 0), 0, 120),
             clamp(finiteNumber(q.personKneeR, 0), 0, 120),
-        ];
+        ],
+        armShoulderAngles=[clamp(finiteNumber(q.personArmShoulderL,0),-100,100),clamp(finiteNumber(q.personArmShoulderR,0),-100,100)],
+        armElbowAngles=[clamp(finiteNumber(q.personArmElbowL,0),-135,135),clamp(finiteNumber(q.personArmElbowR,0),-135,135)];
     const bw = 0.28 * h * bodyScale * shoulderScale,
         bd = 0.16 * h * bodyScale,
         legR = 0.055 * h * bodyScale,
@@ -3386,6 +3377,13 @@ function personPose(o) {
                 foot = { x, y: knee.y + dirShin[0] * shinLen, z: knee.z + dirShin[1] * shinLen };
             return { hip, knee, foot };
         }),
+        arms=[0,1].map(i=>{
+            const side=i?1:-1,shoulder={x:side*bw*.43,y:bodyY-.025*h,z:torso1*.94},upperLen=.205*h,foreLen=.19*h,
+                a0=(12+armShoulderAngles[i])*DG,a1=(12+armShoulderAngles[i]-armElbowAngles[i])*DG,
+                elbow={x:shoulder.x+side*upperLen*Math.sin(a0),y:shoulder.y,z:shoulder.z-upperLen*Math.cos(a0)},
+                wrist={x:elbow.x+side*foreLen*Math.sin(a1),y:elbow.y-.008*h,z:elbow.z-foreLen*Math.cos(a1)};
+            return{shoulder,elbow,wrist,radius:.028*h,upperAngle:armShoulderAngles[i],elbowAngle:armElbowAngles[i]};
+        }),
         // 腰の支点。ここを中心に上体（胴の上面・首・頭）を回す。
         waistPivot = { y: 0, z: torso0 },
         tiltAbout = (y, z, deg, py = waistPivot.y, pz = waistPivot.z) => {
@@ -3425,9 +3423,9 @@ function personPose(o) {
     return {
         h, bw, bd, legR, headR, legTop, torso0, torso1, head0, head1,
         bodyY, headY: headC0.y, headTopX, poseTop, headTilt, pose, stride, crouch, lean,
-        waistAngle, neckAngle, hipAngles, kneeAngles,
+        waistAngle, neckAngle, hipAngles, kneeAngles, armShoulderAngles, armElbowAngles,
         waistPivot, neckBase, headAxis, headC0, headC1,
-        torsoBottom, torsoTop, legs,
+        torsoBottom, torsoTop, legs, arms,
     };
 }
 // 身長・体格・頭身・脚の開き・ポーズ・関節角度を線画へ反映する。
@@ -3435,67 +3433,17 @@ function linesPerson(ctx) {
     const { o, c, a, out } = ctx,
         p = personPose(o),
         h = p.h,
-        line = (pts, col = c, width = 1.4) => out.push(lineA(o, pts, col, width));
+        line = (pts, col = c, width = 1.4, flags = null) => out.push({ ...lineA(o, pts, col, width), ...(flags || {}) });
     // 足元の台座（立方体）は描かない。人物は「そのまま立っている」形にして、
     // 配置したときに足元の箱が他のアセットと重ならないようにする。
-    // 脚：股関節 → 膝 → 足。関節角度は personPose() の中で反映済み。
-    p.legs.forEach((leg) => {
-        line(
-            [
-                [leg.hip.x, leg.hip.y, leg.hip.z],
-                [leg.knee.x, leg.knee.y, leg.knee.z],
-                [leg.foot.x, leg.foot.y, leg.foot.z],
-            ],
-            c,
-            1.4,
-        );
-        // 膝の関節が分かるよう、小さな点を打つ
-        line(
-            [
-                [leg.knee.x - 0.012 * h, leg.knee.y, leg.knee.z],
-                [leg.knee.x + 0.012 * h, leg.knee.y, leg.knee.z],
-            ],
-            a,
-            0.9,
-        );
-    });
+    // 腕・脚は後段で面メッシュからカメラ視点に応じた輪郭線だけを抽出する。
     // 胴：下の面は固定、上の面は腰の角度ぶん傾けた四角柱
     const bottom = p.torsoBottom,
         top = p.torsoTop;
     line([...bottom, bottom[0]], c, 1.15);
     line([...top, top[0]], c, 1.15);
     bottom.forEach((q, i) => line([q, top[i]], a, 0.95));
-    // 肩の線と首
-    line(
-        [
-            [p.torsoTop[0][0], p.torsoTop[0][1], p.torsoTop[0][2]],
-            [p.torsoTop[1][0], p.torsoTop[1][1], p.torsoTop[1][2]],
-        ],
-        a,
-        1,
-    );
-    line(
-        [
-            [0, p.neckBase.y, p.neckBase.z],
-            [0, p.headC0.y, p.headC0.z],
-        ],
-        c,
-        1.1,
-    );
-    // 頭：首の角度ぶん傾いた2つのリングと縦の骨
-    const ringAt = (rx, ry, x0, y0, z, n, color) => {
-        const pts = [];
-        for (let i = 0; i < n; i++) {
-            const t = (i / n) * Math.PI * 2;
-            pts.push([x0 + rx * Math.cos(t), y0 + ry * Math.sin(t), z]);
-        }
-        return polyA(o, pts, color);
-    };
-    out.push(ringAt(p.headR, p.headR * 0.9, 0, p.headC0.y, p.headC0.z, 8, c));
-    out.push(ringAt(p.headR * 0.86, p.headR * 0.78, p.headTopX, p.headC1.y, p.headC1.z, 8, c));
-    out.push(
-        ...spokesA(o, [0, p.headC0.y], [p.headR, p.headR * 0.9], p.headC0.z, [p.headTopX, p.headC1.y], [p.headR * 0.86, p.headR * 0.78], p.headC1.z, 8, c, 0.85),
-    );
+    // 頭部も球状メッシュから視点依存の輪郭線だけを使い、顔の中身は描かない。
     // 姿勢の高さ目盛り
     const mx = 0.42 * h;
     line(
@@ -3566,6 +3514,57 @@ function cornerCutFasciaParts(o) {
         parts.push([a,b,endB,endA]);
     }
     return {g,inner,outer,parts};
+}
+// ベベルした隅切り輪郭に沿って、ファサードの帯を連続した経路として構成する。
+// 各面を個別に丸めて重ねるのではなく、共有する丸みを一度だけ使い、線の二重描画を防ぐ。
+function cornerCutFasciaBevelData(o) {
+    const q=cornerCutBoxParams(o),base=cornerCutFasciaParts(o),g=base.g;
+    if(!g.enabled||q.bevelOffset<=1e-6)return null;
+    const seg=q.bevelSegments,p=g.projection,outerOffset=q.cornerOffset>1e-6?q.cornerOffset+(2-Math.SQRT2)*p:0,
+        outerBase=cornerCutFootprint(q.w+2*p,q.d+2*p,outerOffset,q.cornerCutCorner),
+        innerData=beveledPolygonData(base.inner,q.bevelOffset,seg),
+        outerData=beveledPolygonData(outerBase,q.bevelOffset+p,seg),n=base.inner.length,
+        selected=new Set([n-1]);
+    if(g.side){selected.add(0);selected.add(n-2);}
+    const included=innerData.edgeSources.map((source,k)=>{
+        if(source>=0)return selected.has(source);
+        const corner=Math.floor(k/(seg+1))%n;
+        return selected.has((corner+n-1)%n)&&selected.has(corner);
+    });
+    return{g,q,inner:innerData.points,outer:outerData.points,included,segments:seg,
+        starts:included.map((yes,k)=>yes&&!included[(k+included.length-1)%included.length]),
+        ends:included.map((yes,k)=>yes&&!included[(k+1)%included.length]),
+        apexIndices:Array.from({length:n},(_,i)=>i*(seg+1)+Math.round(seg/2))};
+}
+function cornerCutFasciaBevelWire(o,color=o.c||"#e7fff4") {
+    const d=cornerCutFasciaBevelData(o);if(!d)return[];
+    const out=[],z0=d.g.z0,z1=d.g.z1,L=(p,z)=>[p[0],p[1],z],N=d.included.length,seen=new Set(),
+        add=(a,b)=>{const key=[a,b].map(p=>p.map(v=>Math.round(v*1e6)).join(',')).sort().join('|');if(seen.has(key))return;seen.add(key);out.push(lineA(o,[a,b],color));};
+    for(let k=0;k<N;k++)if(d.included[k]){
+        const j=(k+1)%N;
+        for(const p of [d.inner,d.outer]){add(L(p[k],z0),L(p[j],z0));add(L(p[k],z1),L(p[j],z1));}
+        if(d.starts[k])for(const p of [d.inner,d.outer])add(L(p[k],z0),L(p[k],z1));
+        if(d.ends[k])for(const p of [d.inner,d.outer])add(L(p[j],z0),L(p[j],z1));
+    }
+    d.apexIndices.forEach((i,corner)=>{
+        const prev=(i+N-1)%N,next=i;
+        if(!d.included[prev]||!d.included[next])return;
+        for(const p of [d.inner,d.outer])add(L(p[i],z0),L(p[i],z1));
+    });
+    return out;
+}
+function cornerCutFasciaBevelTriangles(o) {
+    const d=cornerCutFasciaBevelData(o);if(!d)return[];
+    const out=[],z0=d.g.z0,z1=d.g.z1,N=d.included.length,P=(p,z)=>[p[0],p[1],z],
+        tri=(a,b,c)=>out.push([a,b,c]),quad=(a,b,c,e)=>{tri(a,b,c);tri(a,c,e);};
+    for(let k=0;k<N;k++)if(d.included[k]){
+        const j=(k+1)%N,ia=P(d.inner[k],z0),ib=P(d.inner[j],z0),oa=P(d.outer[k],z0),ob=P(d.outer[j],z0),
+            IA=P(d.inner[k],z1),IB=P(d.inner[j],z1),OA=P(d.outer[k],z1),OB=P(d.outer[j],z1);
+        quad(ia,ib,ob,oa);quad(IA,OA,OB,IB);quad(oa,ob,OB,OA);quad(ia,IA,IB,ib);
+        if(d.starts[k])quad(ia,oa,OA,IA);
+        if(d.ends[k])quad(ib,IB,OB,ob);
+    }
+    out.forEach(t=>t.surfaceColor=d.g.color);return out;
 }
 function appendBuildingFascia(o,out) {
     const g=buildingFasciaGeometry(o); if(!g.enabled) return;

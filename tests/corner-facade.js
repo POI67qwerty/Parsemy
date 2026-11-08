@@ -35,7 +35,7 @@ const {open,ADD_FN}=require('./lib');
    document.getElementById('cornerFacadeSides').click();
    const color=document.getElementById('cornerFacadeColor');color.value='#1234ab';color.dispatchEvent(new Event('input',{bubbles:true}));
    const height=document.getElementById('cornerFacadeHeight');height.value='0.9';height.dispatchEvent(new Event('input',{bubbles:true}));height.dispatchEvent(new Event('change',{bubbles:true}));
-   const out=obOf(sel),g=buildingFasciaGeometry(out),q=cornerCutOpeningParams(out),visibleColor=!!surfState?.entries.get(out.id)?.tris?.some(t=>t.color==='#1234ab'),restored=buildingFasciaGeometry(normalizedAsset(JSON.parse(JSON.stringify(out)))),saved=restored.enabled&&restored.side&&restored.color==='#1234ab'&&Math.abs(restored.height-.9)<1e-8;
+   const out=obOf(sel),g=buildingFasciaGeometry(out),q=cornerCutOpeningParams(out),visibleColor=surfaceTriangles(out).some(t=>t.surfaceColor==='#1234ab'),restored=buildingFasciaGeometry(normalizedAsset(JSON.parse(JSON.stringify(out)))),saved=restored.enabled&&restored.side&&restored.color==='#1234ab'&&Math.abs(restored.height-.9)<1e-8;
    const openingSame=JSON.stringify(p)===JSON.stringify(q);
    document.getElementById('cornerFacadeEnabled').click();const off=!buildingFasciaGeometry(obOf(sel)).enabled;
    document.getElementById('cornerFacadeEnabled').click();const on=buildingFasciaGeometry(obOf(sel)).enabled;

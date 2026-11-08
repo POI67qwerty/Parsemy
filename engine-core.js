@@ -441,6 +441,14 @@ $("surfaceToggle").onclick = () => {
     syncSurfaceToggle();
     render();
 };
+// 面ONでは隠面処理を有効にし、面の塗り色は別ボタンで任意に表示する。
+window.__surfaceColors=false;
+const surfaceColorToggle=document.createElement("button");
+surfaceColorToggle.type="button";surfaceColorToggle.id="surfaceColorToggle";surfaceColorToggle.className="toolBtn";
+surfaceColorToggle.textContent="面色 OFF";surfaceColorToggle.title="面表示の塗り色を切り替えます。OFFでも隠面処理は有効です";
+surfaceColorToggle.setAttribute("aria-pressed","false");
+$("surfaceToggle").after(surfaceColorToggle);
+surfaceColorToggle.onclick=()=>{window.__surfaceColors=!window.__surfaceColors;surfaceColorToggle.classList.toggle("on",window.__surfaceColors);surfaceColorToggle.textContent=`面色 ${window.__surfaceColors?"ON":"OFF"}`;surfaceColorToggle.setAttribute("aria-pressed",String(window.__surfaceColors));render();};
 function leaveOrthView(changedKey) {
     if (standardApplying) return;
     // 間取り中は左パネルのカメラ値を変更しても正投影を解除しない。
@@ -1470,6 +1478,7 @@ const lockedObjectCount = () => {
 // attachment.verticalOnly の子は、移動時にこの接続面から離れない。
 function syncAttachedPart(o, parentOverride = null) {
     const a = o?.attachment;
+    if(a?.sceneParent||a?.sceneWorld)return o;
     if (!a?.parentId) return o;
     const parent = parentOverride || obOf(a.parentId);
     if (!parent) return o;
@@ -1718,7 +1727,7 @@ function setOb(id, patch) {
     // 接続子の幅・横方向の面ハンドルは、反対側の面を固定したまま編集する。
     // syncAttachedPartで接着面へ戻す前に、移動後の中心を親ローカルXへ記録する。
     if (
-        o.attachment &&
+        o.attachment && !o.attachment.sceneParent && !o.attachment.sceneWorld &&
         ((patch && Object.prototype.hasOwnProperty.call(patch, "ca")) ||
             (patch && Object.prototype.hasOwnProperty.call(patch, "cb")))
     ) {
@@ -1737,7 +1746,7 @@ function setOb(id, patch) {
                 : { ...next.attachment, x: localX };
         }
     }
-    if (o.attachment && patch && Object.prototype.hasOwnProperty.call(patch, "lift")) {
+    if (o.attachment && !o.attachment.sceneParent && !o.attachment.sceneWorld && patch && Object.prototype.hasOwnProperty.call(patch, "lift")) {
         const parent = obOf(o.attachment.parentId);
         if (parent) {
             const parentBase = L2W(parent, 0, 0, 0)[1],
@@ -1768,16 +1777,17 @@ function setOb(id, patch) {
             } else next.attachment = { ...next.attachment, offsetZ: rawBase - parentBase - baseZ };
         }
     }
+    const transformPatch=patch&&["ca","cb","lift","off","rot","rotX","rotZ","k","d"].some(k=>Object.prototype.hasOwnProperty.call(patch,k));
+    if(transformPatch&&o.attachment?.sceneParent){const raw={...next};delete raw.attachment;const parent=obOf(o.attachment.parentId);if(parent)next.attachment=sceneParentMatrix(raw,parent);}
+    else if(transformPatch&&o.attachment?.sceneWorld){const raw={...next};delete raw.attachment;next.attachment={sceneWorld:true,sceneMatrix:sceneWorldMatrix(raw)};}
     const replace = (def) => {
         S = [...S.filter((s) => !(s.ob && s.ob.id === def.id)), ...genShape(syncAttachedPart(def))];
     };
     replace(next);
-    // 親の面を編集したときは、接続している子も同時に再配置する。
-    const childIds = [...new Set(S.filter((s) => s.ob && s.ob.attachment?.parentId === id).map((s) => s.ob.id))];
-    childIds.forEach((childId) => {
-        const child = obOf(childId);
-        if (child) replace(child);
-    });
+    // 親の変形は子孫まで反映する（ネストしたグループも更新）。
+    const childIds=[],seen=new Set([id]);let frontier=[id];
+    while(frontier.length){const nextIds=[];for(const parentId of frontier)for(const s of S){const child=s?.ob;if(child?.attachment?.parentId===parentId&&!seen.has(child.id)){seen.add(child.id);nextIds.push(child.id);}}childIds.push(...nextIds);frontier=nextIds;}
+    childIds.forEach(childId=>{const child=obOf(childId);if(child)replace(child);});
 }
 // 近くにある図形の線を探す（24px以内）
 function pickOb(p, includeLocked = false) {
@@ -1859,7 +1869,39 @@ function l2wRaw(o, x, y, z) {
     // genShape 側の点も同じ順番（spin → tilt）で掛ける。
     return applyPartSpin(o, [v[0] + f[0], v[1] + f[1], v[2] + f[2]]);
 }
+function objectWorldBasis(o){
+    const origin=L2W(o,0,0,0),axes=[[1,0,0],[0,1,0],[0,0,1]].map(v=>{const p=L2W(o,...v);return p.map((n,i)=>n-origin[i]);});
+    return{origin,axes};
+}
+function inverseBasis(axes){
+    const a=axes[0],b=axes[1],c=axes[2],det=a[0]*(b[1]*c[2]-b[2]*c[1])-b[0]*(a[1]*c[2]-a[2]*c[1])+c[0]*(a[1]*b[2]-a[2]*b[1]);
+    if(Math.abs(det)<1e-10)return[[1,0,0],[0,1,0],[0,0,1]];
+    const inv=1/det,rows=[
+        [(b[1]*c[2]-b[2]*c[1])*inv,(c[0]*b[2]-b[0]*c[2])*inv,(b[0]*c[1]-c[0]*b[1])*inv],
+        [(c[1]*a[2]-a[1]*c[2])*inv,(a[0]*c[2]-c[0]*a[2])*inv,(c[0]*a[1]-a[0]*c[1])*inv],
+        [(a[1]*b[2]-b[1]*a[2])*inv,(b[0]*a[2]-a[0]*b[2])*inv,(a[0]*b[1]-b[0]*a[1])*inv]
+    ];return rows;
+}
+function matrixVector(rows,v){return rows.map(r=>r[0]*v[0]+r[1]*v[1]+r[2]*v[2]);}
+function sceneWorldMatrix(o){const b=objectWorldBasis(o);return{origin:b.origin,axes:b.axes};}
+function sceneParentMatrix(o,parent){
+    const child=sceneWorldMatrix(o),base=objectWorldBasis(parent),inv=inverseBasis(base.axes),delta=child.origin.map((v,i)=>v-base.origin[i]),
+        origin=matrixVector(inv,delta),axes=child.axes.map(axis=>matrixVector(inv,axis)),
+        parentBase=[Math.max(.001,Math.abs(Number(parent.ra)||1)),Math.max(.001,Math.abs(Number(parent.rb)||1)),Math.max(.001,Math.abs(Number(parent.h)||1))];
+    return{sceneParent:true,parentId:parent.id,sceneMatrix:{origin,axes},parentBase};
+}
+function sceneMatrixPoint(matrix,x,y,z){const o=matrix.origin,a=matrix.axes;return o.map((v,i)=>v+a[0][i]*x+a[1][i]*y+a[2][i]*z);}
 function L2W(o, x, y, z) {
+    const attachment=o?.attachment;
+    if(attachment?.sceneWorld&&attachment.sceneMatrix)return sceneMatrixPoint(attachment.sceneMatrix,x,y,z);
+    if(attachment?.sceneParent&&attachment.sceneMatrix){
+        const parent=obOf(attachment.parentId);
+        if(parent){const p=sceneMatrixPoint(attachment.sceneMatrix,x,y,z),base=attachment.parentBase||[1,1,1],
+            now=[Math.max(.001,Math.abs(Number(parent.ra)||1)),Math.max(.001,Math.abs(Number(parent.rb)||1)),Math.max(.001,Math.abs(Number(parent.h)||1))],
+            scaled=p.map((v,i)=>v*now[i]/Math.max(.001,Number(base[i])||1));
+            return L2W(parent,...scaled);
+        }
+    }
     if (o?.attachment) o = syncAttachedPart(o);
     // 横壁看板は、通常の「水平面＋上下押し出し」だけでは表せないため、
     // 親のローカル横壁に沿う直交基底を使って3D座標へ変換する。
@@ -1876,6 +1918,13 @@ function L2W(o, x, y, z) {
         return applyObjectTilt(o, spun, wb.origin);
     }
     return applyObjectTilt(o, l2wRaw(o, x, y, z));
+}
+function sceneParentWouldCycle(childId,parentId){let p=obOf(parentId),seen=new Set();while(p&&!seen.has(p.id)){if(p.id===childId)return true;seen.add(p.id);p=p.attachment?.parentId?obOf(p.attachment.parentId):null;}return false;}
+function setSceneParent(childId,parentId){
+    const child=obOf(childId);if(!child||childId===parentId)return false;
+    if(parentId==null){if(!child.attachment?.sceneParent)return false;const b=sceneWorldMatrix(child);return setOb(childId,{attachment:{sceneWorld:true,sceneMatrix:b},groupId:null})!==false;}
+    const parent=obOf(parentId);if(!parent||sceneParentWouldCycle(childId,parentId))return false;
+    const a=sceneParentMatrix(child,parent);return setOb(childId,{attachment:a,groupId:null})!==false;
 }
 // 古い保存データ（大きさ%・高さ%）を、幅・奥行き・高さの形に直す
 function fixOb(o) {

@@ -298,35 +298,26 @@
         });
     }
     function groupSelectedScene() {
-        const objects = selectedObjects().filter(o => !obLocked(o));
-        if (objects.length < 2) {
-            alert("グループ化するオブジェクトを2個以上選択してください");
-            return;
-        }
-        const groupId = "group-" + uid();
-        HU.push(S);
-        RD = [];
-        rewriteObjectDefs(
-            objects.map((o) => o.id),
-            { groupId },
-        );
-        normalizeSelection();
-        render();
+        const objects=selectedObjects().filter(o=>!obLocked(o));
+        if(objects.length<2){alert("親にするオブジェクトと子にするオブジェクトを2個以上選択してください");return;}
+        const parent=objects.find(o=>o.id===sel)||objects[0],children=objects.filter(o=>o.id!==parent.id);
+        if(children.some(child=>sceneParentWouldCycle(child.id,parent.id))){alert("親子関係が循環するためグループ化できません");return;}
+        HU.push(S);RD=[];
+        children.forEach(child=>setSceneParent(child.id,parent.id));
+        setOb(parent.id,{groupId:null});
+        outlinerInitializedParents.add(parent.id);outlinerCollapsed.delete(parent.id);
+        selIds.clear();selIds.add(parent.id);sel=parent.id;normalizeSelection();render();
     }
     function ungroupSelectedScene() {
-        const objects = selectedObjects().filter((o) => o.groupId && !obLocked(o));
-        if (!objects.length) return;
-        HU.push(S);
-        RD = [];
-        const wanted = new Set(objects.map((o) => o.id));
-        S = S.map((s) => {
-            if (!s?.ob || !wanted.has(s.ob.id)) return s;
-            const ob = { ...s.ob };
-            delete ob.groupId;
-            return { ...s, ob };
-        });
-        normalizeSelection();
-        render();
+        const selected=selectedObjects().filter(o=>!obLocked(o)),objects=sceneObjects(),detach=new Set();
+        selected.forEach(o=>{if(o.attachment?.sceneParent)detach.add(o.id);for(const child of objects)if(child.attachment?.sceneParent&&child.attachment.parentId===o.id)detach.add(child.id);});
+        const legacy=selected.filter(o=>o.groupId);
+        if(!detach.size&&!legacy.length)return;
+        HU.push(S);RD=[];
+        detach.forEach(id=>setSceneParent(id,null));
+        const wanted=new Set(legacy.map(o=>o.id));
+        S=S.map(s=>{if(!s?.ob||!wanted.has(s.ob.id))return s;const ob={...s.ob,groupId:null};return{...s,ob};});
+        normalizeSelection();render();
     }
     function combineSelectedScene() {
         const objects = selectedObjects().filter(o => !obLocked(o));
@@ -432,7 +423,7 @@
             objects = selectedObjects().filter(o => !obLocked(o)),
             units = new Set(objects.map((o) => o.groupId || o.id));
         if (group) group.disabled = units.size < 2;
-        if (ungroup) ungroup.disabled = !objects.some((o) => o.groupId);
+        if (ungroup) ungroup.disabled = !objects.some(o=>o.groupId||o.attachment?.sceneParent||sceneObjects().some(q=>q.attachment?.sceneParent&&q.attachment.parentId===o.id));
         if (combine) combine.disabled = objects.length < 2;
         if (separate) separate.disabled = !objects.some((o) => o.type === "compound");
     }
@@ -534,7 +525,7 @@
         const objects=sceneObjects(),byId=new Map(objects.map(o=>[o.id,o])),children=new Map(),childParent=new Map();
         for(const child of objects){
             const parent=child.attachment?.parentId?byId.get(child.attachment.parentId):null;
-            if(parent?.asset==="building"){
+            if(parent&&(child.attachment?.sceneParent||parent.asset==="building")){ 
                 childParent.set(child.id,parent.id);
                 if(!children.has(parent.id))children.set(parent.id,[]);
                 children.get(parent.id).push(child);
@@ -561,19 +552,17 @@
             outlinerSelection=new Set(selIds);outlinerActive=sel;syncGroupActions();return;
         }
         syncIsolationButton(objects);
-        const listScroll=list.scrollTop,display=[];
-        objects.forEach((o,i)=>{
-            if(childParent.has(o.id))return;
-            const kids=children.get(o.id)||[];display.push({o,i,kids,depth:0});
-            if(kids.length&&!outlinerCollapsed.has(o.id))kids.forEach(child=>display.push({o:child,i:objects.indexOf(child),kids:[],depth:1}));
-        });
+        const listScroll=list.scrollTop,display=[],visited=new Set();
+        const emit=(o,depth=0)=>{if(!o||visited.has(o.id))return;visited.add(o.id);const kids=children.get(o.id)||[];display.push({o,i:objects.indexOf(o),kids,depth});if(kids.length&&!outlinerCollapsed.has(o.id))kids.forEach(child=>emit(child,depth+1));};
+        objects.filter(o=>!childParent.has(o.id)).forEach(o=>emit(o,0));
+        objects.forEach(o=>{if(!visited.has(o.id))emit(o,0);});
         list.innerHTML=display.length?display.map(({o,i,kids,depth})=>{
             if(o.__featureRow){const owner=o.owner,on=!!owner[o.key],active=window.__f1EditFeature===o.feature;return `<div class="objectRow objectChildRow objectFeatureRow ${active?"activeObject":""}" data-feature-child="${o.feature}" data-feature-owner="${owner.id}" style="margin-left:18px"><button type="button" class="objectVisibility" data-feature-visibility="${o.feature}" title="${on?"部品を非表示":"部品を表示"}" aria-label="${on?"非表示":"表示"}">${on?"◉":"○"}</button><span class="objectDisclosureSpacer"></span><input class="objectCheck" type="checkbox" data-feature-select="${o.feature}" ${(active||window.__f1SelectedFeature===o.feature)?"checked":""} aria-label="${o.label}を選択"><span class="objectIcon">◇</span><span class="objectMeta"><span class="objectName">${o.label}</span><small>${on?"表示 · 選択／ダブルクリックで編集":"非表示"}</small></span></div>`;}
             const group=o.type==="compound"?'<span class="compoundMark">結合</span>':o.groupId?'<span class="groupMark">グループ</span>':'',
                 detail=o.type==="compound"?`${Array.isArray(o.parts)?o.parts.length:0}パーツ・複合オブジェクト`:o.type==="asset"&&o.asset==="person"?Number(o.h).toFixed(2)+" m":o.type==="asset"?"low-poly asset":"vector shape",
                 visible=objectVisible(o),locked=obLocked(o),childButton=kids.length?`<button type="button" class="objectDisclosure" data-object-collapse="${o.id}" aria-expanded="${!outlinerCollapsed.has(o.id)}" title="${outlinerCollapsed.has(o.id)?"子パーツを展開":"子パーツを折りたたむ"}">${outlinerCollapsed.has(o.id)?"▸":"▾"}</button>`:'<span class="objectDisclosureSpacer"></span>';
             const childFocused=o.asset==="f1Accessory"&&window.__f1EditFeature===o.f1Feature,ownerFocused=o.asset==="building"&&window.__f1EditOwner===o.id;
-            return `<div class="objectRow ${depth?"objectChildRow":""} ${(selIds.has(o.id)&&!ownerFocused)||childFocused?"selected":""} ${(sel===o.id&&!ownerFocused)||childFocused?"activeObject":""} ${visible?"":"hiddenObject"} ${locked?"lockedObject":""}" data-object="${o.id}" style="${depth?"margin-left:18px;":""}">${childButton}<button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible?"オブジェクトを非表示":"オブジェクトを表示"}" aria-label="${visible?"非表示":"表示"}">${visible?"◉":"○"}</button><button type="button" class="objectLock ${locked?"isLocked":""}" data-object-lock="${o.id}" title="${locked?"ロックを解除（⌘/Ctrl+L）":"ロックする（⌘/Ctrl+L）"}" aria-label="${locked?"ロック解除":"ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked?"M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5":"M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${(selIds.has(o.id)||(o.asset==="f1Accessory"&&window.__f1SelectedFeature===o.f1Feature))?"checked":""} aria-label="${escapeObjectText(objectDisplayName(o))}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta"><span class="objectName">${escapeObjectText(objectDisplayName(o))}${typeof o.displayName==="string"&&o.displayName.trim()?"":` ${i+1}`}</span> ${group}<small>${kids.length?`${kids.length} 子パーツ · `:""}${detail}</small></span><button type="button" class="objectRename" data-object-rename="${o.id}" title="名前を変更" aria-label="${escapeObjectText(objectDisplayName(o))}の名前を変更">✎</button></div>`;
+            return `<div class="objectRow ${depth?"objectChildRow":""} ${(selIds.has(o.id)&&!ownerFocused)||childFocused?"selected":""} ${(sel===o.id&&!ownerFocused)||childFocused?"activeObject":""} ${visible?"":"hiddenObject"} ${locked?"lockedObject":""}" data-object="${o.id}" draggable="true" style="${depth?`margin-left:${depth*18}px;`:""}">${childButton}<button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible?"オブジェクトを非表示":"オブジェクトを表示"}" aria-label="${visible?"非表示":"表示"}">${visible?"◉":"○"}</button><button type="button" class="objectLock ${locked?"isLocked":""}" data-object-lock="${o.id}" title="${locked?"ロックを解除（⌘/Ctrl+L）":"ロックする（⌘/Ctrl+L）"}" aria-label="${locked?"ロック解除":"ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked?"M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5":"M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${(selIds.has(o.id)||(o.asset==="f1Accessory"&&window.__f1SelectedFeature===o.f1Feature))?"checked":""} aria-label="${escapeObjectText(objectDisplayName(o))}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta"><span class="objectName">${escapeObjectText(objectDisplayName(o))}${typeof o.displayName==="string"&&o.displayName.trim()?"":` ${i+1}`}</span> ${group}<small>${kids.length?`${kids.length} 子パーツ · `:""}${detail}</small></span><button type="button" class="objectRename" data-object-rename="${o.id}" title="名前を変更" aria-label="${escapeObjectText(objectDisplayName(o))}の名前を変更">✎</button></div>`;
         }).join(""):'<div class="emptyList">まだオブジェクトがありません</div>';
         list.scrollTop=listScroll;outlinerKey=key;
         outlinerRows=new Map([...list.querySelectorAll("[data-object]")].map(row=>[row.dataset.object,row]));
@@ -804,6 +793,18 @@
         flashHint("テント・看板を建物の左右の中央へ戻しました");
     }
     el("centerChildSel").onclick = centerAttachedChildOnParent;
+    let sceneDragId=null;
+    list.addEventListener("dragstart",e=>{const row=e.target.closest("[data-object]");if(!row)return;sceneDragId=row.dataset.object;e.dataTransfer?.setData("text/plain",sceneDragId);if(e.dataTransfer)e.dataTransfer.effectAllowed="move";row.classList.add("sceneDragging");});
+    list.addEventListener("dragend",()=>{sceneDragId=null;list.querySelectorAll(".sceneDragging,.sceneDropTarget").forEach(x=>x.classList.remove("sceneDragging","sceneDropTarget"));});
+    list.addEventListener("dragover",e=>{if(!sceneDragId)return;e.preventDefault();const row=e.target.closest("[data-object]");list.querySelectorAll(".sceneDropTarget").forEach(x=>{if(x!==row)x.classList.remove("sceneDropTarget");});if(row)row.classList.add("sceneDropTarget");if(e.dataTransfer)e.dataTransfer.dropEffect="move";});
+    list.addEventListener("dragleave",e=>{const row=e.target.closest("[data-object]");if(row&&!row.contains(e.relatedTarget))row.classList.remove("sceneDropTarget");});
+    list.addEventListener("drop",e=>{
+        if(!sceneDragId)return;e.preventDefault();const source=sceneDragId,targetRow=e.target.closest("[data-object]"),targetId=targetRow?.dataset.object||null,child=obOf(source);
+        if(!child||source===targetId||obLocked(child))return;
+        if(targetId){const parent=obOf(targetId);if(!parent||obLocked(parent)||child.attachment?.parentId===targetId)return;if(sceneParentWouldCycle(source,targetId)){flashHint("自分自身や子孫の中には入れられません");return;}HU.push(S);RD=[];if(!setSceneParent(source,targetId))return;outlinerInitializedParents.add(targetId);outlinerCollapsed.delete(targetId);}
+        else {if(!child.attachment?.sceneParent)return;HU.push(S);RD=[];setSceneParent(source,null);}
+        normalizeSelection();render();
+    });
     list.addEventListener("click", (e) => {
         const featureRow=e.target.closest("[data-feature-child]");
         if(featureRow){

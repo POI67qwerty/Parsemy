@@ -175,6 +175,27 @@ function surfaceTriangles(o) {
     surfaceTriCache.set(o, { key, tris });
     return tris;
 }
+// 人物の腕・脚・頭はカメラに対するメッシュのシルエット稜線だけを線画化する。
+// 骨の中心線や顔パーツを描かず、球や円柱プリミティブと同じ輪郭方式にする。
+function personSilhouetteLines(o,onlyPart=null) {
+    if(o?.asset!=="person")return[];
+    const tris=surfaceTriangles(o).filter(t=>!onlyPart||t.personPart===onlyPart),edges=new Map(),quant=p=>p.map(v=>Math.round(v*1e5)).join(","),
+        toward=orthView?orthBasis().depth:camPos();
+    for(const tri of tris){
+        const [a,b,c]=tri,ab=b.map((v,i)=>v-a[i]),ac=c.map((v,i)=>v-a[i]),
+            n=[ab[1]*ac[2]-ab[2]*ac[1],ab[2]*ac[0]-ab[0]*ac[2],ab[0]*ac[1]-ab[1]*ac[0]],nl=Math.hypot(...n);
+        if(nl<1e-10)continue;
+        const center=a.map((v,i)=>(v+b[i]+c[i])/3),view=orthView?toward:toward.map((v,i)=>v-center[i]),front=n[0]*view[0]+n[1]*view[1]+n[2]*view[2]>=0;
+        for(const [u,v]of [[a,b],[b,c],[c,a]]){const ku=quant(u),kv=quant(v),key=ku<kv?`${ku}|${kv}`:`${kv}|${ku}`,entry=edges.get(key);if(entry){entry.faces.push(front);}else edges.set(key,{a:u,b:v,faces:[front]});}
+    }
+    const out=[];for(const edge of edges.values())if(edge.faces.length===1||edge.faces.some(Boolean)&&edge.faces.some(v=>!v))out.push({ob:o,c:o.c||"#222222",w:Math.max(.8,Number(o.w)||1.2),d3:true,p:[edge.a,edge.b],personSilhouette:true});
+    return out;
+}
+function drawPersonSilhouettes(c,hidden=false,depth=null,cw=W,ch=H,tf=null){
+    const seen=new Set(),vs=viewShift(),transform=tf||[Z,0,0,Z,vs[0],vs[1]];
+    for(const s of S){const o=s?.ob;if(!o||o.asset!=="person"||!objectVisible(o)||seen.has(o.id))continue;seen.add(o.id);
+        personSilhouetteLines(o).forEach(line=>hidden?strokeWVisible(c,line,depth,cw,ch,transform):strokeW(c,line));}
+}
 function exportSurfaceTriangles(o) {
     const out = exportSurfaceTrianglesBase(o);
     if (typeof buildingDoorTriangles === "function") out.push(...buildingDoorTriangles(o));
@@ -530,7 +551,7 @@ function exportSurfaceTrianglesBase(o) {
         if (opening?.enabled) cornerCutOpeningAt(z0, z1, opening);
         else {
             const params = cornerCutBoxParams(o),
-                footprint = cornerCutFootprint(params.w, params.d, params.cornerOffset, params.cornerCutCorner),
+                footprint = beveledPolygonData(cornerCutFootprint(params.w,params.d,params.cornerOffset,params.cornerCutCorner),params.bevelOffset,params.bevelSegments).points,
                 center0 = [0, 0, z0],
                 center1 = [0, 0, z1];
             // 隅切りした凸多角形を、上下の扇形と5枚の側面へ分解する。
@@ -545,17 +566,22 @@ function exportSurfaceTrianglesBase(o) {
                 quad(a, b, c, d0);
             }
         }
-        const fascia=cornerCutFasciaParts(o);
-        if(fascia.g.enabled) for(const polygon of fascia.parts) {
-            const mark=out.length, lo=fascia.g.z0, hi=fascia.g.z1,
-                point=(v,z)=>[v[0],v[1],z];
-            quad(point(polygon[0],lo),point(polygon[1],lo),point(polygon[2],lo),point(polygon[3],lo));
-            quad(point(polygon[3],hi),point(polygon[2],hi),point(polygon[1],hi),point(polygon[0],hi));
-            for(let i=0;i<polygon.length;i++) {
-                const j=(i+1)%polygon.length;
-                quad(point(polygon[i],lo),point(polygon[j],lo),point(polygon[j],hi),point(polygon[i],hi));
+        const fascia=cornerCutFasciaParts(o),cutParams=cornerCutBoxParams(o);
+        if(fascia.g.enabled){
+            if(!opening?.enabled&&cutParams.bevelOffset>1e-6){
+                cornerCutFasciaBevelTriangles(o).forEach(t=>{const world=t.map(v=>L(...v));world.surfaceColor=t.surfaceColor;out.push(world);});
+            } else for(const polygon of fascia.parts) {
+                const mark=out.length,lo=fascia.g.z0,hi=fascia.g.z1,point=(v,z)=>[v[0],v[1],z];
+                for(let i=1;i<polygon.length-1;i++){
+                    tri(point(polygon[0],lo),point(polygon[i+1],lo),point(polygon[i],lo));
+                    tri(point(polygon[0],hi),point(polygon[i],hi),point(polygon[i+1],hi));
+                }
+                for(let i=0;i<polygon.length;i++) {
+                    const j=(i+1)%polygon.length;
+                    quad(point(polygon[i],lo),point(polygon[j],lo),point(polygon[j],hi),point(polygon[i],hi));
+                }
+                for(let i=mark;i<out.length;i++) out[i].surfaceColor=fascia.g.color;
             }
-            for(let i=mark;i<out.length;i++) out[i].surfaceColor=fascia.g.color;
         }
         return out;
     }
@@ -804,22 +830,25 @@ function exportSurfaceTrianglesBase(o) {
                 quad(b[0], b[1], b[2], b[3]);
                 quad(tp[3], tp[2], tp[1], tp[0]);
                 for (let i = 0; i < 4; i++) quad(b[i], tp[i], tp[(i + 1) % 4], b[(i + 1) % 4]);
-            };
+            },
+            markPart=(part,fn)=>{const start=out.length;fn();for(let i=start;i<out.length;i++)out[i].personPart=part;};
         // 台座は作らない（線画の linesPerson と同じ扱い）。
         // ここに箱を残していたため、線が消えても面表示では足元に立方体が出ていた。
         // 脚（股関節→膝→足）
-        p.legs.forEach((leg) => {
+        markPart("leg",()=>p.legs.forEach((leg) => {
             segment([leg.hip.x, leg.hip.y, leg.hip.z], [leg.knee.x, leg.knee.y, leg.knee.z], legR);
             segment([leg.knee.x, leg.knee.y, leg.knee.z], [leg.foot.x, leg.foot.y, leg.foot.z], legR * 0.92);
-        });
+        }));
+        // 肩・肘・手首の腕も、脚と同じ関節骨格に沿う閉じた形状にする。
+        markPart("arm",()=>p.arms.forEach(arm=>{segment([arm.shoulder.x,arm.shoulder.y,arm.shoulder.z],[arm.elbow.x,arm.elbow.y,arm.elbow.z],arm.radius);segment([arm.elbow.x,arm.elbow.y,arm.elbow.z],[arm.wrist.x,arm.wrist.y,arm.wrist.z],arm.radius*.9);}));
         // 胴（腰を支点に傾く四角柱）
-        prism(p.torsoBottom, p.torsoTop);
-        // 頭（首の角度ぶん傾いた位置へ置く）
+        markPart("torso",()=>prism(p.torsoBottom,p.torsoTop));
+        // 頭は顔の中身を描かず、球状面の視点依存シルエットだけを使う。
         const headCy = (p.headC0.y + p.headC1.y) * 0.5,
             headCz = (p.headC0.z + p.headC1.z) * 0.5,
             headRy = p.headR * 0.9,
             headRz = Math.max(0.02, Math.hypot(p.headC1.y - p.headC0.y, p.headC1.z - p.headC0.z) * 0.5);
-        ellipsoid(p.headTopX * 0.5, headCy, headCz, p.headR, headRy, headRz, 8, 12);
+        markPart("head",()=>ellipsoid(p.headTopX * 0.5, headCy, headCz, p.headR, headRy, headRz, 8, 12));
         return out;
     }
     if (kind === "stairs") {
@@ -2446,6 +2475,7 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
         if (s.ob && !objectVisible(s.ob)) return;
         hidden ? strokeWVisible(x, s, hiddenDepth, cw, ch, tfEff) : strokeW(x, s);
     });
+    drawPersonSilhouettes(x,hidden,hiddenDepth,cw,ch,tfEff);
     if (withCur) drawCur(x);
     if (withCur && prev) prev.forEach((s) => strokeW(x, s));
     lineDevMin = 0;
@@ -3270,7 +3300,8 @@ function render() {
     c.save();
     const vsMain = viewShift();
     c.setTransform(Z, 0, 0, Z, vsMain[0], vsMain[1]); // 以降はズーム/移動つき
-    drawObjectSurfaces(c);
+    // 面ONでも塗り色は別設定。塗り色OFF時も後段の深度バッファで隠面処理を行う。
+    if(P.surfaceMode&&window.__surfaceColors)drawObjectSurfaces(c);
     if ($("gon").checked) {
         if (orthView) orthGuides(c);
         else T === "f" ? guidesF(c) : guides(c);
@@ -3303,6 +3334,7 @@ function render() {
         S.forEach((s) => {
             if (!s.ob || objectVisible(s.ob)) strokeW(c, s);
         });
+        drawPersonSilhouettes(c,false,null,W,H,[Z,0,0,Z,vsMain[0],vsMain[1]]);
         drawCur(c);
         if (prev) prev.forEach((s) => strokeW(c, s));
     }

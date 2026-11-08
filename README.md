@@ -6,11 +6,11 @@
 ## よく使うコマンド
 
 ```bash
-./build.sh                 # 構文チェック → 単体HTML生成（軽量版も）→ ドキュメントHTML生成
-node check-all-assets.js   # 全アセットの自己点検（失敗すると exit=1）
+./build.sh                         # 構文チェック → 単体HTML生成（軽量版も）→ ドキュメントHTML生成
+bash tests/run.sh check-all-assets.js # 全アセット自己点検（初回はテスト環境も自動準備）
 ```
 
-`node check-all-assets.js` は実ブラウザ（Playwright の Chromium）でHTMLを開く。
+`bash tests/run.sh check-all-assets.js` は実ブラウザ（Playwright の Chromium）でHTMLを開き、依存パッケージ・Chromium・共有ライブラリが無ければ `tests/setup.sh` で準備する。
 ライブラリの場所が環境依存で見つからないときは、先に環境変数を通す:
 
 ```bash
@@ -52,6 +52,6 @@ export LD_LIBRARY_PATH=<libnspr4.so などがある所>
 - **確認用のスクリーンショットは作らない**（画像ファイルは残さない）。
 - 形が変わっていないことは、機械的な比較で確かめる
   （深度バッファ・線画の画素数・`check-all-assets.js`）。
-- スクリプトを触ったら `./build.sh` と `node check-all-assets.js` の両方を通す。
+- スクリプトを触ったら `./build.sh` と `bash tests/run.sh check-all-assets.js` の両方を通す。
 - 画面まわりの実測・画素比較は `tests/` に置いてある（初回だけ `tests/setup.sh`）。
   例：`tests/run.sh tests/perf.js`、`tests/run.sh tests/pixel-surfaces.js`

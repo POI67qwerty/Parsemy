@@ -826,6 +826,9 @@ canvas {
 .objectRow:hover {
     border-color: #5c9b95 !important;
 }
+.objectRow[draggable="true"] { cursor: grab; }
+.objectRow.sceneDragging { opacity: .42; }
+.objectRow.sceneDropTarget { outline: 2px solid var(--mint); outline-offset: 1px; background: #1f3936 !important; }
 .objectDisclosure, .objectDisclosureSpacer {
     flex: none; width: 18px; height: 22px; display: inline-grid; place-items: center;
     padding: 0 !important; border: 0 !important; background: transparent !important;
@@ -2303,6 +2306,13 @@ $("surfaceToggle").onclick = () => {
     syncSurfaceToggle();
     render();
 };
+window.__surfaceColors=false;
+const surfaceColorToggle=document.createElement("button");
+surfaceColorToggle.type="button";surfaceColorToggle.id="surfaceColorToggle";surfaceColorToggle.className="toolBtn";
+surfaceColorToggle.textContent="面色 OFF";surfaceColorToggle.title="面表示の塗り色を切り替えます。OFFでも隠面処理は有効です";
+surfaceColorToggle.setAttribute("aria-pressed","false");
+$("surfaceToggle").after(surfaceColorToggle);
+surfaceColorToggle.onclick=()=>{window.__surfaceColors=!window.__surfaceColors;surfaceColorToggle.classList.toggle("on",window.__surfaceColors);surfaceColorToggle.textContent=`面色 ${window.__surfaceColors?"ON":"OFF"}`;surfaceColorToggle.setAttribute("aria-pressed",String(window.__surfaceColors));render();};
 function leaveOrthView(changedKey) {
     if (standardApplying) return;
     if (window.cityFloorPlanActive) return;
@@ -3186,6 +3196,7 @@ const lockedObjectCount = () => {
 };
 function syncAttachedPart(o, parentOverride = null) {
     const a = o?.attachment;
+    if(a?.sceneParent||a?.sceneWorld)return o;
     if (!a?.parentId) return o;
     const parent = parentOverride || obOf(a.parentId);
     if (!parent) return o;
@@ -3398,7 +3409,7 @@ function setOb(id, patch) {
         next.ra = Math.max(next.rb, next.ra);
     }
     if (
-        o.attachment &&
+        o.attachment && !o.attachment.sceneParent && !o.attachment.sceneWorld &&
         ((patch && Object.prototype.hasOwnProperty.call(patch, "ca")) ||
             (patch && Object.prototype.hasOwnProperty.call(patch, "cb")))
     ) {
@@ -3417,7 +3428,7 @@ function setOb(id, patch) {
                 : { ...next.attachment, x: localX };
         }
     }
-    if (o.attachment && patch && Object.prototype.hasOwnProperty.call(patch, "lift")) {
+    if (o.attachment && !o.attachment.sceneParent && !o.attachment.sceneWorld && patch && Object.prototype.hasOwnProperty.call(patch, "lift")) {
         const parent = obOf(o.attachment.parentId);
         if (parent) {
             const parentBase = L2W(parent, 0, 0, 0)[1],
@@ -3448,6 +3459,9 @@ function setOb(id, patch) {
             } else next.attachment = { ...next.attachment, offsetZ: rawBase - parentBase - baseZ };
         }
     }
+    const transformPatch=patch&&["ca","cb","lift","off","rot","rotX","rotZ","k","d"].some(k=>Object.prototype.hasOwnProperty.call(patch,k));
+    if(transformPatch&&o.attachment?.sceneParent){const raw={...next};delete raw.attachment;const parent=obOf(o.attachment.parentId);if(parent)next.attachment=sceneParentMatrix(raw,parent);}
+    else if(transformPatch&&o.attachment?.sceneWorld){const raw={...next};delete raw.attachment;next.attachment={sceneWorld:true,sceneMatrix:sceneWorldMatrix(raw)};}
     const replace = (def) => {
         S = [...S.filter((s) => !(s.ob && s.ob.id === def.id)), ...genShape(syncAttachedPart(def))];
     };
@@ -3521,7 +3535,39 @@ function l2wRaw(o, x, y, z) {
     v[iv] = o.cb + x * sn + y * cs;
     return applyPartSpin(o, [v[0] + f[0], v[1] + f[1], v[2] + f[2]]);
 }
+function objectWorldBasis(o){
+    const origin=L2W(o,0,0,0),axes=[[1,0,0],[0,1,0],[0,0,1]].map(v=>{const p=L2W(o,...v);return p.map((n,i)=>n-origin[i]);});
+    return{origin,axes};
+}
+function inverseBasis(axes){
+    const a=axes[0],b=axes[1],c=axes[2],det=a[0]*(b[1]*c[2]-b[2]*c[1])-b[0]*(a[1]*c[2]-a[2]*c[1])+c[0]*(a[1]*b[2]-a[2]*b[1]);
+    if(Math.abs(det)<1e-10)return[[1,0,0],[0,1,0],[0,0,1]];
+    const inv=1/det,rows=[
+        [(b[1]*c[2]-b[2]*c[1])*inv,(c[0]*b[2]-b[0]*c[2])*inv,(b[0]*c[1]-c[0]*b[1])*inv],
+        [(c[1]*a[2]-a[1]*c[2])*inv,(a[0]*c[2]-c[0]*a[2])*inv,(c[0]*a[1]-a[0]*c[1])*inv],
+        [(a[1]*b[2]-b[1]*a[2])*inv,(b[0]*a[2]-a[0]*b[2])*inv,(a[0]*b[1]-b[0]*a[1])*inv]
+    ];return rows;
+}
+function matrixVector(rows,v){return rows.map(r=>r[0]*v[0]+r[1]*v[1]+r[2]*v[2]);}
+function sceneWorldMatrix(o){const b=objectWorldBasis(o);return{origin:b.origin,axes:b.axes};}
+function sceneParentMatrix(o,parent){
+    const child=sceneWorldMatrix(o),base=objectWorldBasis(parent),inv=inverseBasis(base.axes),delta=child.origin.map((v,i)=>v-base.origin[i]),
+        origin=matrixVector(inv,delta),axes=child.axes.map(axis=>matrixVector(inv,axis)),
+        parentBase=[Math.max(.001,Math.abs(Number(parent.ra)||1)),Math.max(.001,Math.abs(Number(parent.rb)||1)),Math.max(.001,Math.abs(Number(parent.h)||1))];
+    return{sceneParent:true,parentId:parent.id,sceneMatrix:{origin,axes},parentBase};
+}
+function sceneMatrixPoint(matrix,x,y,z){const o=matrix.origin,a=matrix.axes;return o.map((v,i)=>v+a[0][i]*x+a[1][i]*y+a[2][i]*z);}
 function L2W(o, x, y, z) {
+    const attachment=o?.attachment;
+    if(attachment?.sceneWorld&&attachment.sceneMatrix)return sceneMatrixPoint(attachment.sceneMatrix,x,y,z);
+    if(attachment?.sceneParent&&attachment.sceneMatrix){
+        const parent=obOf(attachment.parentId);
+        if(parent){const p=sceneMatrixPoint(attachment.sceneMatrix,x,y,z),base=attachment.parentBase||[1,1,1],
+            now=[Math.max(.001,Math.abs(Number(parent.ra)||1)),Math.max(.001,Math.abs(Number(parent.rb)||1)),Math.max(.001,Math.abs(Number(parent.h)||1))],
+            scaled=p.map((v,i)=>v*now[i]/Math.max(.001,Number(base[i])||1));
+            return L2W(parent,...scaled);
+        }
+    }
     if (o?.attachment) o = syncAttachedPart(o);
     const wb = o?.wallSideBasis;
     if (wb?.origin && wb?.u && wb?.v && wb?.n) {
@@ -3533,6 +3579,13 @@ function L2W(o, x, y, z) {
         return applyObjectTilt(o, spun, wb.origin);
     }
     return applyObjectTilt(o, l2wRaw(o, x, y, z));
+}
+function sceneParentWouldCycle(childId,parentId){let p=obOf(parentId),seen=new Set();while(p&&!seen.has(p.id)){if(p.id===childId)return true;seen.add(p.id);p=p.attachment?.sceneParent?obOf(p.attachment.parentId):null;}return false;}
+function setSceneParent(childId,parentId){
+    const child=obOf(childId);if(!child||childId===parentId)return false;
+    if(parentId==null){if(!child.attachment?.sceneParent)return false;const b=sceneWorldMatrix(child);return setOb(childId,{attachment:{sceneWorld:true,sceneMatrix:b},groupId:null})!==false;}
+    const parent=obOf(parentId);if(!parent||sceneParentWouldCycle(childId,parentId))return false;
+    const a=sceneParentMatrix(child,parent);return setOb(childId,{attachment:a,groupId:null})!==false;
 }
 function fixOb(o) {
     let n = o;
@@ -6003,6 +6056,15 @@ function personJointHandles(o) {
         kneeAlt = [0, 1].map((i) =>
             rotate(base.legs[i].foot.y, base.legs[i].foot.z, base.legs[i].knee.y, base.legs[i].knee.z, -eps),
         );
+    const armHandles=[0,1].flatMap(i=>{
+        const side=i?"右":"左",shoulderKey=i?"personArmShoulderR":"personArmShoulderL",elbowKey=i?"personArmElbowR":"personArmElbowL",
+            shoulderAlt=personPose({...o,[shoulderKey]:base.armShoulderAngles[i]+eps}).arms[i],
+            elbowAlt=personPose({...o,[elbowKey]:base.armElbowAngles[i]+eps}).arms[i],a=base.arms[i];
+        return[
+            make(`arm-shoulder-${i}`,shoulderKey,`${side}肩` ,"#ffb347",[a.shoulder.x,a.shoulder.y,a.shoulder.z],[a.elbow.x,a.elbow.y,a.elbow.z],[shoulderAlt.elbow.x,shoulderAlt.elbow.y,shoulderAlt.elbow.z],base.armShoulderAngles[i],-100,100),
+            make(`arm-elbow-${i}`,elbowKey,`${side}肘`,"#64d7f2",[a.elbow.x,a.elbow.y,a.elbow.z],[a.wrist.x,a.wrist.y,a.wrist.z],[elbowAlt.wrist.x,elbowAlt.wrist.y,elbowAlt.wrist.z],base.armElbowAngles[i],-135,135),
+        ];
+    });
     return spreadOverlappingHandles([
         make("waist", "personWaist", "腰", "#ff8a3d", [0, 0, base.torso0], [0, waistY, waistZ], [0, waistYa, waistZa], waist, -60, 60),
         make(
@@ -6045,6 +6107,7 @@ function personJointHandles(o) {
                 120,
             ),
         ),
+        ...armHandles,
     ]);
 }
 function personGizmo(o) {
@@ -9389,6 +9452,25 @@ function surfaceTriangles(o) {
     surfaceTriCache.set(o, { key, tris });
     return tris;
 }
+function personSilhouetteLines(o,onlyPart=null) {
+    if(o?.asset!=="person")return[];
+    const tris=surfaceTriangles(o).filter(t=>!onlyPart||t.personPart===onlyPart),edges=new Map(),quant=p=>p.map(v=>Math.round(v*1e5)).join(","),
+        toward=orthView?orthBasis().depth:camPos();
+    for(const tri of tris){
+        const [a,b,c]=tri,ab=b.map((v,i)=>v-a[i]),ac=c.map((v,i)=>v-a[i]),
+            n=[ab[1]*ac[2]-ab[2]*ac[1],ab[2]*ac[0]-ab[0]*ac[2],ab[0]*ac[1]-ab[1]*ac[0]],nl=Math.hypot(...n);
+        if(nl<1e-10)continue;
+        const center=a.map((v,i)=>(v+b[i]+c[i])/3),view=orthView?toward:toward.map((v,i)=>v-center[i]),front=n[0]*view[0]+n[1]*view[1]+n[2]*view[2]>=0;
+        for(const [u,v]of [[a,b],[b,c],[c,a]]){const ku=quant(u),kv=quant(v),key=ku<kv?`${ku}|${kv}`:`${kv}|${ku}`,entry=edges.get(key);if(entry){entry.faces.push(front);}else edges.set(key,{a:u,b:v,faces:[front]});}
+    }
+    const out=[];for(const edge of edges.values())if(edge.faces.length===1||edge.faces.some(Boolean)&&edge.faces.some(v=>!v))out.push({ob:o,c:o.c||"#222222",w:Math.max(.8,Number(o.w)||1.2),d3:true,p:[edge.a,edge.b],personSilhouette:true});
+    return out;
+}
+function drawPersonSilhouettes(c,hidden=false,depth=null,cw=W,ch=H,tf=null){
+    const seen=new Set(),vs=viewShift(),transform=tf||[Z,0,0,Z,vs[0],vs[1]];
+    for(const s of S){const o=s?.ob;if(!o||o.asset!=="person"||!objectVisible(o)||seen.has(o.id))continue;seen.add(o.id);
+        personSilhouetteLines(o).forEach(line=>hidden?strokeWVisible(c,line,depth,cw,ch,transform):strokeW(c,line));}
+}
 function exportSurfaceTriangles(o) {
     const out = exportSurfaceTrianglesBase(o);
     if (typeof buildingDoorTriangles === "function") out.push(...buildingDoorTriangles(o));
@@ -9724,7 +9806,7 @@ function exportSurfaceTrianglesBase(o) {
         if (opening?.enabled) cornerCutOpeningAt(z0, z1, opening);
         else {
             const params = cornerCutBoxParams(o),
-                footprint = cornerCutFootprint(params.w, params.d, params.cornerOffset, params.cornerCutCorner),
+                footprint = beveledPolygonData(cornerCutFootprint(params.w,params.d,params.cornerOffset,params.cornerCutCorner),params.bevelOffset,params.bevelSegments).points,
                 center0 = [0, 0, z0],
                 center1 = [0, 0, z1];
             for (let i = 0; i < footprint.length; i++) {
@@ -9738,17 +9820,22 @@ function exportSurfaceTrianglesBase(o) {
                 quad(a, b, c, d0);
             }
         }
-        const fascia=cornerCutFasciaParts(o);
-        if(fascia.g.enabled) for(const polygon of fascia.parts) {
-            const mark=out.length, lo=fascia.g.z0, hi=fascia.g.z1,
-                point=(v,z)=>[v[0],v[1],z];
-            quad(point(polygon[0],lo),point(polygon[1],lo),point(polygon[2],lo),point(polygon[3],lo));
-            quad(point(polygon[3],hi),point(polygon[2],hi),point(polygon[1],hi),point(polygon[0],hi));
-            for(let i=0;i<polygon.length;i++) {
-                const j=(i+1)%polygon.length;
-                quad(point(polygon[i],lo),point(polygon[j],lo),point(polygon[j],hi),point(polygon[i],hi));
+        const fascia=cornerCutFasciaParts(o),cutParams=cornerCutBoxParams(o);
+        if(fascia.g.enabled){
+            if(!opening?.enabled&&cutParams.bevelOffset>1e-6){
+                cornerCutFasciaBevelTriangles(o).forEach(t=>{const world=t.map(v=>L(...v));world.surfaceColor=t.surfaceColor;out.push(world);});
+            } else for(const polygon of fascia.parts) {
+                const mark=out.length,lo=fascia.g.z0,hi=fascia.g.z1,point=(v,z)=>[v[0],v[1],z];
+                for(let i=1;i<polygon.length-1;i++){
+                    tri(point(polygon[0],lo),point(polygon[i+1],lo),point(polygon[i],lo));
+                    tri(point(polygon[0],hi),point(polygon[i],hi),point(polygon[i+1],hi));
+                }
+                for(let i=0;i<polygon.length;i++) {
+                    const j=(i+1)%polygon.length;
+                    quad(point(polygon[i],lo),point(polygon[j],lo),point(polygon[j],hi),point(polygon[i],hi));
+                }
+                for(let i=mark;i<out.length;i++) out[i].surfaceColor=fascia.g.color;
             }
-            for(let i=mark;i<out.length;i++) out[i].surfaceColor=fascia.g.color;
         }
         return out;
     }
@@ -9983,17 +10070,19 @@ function exportSurfaceTrianglesBase(o) {
                 quad(b[0], b[1], b[2], b[3]);
                 quad(tp[3], tp[2], tp[1], tp[0]);
                 for (let i = 0; i < 4; i++) quad(b[i], tp[i], tp[(i + 1) % 4], b[(i + 1) % 4]);
-            };
-        p.legs.forEach((leg) => {
+            },
+            markPart=(part,fn)=>{const start=out.length;fn();for(let i=start;i<out.length;i++)out[i].personPart=part;};
+        markPart("leg",()=>p.legs.forEach((leg) => {
             segment([leg.hip.x, leg.hip.y, leg.hip.z], [leg.knee.x, leg.knee.y, leg.knee.z], legR);
             segment([leg.knee.x, leg.knee.y, leg.knee.z], [leg.foot.x, leg.foot.y, leg.foot.z], legR * 0.92);
-        });
-        prism(p.torsoBottom, p.torsoTop);
+        }));
+        markPart("arm",()=>p.arms.forEach(arm=>{segment([arm.shoulder.x,arm.shoulder.y,arm.shoulder.z],[arm.elbow.x,arm.elbow.y,arm.elbow.z],arm.radius);segment([arm.elbow.x,arm.elbow.y,arm.elbow.z],[arm.wrist.x,arm.wrist.y,arm.wrist.z],arm.radius*.9);}));
+        markPart("torso",()=>prism(p.torsoBottom,p.torsoTop));
         const headCy = (p.headC0.y + p.headC1.y) * 0.5,
             headCz = (p.headC0.z + p.headC1.z) * 0.5,
             headRy = p.headR * 0.9,
             headRz = Math.max(0.02, Math.hypot(p.headC1.y - p.headC0.y, p.headC1.z - p.headC0.z) * 0.5);
-        ellipsoid(p.headTopX * 0.5, headCy, headCz, p.headR, headRy, headRz, 8, 12);
+        markPart("head",()=>ellipsoid(p.headTopX * 0.5, headCy, headCz, p.headR, headRy, headRz, 8, 12));
         return out;
     }
     if (kind === "stairs") {
@@ -11266,6 +11355,7 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
         if (s.ob && !objectVisible(s.ob)) return;
         hidden ? strokeWVisible(x, s, hiddenDepth, cw, ch, tfEff) : strokeW(x, s);
     });
+    drawPersonSilhouettes(x,hidden,hiddenDepth,cw,ch,tfEff);
     if (withCur) drawCur(x);
     if (withCur && prev) prev.forEach((s) => strokeW(x, s));
     lineDevMin = 0;
@@ -11973,7 +12063,7 @@ function render() {
     c.save();
     const vsMain = viewShift();
     c.setTransform(Z, 0, 0, Z, vsMain[0], vsMain[1]);
-    drawObjectSurfaces(c);
+    if(P.surfaceMode&&window.__surfaceColors)drawObjectSurfaces(c);
     if ($("gon").checked) {
         if (orthView) orthGuides(c);
         else T === "f" ? guidesF(c) : guides(c);
@@ -12005,6 +12095,7 @@ function render() {
         S.forEach((s) => {
             if (!s.ob || objectVisible(s.ob)) strokeW(c, s);
         });
+        drawPersonSilhouettes(c,false,null,W,H,[Z,0,0,Z,vsMain[0],vsMain[1]]);
         drawCur(c);
         if (prev) prev.forEach((s) => strokeW(c, s));
     }
@@ -13577,7 +13668,7 @@ function f1AwningTinControls() {
 function f1FacadeControls() {
     const visible=()=>window.__f1EditFeature==="facade", base={type:"range",handleOnly:true,canvasSlider:true,canvasVisible:visible,f1Feature:"facade",unit:"m",step:.02};
     return [
-        {key:"facadeSides",label:"ファサードを側面にも回す",type:"boolean",default:false,canvasVisible:visible,f1Feature:"facade",handleOnly:true},
+        {key:"facadeSides",label:"ファサードを左右の側面にも回す",type:"boolean",default:false,canvasVisible:visible,f1Feature:"facade",handleOnly:true},
         {...base,key:"facadeWidth",label:"ファサード幅",default:4,min:.2,max:o=>Math.max(.2,Math.abs(Number(o.ra)||2)*2),get:o=>Number(o.facadeWidth)||Math.abs(Number(o.ra)||2)*2,
             handle:(o,v)=>({anchor:[0,-Math.abs(Number(o.rb)||1.5),o.h],sample:[v/2,-Math.abs(Number(o.rb)||1.5),o.h],probe:[v/2+1,-Math.abs(Number(o.rb)||1.5),o.h],fallback:{x:1,y:0}})},
         {...base,key:"facadeHeight",label:"ファサード高さ",default:.7,min:.05,max:o=>Math.max(.05,Number(o.h)||3),get:o=>Number(o.facadeHeight)||Math.min(.7,(Number(o.h)||3)*.22),
@@ -13640,6 +13731,9 @@ const ASSETS = {
         h: 3.6,
         cornerOffset: 0.8,
         cornerCutCorner: "front-left",
+        bevelOffset: 0,
+        bevelSegments: 4,
+        controls: [{ key:"bevelOffset", label:"Z軸辺のベベル", type:"range", canvasSlider:true, default:0, min:0, max:o=>{const w=Math.abs(Number(o.ra)||2.1),d=Math.abs(Number(o.rb)||1.8),cut=Math.abs(Number(o.cornerOffset)||0);return Math.min(Math.min(w,d)*.2,cut>1e-5?cut*.35:Math.min(w,d)*.2);}, step:.01, unit:"m", handle:(o,v)=>{const x=Math.abs(Number(o.ra)||2.1),y=-Math.abs(Number(o.rb)||1.8),z=Math.max(.01,Number(o.h)||.01);return{anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}};} },{key:"facadeSides",label:"ファサードを左右の側面にも回す",type:"boolean",default:false,handleOnly:true,canvasToggle:true,canvasVisible:o=>o?.facadeEnabled===true}],
         cornerCutOpeningW: 0.7,
         cornerCutOpeningH: 2.2,
         cornerCutOpeningDepth: 0.8,
@@ -13682,7 +13776,7 @@ const ASSETS = {
         { key: "f1SignEnabled", label: "正面看板をつける", type: "boolean", default: false, handleOnly: true },
         { key: "wallSideSignEnabled", label: "横壁看板をつける", type: "boolean", default: false, handleOnly: true },
         { key: "facadeEnabled", label: "ファサード看板をつける", type: "boolean", default: false, handleOnly: true },
-        { key: "facadeSides", label: "ファサードを横壁にも回す", type: "boolean", default: false, handleOnly: true },
+        { key: "facadeSides", label: "ファサードを左右の側面にも回す", type: "boolean", default: false, handleOnly: true, canvasToggle: true, canvasVisible:o=>o?.facadeEnabled===true },
         ...f1PartControls("awning"), ...f1AwningTinControls(), ...f1PartControls("sign"), ...f1FacadeControls(),
         { key: "bevelOffset", label: "Z軸辺のベベル", type: "range", canvasSlider: true, default: 0, min: 0, max: o => Math.min(Math.abs(o.ra), Math.abs(o.rb)) * 0.22, step: 0.01, unit: "m", handle: (o,v) => { const x=Math.abs(Number(o.ra)||2), y=-Math.abs(Number(o.rb)||1.5), z=Math.max(.01,Number(o.h)||.01); return {anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}}; } }
     ], accent: "#8ce6c2" },
@@ -13711,8 +13805,8 @@ const ASSETS = {
         recessedWindowBottom: 0.48,
         recessedSillHeight: 0.48,
         recessedSideWindowW: 2.4,
-        recessedWindowMarginLeft: 0.85,
-        recessedWindowMarginEnd: 0.75,
+        recessedWindowMarginLeft: 0,
+        recessedWindowMarginEnd: 0,
         recessedJunctionOffset: 0,
         recessedSideWindows: true,
         accent: "#b6d9d5",
@@ -13898,44 +13992,15 @@ function beveledWireBoxA(o, cx, cy, w, d, z0, z1, offset = 0.06, segments = 3, c
     });
     return out;
 }
-function cornerCutWireBoxA(o, w, d, z0, z1, offset, corner, color = o.c || "#e7fff4", cutColor = "#e24b4b") {
-    const footprint = cornerCutFootprint(w, d, offset, corner),
-        out = [],
-        cutStart = footprint.length - 1,
-        edgeColor = (index) => (index === cutStart ? cutColor : color);
-    for (let i = 0; i < footprint.length; i++) {
-        const j = (i + 1) % footprint.length;
-        out.push(
-            lineA(
-                o,
-                [
-                    [footprint[i][0], footprint[i][1], z0],
-                    [footprint[j][0], footprint[j][1], z0],
-                ],
-                edgeColor(i),
-            ),
-            lineA(
-                o,
-                [
-                    [footprint[i][0], footprint[i][1], z1],
-                    [footprint[j][0], footprint[j][1], z1],
-                ],
-                edgeColor(i),
-            ),
-        );
+function cornerCutWireBoxA(o,w,d,z0,z1,offset,corner,color=o.c||"#e7fff4",cutColor="#e24b4b",bevel=0,segments=4) {
+    const base=cornerCutFootprint(w,d,offset,corner),data=beveledPolygonData(base,bevel,segments),footprint=data.points,out=[],cutEdge=base.length-1,
+        edgeColor=i=>data.edgeSources[i]===cutEdge?cutColor:color;
+    for(let i=0;i<footprint.length;i++){
+        const j=(i+1)%footprint.length,a=footprint[i],b=footprint[j];
+        out.push(lineA(o,[[a[0],a[1],z0],[b[0],b[1],z0]],edgeColor(i)),lineA(o,[[a[0],a[1],z1],[b[0],b[1],z1]],edgeColor(i)));
     }
-    footprint.forEach(([x, y], index) =>
-        out.push(
-            lineA(
-                o,
-                [
-                    [x, y, z0],
-                    [x, y, z1],
-                ],
-                index === 0 || index === cutStart ? cutColor : color,
-            ),
-        ),
-    );
+    const cutVertices=new Set([0,base.length-1]);
+    data.apexes.forEach((p,i)=>{const line=lineA(o,[[p[0],p[1],z0],[p[0],p[1],z1]],cutVertices.has(i)?cutColor:color);out.push(line);});
     return out;
 }
 function cornerCutOpeningWireBoxA(o, opening, z1, color = o.c || "#e7fff4", cutColor = "#e24b4b") {
@@ -13998,6 +14063,22 @@ function beveledBoxFootprint(width, depth, offset, segmentCount) {
         }
     });
     return out;
+}
+function beveledPolygonData(path, offset, segmentCount=4) {
+    const n=path.length,r=Math.max(0,Number(offset)||0),segments=beveledBoxSegments(segmentCount);
+    if(n<3)return{points:path.map(p=>p.slice()),edgeSources:path.map((_,i)=>i),apexes:path.map(p=>p.slice())};
+    if(r<=1e-6)return{points:path.map(p=>p.slice()),edgeSources:path.map((_,i)=>i),apexes:path.map(p=>p.slice())};
+    const area=path.reduce((sum,p,i)=>{const q=path[(i+1)%n];return sum+p[0]*q[1]-q[0]*p[1];},0),turn=area>=0?1:-1,arcs=[];
+    for(let i=0;i<n;i++){
+        const v=path[i],prev=path[(i+n-1)%n],next=path[(i+1)%n],u1=[prev[0]-v[0],prev[1]-v[1]],u2=[next[0]-v[0],next[1]-v[1]],
+            l1=Math.hypot(...u1),l2=Math.hypot(...u2),a=u1.map(x=>x/l1),b=u2.map(x=>x/l2),theta=Math.acos(clamp(a[0]*b[0]+a[1]*b[1],-1,1)),
+            tangent=Math.min(r/Math.max(1e-6,Math.tan(theta/2)),l1*.45,l2*.45),radius=tangent*Math.tan(theta/2),bis=[a[0]+b[0],a[1]+b[1]],bl=Math.hypot(...bis),center=[v[0]+bis[0]/bl*radius/Math.max(1e-6,Math.sin(theta/2)),v[1]+bis[1]/bl*radius/Math.max(1e-6,Math.sin(theta/2))],
+            start=[v[0]+a[0]*tangent,v[1]+a[1]*tangent],startA=Math.atan2(start[1]-center[1],start[0]-center[0]),sweep=turn*(Math.PI-theta);
+        arcs.push(Array.from({length:segments+1},(_,j)=>{const q=startA+sweep*j/segments;return[center[0]+radius*Math.cos(q),center[1]+radius*Math.sin(q)];}));
+    }
+    const points=[],edgeSources=[],apexes=[];
+    arcs.forEach((arc,i)=>{arc.forEach((p,j)=>{points.push(p);if(j<arc.length-1)edgeSources.push(-1);});apexes.push(arc[Math.round(segments/2)].slice());edgeSources.push(i);});
+    return{points,edgeSources,apexes};
 }
 function beveledEdgeMark(index, offset, segments, group = 0) {
     const b = Math.abs(Number(offset) || 0),
@@ -14093,10 +14174,13 @@ function cornerCutBoxParams(o) {
         d = Math.max(0.01, Math.abs(Number(o?.rb) || 0.01) * 2),
         max = Math.max(0, Math.min(w, d) * 0.5 - 0.001),
         cornerOffset = clamp(Number(o?.cornerOffset) || 0, 0, max),
+        bevelMax=Math.min(Math.min(w,d)*.2,cornerOffset>1e-5?cornerOffset*.35:Math.min(w,d)*.2),
+        bevelOffset=clamp(Number(o?.bevelOffset)||0,0,bevelMax),
+        bevelSegments=beveledBoxSegments(o?.bevelSegments, null, 4),
         cornerCutCorner = ["front-left", "front-right", "back-right", "back-left"].includes(o?.cornerCutCorner)
             ? o.cornerCutCorner
             : "front-left";
-    return { w, d, max, cornerOffset, cornerCutCorner };
+    return { w, d, max, cornerOffset, cornerCutCorner, bevelOffset, bevelMax, bevelSegments };
 }
 function cornerCutOpeningRayDistance(origin, direction, polygon) {
     const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
@@ -14244,8 +14328,8 @@ function recessedStackedBuildingParams(o) {
         cornerBevel = clamp(finite(o?.recessedCornerBevel, 0.45), 0, insetMax),
         cornerBevelSegments = clamp(Math.round(finite(o?.recessedCornerBevelSegments, 4)), 1, 8),
         totalH = firstFloorHeight + Math.max(0, floorCount - 1) * (floorHeight + floorGap),
-        frontWindowMax = Math.max(0.2, w - cornerBevel - 0.3),
-        sideWindowMax = Math.max(0.2, d - cornerBevel - 0.3),
+        frontWindowMax = Math.max(0.2, w - cornerBevel),
+        sideWindowMax = Math.max(0.2, d - cornerBevel),
         marginLeft = clamp(
             finite(o?.recessedWindowMarginLeft, w - cornerBevel - clamp(finite(o?.recessedWindowW, w * 0.74), 0.2, frontWindowMax)),
             0,
@@ -15238,8 +15322,9 @@ function wireCylinderA(o, cx, cy, r, z0, z1, segments = 12, color) {
     }
     return out;
 }
-function wirePrismA(o, polygon, z0, z1, color) {
-    const poly = (polygon || []).filter((q) => Array.isArray(q) && q.length >= 2);
+function wirePrismA(o, polygon, z0, z1, color, bevel=0, segments=4) {
+    const raw = (polygon || []).filter((q) => Array.isArray(q) && q.length >= 2),
+        poly = bevel>1e-6?beveledPolygonData(raw,bevel,segments).points:raw;
     if (poly.length < 3) return [];
     const Z0 = finiteNumber(z0, 0),
         Z1 = finiteNumber(z1, 0),
@@ -15255,18 +15340,8 @@ function wirePrismA(o, polygon, z0, z1, color) {
                 color,
             ),
         ];
-    poly.forEach(([x, y]) =>
-        out.push(
-            lineA(
-                o,
-                [
-                    [x, y, Z0],
-                    [x, y, Z1],
-                ],
-                color,
-            ),
-        ),
-    );
+    const verticals=bevel>1e-6?beveledPolygonData(raw,bevel,segments).apexes:raw;
+    verticals.forEach(([x,y])=>out.push(lineA(o,[[x,y,Z0],[x,y,Z1]],color)));
     return out;
 }
 function wirePyramidA(o, polygon, zBase, apexZ, color, apexX = 0, apexY = 0) {
@@ -15554,10 +15629,13 @@ function linesCornerCutBox(ctx) {
     if (q.enabled) out.push(...cornerCutOpeningWireBoxA(o, q, z1, c, o.cutColor || "#e24b4b"));
     else
         out.push(
-            ...cornerCutWireBoxA(o, q.w, q.d, 0, z1, q.cornerOffset, q.cornerCutCorner, c, o.cutColor || "#e24b4b"),
+            ...cornerCutWireBoxA(o,q.w,q.d,0,z1,q.cornerOffset,q.cornerCutCorner,c,o.cutColor||"#e24b4b",q.bevelOffset,q.bevelSegments),
         );
     const fascia=cornerCutFasciaParts(o);
-    if(fascia.g.enabled) fascia.parts.forEach(part=>out.push(...wirePrismA(o,part,fascia.g.z0,fascia.g.z1,c)));
+    if(fascia.g.enabled){
+        if(!q.enabled&&q.bevelOffset>1e-6)out.push(...cornerCutFasciaBevelWire(o,c));
+        else fascia.parts.forEach(part=>out.push(...wirePrismA(o,part,fascia.g.z0,fascia.g.z1,c)));
+    }
 }
 function linesWallSideSign(ctx) {
     const { o, w, d, h, c, a, out } = ctx;
@@ -16467,7 +16545,9 @@ function personPose(o) {
         kneeAngles = [
             clamp(finiteNumber(q.personKneeL, 0), 0, 120),
             clamp(finiteNumber(q.personKneeR, 0), 0, 120),
-        ];
+        ],
+        armShoulderAngles=[clamp(finiteNumber(q.personArmShoulderL,0),-100,100),clamp(finiteNumber(q.personArmShoulderR,0),-100,100)],
+        armElbowAngles=[clamp(finiteNumber(q.personArmElbowL,0),-135,135),clamp(finiteNumber(q.personArmElbowR,0),-135,135)];
     const bw = 0.28 * h * bodyScale * shoulderScale,
         bd = 0.16 * h * bodyScale,
         legR = 0.055 * h * bodyScale,
@@ -16513,6 +16593,13 @@ function personPose(o) {
                 foot = { x, y: knee.y + dirShin[0] * shinLen, z: knee.z + dirShin[1] * shinLen };
             return { hip, knee, foot };
         }),
+        arms=[0,1].map(i=>{
+            const side=i?1:-1,shoulder={x:side*bw*.43,y:bodyY-.025*h,z:torso1*.94},upperLen=.205*h,foreLen=.19*h,
+                a0=(12+armShoulderAngles[i])*DG,a1=(12+armShoulderAngles[i]-armElbowAngles[i])*DG,
+                elbow={x:shoulder.x+side*upperLen*Math.sin(a0),y:shoulder.y,z:shoulder.z-upperLen*Math.cos(a0)},
+                wrist={x:elbow.x+side*foreLen*Math.sin(a1),y:elbow.y-.008*h,z:elbow.z-foreLen*Math.cos(a1)};
+            return{shoulder,elbow,wrist,radius:.028*h,upperAngle:armShoulderAngles[i],elbowAngle:armElbowAngles[i]};
+        }),
         waistPivot = { y: 0, z: torso0 },
         tiltAbout = (y, z, deg, py = waistPivot.y, pz = waistPivot.z) => {
             const v = rot(y - py, z - pz, deg);
@@ -16549,69 +16636,21 @@ function personPose(o) {
     return {
         h, bw, bd, legR, headR, legTop, torso0, torso1, head0, head1,
         bodyY, headY: headC0.y, headTopX, poseTop, headTilt, pose, stride, crouch, lean,
-        waistAngle, neckAngle, hipAngles, kneeAngles,
+        waistAngle, neckAngle, hipAngles, kneeAngles, armShoulderAngles, armElbowAngles,
         waistPivot, neckBase, headAxis, headC0, headC1,
-        torsoBottom, torsoTop, legs,
+        torsoBottom, torsoTop, legs, arms,
     };
 }
 function linesPerson(ctx) {
     const { o, c, a, out } = ctx,
         p = personPose(o),
         h = p.h,
-        line = (pts, col = c, width = 1.4) => out.push(lineA(o, pts, col, width));
-    p.legs.forEach((leg) => {
-        line(
-            [
-                [leg.hip.x, leg.hip.y, leg.hip.z],
-                [leg.knee.x, leg.knee.y, leg.knee.z],
-                [leg.foot.x, leg.foot.y, leg.foot.z],
-            ],
-            c,
-            1.4,
-        );
-        line(
-            [
-                [leg.knee.x - 0.012 * h, leg.knee.y, leg.knee.z],
-                [leg.knee.x + 0.012 * h, leg.knee.y, leg.knee.z],
-            ],
-            a,
-            0.9,
-        );
-    });
+        line = (pts, col = c, width = 1.4, flags = null) => out.push({ ...lineA(o, pts, col, width), ...(flags || {}) });
     const bottom = p.torsoBottom,
         top = p.torsoTop;
     line([...bottom, bottom[0]], c, 1.15);
     line([...top, top[0]], c, 1.15);
     bottom.forEach((q, i) => line([q, top[i]], a, 0.95));
-    line(
-        [
-            [p.torsoTop[0][0], p.torsoTop[0][1], p.torsoTop[0][2]],
-            [p.torsoTop[1][0], p.torsoTop[1][1], p.torsoTop[1][2]],
-        ],
-        a,
-        1,
-    );
-    line(
-        [
-            [0, p.neckBase.y, p.neckBase.z],
-            [0, p.headC0.y, p.headC0.z],
-        ],
-        c,
-        1.1,
-    );
-    const ringAt = (rx, ry, x0, y0, z, n, color) => {
-        const pts = [];
-        for (let i = 0; i < n; i++) {
-            const t = (i / n) * Math.PI * 2;
-            pts.push([x0 + rx * Math.cos(t), y0 + ry * Math.sin(t), z]);
-        }
-        return polyA(o, pts, color);
-    };
-    out.push(ringAt(p.headR, p.headR * 0.9, 0, p.headC0.y, p.headC0.z, 8, c));
-    out.push(ringAt(p.headR * 0.86, p.headR * 0.78, p.headTopX, p.headC1.y, p.headC1.z, 8, c));
-    out.push(
-        ...spokesA(o, [0, p.headC0.y], [p.headR, p.headR * 0.9], p.headC0.z, [p.headTopX, p.headC1.y], [p.headR * 0.86, p.headR * 0.78], p.headC1.z, 8, c, 0.85),
-    );
     const mx = 0.42 * h;
     line(
         [
@@ -16675,6 +16714,55 @@ function cornerCutFasciaParts(o) {
         parts.push([a,b,endB,endA]);
     }
     return {g,inner,outer,parts};
+}
+function cornerCutFasciaBevelData(o) {
+    const q=cornerCutBoxParams(o),base=cornerCutFasciaParts(o),g=base.g;
+    if(!g.enabled||q.bevelOffset<=1e-6)return null;
+    const seg=q.bevelSegments,p=g.projection,outerOffset=q.cornerOffset>1e-6?q.cornerOffset+(2-Math.SQRT2)*p:0,
+        outerBase=cornerCutFootprint(q.w+2*p,q.d+2*p,outerOffset,q.cornerCutCorner),
+        innerData=beveledPolygonData(base.inner,q.bevelOffset,seg),
+        outerData=beveledPolygonData(outerBase,q.bevelOffset+p,seg),n=base.inner.length,
+        selected=new Set([n-1]);
+    if(g.side){selected.add(0);selected.add(n-2);}
+    const included=innerData.edgeSources.map((source,k)=>{
+        if(source>=0)return selected.has(source);
+        const corner=Math.floor(k/(seg+1))%n;
+        return selected.has((corner+n-1)%n)&&selected.has(corner);
+    });
+    return{g,q,inner:innerData.points,outer:outerData.points,included,segments:seg,
+        starts:included.map((yes,k)=>yes&&!included[(k+included.length-1)%included.length]),
+        ends:included.map((yes,k)=>yes&&!included[(k+1)%included.length]),
+        apexIndices:Array.from({length:n},(_,i)=>i*(seg+1)+Math.round(seg/2))};
+}
+function cornerCutFasciaBevelWire(o,color=o.c||"#e7fff4") {
+    const d=cornerCutFasciaBevelData(o);if(!d)return[];
+    const out=[],z0=d.g.z0,z1=d.g.z1,L=(p,z)=>[p[0],p[1],z],N=d.included.length,seen=new Set(),
+        add=(a,b)=>{const key=[a,b].map(p=>p.map(v=>Math.round(v*1e6)).join(',')).sort().join('|');if(seen.has(key))return;seen.add(key);out.push(lineA(o,[a,b],color));};
+    for(let k=0;k<N;k++)if(d.included[k]){
+        const j=(k+1)%N;
+        for(const p of [d.inner,d.outer]){add(L(p[k],z0),L(p[j],z0));add(L(p[k],z1),L(p[j],z1));}
+        if(d.starts[k])for(const p of [d.inner,d.outer])add(L(p[k],z0),L(p[k],z1));
+        if(d.ends[k])for(const p of [d.inner,d.outer])add(L(p[j],z0),L(p[j],z1));
+    }
+    d.apexIndices.forEach((i,corner)=>{
+        const prev=(i+N-1)%N,next=i;
+        if(!d.included[prev]||!d.included[next])return;
+        for(const p of [d.inner,d.outer])add(L(p[i],z0),L(p[i],z1));
+    });
+    return out;
+}
+function cornerCutFasciaBevelTriangles(o) {
+    const d=cornerCutFasciaBevelData(o);if(!d)return[];
+    const out=[],z0=d.g.z0,z1=d.g.z1,N=d.included.length,P=(p,z)=>[p[0],p[1],z],
+        tri=(a,b,c)=>out.push([a,b,c]),quad=(a,b,c,e)=>{tri(a,b,c);tri(a,c,e);};
+    for(let k=0;k<N;k++)if(d.included[k]){
+        const j=(k+1)%N,ia=P(d.inner[k],z0),ib=P(d.inner[j],z0),oa=P(d.outer[k],z0),ob=P(d.outer[j],z0),
+            IA=P(d.inner[k],z1),IB=P(d.inner[j],z1),OA=P(d.outer[k],z1),OB=P(d.outer[j],z1);
+        quad(ia,ib,ob,oa);quad(IA,OA,OB,IB);quad(oa,ob,OB,OA);quad(ia,IA,IB,ib);
+        if(d.starts[k])quad(ia,oa,OA,IA);
+        if(d.ends[k])quad(ib,IB,OB,ob);
+    }
+    out.forEach(t=>t.surfaceColor=d.g.color);return out;
 }
 function appendBuildingFascia(o,out) {
     const g=buildingFasciaGeometry(o); if(!g.enabled) return;
@@ -20333,12 +20421,22 @@ function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
  ASSET_KIT.define('streetCone',{...common,label:'交通コーン',glyph:'▲',group:'traffic',w:.42,d:.42,h:.7,accent:'#ed7845',minHeight:()=>.1,controls:[
    {key:'coneBaseThickness',label:'台座の厚さ',default:.05,min:.01,max:o=>Math.max(.01,o.h*.35),step:.01,unit:'m',handle:(o,v)=>vertical(o,v,-o.ra,-o.rb)}
  ]},(o,K)=>{const {w,d,h}=size(o),t=val(o,'coneBaseThickness',.05,.01,h*.35),z1=t+(h-t)*.35,z2=t+(h-t)*.67,rad=z=>.4*(1-.83*(z-t)/(h-t));return [K.box(K.rectPath(w,d),0,t),streetRoundPart(o,K,[[w*.4,d*.4,t],[w*rad(z1),d*rad(z1),z1],[w*rad(z2),d*rad(z2),z2],[w*.068,d*.068,h]],[1,2])];});
+ function pavementSlab(K,w,d,h,b,segments){const path=b>1e-6?K.ringPath(w,d,b,segments):K.rectPath(w,d),n=path.length,triangles=[],edges=[],p=(v,z)=>[v[0],v[1],z],
+  tri=(a,c,e)=>triangles.push([a,c,e]),quad=(a,c,e,f)=>{tri(a,c,e);tri(a,e,f);};
+  for(let i=1;i<n-1;i++){tri(p(path[0],0),p(path[i+1],0),p(path[i],0));tri(p(path[0],h),p(path[i],h),p(path[i+1],h));}
+  for(let i=0;i<n;i++){const j=(i+1)%n;quad(p(path[i],0),p(path[j],0),p(path[j],h),p(path[i],h));}
+  const loop=z=>{for(let i=0;i<n;i++)edges.push([p(path[i],z),p(path[(i+1)%n],z)]);};loop(0);loop(h);
+  const ids=b>1e-6?Array.from({length:4},(_,i)=>i*(segments+1)+Math.round(segments/2)):Array.from({length:4},(_,i)=>i);
+  ids.forEach(i=>edges.push([p(path[i],0),p(path[i],h)]));
+  return{meshTriangles:triangles,meshEdges:edges,onFace:true,preciseTubeEdge:true};}
  const curbWidth=o=>val(o,'pavementCurbWidth',.18,.02,2),
        curbHeight=o=>val(o,'pavementCurbHeight',.06,.005,1),
        curbBevel=o=>val(o,'pavementCurbBevel',.04,0,curbWidth(o));
- function pavementCurbRing(w,d,cw,b,z0,z1,tileTop) {
-  const outer=beveledBoxFootprint(w+2*cw,d+2*cw,b,4),n=b>1e-6?5:1,
-   corners=beveledBoxFootprint(w,d,0,4),inner=corners.flatMap(p=>Array.from({length:n},()=>p)),
+ function pavementCurbRing(w,d,cw,b,tileBevel,segments,z0,z1,tileTop) {
+  const n=(b>1e-6||tileBevel>1e-6)?segments+1:1,
+   repeatSharp=path=>path.flatMap(p=>Array.from({length:n},()=>p)),
+   outer0=beveledBoxFootprint(w+2*cw,d+2*cw,b,segments),outer=b>1e-6?outer0:repeatSharp(outer0),
+   inner0=beveledBoxFootprint(w,d,tileBevel,segments),inner=tileBevel>1e-6?inner0:repeatSharp(inner0),
    triangles=[],edges=[],marks=[],point=(p,z)=>[p[0],p[1],z];
   const tri=(a,c,e)=>{const u=c.map((v,i)=>v-a[i]),v=e.map((x,i)=>x-a[i]);
    if(Math.hypot(u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0])>1e-12)triangles.push([a,c,e]);},
@@ -20353,17 +20451,21 @@ function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
    quad(point(a,z0),point(u,z0),point(v,z0),point(c,z0));
   }
   add(loop(outer,z0));add(loop(outer,z1));
-  outer.forEach((p,i)=>add([point(p,z0),point(p,z1)],beveledEdgeMark(i,b,4,'pavementCurb')));
-  add(loop(corners,z1));corners.forEach(p=>add([point(p,tileTop),point(p,z1)]));
+  outer.forEach((p,i)=>{if(b>1e-6||i%(segments+1)===0)add([point(p,z0),point(p,z1)],beveledEdgeMark(i,b,segments,'pavementCurb'));});
+  add(loop(inner,z1));
+  const innerApex=tileBevel>1e-6?Array.from({length:4},(_,i)=>i*(segments+1)+Math.round(segments/2)):Array.from({length:4},(_,i)=>i*n);
+  innerApex.forEach(i=>add([point(inner[i],tileTop),point(inner[i],z1)]));
   return {meshTriangles:triangles,meshEdges:edges,seamMarks:marks,onFace:true,preciseTubeEdge:true};
  }
- ASSET_KIT.define('streetPavement',{...common,label:'タイル舗道',glyph:'▦',group:'traffic',w:2.4,d:1.2,h:.12,accent:'#a3aaa7',minHeight:()=>.02,
+ ASSET_KIT.define('streetPavement',{...common,label:'タイル',glyph:'▦',group:'traffic',w:2.4,d:1.2,h:.12,accent:'#a3aaa7',minHeight:()=>.02,
   constrainEdit:(next,old,patch)=>{const q={...next},has=k=>Object.prototype.hasOwnProperty.call(patch,k);
    if(has('pavementCurbWidth'))q.pavementCurbWidth=clamp(Number(q.pavementCurbWidth)||.02,Math.max(.02,curbBevel(old)),2);
    if(has('pavementCurbHeight'))q.pavementCurbHeight=clamp(Number(q.pavementCurbHeight)||.005,.005,1);
    if(has('pavementCurbBevel'))q.pavementCurbBevel=clamp(Number(q.pavementCurbBevel)||0,0,curbWidth(q));
    return q;},controls:[
    {key:'pavementTileSize',label:'タイル間隔',default:.3,min:.08,max:2,step:.05,unit:'m',handle:(o,v)=>({anchor:[-o.ra,-o.rb,o.h+.001],sample:[-o.ra+v,-o.rb,o.h+.001],probe:[-o.ra+v+1,-o.rb,o.h+.001],fallback:{x:1,y:0}})},
+   {key:'pavementBevelOffset',label:'Z軸辺のベベル',default:0,min:0,max:o=>Math.min(Math.abs(Number(o.ra)||1.2),Math.abs(Number(o.rb)||.6))*.4,step:.01,unit:'m',handle:(o,v)=>({anchor:[o.ra,-o.rb,o.h],sample:[o.ra-v,-o.rb,o.h],probe:[o.ra-v-1,-o.rb,o.h],fallback:{x:-1,y:0}})},
+   {key:'pavementBevelSegments',label:'ベベル分割数',type:'range',default:4,min:1,max:4,step:1},
    {key:'pavementCurbEnabled',label:'縁石をつける',type:'boolean',default:false},
    {key:'pavementCurbWidth',label:'縁石の幅',default:.18,min:o=>Math.max(.02,curbBevel(o)),max:2,step:.01,unit:'m',
     handle:(o,v)=>{if(!o.pavementCurbEnabled)return null;const x=o.ra*.35,y=-o.rb,z=o.h+curbHeight(o)+.05;
@@ -20375,16 +20477,18 @@ function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
     get:curbBevel,handle:(o,v)=>{if(!o.pavementCurbEnabled)return null;const w=curbWidth(o),x=o.ra+w,y=o.rb+w,z=o.h+curbHeight(o)+.30;
      return {anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}};}}
  ]},(o,K)=>{const {w,d,h}=size(o),step=val(o,'pavementTileSize',.3,.08,2),enabled=o.pavementCurbEnabled===true,
-    cw=enabled?curbWidth(o):0,ch=enabled?curbHeight(o):0,b=enabled?curbBevel(o):0,edges=[],curbEdges=[],
-    dx=Math.max(step,w/32),dy=Math.max(step,d/32),z=h+.001,front=-d/2,back=d/2,left=-w/2,right=w/2;
-  for(let i=1;i*dx<w-1e-8;i++){const x=left+i*dx;edges.push([[x,front,z],[x,back,z]]);
+    cw=enabled?curbWidth(o):0,ch=enabled?curbHeight(o):0,b=enabled?curbBevel(o):0,bevel=val(o,'pavementBevelOffset',0,0,Math.min(w,d)*.2),bevelSegments=Math.max(1,Math.min(4,Math.round(val(o,'pavementBevelSegments',4,1,4)))),edges=[],curbEdges=[],
+    dx=Math.max(step,w/32),dy=Math.max(step,d/32),z=h+.001,front=-d/2,back=d/2,left=-w/2,right=w/2,
+    roundedY=x=>{const q=Math.abs(x)-(w/2-bevel);return bevel>1e-6&&q>0?d/2-bevel+Math.sqrt(Math.max(0,bevel*bevel-q*q)):d/2;},
+    roundedX=y=>{const q=Math.abs(y)-(d/2-bevel);return bevel>1e-6&&q>0?w/2-bevel+Math.sqrt(Math.max(0,bevel*bevel-q*q)):w/2;};
+  for(let i=1;i*dx<w-1e-8;i++){const x=left+i*dx,ym=roundedY(x);edges.push([[x,-ym,z],[x,ym,z]]);
    if(enabled)for(const sy of [-1,1]){const inner=sy*d/2,outer=sy*(d/2+cw);
     curbEdges.push([[x,outer+sy*.001,0],[x,outer+sy*.001,h+ch+.001],[x,inner,h+ch+.001],[x,inner,h]]);}}
-  for(let i=1;i*dy<d-1e-8;i++){const y=front+i*dy;edges.push([[left,y,z],[right,y,z]]);
+  for(let i=1;i*dy<d-1e-8;i++){const y=front+i*dy,xm=roundedX(y);edges.push([[-xm,y,z],[xm,y,z]]);
    if(enabled)for(const sx of [-1,1]){const inner=sx*w/2,outer=sx*(w/2+cw);
     curbEdges.push([[outer+sx*.001,y,0],[outer+sx*.001,y,h+ch+.001],[inner,y,h+ch+.001],[inner,y,h]]);}}
-  const parts=[K.box(K.rectPath(w,d),0,h,enabled?{preciseTubeEdge:true,onFace:true}:{}),{meshTriangles:[],meshEdges:edges,onFace:true,...(enabled?{preciseTubeEdge:true}:{})}];
-  if(enabled){parts.push(pavementCurbRing(w,d,cw,b,0,h+ch,h));
+  const parts=[pavementSlab(K,w,d,h,bevel,bevelSegments),{meshTriangles:[],meshEdges:edges,onFace:true,...(enabled||bevel>1e-6?{preciseTubeEdge:true}:{})}];
+  if(enabled){parts.push(pavementCurbRing(w,d,cw,b,bevel,bevelSegments,0,h+ch,h));
    parts.push({meshTriangles:[],meshEdges:curbEdges,onFace:true,preciseTubeEdge:true});}
   return parts;});
  ASSET_KIT.define('streetParcel',{...common,label:'段ボール箱',glyph:'▣',group:'streetObjects',w:.62,d:.46,h:.44,accent:'#cba475',minHeight:()=>.05,controls:[
@@ -24405,35 +24509,26 @@ window.CityCanvasControls = (function () {
         });
     }
     function groupSelectedScene() {
-        const objects = selectedObjects().filter(o => !obLocked(o));
-        if (objects.length < 2) {
-            alert("グループ化するオブジェクトを2個以上選択してください");
-            return;
-        }
-        const groupId = "group-" + uid();
-        HU.push(S);
-        RD = [];
-        rewriteObjectDefs(
-            objects.map((o) => o.id),
-            { groupId },
-        );
-        normalizeSelection();
-        render();
+        const objects=selectedObjects().filter(o=>!obLocked(o));
+        if(objects.length<2){alert("親にするオブジェクトと子にするオブジェクトを2個以上選択してください");return;}
+        const parent=objects.find(o=>o.id===sel)||objects[0],children=objects.filter(o=>o.id!==parent.id);
+        if(children.some(child=>sceneParentWouldCycle(child.id,parent.id))){alert("親子関係が循環するためグループ化できません");return;}
+        HU.push(S);RD=[];
+        children.forEach(child=>setSceneParent(child.id,parent.id));
+        setOb(parent.id,{groupId:null});
+        outlinerCollapsed.delete(parent.id);
+        selIds.clear();selIds.add(parent.id);sel=parent.id;normalizeSelection();render();
     }
     function ungroupSelectedScene() {
-        const objects = selectedObjects().filter((o) => o.groupId && !obLocked(o));
-        if (!objects.length) return;
-        HU.push(S);
-        RD = [];
-        const wanted = new Set(objects.map((o) => o.id));
-        S = S.map((s) => {
-            if (!s?.ob || !wanted.has(s.ob.id)) return s;
-            const ob = { ...s.ob };
-            delete ob.groupId;
-            return { ...s, ob };
-        });
-        normalizeSelection();
-        render();
+        const selected=selectedObjects().filter(o=>!obLocked(o)),objects=sceneObjects(),detach=new Set();
+        selected.forEach(o=>{if(o.attachment?.sceneParent)detach.add(o.id);for(const child of objects)if(child.attachment?.sceneParent&&child.attachment.parentId===o.id)detach.add(child.id);});
+        const legacy=selected.filter(o=>o.groupId);
+        if(!detach.size&&!legacy.length)return;
+        HU.push(S);RD=[];
+        detach.forEach(id=>setSceneParent(id,null));
+        const wanted=new Set(legacy.map(o=>o.id));
+        S=S.map(s=>{if(!s?.ob||!wanted.has(s.ob.id))return s;const ob={...s.ob,groupId:null};return{...s,ob};});
+        normalizeSelection();render();
     }
     function combineSelectedScene() {
         const objects = selectedObjects().filter(o => !obLocked(o));
@@ -24539,7 +24634,7 @@ window.CityCanvasControls = (function () {
             objects = selectedObjects().filter(o => !obLocked(o)),
             units = new Set(objects.map((o) => o.groupId || o.id));
         if (group) group.disabled = units.size < 2;
-        if (ungroup) ungroup.disabled = !objects.some((o) => o.groupId);
+        if (ungroup) ungroup.disabled = !objects.some(o=>o.groupId||o.attachment?.sceneParent||sceneObjects().some(q=>q.attachment?.sceneParent&&q.attachment.parentId===o.id));
         if (combine) combine.disabled = objects.length < 2;
         if (separate) separate.disabled = !objects.some((o) => o.type === "compound");
     }
@@ -24637,7 +24732,7 @@ window.CityCanvasControls = (function () {
         const objects=sceneObjects(),byId=new Map(objects.map(o=>[o.id,o])),children=new Map(),childParent=new Map();
         for(const child of objects){
             const parent=child.attachment?.parentId?byId.get(child.attachment.parentId):null;
-            if(parent?.asset==="building"){
+            if(parent&&(child.attachment?.sceneParent||parent.asset==="building")){
                 childParent.set(child.id,parent.id);
                 if(!children.has(parent.id))children.set(parent.id,[]);
                 children.get(parent.id).push(child);
@@ -24664,19 +24759,17 @@ window.CityCanvasControls = (function () {
             outlinerSelection=new Set(selIds);outlinerActive=sel;syncGroupActions();return;
         }
         syncIsolationButton(objects);
-        const listScroll=list.scrollTop,display=[];
-        objects.forEach((o,i)=>{
-            if(childParent.has(o.id))return;
-            const kids=children.get(o.id)||[];display.push({o,i,kids,depth:0});
-            if(kids.length&&!outlinerCollapsed.has(o.id))kids.forEach(child=>display.push({o:child,i:objects.indexOf(child),kids:[],depth:1}));
-        });
+        const listScroll=list.scrollTop,display=[],visited=new Set();
+        const emit=(o,depth=0)=>{if(!o||visited.has(o.id))return;visited.add(o.id);const kids=children.get(o.id)||[];display.push({o,i:objects.indexOf(o),kids,depth});if(kids.length&&!outlinerCollapsed.has(o.id))kids.forEach(child=>emit(child,depth+1));};
+        objects.filter(o=>!childParent.has(o.id)).forEach(o=>emit(o,0));
+        objects.forEach(o=>{if(!visited.has(o.id))emit(o,0);});
         list.innerHTML=display.length?display.map(({o,i,kids,depth})=>{
             if(o.__featureRow){const owner=o.owner,on=!!owner[o.key],active=window.__f1EditFeature===o.feature;return `<div class="objectRow objectChildRow objectFeatureRow ${active?"activeObject":""}" data-feature-child="${o.feature}" data-feature-owner="${owner.id}" style="margin-left:18px"><button type="button" class="objectVisibility" data-feature-visibility="${o.feature}" title="${on?"部品を非表示":"部品を表示"}" aria-label="${on?"非表示":"表示"}">${on?"◉":"○"}</button><span class="objectDisclosureSpacer"></span><input class="objectCheck" type="checkbox" data-feature-select="${o.feature}" ${(active||window.__f1SelectedFeature===o.feature)?"checked":""} aria-label="${o.label}を選択"><span class="objectIcon">◇</span><span class="objectMeta"><span class="objectName">${o.label}</span><small>${on?"表示 · 選択／ダブルクリックで編集":"非表示"}</small></span></div>`;}
             const group=o.type==="compound"?'<span class="compoundMark">結合</span>':o.groupId?'<span class="groupMark">グループ</span>':'',
                 detail=o.type==="compound"?`${Array.isArray(o.parts)?o.parts.length:0}パーツ・複合オブジェクト`:o.type==="asset"&&o.asset==="person"?Number(o.h).toFixed(2)+" m":o.type==="asset"?"low-poly asset":"vector shape",
                 visible=objectVisible(o),locked=obLocked(o),childButton=kids.length?`<button type="button" class="objectDisclosure" data-object-collapse="${o.id}" aria-expanded="${!outlinerCollapsed.has(o.id)}" title="${outlinerCollapsed.has(o.id)?"子パーツを展開":"子パーツを折りたたむ"}">${outlinerCollapsed.has(o.id)?"▸":"▾"}</button>`:'<span class="objectDisclosureSpacer"></span>';
             const childFocused=o.asset==="f1Accessory"&&window.__f1EditFeature===o.f1Feature,ownerFocused=o.asset==="building"&&window.__f1EditOwner===o.id;
-            return `<div class="objectRow ${depth?"objectChildRow":""} ${(selIds.has(o.id)&&!ownerFocused)||childFocused?"selected":""} ${(sel===o.id&&!ownerFocused)||childFocused?"activeObject":""} ${visible?"":"hiddenObject"} ${locked?"lockedObject":""}" data-object="${o.id}" style="${depth?"margin-left:18px;":""}">${childButton}<button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible?"オブジェクトを非表示":"オブジェクトを表示"}" aria-label="${visible?"非表示":"表示"}">${visible?"◉":"○"}</button><button type="button" class="objectLock ${locked?"isLocked":""}" data-object-lock="${o.id}" title="${locked?"ロックを解除（⌘/Ctrl+L）":"ロックする（⌘/Ctrl+L）"}" aria-label="${locked?"ロック解除":"ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked?"M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5":"M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${(selIds.has(o.id)||(o.asset==="f1Accessory"&&window.__f1SelectedFeature===o.f1Feature))?"checked":""} aria-label="${escapeObjectText(objectDisplayName(o))}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta"><span class="objectName">${escapeObjectText(objectDisplayName(o))}${typeof o.displayName==="string"&&o.displayName.trim()?"":` ${i+1}`}</span> ${group}<small>${kids.length?`${kids.length} 子パーツ · `:""}${detail}</small></span><button type="button" class="objectRename" data-object-rename="${o.id}" title="名前を変更" aria-label="${escapeObjectText(objectDisplayName(o))}の名前を変更">✎</button></div>`;
+            return `<div class="objectRow ${depth?"objectChildRow":""} ${(selIds.has(o.id)&&!ownerFocused)||childFocused?"selected":""} ${(sel===o.id&&!ownerFocused)||childFocused?"activeObject":""} ${visible?"":"hiddenObject"} ${locked?"lockedObject":""}" data-object="${o.id}" draggable="true" style="${depth?`margin-left:${depth*18}px;`:""}">${childButton}<button type="button" class="objectVisibility" data-object-visibility="${o.id}" title="${visible?"オブジェクトを非表示":"オブジェクトを表示"}" aria-label="${visible?"非表示":"表示"}">${visible?"◉":"○"}</button><button type="button" class="objectLock ${locked?"isLocked":""}" data-object-lock="${o.id}" title="${locked?"ロックを解除（⌘/Ctrl+L）":"ロックする（⌘/Ctrl+L）"}" aria-label="${locked?"ロック解除":"ロック"}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path class="shackle" d="${locked?"M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5":"M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0"}" /></svg></button><input class="objectCheck" type="checkbox" data-object-check="${o.id}" ${(selIds.has(o.id)||(o.asset==="f1Accessory"&&window.__f1SelectedFeature===o.f1Feature))?"checked":""} aria-label="${escapeObjectText(objectDisplayName(o))}を選択"><span class="objectIcon">${assetGlyph(o)}</span><span class="objectMeta"><span class="objectName">${escapeObjectText(objectDisplayName(o))}${typeof o.displayName==="string"&&o.displayName.trim()?"":` ${i+1}`}</span> ${group}<small>${kids.length?`${kids.length} 子パーツ · `:""}${detail}</small></span><button type="button" class="objectRename" data-object-rename="${o.id}" title="名前を変更" aria-label="${escapeObjectText(objectDisplayName(o))}の名前を変更">✎</button></div>`;
         }).join(""):'<div class="emptyList">まだオブジェクトがありません</div>';
         list.scrollTop=listScroll;outlinerKey=key;
         outlinerRows=new Map([...list.querySelectorAll("[data-object]")].map(row=>[row.dataset.object,row]));
@@ -24906,6 +24999,18 @@ window.CityCanvasControls = (function () {
         flashHint("テント・看板を建物の左右の中央へ戻しました");
     }
     el("centerChildSel").onclick = centerAttachedChildOnParent;
+    let sceneDragId=null;
+    list.addEventListener("dragstart",e=>{const row=e.target.closest("[data-object]");if(!row)return;sceneDragId=row.dataset.object;e.dataTransfer?.setData("text/plain",sceneDragId);if(e.dataTransfer)e.dataTransfer.effectAllowed="move";row.classList.add("sceneDragging");});
+    list.addEventListener("dragend",()=>{sceneDragId=null;list.querySelectorAll(".sceneDragging,.sceneDropTarget").forEach(x=>x.classList.remove("sceneDragging","sceneDropTarget"));});
+    list.addEventListener("dragover",e=>{if(!sceneDragId)return;e.preventDefault();const row=e.target.closest("[data-object]");list.querySelectorAll(".sceneDropTarget").forEach(x=>{if(x!==row)x.classList.remove("sceneDropTarget");});if(row)row.classList.add("sceneDropTarget");if(e.dataTransfer)e.dataTransfer.dropEffect="move";});
+    list.addEventListener("dragleave",e=>{const row=e.target.closest("[data-object]");if(row&&!row.contains(e.relatedTarget))row.classList.remove("sceneDropTarget");});
+    list.addEventListener("drop",e=>{
+        if(!sceneDragId)return;e.preventDefault();const source=sceneDragId,targetRow=e.target.closest("[data-object]"),targetId=targetRow?.dataset.object||null,child=obOf(source);
+        if(!child||source===targetId||obLocked(child))return;
+        if(targetId){const parent=obOf(targetId);if(!parent||obLocked(parent)||child.attachment?.parentId===targetId)return;if(sceneParentWouldCycle(source,targetId)){flashHint("自分自身や子孫の中には入れられません");return;}HU.push(S);RD=[];if(!setSceneParent(source,targetId))return;outlinerCollapsed.delete(targetId);}
+        else {if(!child.attachment?.sceneParent)return;HU.push(S);RD=[];setSceneParent(source,null);}
+        normalizeSelection();render();
+    });
     list.addEventListener("click", (e) => {
         const featureRow=e.target.closest("[data-feature-child]");
         if(featureRow){

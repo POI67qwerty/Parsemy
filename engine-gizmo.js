@@ -2375,6 +2375,15 @@ function personJointHandles(o) {
         kneeAlt = [0, 1].map((i) =>
             rotate(base.legs[i].foot.y, base.legs[i].foot.z, base.legs[i].knee.y, base.legs[i].knee.z, -eps),
         );
+    const armHandles=[0,1].flatMap(i=>{
+        const side=i?"右":"左",shoulderKey=i?"personArmShoulderR":"personArmShoulderL",elbowKey=i?"personArmElbowR":"personArmElbowL",
+            shoulderAlt=personPose({...o,[shoulderKey]:base.armShoulderAngles[i]+eps}).arms[i],
+            elbowAlt=personPose({...o,[elbowKey]:base.armElbowAngles[i]+eps}).arms[i],a=base.arms[i];
+        return[
+            make(`arm-shoulder-${i}`,shoulderKey,`${side}肩` ,"#ffb347",[a.shoulder.x,a.shoulder.y,a.shoulder.z],[a.elbow.x,a.elbow.y,a.elbow.z],[shoulderAlt.elbow.x,shoulderAlt.elbow.y,shoulderAlt.elbow.z],base.armShoulderAngles[i],-100,100),
+            make(`arm-elbow-${i}`,elbowKey,`${side}肘`,"#64d7f2",[a.elbow.x,a.elbow.y,a.elbow.z],[a.wrist.x,a.wrist.y,a.wrist.z],[elbowAlt.wrist.x,elbowAlt.wrist.y,elbowAlt.wrist.z],base.armElbowAngles[i],-135,135),
+        ];
+    });
     return spreadOverlappingHandles([
         make("waist", "personWaist", "腰", "#ff8a3d", [0, 0, base.torso0], [0, waistY, waistZ], [0, waistYa, waistZa], waist, -60, 60),
         make(
@@ -2417,6 +2426,7 @@ function personJointHandles(o) {
                 120,
             ),
         ),
+        ...armHandles,
     ]);
 }
 // 人物ギズモは関節ハンドルの集まり。C3は腰の高さにして、
