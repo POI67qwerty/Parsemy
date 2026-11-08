@@ -594,7 +594,9 @@ canvas {
 #objectList {
     margin-top: 9px;
     max-height: 190px;
+    min-height: 120px;
     overflow: auto;
+    align-content: start;
     display: grid;
     gap: 5px;
 }

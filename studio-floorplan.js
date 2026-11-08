@@ -1967,7 +1967,7 @@
             // 回転ギズモを掴んだ操作は engine-input.js 側で処理する（ここでは何もしない）。
             if (e.__cityGizmoTakes) return;
             const p = pos(e),
-                panGesture = e.button === 1 || e.button === 2 || e.altKey || floorPlanPanMode;
+                panGesture = e.button === 1 || e.button === 2 || e.altKey || floorPlanPanMode || (mode === "view" && e.button === 0);
             if (panGesture && (orthPlane() === "top" || orthPlane() === "side" || orthPlane() === "front")) {
                 beginFloorPan(e, p);
                 return;

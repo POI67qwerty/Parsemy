@@ -25,7 +25,7 @@ async function open(viewport = { width: 1400, height: 900 }) {
 const ADD_FN = `window.__add = (k, n) => {
     const t = document.querySelector("#assetToggle");
     if (t && t.getAttribute("aria-expanded") !== "true") t.click();
-    const groups = ["primitive", "building", "buildingParts", "street", "furniture", "person", "vehicle"];
+    const groups = ["primitive", "building", "buildingParts", "street", "traffic", "streetObjects", "furniture", "person", "vehicle"];
     const card = document.querySelector('[data-asset="' + k + '"]');
     const targetGroup = card?.dataset.group;
     for (const g of groups) {

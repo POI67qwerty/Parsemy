@@ -168,6 +168,9 @@ function dens(a) {
     return o;
 }
 function dens3(a) {
+    // 透視／正投影では3D直線は画面上も直線なので、不要な中間頂点を作らない。
+    // 球面投影の魚眼だけ、直線が曲線に見えるため角度に応じて細分化する。
+    if (T !== "f") return a;
     const o = [a[0]],
         co = CO();
     for (let i = 1; i < a.length; i++) {
@@ -514,6 +517,7 @@ cv.addEventListener("dblclick", e => {
     syncSel();render();
     flashHint(window.__f1EditFeature?`${near.feature==="awning"?"テント":"正面看板"}の編集：キャンバス上の幅・位置・寸法を調整できます（同じ部品をダブルクリックで解除）`:"部品編集を解除しました");
 });
+cv.oncontextmenu = (e) => { e.preventDefault(); };
 cv.onpointerdown = (e) => {
     // 間取りのポインター処理はstudio-ui.jsが正面／横／上の専用ギズモを
     // 先に判定する。先行するtargetハンドラが通常編集へ入らないようにする。
@@ -591,14 +595,17 @@ cv.onpointerdown = (e) => {
             flashHint("カメラ固定中：視点は動きません（L で解除）");
             return;
         }
-        const pan = e.shiftKey || e.altKey || e.button === 2;
+        // Alt+左=回転、Alt+中=移動、右ドラッグ=ズーム。Shift+左は移動の代替。
+        const zoom = e.button === 2,
+            pan = e.button === 1 || (e.shiftKey && e.button === 0);
         drag = {
-            kind: pan ? "pan" : "orbit",
+            kind: zoom ? "zoom" : pan ? "pan" : "orbit",
             x: e.clientX,
             y: e.clientY,
             yaw: P.yaw,
             hz: P.hz,
             pitch: P.pitch,
+            lens: P.lens,
             cx: P.cx,
             cz: P.cz,
             ch: P.ch,
@@ -702,7 +709,9 @@ cv.onpointermove = (e) => {
         }
         const dx = e.clientX - drag.x,
             dy = e.clientY - drag.y;
-        if (drag.kind === "pan") {
+        if (drag.kind === "zoom") {
+            setP("lens", clamp(drag.lens * Math.exp(-dy / Math.max(80, H * 0.55)), 8, 180));
+        } else if (drag.kind === "pan") {
             const worldPerPx = ((Math.max(0.15, P.ch) * 2) / H) * k;
             const th = P.yaw * DG;
             setP("cx", drag.cx - dx * worldPerPx * Math.cos(th));
@@ -852,8 +861,20 @@ cv.onpointerup = cv.onpointercancel = (e) => {
     cur = null;
     renderSoon();
 }; // 向きに変換して保存
+cv.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    if (orthView) {
+        if (cameraLock) { flashHint("カメラ固定中：L で解除"); return; }
+        const current=Number(window.cityFloorPlanScale)||Math.min(W,H)/7.2;
+        window.cityFloorPlanScale=clamp(current*Math.exp(-e.deltaY*.001),Math.min(W,H)/1000,Math.min(W,H)/.25);
+    } else {
+        if (cameraLock) { flashHint("カメラ固定中：L で解除"); return; }
+        setP("lens",clamp(P.lens*Math.exp(-e.deltaY*.001),8,180));
+    }
+    renderSoon();
+},{passive:false});
 
-// iPad Safariでキャンバス外へ指／ペンを離した場合の一般操作用保険。
+// iPad Safariでキャンバス外へ指／ペンを離した場合の一般操作用保険.
 // ボックス選択以外の編集でも、古いpointerIdが次の操作をブロックしないようにする。
 function releaseInputState(e) {
     if (e?.pointerType === "touch") {
@@ -931,6 +952,25 @@ $("clr").onclick = () => {
         renderSoon();
     }
 };
+function frameSceneObjects(selectionOnly = false) {
+    const pool = typeof sceneObjects === "function" ? sceneObjects() : [...new Map(S.filter(s=>s?.ob).map(s=>[s.ob.id,s.ob])).values()];
+    const picked = selectionOnly ? pool.filter(o => selIds.has(o.id) || o.id === sel) : pool;
+    const objects = picked.filter(o => objectVisible(o) && !o.hide);
+    if (!objects.length) { flashHint(selectionOnly ? "先にオブジェクトを選んでください" : "表示できるオブジェクトがありません"); return false; }
+    if (cameraLock) { flashHint("カメラ固定中：L で解除してから表示を合わせてください"); return false; }
+    const lo=[Infinity,Infinity,Infinity], hi=[-Infinity,-Infinity,-Infinity];
+    for (const o of objects) {
+        const tris=typeof surfaceTriangles==="function"?surfaceTriangles(o):[];
+        const points=tris.flat();
+        if (points.length) for(const p of points) for(let k=0;k<3;k++){lo[k]=Math.min(lo[k],p[k]);hi[k]=Math.max(hi[k],p[k]);}
+        else { const p=L2W(o,0,0,0), r=Math.max(Number(o.ra)||.5,Number(o.rb)||.5,Number(o.h)||.5); for(let k=0;k<3;k++){lo[k]=Math.min(lo[k],p[k]-r);hi[k]=Math.max(hi[k],p[k]+r);} }
+    }
+    const center=lo.map((v,k)=>(v+hi[k])/2), radius=Math.max(.1,Math.hypot(...lo.map((v,k)=>(hi[k]-v)/2)));
+    const yaw=P.yaw*Math.PI/180,pitch=P.pitch*Math.PI/180, forward=[-Math.cos(pitch)*Math.sin(yaw),Math.sin(pitch),Math.cos(pitch)*Math.cos(yaw)];
+    const focal=W*P.lens/36, distance=Math.max(radius*1.5,focal*radius/(Math.min(W,H)*.36));
+    if(!setP("cx",center[0]-forward[0]*distance)||!setP("cz",center[2]-forward[2]*distance)||!setP("ch",center[1]-forward[1]*distance+1))return false;
+    render();flashHint(selectionOnly?"選択中のオブジェクトに表示を合わせました":"全オブジェクトが入るよう表示を合わせました");return true;
+}
 addEventListener("keydown", (e) => {
     const m = e.ctrlKey || e.metaKey;
     if (m && e.key.toLowerCase() === "z") {
@@ -977,6 +1017,10 @@ addEventListener("keydown", (e) => {
         // Eは従来どおり、線の一部を消す消しゴムを起動する。
         $("tE").click();
         return;
+    }
+    if (!m && !e.altKey && !e.shiftKey && !/INPUT|SELECT|TEXTAREA/.test(tag)) {
+        if (key === "f") { e.preventDefault(); frameSceneObjects(true); return; }
+        if (key === "a") { e.preventDefault(); frameSceneObjects(false); return; }
     }
     if (!m && !/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) {
         if (e.key === "1") {

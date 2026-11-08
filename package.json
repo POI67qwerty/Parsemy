@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "description": "Development and browser-test dependencies for City Grid Studio",
   "devDependencies": {
-    "playwright": "^1.58.2"
+    "esbuild": "^0.25.12",
+    "playwright": "^1.58.2",
+    "three": "^0.180.0"
   }
 }

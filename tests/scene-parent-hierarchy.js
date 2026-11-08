@@ -1,0 +1,15 @@
+const assert=require('assert');const{open,ADD_FN}=require('./lib');
+const close=(a,b,e=1e-5)=>Math.abs(a-b)<e,dist=(a,b)=>Math.hypot(...a.map((x,i)=>x-b[i]));
+(async()=>{const{browser,page,errors}=await open({width:1280,height:900});await page.evaluate(ADD_FN);const r=await page.evaluate(()=>{
+ const dist=(a,b)=>Math.hypot(...a.map((x,i)=>x-b[i])),basis=o=>{const p=L2W(o,0,0,0);return{p,a:[[1,0,0],[0,1,0],[0,0,1]].map(v=>L2W(o,...v).map((x,i)=>x-p[i]))};},S0=()=>{S.length=0;clearSelection();};
+ S0();__add('box',1);const parentId=sel;setOb(parentId,{ca:0,cb:0,lift:0,ra:1,rb:1,h:2,rot:0});__add('sphere',1);const childId=sel;setOb(childId,{ca:.55,cb:.2,lift:0,ra:.2,rb:.2,h:.4,rot:0});
+ const parent=obOf(parentId),child=obOf(childId),before=basis(child),attach=setSceneParent(childId,parentId),after=basis(obOf(childId)),attachPreserved=dist(before.p,after.p)<1e-6&&before.a.every((v,i)=>dist(v,after.a[i])<1e-6);
+ const beforeMove=basis(obOf(childId));setOb(parentId,{ca:.4});const afterMove=basis(obOf(childId)),moved=dist(beforeMove.p,afterMove.p)>.35;
+ const beforeRotate=basis(obOf(childId));setOb(parentId,{rot:35});const afterRotate=basis(obOf(childId)),rotated=dist(beforeRotate.a[0],afterRotate.a[0])>.2&&dist(beforeRotate.p,afterRotate.p)>.1;
+ const beforeScale=basis(obOf(childId)),oldRa=obOf(parentId).ra;setOb(parentId,{ra:oldRa*1.5});const afterScale=basis(obOf(childId)),scaled=dist(beforeScale.a[0],afterScale.a[0])>.1;
+ const childBeforeEdit=basis(obOf(childId));setOb(childId,{ca:obOf(childId).ca+.25});const childAfterEdit=basis(obOf(childId)),childEdit=dist(childBeforeEdit.p,childAfterEdit.p)>.1;
+ const detachBefore=basis(obOf(childId)),detach=setSceneParent(childId,null),detachAfter=basis(obOf(childId));setOb(parentId,{ca:1});const detachedIndependent=dist(detachAfter.p,basis(obOf(childId)).p)<1e-6;
+ S0();__add('box',1);const uiParent=sel;__add('sphere',1);const uiChild=sel;selIds.clear();selIds.add(uiParent);selIds.add(uiChild);sel=uiParent;normalizeSelection();syncSel();render();document.getElementById('sceneGroupSel').click();const afterGroup=obOf(uiChild),grouped=!!afterGroup?.attachment?.sceneParent&&afterGroup?.attachment?.parentId===uiParent&&sel===uiParent;
+ const row=document.querySelector(`#objectList [data-object="${uiChild}"]`),nested=!!row&&row.classList.contains('objectChildRow');
+ return{attach,attachPreserved,moved,rotated,scaled,childEdit,detach,detachPreserved:dist(detachBefore.p,detachAfter.p)<1e-6,detachedIndependent,cycleBlocked:sceneParentWouldCycle(uiParent,uiChild),grouped,nested,parentId,childId};
+});console.log(JSON.stringify({r,errors}));for(const k of ['attach','attachPreserved','moved','rotated','scaled','childEdit','detach','detachPreserved','detachedIndependent','cycleBlocked','grouped','nested'])assert(r[k],`scene hierarchy check failed: ${k}`);assert.strictEqual(errors.length,0);await browser.close();console.log('OK: hierarchy grouping, world-preserving parent/drop, nested outliner, transform inheritance and unparent');})().catch(e=>{console.error(e);process.exit(1)});

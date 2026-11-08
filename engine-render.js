@@ -3253,7 +3253,8 @@ let lastObjectGeometryScene = null,
     lastObjectGeometrySignature = null,
     lastObjectGeometryLength = -1,
     lastObjectGeometryFirst = null,
-    lastObjectGeometryLast = null;
+    lastObjectGeometryLast = null,
+    lastObjectGeometryProjection = null;
 function render() {
     // 予約済みの描画は、この同期描画1回にまとめる（二重に描かない）。
     if (RAF) {
@@ -3277,16 +3278,19 @@ function render() {
         lastObjectGeometrySignature !== currentSignature ||
         lastObjectGeometryLength !== sceneLength ||
         lastObjectGeometryFirst !== sceneFirst ||
-        lastObjectGeometryLast !== sceneLast
+        lastObjectGeometryLast !== sceneLast ||
+        lastObjectGeometryProjection !== T
     ) {
-        if (S.some((s) => s.ob && (s.cs !== currentSignature || (s.signalPoleTopRing && s.signalPoleContourView !== (orthView || "3d")) || (s.preciseTubeEdge && s.tubeContourView !== (orthView || "3d"))))) {
-            regenObjects();
-        }
+        const projectionChanged=lastObjectGeometryProjection!==T,
+            needsRegen=projectionChanged||S.some((s)=>s.ob&&((T==="f"&&s.cs!==currentSignature)||(s.signalPoleTopRing&&s.signalPoleContourView!==(orthView||"3d"))||(s.preciseTubeEdge&&s.tubeContourView!==(orthView||"3d"))));
+        if(needsRegen)regenObjects();
+        else if(T!=="f"&&lastObjectGeometrySignature!==currentSignature)S.forEach(s=>{if(s.ob)s.cs=currentSignature;});
         lastObjectGeometryScene = S;
         lastObjectGeometrySignature = currentSignature;
         lastObjectGeometryLength = S.length;
         lastObjectGeometryFirst = S.length ? S[0] : null;
         lastObjectGeometryLast = S.length ? S[S.length - 1] : null;
+        lastObjectGeometryProjection = T;
     }
     syncSel();
     T === "f" ? calcF() : calc();
@@ -3302,6 +3306,7 @@ function render() {
     c.setTransform(Z, 0, 0, Z, vsMain[0], vsMain[1]); // 以降はズーム/移動つき
     // 面ONでも塗り色は別設定。塗り色OFF時も後段の深度バッファで隠面処理を行う。
     if(P.surfaceMode&&window.__surfaceColors)drawObjectSurfaces(c);
+    let threeMainLines = false;
     if ($("gon").checked) {
         if (orthView) orthGuides(c);
         else T === "f" ? guidesF(c) : guides(c);
@@ -3319,24 +3324,28 @@ function render() {
         c.stroke();
         c.setLineDash([]);
     }
+    threeMainLines = window.cityThreeMainEnabled && typeof window.cityDrawThreeMainLines === "function" && window.cityDrawThreeMainLines(c);
     if (P.surfaceMode) {
-        // 面表示中は面を深度バッファに使い、面の裏側に隠れるエッジを表示しない。
-        c.save();
-        c.setTransform(1, 0, 0, 1, 0, 0);
-        c.drawImage(lineLayer(true, true, W, H, null, true), 0, 0);
-        c.restore();
+        // Three.jsは3D線画と深度判定を担当。2Dの補助線だけ既存Canvasで重ねる。
+        if (threeMainLines) {
+            S.forEach((s) => { if (!s?.d3 && (!s.ob || objectVisible(s.ob))) strokeW(c,s); });
+            drawCur(c);
+        } else {
+            c.save(); c.setTransform(1,0,0,1,0,0); c.drawImage(lineLayer(true,true,W,H,null,true),0,0); c.restore();
+        }
     } else if ($("bin").checked) {
-        c.save();
-        c.setTransform(1, 0, 0, 1, 0, 0);
-        c.drawImage(lineLayer(true, true), 0, 0);
-        c.restore();
+        if (threeMainLines) S.forEach((s) => { if (!s?.d3 && (!s.ob || objectVisible(s.ob))) strokeW(c,s); });
+        else { c.save(); c.setTransform(1,0,0,1,0,0); c.drawImage(lineLayer(true,true),0,0); c.restore(); }
+        drawCur(c);
+    } else if (threeMainLines) {
+        S.forEach((s) => { if (!s?.d3 && (!s.ob || objectVisible(s.ob))) strokeW(c,s); });
+        drawCur(c);
+        if (prev) prev.forEach((s) => strokeW(c,s));
     } else {
-        S.forEach((s) => {
-            if (!s.ob || objectVisible(s.ob)) strokeW(c, s);
-        });
+        S.forEach((s) => { if (!s.ob || objectVisible(s.ob)) strokeW(c,s); });
         drawPersonSilhouettes(c,false,null,W,H,[Z,0,0,Z,vsMain[0],vsMain[1]]);
         drawCur(c);
-        if (prev) prev.forEach((s) => strokeW(c, s));
+        if (prev) prev.forEach((s) => strokeW(c,s));
     }
     // 選択中の線を橙色に塗り替えない。線画は常に設定した線色で表示し、選択状態はギズモだけで示す。
     if (snapHit)

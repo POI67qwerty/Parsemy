@@ -704,6 +704,13 @@ window.cityGridInstallAssetUI = function (bridge) {
                 add("trainPole",0,0,.08,{h:2.35});
                 add("trainSlidingDoor",1.34,0,.08,{rot:90,ra:.75,h:2.2});
             }
+            // 一括配置の床をルート親にし、座席・壁・ポール等を最初から追従する子にする。
+            // 親の移動・回転・拡縮時も車内レイアウト全体が一体で動く。
+            const root = parts[0];
+            for (const child of parts.slice(1)) {
+                if (typeof sceneParentMatrix !== "function") throw new Error("scene parenting is unavailable");
+                child.attachment = sceneParentMatrix(child, root);
+            }
             const lines = parts.flatMap(o => genShape(o));
             if (!lines.length || lines.some(s => !validStroke(s))) throw new Error("invalid train preset geometry");
             HU.push(S); RD=[]; S=[...S,...lines];
@@ -1177,6 +1184,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             kinds: [
                 "crosswalk",
                 "streetPavement",
+                "streetCurbRamp",
                 "trafficSignal",
                 "pedSignal",
                 "signPost",

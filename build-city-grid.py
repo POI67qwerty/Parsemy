@@ -120,7 +120,8 @@ def main() -> None:
     ui = read("studio-lib.js") + "\n" + read("studio-canvas-controls.js") + "\n" + read("studio-ui.js") + "\n" + read("studio-floorplan.js")
 
     # 単体HTMLの「engine」ブロック＝コア＋入力／描画ツール。
-    engine = lib + "\n" + core + "\n" + tools
+    three = read("vendor/three.iife.js")
+    engine = three + "\n" + lib + "\n" + core + "\n" + tools + "\n" + read("three-compare.js")
 
     # 単体HTMLは、engineとstudio-uiの2ブロックへ同じソースを埋め込む。
     html = read("cyberpunk-city-studio.html")
@@ -149,6 +150,13 @@ def main() -> None:
     else:
         target_start = html.index('<div class="barGroup" id="standardViews">')
         html = html[:target_start] + block + "\n                " + html[target_start:]
+    # Three.js比較ボタンは開発版・単体HTMLで同じ場所に置く。
+    three_button = '<button id="threePreviewToggle" class="toolBtn" aria-pressed="false" title="線画の描画方式をThree.js／Canvasで切り替えます">Three.js比較</button>'
+    if 'id="threePreviewToggle"' not in html:
+        marker = 'id="lockSel"'
+        pos = html.index(marker)
+        start = html.rfind('><button', 0, pos)
+        html = html[:start] + '>' + three_button + '\n                    ' + html[start + 1:]
     # CSSも単体HTMLへ埋め込む。以前は手で貼っていたため、studio.css を直しても
     # 配布用HTMLだけ古い見た目のまま、という食い違いが起きた。
     html = inject_style(html, "<style>", read("style.css"))

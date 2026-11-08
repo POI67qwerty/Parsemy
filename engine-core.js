@@ -118,6 +118,9 @@ ${R("gn", "マスの数（片側）", 2, 60, 1)}
 <label><input type=checkbox id=gon checked> 補助線を表示</label>
 <label><input type=checkbox id=hzl checked> 地平線を表示</label>
 <label><input type=checkbox id=bgw checked> 背景を白にする</label>
+<h3>表示の詳細</h3>
+${R("pw", "線の太さ", 0.5, 20, 0.5, "px")}
+<div class="note">アセット・3D図形・描画線の太さをまとめて調整します。面色をOFFにしても隠面処理は維持されます。</div>
 <h3>ペン</h3>
 <label><input type=checkbox id=pn checked> iPad：指＝視点／ペン＝描画</label>
 <div class="note">二本指タップ＝元に戻す／三本指タップ＝やり直し／二本指ピンチ＝ズーム・移動<br>オフだと上の①②ボタンのモードで全部の入力を扱います</div>
@@ -125,8 +128,6 @@ ${R("gn", "マスの数（片側）", 2, 60, 1)}
 <label><input type=checkbox id=p3 checked> 線を3D空間に固定（視点移動に追従）</label>
 ${R("dp", "奥行き", 1, 100, 0.5)}
 <div class="note">描画した線は3D空間に固定されます。視点を回転・水平移動すると、線画の見え方も変わります。</div>
-${R("pw", "線の太さ（全体）", 0.5, 20, 0.5, "px")}
-<div class="note">描画線・図形・アセットを含む全ての線画に反映されます。</div>
 <label><span>色</span><input type=color id=pc value="#222222"></label>
 <label><input type=checkbox id=bin checked> 線画のアンチエイリアスをオフ（二値）</label>
 ${R("bt", "しきい値", 16, 240, 1)}
@@ -945,9 +946,9 @@ function strokeW(c, s) {
         on ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y);
         on = true;
     };
-    // 正投影ビューでは投影が線形なので、点の間を球面上で補間する必要がない。
-    // （以前は全ビューで角度分割していたため、1本の線が最大200点に増えていた）
-    const subdivide = !orthView;
+    // 透視・正投影では3D線分の投影も直線なので中間点は不要。魚眼だけ曲線化する。
+    // 以前は通常透視でも角度分割し、直線1本が何十〜数百点に増えていた。
+    const subdivide = T === "f";
     // 直前の点の正規化ベクトルを次の区間で使い回す（以前は区間ごとに2点とも正規化し直していた）。
     let pna = null;
     s.p.forEach((v, i) => {

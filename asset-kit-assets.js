@@ -1918,6 +1918,14 @@ function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
   if(enabled){parts.push(pavementCurbRing(w,d,cw,b,bevel,bevelSegments,0,h+ch,h));
    parts.push({meshTriangles:[],meshEdges:curbEdges,onFace:true,preciseTubeEdge:true});}
   return parts;});
+ // 横断歩道の歩道切下げ。車道側から歩道側へ高さが上がる一体型スロープ。
+ ASSET_KIT.define('streetCurbRamp',{...common,label:'歩道切下げスロープ',glyph:'▱',group:'traffic',w:1.8,d:1.0,h:.15,accent:'#a3aaa7',minHeight:()=>.02,controls:[
+  {key:'curbRampRise',label:'歩道側の段差',default:.15,min:.02,max:1,step:.01,unit:'m',handle:(o,v)=>({anchor:[-o.ra,o.rb,0],sample:[-o.ra,o.rb,v],probe:[-o.ra,o.rb,v+1],fallback:{x:0,y:-1}})}
+ ]},(o,K)=>{const {w,d}=size(o),h=val(o,'curbRampRise',o.h,.02,1),x=w/2,y0=-d/2,y1=d/2,
+  a=[-x,y0,0],b=[x,y0,0],c=[x,y1,h],e=[-x,y1,h],a0=[-x,y0,0],b0=[x,y0,0],c0=[x,y1,0],e0=[-x,y1,0],
+  triangles=[[a,b,c],[a,c,e],[a0,c0,b0],[a0,e0,c0],[a0,b0,b],[a0,b,a],[c0,e0,e],[c0,e,c],[a0,a,e],[a0,e,e0],[b0,c0,c],[b0,c,b]],
+  edges=[[a,b],[b,c],[c,e],[e,a],[a0,b0],[b0,c0],[c0,e0],[e0,a0],[a0,a],[b0,b],[c0,c],[e0,e]];
+  return {meshTriangles:triangles,meshEdges:edges,onFace:true,preciseTubeEdge:true};});
  ASSET_KIT.define('streetParcel',{...common,label:'段ボール箱',glyph:'▣',group:'streetObjects',w:.62,d:.46,h:.44,accent:'#cba475',minHeight:()=>.05,controls:[
    {key:'parcelTapeWidth',label:'テープ幅',default:.09,min:.01,max:o=>Math.max(.01,Math.abs(o.ra)*1.7),step:.01,unit:'m',handle:(o,v)=>({anchor:[0,0,o.h+.001],sample:[v/2,0,o.h+.001],probe:[(v+1)/2,0,o.h+.001],fallback:{x:1,y:0}})},
    {key:'parcelOpen',label:'ふたの開き',type:'range',default:0,min:0,max:180,step:1,unit:'°',handle:(o,v)=>({anchor:[-o.ra,0,o.h+.1],sample:[-o.ra+.12+v*.002,0,o.h+.1],probe:[-o.ra+1.12+v*.002,0,o.h+.1],fallback:{x:1,y:0},pixelsPerUnit:1})}
