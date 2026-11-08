@@ -102,6 +102,7 @@
     // プリセットの旧details配列は、この元の順序で読み書きする。
     const presetDetails = [...side.querySelectorAll("details")],
         editSection = el("objP")?.closest("details");
+
     if (editSection) quick.querySelector("#objectEditSectionSlot").appendChild(editSection);
     side.insertBefore(quick, side.firstChild);
     const humanInput = el("humanHeight");
@@ -118,10 +119,6 @@
         quick.querySelectorAll("[data-workspace-screen]").forEach((screen) => {
             screen.hidden = screen.dataset.workspaceScreen !== tab;
         });
-        if (name === "floorplan") window.cityFloorPlanEnter?.();
-        // 人物・ポーズの設定を開いても、前／横／上の間取り表示は維持する。
-        // 3Dへ戻るときだけ、明示的に間取りを閉じる。
-        else if (window.cityFloorPlanActive && name === "perspective") window.cityFloorPlanExit?.();
     }
     quick
         .querySelectorAll("[data-workspace-tab]")
@@ -1178,6 +1175,8 @@
             side = el("wallSideSignSide"),
             brace = el("wallSideSignBrace"),
             brackets = el("wallSideSignBrackets"),
+            bracketLengthInput = el("wallSideSignBracketLength"),
+            bracketThicknessInput = el("wallSideSignBracketThickness"),
             shape = el("wallSideSignShape"),
             scope = el("wallSideSignScope"),
             scopeRow = el("wallSideSignScopeRow"),
@@ -1205,6 +1204,8 @@
             side.value = String(Number(parent.wallSideSignSide ?? child?.attachment?.wallSideSignSide) < 0 ? -1 : 1);
         if (brace && document.activeElement !== brace) brace.checked = count > 0;
         if (brackets && document.activeElement !== brackets) brackets.value = String(count);
+        if (bracketLengthInput && document.activeElement !== bracketLengthInput) bracketLengthInput.value = Number(parent.wallSideSignBracketLength ?? child?.wallSideSignBracketLength ?? 0.36).toFixed(2);
+        if (bracketThicknessInput && document.activeElement !== bracketThicknessInput) bracketThicknessInput.value = Number(parent.wallSideSignBracketThickness ?? child?.wallSideSignBracketThickness ?? 0.1).toFixed(2);
         if (shape && document.activeElement !== shape) shape.value = "beveled";
         if (scope && document.activeElement !== scope) scope.value = scopeValue;
         if (bevel && document.activeElement !== bevel) bevel.value = bevelValue.toFixed(2);
@@ -1354,6 +1355,8 @@
         wallSideSignSide = el("wallSideSignSide"),
         wallSideSignBrace = el("wallSideSignBrace"),
         wallSideSignBrackets = el("wallSideSignBrackets"),
+        wallSideSignBracketLength = el("wallSideSignBracketLength"),
+        wallSideSignBracketThickness = el("wallSideSignBracketThickness"),
         wallSideSignShape = el("wallSideSignShape"),
         wallSideSignScope = el("wallSideSignScope"),
         wallSideSignBevelOffset = el("wallSideSignBevelOffset");
@@ -1367,7 +1370,8 @@
                     ? wallSideSignScope.value
                     : wallSideSignScopeValue(parent, children),
             count = wallSideSignBrace?.checked ? clamp(Math.round(Number(wallSideSignBrackets?.value) || 0), 0, 3) : 0,
-            length = clamp(Math.abs(Number(parent.wallSideSignBracketLength) || 0.36), 0.05, 5),
+            length = clamp(Math.abs(Number(wallSideSignBracketLength?.value ?? parent.wallSideSignBracketLength) || 0.36), 0.05, 5),
+            bracketThickness = clamp(Math.abs(Number(wallSideSignBracketThickness?.value ?? parent.wallSideSignBracketThickness) || 0.1), 0.02, 0.5),
             shape = "beveled",
             bevel = clamp(Number(wallSideSignBevelOffset?.value) || 0.06, 0.01, 1),
             flags = floorFlagsOverride || wallSideSignFlags(parent, children);
@@ -1381,6 +1385,7 @@
             bevel,
             scope,
             flags,
+            bracketThickness,
         );
     }
     if (wallSideSignCheck) wallSideSignCheck.onchange = applyWallSideSignControl;
@@ -1390,6 +1395,8 @@
         };
     if (wallSideSignBrace) wallSideSignBrace.onchange = applyWallSideSignControl;
     if (wallSideSignBrackets) wallSideSignBrackets.onchange = applyWallSideSignControl;
+    if (wallSideSignBracketLength) wallSideSignBracketLength.onchange = applyWallSideSignControl;
+    if (wallSideSignBracketThickness) wallSideSignBracketThickness.onchange = applyWallSideSignControl;
     if (wallSideSignShape) wallSideSignShape.onchange = applyWallSideSignControl;
     if (wallSideSignScope) wallSideSignScope.onchange = applyWallSideSignControl;
     if (wallSideSignBevelOffset) wallSideSignBevelOffset.oninput = applyWallSideSignControl;
@@ -1859,6 +1866,7 @@
                 c: first.c,
                 wallSideSignBracketCount: first.wallSideSignBracketCount,
                 wallSideSignBracketLength: first.wallSideSignBracketLength,
+                wallSideSignBracketThickness: first.wallSideSignBracketThickness,
                 wallSideSignShape: first.wallSideSignShape,
                 wallSideSignBevelOffset: first.wallSideSignBevelOffset,
                 wallSideSignBevelSegments: first.wallSideSignBevelSegments,
@@ -3304,7 +3312,7 @@
             setSide(true);
             fit();
         }
-        SH.floorPlanDock.classList.add("open");
+        SH.floorPlanDock?.classList.add("open");
         fitCanvasDisplay();
         SH.syncFloorPlanDockLayout?.();
         Z = 1;
@@ -3324,7 +3332,7 @@
         if (!window.cityFloorPlanActive) return;
         // 間取り中に変更した共有カメラ設定は、そのまま3D視点へ引き継ぐ。
         window.cityFloorPlanActive = false;
-        SH.floorPlanDock.classList.remove("open");
+        SH.floorPlanDock?.classList.remove("open");
         fitCanvasDisplay();
         const saved = floorPlanView,
             restoreSide = floorPlanAutoHidSide && !floorPlanSideWasHidden;

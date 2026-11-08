@@ -283,7 +283,7 @@ canvas {
 }
 .workspaceTabs {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 5px;
     margin: 10px 0 9px;
     padding: 3px;
@@ -567,6 +567,10 @@ canvas {
     font-size: 10px;
     line-height: 1.3;
 }
+
+.roomModeTabs { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:3px; margin:7px 0; }
+.roomModeTabs button { min-width:0 !important; padding:5px 2px !important; }
+.roomModeTabs button.is-active { background:linear-gradient(135deg,#285e5a,#315d86) !important; border-color:#66e3c8 !important; color:#effffb !important; }
 #floorPlanDock.collapsed {
     width: auto;
     right: 18px;
@@ -1174,7 +1178,7 @@ body.cameraLocked #cv {
 }
 @media (max-width: 520px) {
     #studioQuick .workspaceTabs {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
     }
     #bar {
         gap: 5px;

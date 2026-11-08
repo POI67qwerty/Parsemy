@@ -979,6 +979,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 0.05,
                 5,
             ),
+            bracketThickness = clamp(Math.abs(Number(parent.wallSideSignBracketThickness ?? template?.wallSideSignBracketThickness) || 0.1),0.02,0.5),
             shape =
                 parent.wallSideSignShape === "beveled"
                     ? "beveled"
@@ -1024,6 +1025,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 wallSideSign: true,
                 wallSideSignBracketCount: bracketCount,
                 wallSideSignBracketLength: bracketLength,
+                wallSideSignBracketThickness: bracketThickness,
                 wallSideSignShape: shape,
                 wallSideSignBevelOffset: bevelOffset,
                 wallSideSignBevelSegments: 4,
@@ -1054,6 +1056,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         bevelOffset = 0.06,
         scope = null,
         floorFlags = null,
+        bracketThickness = 0.1,
     ) {
         const parent = wallSideSignParent(parentId);
         if (!parent) return false;
@@ -1062,6 +1065,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             oldIds = new Set(oldChildren.map((child) => child.id)),
             count = clamp(Math.round(Number(bracketCount) || 0), 0, 3),
             length = clamp(Math.abs(Number(bracketLength) || 0.36), 0.05, 5),
+            thickness = clamp(Math.abs(Number(bracketThickness) || 0.1),0.02,0.5),
             form = shape === "beveled" ? "beveled" : "box",
             bevel = clamp(Number(bevelOffset) || 0.06, 0.01, 1),
             stacked = isStackedBuildingAsset(parent),
@@ -1084,6 +1088,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 wallSideSignSide: side < 0 ? -1 : 1,
                 wallSideSignBracketCount: count,
                 wallSideSignBracketLength: length,
+                wallSideSignBracketThickness: thickness,
                 wallSideSignShape: form,
                 wallSideSignBevelOffset: bevel,
                 wallSideSignBevelSegments: 4,

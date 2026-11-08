@@ -139,7 +139,8 @@ function addExportBoxFaces(out, o, w, d, z0, z1) {
 const surfaceTriCache = new WeakMap();
 function surfaceCacheKey(o) {
     try {
-        return JSON.stringify(o);
+        const key=JSON.stringify(o);
+        return key;
     } catch (e) {
         const seen = new Set();
         return JSON.stringify(o, (key, value) => {
@@ -710,25 +711,24 @@ function exportSurfaceTrianglesBase(o) {
             thickness = Math.max(0.02, Math.abs(Number(o.h) || 0.12)),
             count = clamp(Math.round(Number(o.wallSideSignBracketCount) || 0), 0, 3),
             length = clamp(Math.abs(Number(o.wallSideSignBracketLength) || 0.36), 0.05, 5),
+            bracketThickness = clamp(Math.abs(Number(o.wallSideSignBracketThickness) || Math.max(.06, Math.min(.18, boardH * .1))), .02, .5),
             clearance = 0.025,
             span = length + clearance,
             centerY = -(boardW * 0.5 + span * 0.5),
-            barV = Math.max(0.06, Math.min(0.18, boardH * 0.1)),
-            beveled = true,
+            barV = bracketThickness,
             bevelOffset = clamp(
                 Number(o.wallSideSignBevelOffset) || 0.06,
                 0.01,
                 Math.max(0.01, Math.min(boardH, boardW) * 0.45),
             ),
             bevelSegments = 4,
-            drawBoard = (cx, cy, bw, bd, z0, z1) =>
-                beveled ? beveledAt(cx, cy, bw, bd, z0, z1, bevelOffset, bevelSegments) : boxAt(cx, cy, bw, bd, z0, z1);
+            drawBoard = (cx, cy, bw, bd, z0, z1) => beveledAt(cx, cy, bw, bd, z0, z1, bevelOffset, bevelSegments);
         // 面表示用も、ベベルは看板本体だけ。取付金具は普通の直方体の面にする。
         drawBoard(0, 0, boardH, boardW, -thickness * 0.5, thickness * 0.5);
         for (let i = 0; i < count; i++) {
             const t = (i + 1) / (count + 1),
                 x = -boardH * 0.5 + boardH * t;
-            beveledAt(x,centerY,barV,span,-thickness*.5,thickness*.5,Math.max(.001,Math.min(bevelOffset*.35,barV*.24,span*.24)),4);
+            boxAt(x,centerY,barV,span,-thickness*.5,thickness*.5);
         }
         return out;
     }
@@ -3324,9 +3324,9 @@ function render() {
         c.stroke();
         c.setLineDash([]);
     }
-    threeMainLines = window.cityThreeMainEnabled && typeof window.cityDrawThreeMainLines === "function" && window.cityDrawThreeMainLines(c);
+    threeMainLines = false;
     if (P.surfaceMode) {
-        // Three.jsは3D線画と深度判定を担当。2Dの補助線だけ既存Canvasで重ねる。
+        // 面の深度判定も線画もCanvas経路で描画する。
         if (threeMainLines) {
             S.forEach((s) => { if (!s?.d3 && (!s.ob || objectVisible(s.ob))) strokeW(c,s); });
             drawCur(c);
@@ -3359,9 +3359,7 @@ function render() {
         }); // くっつき先は桃色
     if (tool === "edit" && selIds.size > 1) drawSelectionFeedback(c);
     const selectedForGizmo = sel && obOf(sel);
-    if (sel && tool === "edit" && (!window.cityFloorPlanActive || selectedForGizmo?.attachment?.wallSideSign))
-        drawGizmo(c); // 3D視点と壁横看板の前／横／上ビューへ、軸・面・専用ハンドルを表示
-    if (window.cityFloorPlanOverlay && window.cityFloorPlanActive) window.cityFloorPlanOverlay(c);
+    if (sel && tool === "edit") drawGizmo(c); // 正投影ビューでも選択中オブジェクトのギズモを表示
     if (boxSelect) drawBoxSelection(c);
     if (er) {
         c.strokeStyle = "#e84a4a";

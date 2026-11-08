@@ -2287,8 +2287,9 @@ function linesWallSideSign(ctx) {
         thickness = Math.max(0.02, Math.abs(Number(o.h) || 0.12)),
         bracketCount = clamp(Math.round(Number(o.wallSideSignBracketCount) || 0), 0, 3),
         bracketLength = clamp(Math.abs(Number(o.wallSideSignBracketLength) || 0.36), 0.05, 5),
+        bracketThickness = clamp(Math.abs(Number(o.wallSideSignBracketThickness) || Math.max(.06, Math.min(.18, boardH * .1))), .02, .5),
         clearance = 0.025,
-        bracketV = Math.max(0.06, Math.min(0.18, boardH * 0.1)),
+        bracketV = bracketThickness,
         bracketSpan = bracketLength + clearance,
         bracketCenter = -(boardW * 0.5 + bracketSpan * 0.5),
         beveled = true,
@@ -2308,8 +2309,7 @@ function linesWallSideSign(ctx) {
     for (let i = 0; i < bracketCount; i++) {
         const t = (i + 1) / (bracketCount + 1),
             x = -boardH * 0.5 + boardH * t;
-        const metalBevel=Math.max(.005,Math.min(bevelOffset*.35,bracketV*.24,bracketSpan*.24));
-        out.push(...beveledWireBoxA(o,x,bracketCenter,bracketV,bracketSpan,-thickness*.5,thickness*.5,metalBevel,bevelSegments,c));
+        out.push(...wireBoxA(o,x,bracketCenter,bracketV,bracketSpan,-thickness*.5,thickness*.5,c));
     }
 }
 
@@ -3614,7 +3614,7 @@ function appendF1BuildingOptions(o,out,w,d,h,c=o.c||"#222222") {
         const g=sg(),start=out.length,bevel=clamp(o.f1SignBevelOffset==null ? .18 : Number(o.f1SignBevelOffset),0,Math.max(0,Math.min(g.width,g.height)*.45-.001));
         const zc=g.z+g.height/2;
         const outline=wallSignFacePoints({width:g.width,height:g.height,beveled:true,bevelOffset:bevel,bevelSegments:4}),frontY=-d/2-g.depth,backY=frontY+g.depth;
-        for(let i=0;i<outline.length;i++){const a=outline[i],b=outline[(i+1)%outline.length],ax=g.x+a[0],az=zc+a[1],bx=g.x+b[0],bz=zc+b[1];out.push(lineA(o,[[ax,frontY,az],[bx,frontY,bz]],c),lineA(o,[[ax,backY,az],[bx,backY,bz]],c),lineA(o,[[ax,frontY,az],[ax,backY,az]],c));}
+        for(let i=0;i<outline.length;i++){const a=outline[i],b=outline[(i+1)%outline.length],ax=g.x+a[0],az=zc+a[1],bx=g.x+b[0],bz=zc+b[1],front=lineA(o,[[ax,frontY,az],[bx,frontY,bz]],c),back=lineA(o,[[ax,backY,az],[bx,backY,bz]],c),depth=lineA(o,[[ax,frontY,az],[ax,backY,az]],c),mark=beveledEdgeMark(i,bevel,4,"f1-front-sign");if(mark){depth.seam=mark.key;depth.seamApex=mark.apex;}out.push(front,back,depth);}
         for(let i=start;i<out.length;i++)out[i].f1Feature="sign";
     }
 }

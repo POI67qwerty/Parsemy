@@ -170,21 +170,8 @@
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) resetFloorTouch();
     });
-    const floorPlanDock = document.createElement("div");
-    floorPlanDock.id = "floorPlanDock";
-    floorPlanDock.innerHTML =
-        '<div class="floorPlanDockInner"><div class="floorPlanDockHeader"><div id="floorPlanDockStatus" class="floorPlanDockStatus">オブジェクトを選択すると、移動・回転・サイズ変更ができます。<small>カメラ本体：位置　／　先端の丸：向き</small></div><div class="floorHistoryButtons"><button type="button" id="floorUndo" class="floorHistoryButton" title="間取りの操作を元に戻す">↶ 元に戻す</button><button type="button" id="floorRedo" class="floorHistoryButton" title="間取りの操作をやり直す">↷ やり直す</button></div><button type="button" class="dockCollapse" data-floor-dock-action="collapse" title="操作バーを折りたたむ">−</button></div><button type="button" data-floor-dock-action="left">↺ 15°</button><button type="button" data-floor-dock-action="right">↻ 15°</button><button type="button" data-floor-dock-action="rot30">30°</button><button type="button" data-floor-dock-action="rot45">45°</button><button type="button" data-floor-dock-action="90">90°回す</button><label class="floorLensTools">レンズ <input id="floorLensInput" type="number" min="14" max="200" step="1"> mm</label><div class="floorPlanPanTools"><span>表示移動</span><button type="button" data-floor-dock-action="pan-up" title="表示を上へ">↑</button><button type="button" data-floor-dock-action="pan-down" title="表示を下へ">↓</button><button type="button" data-floor-dock-action="pan-left" title="表示を左へ">←</button><button type="button" data-floor-dock-action="pan-right" title="表示を右へ">→</button></div><button type="button" data-floor-dock-action="assets">＋アセット</button><button type="button" data-floor-dock-action="delete">片付ける</button><span class="dockHint">中／右ドラッグ：表示移動　・　表示移動ボタン／Alt＋矢印／WASD：キャンバス移動　・　2本指ピンチ：ズームイン／ズームアウト（正面・横・上のまま）　・　磁石ON：家具移動と幅／奥行の面編集をエッジへ吸着　・　2本指タップ：元に戻す／3本指タップ：やり直す</span></div>';
-    stage.parentNode.insertBefore(floorPlanDock, stage);
-    // アセット棚を開いたときは、間取り操作バーを棚の上へ逃がす。棚と操作バーを重ねないためのレイアウト調整。
-    function syncFloorPlanDockLayout() {
-        const tray = el("assetTray");
-        if (!tray) return;
-        // 操作バーは右上に固定し、下部のアセット棚と重ならない配置にする。
-        floorPlanDock.style.bottom = "";
-        floorPlanDock.dataset.assetTrayOpen =
-            !!window.cityFloorPlanActive && getComputedStyle(tray).display !== "none" ? "1" : "0";
-    }
-    addEventListener("resize", () => requestAnimationFrame(syncFloorPlanDockLayout));
+    // 間取り操作バーは撤回。正投影ビューのキャンバス操作はジェスチャーで継続する。
+    function syncFloorPlanDockLayout() {}
     const angle360 = (a) => (((Number(a) || 0) % 360) + 360) % 360;
     const floorPlanObject = () => { const o = sel && obOf(sel); return o && !obLocked(o) ? o : null; };
     function floorPlanWorldAt(p) {
@@ -1536,16 +1523,6 @@
             : "オブジェクトを選択すると、移動・回転できます。";
         const status = el("floorPlanSelectionStatus");
         if (status) status.textContent = text;
-        const dockStatus = el("floorPlanDockStatus");
-        if (dockStatus) {
-            const cameraHint =
-                orthPlane() === "side"
-                    ? "真横：カメラ本体＝位置・高さ　／　先端の丸＝上下の傾き"
-                    : orthPlane() === "front"
-                      ? "正面：カメラ本体＝X位置・高さ　／　先端の丸＝上下の傾き"
-                      : "カメラ本体：位置　／　先端の丸＝向き";
-            dockStatus.innerHTML = `${text}<small>幅・奥行ハンドルは反対側の面を固定　／　${cameraHint}</small>`;
-        }
         [
             ["floorRotateLeft", canRotate],
             ["floorRotateRight", canRotate],
@@ -1555,17 +1532,6 @@
             const b = el(id);
             if (b) b.disabled = !on;
         });
-        floorPlanDock.querySelectorAll("[data-floor-dock-action]").forEach((b) => {
-            const a = b.dataset.floorDockAction;
-            b.disabled =
-                a === "delete" ? !o : ["left", "right", "rot30", "rot45", "90"].includes(a) ? !canRotate : false;
-        });
-        const undoButton = el("floorUndo"),
-            redoButton = el("floorRedo");
-        if (undoButton) undoButton.disabled = !HU.length;
-        if (redoButton) redoButton.disabled = !RD.length;
-        const lensInput = el("floorLensInput");
-        if (lensInput && document.activeElement !== lensInput) lensInput.value = Number(P.lens || 35).toFixed(0);
     }
     // Y生成面の幅・奥行き・高さハンドルを、オブジェクト定義の差分へ変換する。
     // X/Z生成面は上のfloorWallDimensionPatchへ分岐する。
@@ -1845,54 +1811,6 @@
         window.cityFloorPlanCenter = [c[0] - dx / sc, c[1] + dy / sc];
         render();
     }
-    el("floorUndo").onclick = () => {
-        floorPlanDrag = null;
-        undo();
-    };
-    el("floorRedo").onclick = () => {
-        floorPlanDrag = null;
-        redo();
-    };
-    const floorLensInput = el("floorLensInput");
-    floorLensInput.oninput = () => {
-        const v = Number(floorLensInput.value);
-        if (Number.isFinite(v)) {
-            P.lens = clamp(v, 14, 200);
-            sync();
-            render();
-        }
-    };
-    floorLensInput.onchange = () => {
-        floorLensInput.value = Number(P.lens || 35).toFixed(0);
-    };
-    floorPlanDock.querySelector('[data-floor-dock-action="pan-up"]').onclick = () => panFloorPlan(0, -80);
-    floorPlanDock.querySelector('[data-floor-dock-action="pan-down"]').onclick = () => panFloorPlan(0, 80);
-    floorPlanDock.querySelector('[data-floor-dock-action="pan-left"]').onclick = () => panFloorPlan(-80, 0);
-    floorPlanDock.querySelector('[data-floor-dock-action="pan-right"]').onclick = () => panFloorPlan(80, 0);
-    floorPlanDock.querySelector('[data-floor-dock-action="left"]').onclick = () => rotateFloorSelected(15);
-    floorPlanDock.querySelector('[data-floor-dock-action="right"]').onclick = () => rotateFloorSelected(-15);
-    floorPlanDock.querySelector('[data-floor-dock-action="rot30"]').onclick = () => rotateFloorSelected(30);
-    floorPlanDock.querySelector('[data-floor-dock-action="rot45"]').onclick = () => rotateFloorSelected(45);
-    floorPlanDock.querySelector('[data-floor-dock-action="90"]').onclick = () => rotateFloorSelected(90);
-    floorPlanDock.querySelector('[data-floor-dock-action="assets"]').onclick = () => {
-        const tray = el("assetTray");
-        if (!tray) return;
-        tray.classList.add("floorAssetTray");
-        if (getComputedStyle(tray).display !== "block") el("assetToggle")?.click();
-        requestAnimationFrame(syncFloorPlanDockLayout);
-    };
-    floorPlanDock.querySelector('[data-floor-dock-action="delete"]').onclick = () => el("obDel").click();
-    const floorDockCollapse = floorPlanDock.querySelector('[data-floor-dock-action="collapse"]');
-    floorPlanDock.classList.add("collapsed");
-    floorDockCollapse.textContent = "＋ 操作";
-    floorDockCollapse.title = "操作バーを開く";
-    floorDockCollapse.onclick = () => {
-        const collapsed = floorPlanDock.classList.toggle("collapsed");
-        fitCanvasDisplay();
-        render();
-        floorDockCollapse.textContent = collapsed ? "＋ 操作" : "−";
-        floorDockCollapse.title = collapsed ? "操作バーを開く" : "操作バーを折りたたむ";
-    };
     // カメラ／回転ハンドルだけを先に受け取り、それ以外のドラッグは既存の家具移動へ渡す。
     function beginFloorPan(e, p, tapClear = false) {
         if (!Array.isArray(window.cityFloorPlanCenter)) fitFloorPlan();
@@ -2764,7 +2682,7 @@
 
     // ===== 外（studio-ui.js）から使うもの =====
     SH.FLOOR_CAMERA_RAY = FLOOR_CAMERA_RAY;
-    SH.floorPlanDock = floorPlanDock;
+    SH.floorPlanDock = null;
     SH.syncFloorPlanDockLayout = syncFloorPlanDockLayout;
     SH.floorPlanWorldAt = floorPlanWorldAt;
     SH.floorPlanSideWorldAt = floorPlanSideWorldAt;

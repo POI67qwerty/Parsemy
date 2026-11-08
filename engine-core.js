@@ -201,6 +201,8 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <label><span>取付側</span><select id=wallSideSignSide><option value="-1">左側の横壁</option><option value="1">右側の横壁</option></select></label>
 <label><input type=checkbox id=wallSideSignBrace checked> 取付金具を付ける</label>
 <label><span>取付金具の本数</span><select id=wallSideSignBrackets><option value="0">なし</option><option value="1">1本</option><option value="2">2本</option><option value="3" selected>3本</option></select></label>
+<label><span>取付金具の長さ</span><input type=number class=nv id=wallSideSignBracketLength min=0.05 max=5 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><span>取付金具の太さ</span><input type=number class=nv id=wallSideSignBracketThickness min=0.02 max=0.5 step=0.01 style="width:100px"><span class=un>m</span></label>
 <label><span>看板・金具形状</span><select id=wallSideSignShape><option value="beveled" selected>ベベルのみ</option></select></label>
 <label id=wallSideSignScopeRow style="display:none"><span>階層看板</span><select id=wallSideSignScope><option value="first">1Fだけ</option><option value="all">全部の階</option><option value="individual">階ごとに選択</option></select></label>
 <div id=wallSideSignFloorSelect style="display:none"></div>
@@ -1969,6 +1971,7 @@ function fixOb(o) {
             h: oldThickness,
             wallSideSignBracketCount: 3,
             wallSideSignBracketLength: 0.36,
+            wallSideSignBracketThickness: 0.1,
             wallSideSignShape: "box",
             wallSideSignBevelOffset: 0.06,
             wallSideSignBevelSegments: 4,

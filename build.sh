@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")"
 
 echo "== 構文チェック =="
-for f in engine-lib.js engine-core.js engine-gizmo.js engine-render.js three-compare.js engine-input.js engine-io.js asset.js asset-kit.js asset-kit-parts.js asset-kit-assets.js asset-controller.js studio-lib.js studio-floorplan.js studio-canvas-controls.js studio-ui.js check-all-assets.js; do
+for f in engine-lib.js engine-core.js engine-gizmo.js engine-render.js engine-input.js engine-io.js asset.js asset-kit.js asset-kit-parts.js asset-kit-assets.js asset-controller.js studio-lib.js studio-floorplan.js studio-canvas-controls.js studio-ui.js check-all-assets.js; do
     node --check "$f" && echo "  ok  $f"
 done
 
