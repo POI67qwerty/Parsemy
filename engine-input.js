@@ -722,11 +722,16 @@ cv.onpointermove = (e) => {
             setP("yaw", +clamp(drag.yaw + dx * k * 0.1, -yawLimit, yawLimit).toFixed(3));
             setP("pitch", +clamp(drag.pitch - dy * k * 0.1, -89, 89).toFixed(2));
         }
+        // 視点操作中も軽量プレビューへ切り替える。重い隠線判定は操作終了後に一度だけ戻す。
+        window.__fastInteractionPreview=true;
         sync();
         renderSoon();
         return;
     }
     if (ed) {
+        // 編集ドラッグ中は一時的にBVHの精密レイ隠線を省き、深度バッファの軽いプレビューで追従させる。
+        // pointerupでフラグを戻して通常品質を再描画する。
+        window.__fastInteractionPreview=true;
         dragEdit(pos(e), !!e.shiftKey);
         return;
     }
@@ -844,6 +849,7 @@ cv.onpointerup = cv.onpointercancel = (e) => {
         if (r.w < 8 || r.h < 8) CR = null;
     }
     ed = null;
+    window.__fastInteractionPreview=false;
     snapHit = null;
     drag = null;
     if (cur && cur.pv) {
@@ -877,6 +883,7 @@ cv.addEventListener("wheel", (e) => {
 // iPad Safariでキャンバス外へ指／ペンを離した場合の一般操作用保険.
 // ボックス選択以外の編集でも、古いpointerIdが次の操作をブロックしないようにする。
 function releaseInputState(e) {
+    const restoreQuality=!!window.__fastInteractionPreview;
     if (e?.pointerType === "touch") {
         TC.delete(e.pointerId);
         if (!TC.size) mg = null;
@@ -886,12 +893,14 @@ function releaseInputState(e) {
         ptr = null;
         ptrType = null;
         ed = null;
+        window.__fastInteractionPreview=false;
         drag = null;
         cur = null;
         bd = false;
         er = null;
         snapHit = null;
     }
+    if(restoreQuality) renderSoon();
 }
 addEventListener("pointerup", releaseInputState, false);
 addEventListener("pointercancel", releaseInputState, false);
@@ -900,6 +909,7 @@ addEventListener("blur", () => {
         ptr = null;
         ptrType = null;
         ed = null;
+        window.__fastInteractionPreview=false;
         drag = null;
         cur = null;
         bd = false;

@@ -1985,7 +1985,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     // 何も描かれない（実測：凹窓階層建物の窓間仕切りが全部消えていた）。
     // 生成側が onFace を立てた線だけ、面の内側判定を通す。
     const onFace = !!s.onFace,
-        preciseSignalEdge = (s.signalPoleTopRing && !window.__legacyPoleRay) || (s.signalSmoothSide && !window.__legacySignalSmoothRay) || !!s.preciseTubeEdge || !!s.arrayGeometry,
+        preciseSignalEdge = (s.signalPoleTopRing && !window.__legacyPoleRay) || (s.signalSmoothSide && !window.__legacySignalSmoothRay) || (!!s.preciseTubeEdge&&!window.__fastInteractionPreview) || !!s.arrayGeometry,
         poleTip = s.signalPoleSide && !window.__legacyPoleRay && s.p?.length ? projPoint(s.p[s.p.length-1], tf) : null,
         preciseSignalAt = e => preciseSignalEdge || !!(poleTip?.ok && Math.hypot(e.x-poleTip.x,e.y-poleTip.y) < 24*Math.max(1,Math.abs(tf[0] || 1)));
     // 線全体を数点だけ見て省略すると、試験点の間にある開口や遮蔽物の切れ目で
@@ -2010,7 +2010,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
             (orthView ? signalOrthOccluded(e, (s.signalSmoothSide || s.preciseTubeEdge) ? 0.004 : 0.008) : T !== "f" && exactPerspectiveOccluded(e))) return true;
         const x = Math.round(e.x), y = Math.round(e.y);
         if (x < 0 || x >= cw || y < 0 || y >= ch) return false;
-        if (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) return fishPointOccluded(e);
+        if (!window.__fastInteractionPreview && !orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) return fishPointOccluded(e);
         // 【重要】「まわりの画素すべてが、この線よりはっきり手前の平らな面」なら、
         // その点は隠れる面の内側にある。同じオブジェクトの面かどうかに関係なく隠す。
         // これが無いと、階層建物の縁（張り出した帯）の奥にある壁の稜線が、
@@ -2069,7 +2069,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         }
         // 正投影の同一オブジェクト背面線は、深度画素の輪郭救済前に実三角面で確認する。
         
-        if (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) {
+        if (!window.__fastInteractionPreview && !orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) {
             if (fishPointOccluded(e)) return false;
             if (!onFace && !window.__noFaceCull && depthOwner?.[i1] === myOwner && depthFace?.[i1] &&
                 faceCullAround(cw, ch, x, y, depthFace[i1], myOwner) && fishFaceInterior(e, s.ob.id, tf)) return false;
@@ -2343,7 +2343,8 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
 }
 
 // ===== 5. 線画レイヤー：線だけ別キャンバスに描き、アンチエイリアスを消して二値化する =====
-let LC = null;
+let LC = null,
+    fastPreviewLayer = null;
 // 書き出し用の線だけを別キャンバスへ描く。
 // hidden=trueでは面の深度情報を使って、背面に隠れる線を除去する。
 // 実際に線を引いた範囲（デバイスpx）。二値化の対象を絞るために使う。
@@ -2453,10 +2454,14 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     // tf=書き出し用の変換 [拡大,0,0,拡大,ずれx,ずれy]
     // このフレームの投影キー（投影キャッシュの判定に使う）。
     projKeyValue = projCameraKey(tf);
-    const binOn = $("bin").checked;
+    const binOn = $("bin").checked,
+        fastInteractionPreview=!!window.__fastInteractionPreview,
+        effectiveHidden=hidden&&!fastInteractionPreview;
     // オブジェクトごとの今の状態（層のキャッシュ判定に使う）。
     const sigs = new Map();
-    S.forEach((s) => {
+    // 操作中はフレームごとに全アセットをJSON化しない。プレビューはキャッシュを使わず、
+    // pointermoveごとに描き直すため、ここでの完全シグネチャ比較は不要。
+    if(!fastInteractionPreview) S.forEach((s) => {
         const o = s && s.ob;
         if (!o || !objectVisible(o) || sigs.has(o.id)) return;
         sigs.set(o.id, JSON.stringify(o));
@@ -2468,12 +2473,12 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     // 選択色は線層へ描かずギズモだけに表示するため、選択変更だけでは線層を再生成しない。
     // 比較用フラグは旧方式（選択ごとに作り直し）へ切り替えて画素一致を検査できる。
     const selectionKey=window.__lineCacheBySelection ? (sel ?? "") : "";
-    const camKey = projKeyValue + "|" + (hidden ? 1 : 0) + "|" + cw + "," + ch + "|" + (view ? 1 : 0) + "|" + selectionKey;
+    const camKey = projKeyValue + "|" + (effectiveHidden ? 1 : 0) + "|" + cw + "," + ch + "|" + (view ? 1 : 0) + "|" + selectionKey + "|p" + (fastInteractionPreview?1:0);
     const key =
         camKey + "|" + (curEff ? 1 : 0) + "|" + (binOn ? 1 : 0) + "|" + freeLineSig() + "|" +
         [...sigs].map(([id, sg]) => id + ":" + sg).join(";");
     // 同じ絵が続くときは層を作り直さない（層の描き直しは実測20〜30ms）。
-    if (!window.__noLineCache && LC && LC.width === cw && LC.height === ch && lineLayerKey && key === lineLayerKey) {
+    if (!fastInteractionPreview && !window.__noLineCache && LC && LC.width === cw && LC.height === ch && lineLayerKey && key === lineLayerKey) {
         return LC;
     }
     if (!LC || LC.width !== cw || LC.height !== ch) {
@@ -2481,49 +2486,55 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
         LC.width = cw;
         LC.height = ch;
     }
-    const x = LC.getContext("2d", { willReadFrequently: true });
+    // ドラッグ中は深度バッファと線層を半解像度で処理し、最後に画面サイズへ拡大する。
+    // 精密なBVH判定を省くだけだった前方式より、ピクセル数に比例する隠線処理も軽くする。
+    const previewScale=fastInteractionPreview ? 0.5 : 1,
+        workW=Math.max(1,Math.ceil(cw*previewScale)),workH=Math.max(1,Math.ceil(ch*previewScale)),
+        work=fastInteractionPreview?(fastPreviewLayer||(fastPreviewLayer=document.createElement("canvas"))):LC;
+    if(work.width!==workW||work.height!==workH){work.width=workW;work.height=workH;}
+    const x = work.getContext("2d", { willReadFrequently: true });
     x.setTransform(1, 0, 0, 1, 0, 0);
-    x.clearRect(0, 0, cw, ch);
+    x.clearRect(0, 0, workW, workH);
     // 線を引くときの変換（画面表示ならズーム・移動つき）。
     // 奥行きバッファも**同じ変換**で作る。以前はここが [1,0,0,1,0,0] 固定だったため、
     // 拡大・移動していると奥行きの画素位置と線の画素位置がずれて
     // 「隠れていない線まで隠れる」＝正投影で線がほぼ出ない状態になっていた（実測 ink 0）。
-    const vs = viewShift(),
-        tfEff = tf || [Z, 0, 0, Z, vs[0], vs[1]];
+    const vs = viewShift(),baseTf=tf||[Z,0,0,Z,vs[0],vs[1]],
+        tfEff=previewScale===1?baseTf:baseTf.map(v=>v*previewScale);
     x.setTransform(...tfEff);
-    const hiddenDepth = hidden ? buildExportDepth(cw, ch, tfEff) : null;
-    if (hiddenDepth && !orthView && T === "f" && !window.__legacyFishLines) {
+    const hiddenDepth = effectiveHidden ? buildExportDepth(workW, workH, tfEff) : null;
+    if (hiddenDepth && !fastInteractionPreview && !orthView && T === "f" && !window.__legacyFishLines) {
         prepareFishLineOccluders();
-        fishBlockedWidth=cw; fishBlockedHeight=ch; fishLineSerial=0;
-        fishBlockedPixels=$("bin").checked ? new Int32Array(cw*ch) : null;
-        fishVisiblePixels=fishBlockedPixels ? new Int32Array(cw*ch) : null;
+        fishBlockedWidth=workW; fishBlockedHeight=workH; fishLineSerial=0;
+        fishBlockedPixels=$("bin").checked ? new Int32Array(workW*workH) : null;
+        fishVisiblePixels=fishBlockedPixels ? new Int32Array(workW*workH) : null;
     } else {
         fishBlockedPixels = null; fishVisiblePixels = null;
-        if (hiddenDepth && (orthView || S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyPoleRay && s.signalPoleTopRing) || (!window.__legacySignalSmoothRay && s.signalSmoothSide) || s.preciseTubeEdge || s.arrayGeometry || (!orthView && T !== "f" && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge))))))) prepareFishLineOccluders();
+        if (hiddenDepth && (orthView || S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyPoleRay && s.signalPoleTopRing) || (!window.__legacySignalSmoothRay && s.signalSmoothSide) || (s.preciseTubeEdge&&!fastInteractionPreview) || s.arrayGeometry || (!orthView && T !== "f" && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge))))))) prepareFishLineOccluders();
         else fishLineOccluders = null;
     }
     // ベベルの縦線は「角ごとに輪郭の1本」だけ描く（面ONのとき）。
-    if (hiddenDepth) updateSeamPicks(hiddenDepth, cw, ch, tfEff);
+    if (hiddenDepth) updateSeamPicks(hiddenDepth, workW, workH, tfEff);
     // 二値化する層だけ、細い線が欠けないよう最小の太さを確保する。
     const binNow = $("bin").checked;
     lineDevMin = binNow && !window.__noBinMinW ? (window.__minDevW === undefined ? 1.15 : Number(window.__minDevW)) : 0;
     lineDevMinScale = tf ? Math.abs(tf[0] || 1) : view ? Z : 1;
     S.forEach((s) => {
         if (s.ob && !objectVisible(s.ob)) return;
-        hidden ? strokeWVisible(x, s, hiddenDepth, cw, ch, tfEff) : strokeW(x, s);
+        effectiveHidden ? strokeWVisible(x, s, hiddenDepth, workW, workH, tfEff) : strokeW(x, s);
     });
-    drawPersonSilhouettes(x,hidden,hiddenDepth,cw,ch,tfEff);
+    drawPersonSilhouettes(x,effectiveHidden,hiddenDepth,workW,workH,tfEff);
     if (withCur) drawCur(x);
     if (withCur && prev) prev.forEach((s) => strokeW(x, s));
     lineDevMin = 0;
-    lineLayerKey = curEff ? null : key;
-    if ($("bin").checked) {
+    lineLayerKey = (curEff || fastInteractionPreview) ? null : key;
+    if ($("bin").checked && !fastInteractionPreview) {
         // 二値化：しきい値以上の画素だけ完全に不透明にする。
         // 線がある範囲だけを処理すれば同じ結果（全体だと 100万画素以上を読み書きする）。
         // ※「変わった範囲だけ二値化する」案（層を2枚に分ける）も試したが、
         //   層をもう1枚経由すると GPU からの読み戻しが増えて、かえって遅かった。
         x.setTransform(1, 0, 0, 1, 0, 0);
-        const box = strokeBox(cw, ch, tfEff);
+        const box = strokeBox(workW, workH, tfEff);
         if (box) {
             const im = x.getImageData(box.x, box.y, box.w, box.h),
                 d = im.data,
@@ -2540,13 +2551,17 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
             // （実測：拡大1.0で 357か所・2,435px の欠け）。線の両側が繋がっている
             // 短い切れ目だけを埋めれば、線の太さは変えずに連続した線に戻せる。
             const noFill = fishBlockedPixels ? (i) => {
-                const index=(box.y + Math.floor(i / box.w)) * cw + box.x + i % box.w,
+                const index=(box.y + Math.floor(i / box.w)) * workW + box.x + i % box.w,
                     blocked=fishBlockedPixels[index], visible=fishVisiblePixels[index];
                 return !!blocked && !(visible && visible !== blocked);
             } : null;
             closeBinGaps(u32, box.w, box.h, window.__binBridge === undefined ? 2 : Number(window.__binBridge), noFill);
             x.putImageData(im, box.x, box.y);
         }
+    }
+    if(fastInteractionPreview){
+        const out=LC.getContext("2d");out.setTransform(1,0,0,1,0,0);out.clearRect(0,0,cw,ch);
+        out.imageSmoothingEnabled=true;out.drawImage(work,0,0,workW,workH,0,0,cw,ch);
     }
     return LC;
 }
