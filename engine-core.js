@@ -156,7 +156,27 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <div class=note>間隔は中心から中心までの距離。マイナスで反対方向に並びます。方向はギズモと同じワールド軸です（位置欄のY・Zとは表記が異なります）。複数選択した場合は全てに適用します。複雑な形状や多数のコピーは表示が重くなる場合があります。</div>
 </div></div>
 <label id=buildingOpeningEnabledRow style="display:none"><input type=checkbox id=buildingOpeningEnabled> 開口をつける</label>
+<label id=cornerCutOpeningQuickRow style="display:none"><input type=checkbox id=cornerCutOpeningQuickEnabled> 赤い隅切り面に開口</label>
 <label id=linkedBuildingOpeningRow style="display:none"><input type=checkbox id=linkedBuildingOpening> 開口をつける</label>
+<div id=cornerCutP style="display:none"><h3>隅切り直方体</h3>
+<label><span>隅切りオフセット</span><input type=number class=nv id=cornerCutOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><input type=checkbox id=cornerFacadeEnabled> ファサード看板をつける</label>
+<div id=cornerFacadeControls style="display:none">
+<label><input type=checkbox id=cornerFacadeSides> 隅切り両端の辺にも回す</label>
+<label><span>看板の色</span><input type=color id=cornerFacadeColor value="#2f73bc"></label>
+<label><span>看板の高さ</span><input type=number class=nv id=cornerFacadeHeight min=0.01 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>看板の張り出し</span><input type=number class=nv id=cornerFacadeProjection min=0.02 max=2 step=0.01 style="width:100px"><span class=un>m</span></label>
+<div class="note">隅切り面に付く立体の看板です。両端の辺へ回すこともできます。文字・ロゴは含みません。</div></div>
+<label><input type=checkbox id=cornerCutOpeningEnabled> 赤い隅切り面に開口</label>
+<div id=cornerCutOpeningControls style="display:none">
+<label><span>開口の幅</span><input type=number class=nv id=cornerCutOpeningW min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>開口の高さ</span><input type=number class=nv id=cornerCutOpeningH min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>開口の奥行き</span><input type=number class=nv id=cornerCutOpeningDepth min=0.025 step=0.05 style="width:100px"><span class=un>m</span></label>
+<div class="note">開口は赤い斜め隅切り面を分割し、内部の左右側面・上面・奥壁を持つ形状として描画します。幅・高さ・奥行きは数値欄または画面上のハンドルで、3D・正面・横・上ビューから編集できます。</div>
+</div>
+<div class="note">赤い切り口のオレンジ菱形ハンドルを、3D・正面・横・上ビューでドラッグして編集できます。</div>
+</div>
+
 <div id=buildingDoorP style="display:none"><h3>開口の扉</h3>
 <label id=buildingOpeningPositionRow><span>開口の左右</span><input type=number id=buildingOpeningOffset step=0.05 style="width:100px"><span class=un>m</span></label>
 <button id=buildingDoorCenter type=button>扉を中央へ</button>
@@ -295,24 +315,6 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <div class="note">四つの縦角を面取りします。オフセットは面取り幅、セグメント数は角の丸みを分割する数です。1は一枚面、4は4分割です。オフセットはキャンバス上のオレンジのベベルハンドルからも変更できます。幅・奥行き・高さは共通の面ハンドルまたは上の数値欄で編集できます。初期状態は面で、上面を押し出すと高さができます。</div>
 </div>
 <div id=assetEditorP style="display:none"><h3>アセット設定</h3><div id=assetEditorFields></div></div>
-<div id=cornerCutP style="display:none"><h3>隅切り直方体</h3>
-<label><span>隅切りオフセット</span><input type=number class=nv id=cornerCutOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
-<label><input type=checkbox id=cornerFacadeEnabled> ファサード看板をつける</label>
-<div id=cornerFacadeControls style="display:none">
-<label><input type=checkbox id=cornerFacadeSides> 隅切り両端の辺にも回す</label>
-<label><span>看板の色</span><input type=color id=cornerFacadeColor value="#2f73bc"></label>
-<label><span>看板の高さ</span><input type=number class=nv id=cornerFacadeHeight min=0.01 step=0.05 style="width:100px"><span class=un>m</span></label>
-<label><span>看板の張り出し</span><input type=number class=nv id=cornerFacadeProjection min=0.02 max=2 step=0.01 style="width:100px"><span class=un>m</span></label>
-<div class="note">隅切り面に付く立体の看板です。両端の辺へ回すこともできます。文字・ロゴは含みません。</div></div>
-<label><input type=checkbox id=cornerCutOpeningEnabled> 赤い隅切り面に開口</label>
-<div id=cornerCutOpeningControls style="display:none">
-<label><span>開口の幅</span><input type=number class=nv id=cornerCutOpeningW min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
-<label><span>開口の高さ</span><input type=number class=nv id=cornerCutOpeningH min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
-<label><span>開口の奥行き</span><input type=number class=nv id=cornerCutOpeningDepth min=0.025 step=0.05 style="width:100px"><span class=un>m</span></label>
-<div class="note">開口は赤い斜め隅切り面を分割し、内部の左右側面・上面・奥壁を持つ形状として描画します。幅・高さ・奥行きは数値欄または画面上のハンドルで、3D・正面・横・上ビューから編集できます。</div>
-</div>
-<div class="note">赤い切り口のオレンジ菱形ハンドルを、3D・正面・横・上ビューでドラッグして編集できます。</div>
-</div>
 <div id=recessedStackedP style="display:none"><h3>凹窓階層建物</h3>
 <label><button id=recessedAlign class="primary">上方向へ整列</button></label>
 <label><span>階数</span><input type=number class=nv id=recessedFloorCount min=1 max=30 step=1 style="width:100px"></label>
@@ -1707,6 +1709,7 @@ function setOb(id, patch) {
     if (patch?.doorEnabled === true && patch.openingBack == null && o.asset === "building" && o.openingBack == null && typeof buildingGeometry === "function")
         patch = { ...patch, openingBack: buildingGeometry(o).backY };
     let next = { ...o, ...patch };
+    if (Object.prototype.hasOwnProperty.call(patch || {}, "facadeWidth")) next.facadeWidthEdited = true;
     // テーブル全高の面ハンドルからの編集も脚高へ反映し、保存済み脚高に上書きされないよう同期する。
     if(o.asset==="tLegTable"&&patch&&Object.prototype.hasOwnProperty.call(patch,"h")&&!Object.prototype.hasOwnProperty.call(patch,"tableLegHeight")&&!Object.prototype.hasOwnProperty.call(patch,"tableTopThickness"))
         next.tableLegHeight=Math.max(.2,Number(next.h)-Math.max(.025,Number(next.tableTopThickness)||.07));
@@ -1801,20 +1804,17 @@ function pickOb(p, includeLocked = false) {
         // ロック中のオブジェクトは通常のクリックでは選ばない。
         // includeLocked=true は「押した場所がロック中だった」と知らせるためだけに使う。
         if (!s.ob || !objectVisible(s.ob) || (!includeLocked && obLocked(s.ob))) return;
-        for (const v of s.p) {
-            const q = sp(s, v);
-            if (!q.ok) continue;
-            const dd = Math.hypot(q.x - p.x, q.y - p.y),
-                attached = !!s.ob.attachment,
-                childHit = attached && dd < 9 / Z;
-            if (childHit && !bestAttached) {
-                bd = dd;
-                best = s.ob.id;
-                bestAttached = true;
-            } else if ((!bestAttached && dd < bd) || (bestAttached && attached && dd < bd)) {
-                bd = dd;
-                best = s.ob.id;
-            }
+        // 線の頂点だけでなく、線分そのものまでの距離で拾う。
+        // 頂点間が長いアセットは線の真ん中をクリックしても選べず、選択しづらかった。
+        const points=Array.isArray(s.p)?s.p:[];
+        for(let i=1;i<points.length;i++){
+            const a=sp(s,points[i-1]),b=sp(s,points[i]);
+            if(!a.ok||!b.ok)continue;
+            const dx=b.x-a.x,dy=b.y-a.y,t=clamp(((p.x-a.x)*dx+(p.y-a.y)*dy)/(dx*dx+dy*dy||1),0,1),
+                dd=Math.hypot(a.x+t*dx-p.x,a.y+t*dy-p.y),
+                attached=!!s.ob.attachment,childHit=attached&&dd<9/Z;
+            if(childHit&&!bestAttached){bd=dd;best=s.ob.id;bestAttached=true;}
+            else if((!bestAttached&&dd<bd)||(bestAttached&&attached&&dd<bd)){bd=dd;best=s.ob.id;}
         }
     });
     return best;

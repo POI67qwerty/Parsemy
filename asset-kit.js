@@ -226,8 +226,11 @@ const ASSET_KIT = (function () {
             radius=Math.max(0,Math.min(Number(r)||0,Math.min(width,height)*.4999)),
             segments=Math.max(1,Math.min(12,Math.round(Number(opts.seg)||3))),
             z0=Number.isFinite(Number(opts.z0))?Number(opts.z0):0,
-            path=roundRectPath(width,height,radius,segments,0,z0+height/2);
-        return box(path,-depth/2,depth/2,{axis:"y",depthBevelEdge:true});
+            path=roundRectPath(width,height,radius,segments,0,z0+height/2),
+            // 前後ベベルの縦稜線もベベル直方体と同じ seam 選別へ渡す。
+            // 前後輪郭の後に並ぶ縦辺を角ごとにグループ化する。
+            seamMarks=opts.seamLines?bevelMarks(path,radius,segments,opts.group||"depth-bevel"):undefined;
+        return box(path,-depth/2,depth/2,{axis:"y",depthBevelEdge:true,seamMarks});
     }
     // 上下の面だけ（板・シート）。側面の線は出さない。
     const sheet = (path, z0, z1, extra = {}) => prism(path, z0, z1, { ...extra, sheet: true });
@@ -915,9 +918,9 @@ const ASSET_KIT = (function () {
             const points=[];
             for(const part of build(o,API)||[]) {
                 if(part && Array.isArray(part.path) && !part.meshEdges && !part.meshTriangles) {
-                    const z0=part.z0, z1=part.z1;
-                    for(const [x,y] of part.path) {
-                        points.push(L2W(o,x,y,z0), L2W(o,x,y,z1));
+                    const z0=part.z0, z1=part.z1, axis=part.axis||"z";
+                    for(const [u,v] of part.path) {
+                        points.push(L2W(o,...toP3(axis,u,v,z0)), L2W(o,...toP3(axis,u,v,z1)));
                     }
                     continue;
                 }

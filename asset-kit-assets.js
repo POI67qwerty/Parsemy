@@ -129,7 +129,7 @@ ASSET_KIT.define(
                 K.box(K.rectPath(pw, ph, cx, cz), front - proud, front + panelT, { axis: "y", holes, holeSides: true });
 
         // 1) 前後方向の稜線だけを丸める。旧丸胴値は使用しない。
-        parts.push(K.depthBeveledBox(W, D, H, K.param(o, "vmDepthBevel", 0.03), {seg: 3}));
+        parts.push(K.depthBeveledBox(W, D, H, K.param(o, "vmDepthBevel", 0.03), {seg: 3,group:"vending-body",seamLines:true}));
         // 2) 商品の窓（板に穴をあける）
         const winCz = winBottom + winH / 2,
             frameH = winH + Math.min(0.16, winH * 0.28);
@@ -1481,6 +1481,22 @@ ASSET_KIT.define(
     vehicleParts,
 );
 
+// トラック2：プリミティブの五角形キャブ＋直方体の荷台＋4輪。
+// 参考画像に合わせ、明るいキャブと赤橙色の荷台・側面帯で構成する。
+function truck2Parts(o,K){
+    const g=pentaGeometry(o),
+        profile=K.area2(g.profile)<0?g.profile.slice().reverse():g.profile,
+        // 構成は五角形の立体・後部の直方体コンテナ・タイヤだけ。窓や帯などは追加しない。
+        parts=[
+            K.box(profile,-g.W/2,g.W/2,{axis:"x",color:"#e7dfb1"}),
+            K.box(K.rectPath(g.W,g.bedL,0,g.yB-g.bedL/2),0,g.bedH,{color:"#b6533d"}),
+        ];
+    if(g.cfg.wheels)g.wheels.forEach(wheel=>parts.push(...K.part("tire",{r:g.tireR,t:g.tireW,x:wheel.x,axleY:wheel.y,z:g.tireZ})));
+    return parts;
+}
+ASSET_KIT.define("keiTruck2",{label:"トラック2",glyph:"🚚",group:"vehicle",w:1.72,d:4.4,h:2.25,accent:"#e7dfb1",
+    vhFrontH:1.22,vhNose:.08,vhBedL:2.25,vhBedH:2.30,vhTireR:.34,vhTireW:.2,vhTrack:1.76,vhWb:2.55},truck2Parts);
+
 // 軽バン：屋根まで高い五角形＋タイヤ。荷台は無し。
 ASSET_KIT.define(
     "keiVan",
@@ -1962,7 +1978,7 @@ function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
  ]},(o,K)=>{const {w,d,h}=size(o),p=val(o,'mailPostLength',.42,.05,Math.max(.05,h-.16)),pd=val(o,'mailPostDiameter',.1,.02,Math.min(w,d)*.65),bh=h-p,y=-d/2-.001,base=Math.min(.035,p*.15),slot=val(o,'mailSlotHeight',bh*.625,.04,Math.max(.04,bh-.04)),sh=Math.min(bh*.045,.03),flag={onFace:true,preciseTubeEdge:true};
  // 画像の角張った本体と短い台座。表面の詳細は横長の投入口だけ。
  return [K.box(K.rectPath(pd*1.6,pd*1.5),0,base),streetRoundPart(o,K,[[pd/2,pd/2,base],[pd/2,pd/2,p]]),
- K.depthBeveledBox(w,d,bh,Math.min(.025,w*.05,bh*.05),{z0:p,seg:2}),
+ K.depthBeveledBox(w,d,bh,Math.min(.025,w*.05,bh*.05),{z0:p,seg:2,group:"street-mailbox-body",seamLines:true}),
  K.face3([[-w*.31,y,p+slot-sh],[w*.31,y,p+slot-sh],[w*.31,y,p+slot+sh],[-w*.31,y,p+slot+sh]],{onFace:true}),
  K.face3([[-w*.26,y-.002,p+slot-sh/3],[w*.26,y-.002,p+slot-sh/3],[w*.26,y-.002,p+slot+sh/3],[-w*.26,y-.002,p+slot+sh/3]],flag)];});
  ASSET_KIT.define('streetPlant',{...common,label:'鉢植え',glyph:'♧',group:'streetObjects',w:.72,d:.72,h:.9,accent:'#79b974',minHeight:o=>Math.max(.15,(Number(o.plantPotHeight)||.25)+.12),controls:[
@@ -2310,6 +2326,60 @@ ASSET_KIT.define('guardPoleHalf',{
  };
  // 電車窓・扉窓の外周は、ベベル直方体と同じ4分割の点列を共有する。
  // 小さな窓でも既存の0.01m下限で形が膨らまないよう、比例拡大してから戻す。
+ // 参考画像風の電車1両：深緑の車体、黄土色の帯、連続窓・片開き扉、屋根機器。
+ ASSET_KIT.define('trainCar',{label:'電車車両',glyph:'🚆',group:'train',w:2.8,d:12,h:3.35,accent:'#547b43',
+  geometryBounds:true,minHalfWidth:()=>.7,minHalfDepth:()=>1,minHeight:()=>1.2,
+  controls:[{key:'trainCarWindowCount',label:'側面窓の数',type:'range',default:6,min:3,max:10,step:1,integer:true,unit:'枚'}]},(o,K)=>{
+  const w=Math.max(1.4,2*Math.abs(o.ra)),len=Math.max(2,2*Math.abs(o.rb)),h=Math.max(1.2,Number(o.h)||3.35),
+   count=Math.max(3,Math.min(10,Math.round(Number(o.trainCarWindowCount)||6))),sideT=.035,
+   lower=.34,bandZ=.92,topZ=1.35,roofZ=h*.88,out=[];
+  const panel=(side,y0,y1,z0,z1,color,extra={})=>{
+   const x0=side<0?-w/2-sideT:w/2-sideT,x1=side<0?-w/2+sideT:w/2+sideT;
+   out.push(K.box(K.rectPath(y1-y0,z1-z0,(y0+y1)/2,(z0+z1)/2),x0,x1,{axis:'x',color,...extra}));
+  };
+  // 車体本体・下回り・側面帯。
+  out.push(K.box(K.rectPath(w,len),0,h,{color:'#547b43'}));
+  out.push(K.box(K.rectPath(w*1.04,len*.98),.12,.48,{color:'#51484a'}));
+  for(const side of [-1,1]){
+   panel(side,-len/2,len/2,.48,bandZ,'#a98224');
+   panel(side,-len/2,len/2,bandZ,topZ,'#c6b05a');
+   // 窓は端部に余白を残して均等配置。枠＋濃色ガラスの二層。
+   const doorY=len*.30,usable=len*.78,step=usable/count,winW=step*.72,winH=Math.min(.78,h*.27),winZ=h*.66;
+   for(let i=0;i<count;i++){
+    const cy=-len*.39+(i+.5)*step;
+    if(Math.abs(cy-doorY)<.68)continue;
+    panel(side,cy-winW/2,cy+winW/2,winZ-winH/2,winZ+winH/2,'#473e4b');
+    panel(side,cy-winW/2+.055,cy+winW/2-.055,winZ-winH/2+.055,winZ+winH/2-.055,'#384650');
+   }
+   // 乗降扉と上窓。
+   panel(side,doorY-.44,doorY+.44,.55,2.30,'#594b4a');
+   panel(side,doorY-.31,doorY+.31,1.62,2.20,'#51676a');
+   panel(side,doorY-.27,doorY+.27,1.66,2.16,'#94b5ae');
+   panel(side,doorY+.31,doorY+.35,.85,1.02,'#d3bd6d');
+   // 手すりと車体下の細い横桟。
+   panel(side,-len/2,len/2,lower,lower+.045,'#d3bd6d');
+   panel(side,-len/2,len/2,.20,.25,'#81705a');
+  }
+  // 前後の運転台窓・灯火。
+  for(const end of [-1,1]){
+   const y0=end<0?-len/2-.008:len/2-.008,y1=end<0?-len/2+.008:len/2+.008;
+   out.push(K.box(K.rectPath(w*.55,.85,0,h*.68),y0,y1,{axis:'y',color:'#4b424b'}));
+   out.push(K.box(K.rectPath(w*.49,.72,0,h*.68),y0+end*.01,y1+end*.01,{axis:'y',color:'#657c7b'}));
+   for(const sx of [-1,1])out.push(K.box(K.rectPath(.14,.18,sx*w*.34,h*.39),y0,y1,{axis:'y',color:'#db762a'}));
+  }
+  // 屋根の空調・換気箱とパンタグラフ風の架線機器。
+  for(const y of [-len*.25,len*.05])out.push(K.box(K.rectPath(w*.34,len*.10,0,y),roofZ,roofZ+.28,{color:'#625954'}));
+  for(const yy of [len*.22,len*.35])out.push(K.box(K.rectPath(.055,.48,0,yy),roofZ+.28,roofZ+.78,{color:'#554b4d'}));
+  out.push(K.box(K.rectPath(.75,.055,0,len*.285),roofZ+.72,roofZ+.79,{color:'#554b4d'}));
+  // 台車・車輪（各側2軸）。
+  for(const side of [-1,1])for(const y of [-len*.31,len*.31]){
+   const x=side*(w*.39);
+   out.push(K.box(K.rectPath(.72,1.55,x,y),.28,.55,{color:'#625a54'}));
+   for(const yy of [y-.48,y+.48])out.push(...K.part('tire',{r:.34,t:.16,x:side*(w*.48),axleY:yy,z:0}));
+  }
+  return out;
+ });
+
  const trainFramePath=(K,w,h,r,x,z)=>{
   const scale=Math.max(1,.02/Math.min(w,h));
   return beveledBoxFootprint(w*scale,h*scale,r*scale,4).map(([u,v])=>[x+u/scale,z+v/scale]);
@@ -2396,7 +2466,7 @@ ASSET_KIT.define('guardPoleHalf',{
  seat('trainDividedSeat','電車の椅子（区切り）',.58,true,true);
  const horizontalPoleLength={key:'trainRailLength',label:'ポールの長さ',min:.2,max:10,step:.05,unit:'m',get:o=>2*Math.abs(o.ra),patch:(o,v)=>({ra:v/2}),
   handle:(o,v)=>({anchor:[0,-o.rb-.16,o.h],sample:[v/2,-o.rb-.16,o.h],probe:[v/2+1,-o.rb-.16,o.h],fallback:{x:1,y:0}})};
- ASSET_KIT.define('trainStraps',{label:'つり革',glyph:'♧',group:'train',w:1.5,d:.12,h:.45,accent:'#bfc3c6',minHalfWidth:()=>.10,minHalfDepth:()=>.025,minHeight:()=>.20,controls:[
+ ASSET_KIT.define('trainStraps',{label:'つり革',glyph:'♧',group:'train',w:1.5,d:.12,h:.45,accent:'#bfc3c6',geometryBounds:true,minHalfWidth:()=>.10,minHalfDepth:()=>.025,minHeight:()=>.20,controls:[
   {key:'trainStrapCount',label:'つり革の数',type:'range',canvasSlider:true,default:4,min:1,max:12,step:1,integer:true,unit:'個'},horizontalPoleLength
  ]},(o,K)=>{const w=Math.max(.2,2*Math.abs(o.ra)),d=Math.max(.05,2*Math.abs(o.rb)),h=Math.max(.2,o.h),n=K.count(o.trainStrapCount,4,1,12),r=Math.min(.016,d*.22,h*.05),out=[cylinder(K,r,-w/2,w/2,{axis:'x',cx:0,cy:h-r})];
   const cell=w/n,rw=Math.min(.16,cell*.72,h*.36),rh=Math.min(.19,h*.42),t=Math.min(.018,rw*.14,rh*.14);
@@ -2406,11 +2476,11 @@ ASSET_KIT.define('guardPoleHalf',{
   handle:(o,v)=>({anchor:[.22,0,0],sample:[.22,0,v],probe:[.22,0,v+1],fallback:{x:0,y:-1}})};
  ASSET_KIT.define('trainPole',{label:'車内の縦ポール',glyph:'│',group:'train',w:.08,d:.08,h:2.2,accent:'#bfc3c6',minHalfWidth:()=>.012,minHalfDepth:()=>.012,minHeight:()=>.2,controls:[poleLength]},(o,K)=>{
   const w=Math.max(.024,Math.abs(o.ra)*2),d=Math.max(.024,Math.abs(o.rb)*2),h=Math.max(.2,o.h),r=Math.min(w,d)*.36;return [cylinder(K,r,0,h),cylinder(K,Math.min(w,d)*.5,0,Math.min(.04,h*.1)),cylinder(K,Math.min(w,d)*.5,h-Math.min(.04,h*.1),h)];});
- ASSET_KIT.define('trainHandrail',{label:'車内の横手すり',glyph:'┰',group:'train',w:1.8,d:.18,h:.12,accent:'#bfc3c6',minHalfWidth:()=>.10,minHalfDepth:()=>.025,minHeight:()=>.04,controls:[horizontalPoleLength]},(o,K)=>{
+ ASSET_KIT.define('trainHandrail',{label:'車内の横手すり',glyph:'┰',group:'train',w:1.8,d:.18,h:.12,accent:'#bfc3c6',geometryBounds:true,minHalfWidth:()=>.10,minHalfDepth:()=>.025,minHeight:()=>.04,controls:[horizontalPoleLength]},(o,K)=>{
   const w=Math.max(.2,2*Math.abs(o.ra)),d=Math.max(.05,2*Math.abs(o.rb)),h=Math.max(.04,o.h),r=Math.min(.022,d*.16,h*.20),out=[cylinder(K,r,-w/2,w/2,{axis:'x',cx:-d*.25,cy:h*.5})];
   for(const x of [-w*.42,w*.42]){const rail=cylinder(K,r,-d*.25,d*.48,{axis:'y',cx:x,cy:h*.5});out.push(rail,box(K,r*4,Math.min(.02,d*.12),x,d*.46,h*.5-r*2,h*.5+r*2));}return out;
  });
- ASSET_KIT.define('trainWindowWall',{label:'窓付き車内壁',glyph:'▣',group:'train',w:2,d:.12,h:2.35,accent:'#9babae',minHalfWidth:()=>.25,minHalfDepth:()=>.025,minHeight:()=>.6,controls:[
+ ASSET_KIT.define('trainWindowWall',{label:'窓付き車内壁',glyph:'▣',group:'train',w:2,d:.12,h:2.35,accent:'#9babae',geometryBounds:true,minHalfWidth:()=>.25,minHalfDepth:()=>.025,minHeight:()=>.6,controls:[
   {key:'trainWindowWidth',label:'窓の幅',default:1.35,min:.2,max:o=>Math.max(.2,2*o.ra-.16),step:.05,unit:'m',handle:(o,v)=>({anchor:[0,-o.rb,o.h*.65],sample:[v/2,-o.rb,o.h*.65],probe:[v/2+1,-o.rb,o.h*.65],fallback:{x:1,y:0}})},
   {key:'trainWindowHeight',label:'窓の高さ',default:.9,min:.2,max:o=>Math.max(.2,o.h-value(o,'trainWindowBottom',1,.08,o.h-value(o,'trainWindowHeight',.9,.2,o.h-.16)-.08)-.08),step:.05,unit:'m',handle:(o,v)=>{const z=value(o,'trainWindowBottom',1,.08,o.h-v-.08);return {anchor:[0,-o.rb,z],sample:[0,-o.rb,z+v],probe:[0,-o.rb,z+v+1],fallback:{x:0,y:-1}}}},
   {key:'trainWindowBottom',label:'窓の下端',default:1.0,min:.08,max:o=>Math.max(.08,o.h-value(o,'trainWindowHeight',.9,.2,o.h-.16)-.08),step:.05,unit:'m',handle:(o,v)=>({anchor:[-o.ra,-o.rb,0],sample:[-o.ra,-o.rb,v],probe:[-o.ra,-o.rb,v+1],fallback:{x:0,y:-1}})}

@@ -2060,6 +2060,15 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         // 面の持ち主・面IDは一番近い画素のものを使う（面の内外の判定用）。
         const i1 = y * cw + x,
             z = window.__noDepthInterp ? depth[i1] : depthAtPoint(depth, cw, ch, e.x, e.y);
+        // 凹窓の桟は奥面に置く意図線。自己深度バッファで開口内まで消さず、
+        // 遮蔽判定は別オブジェクトの手前面に限定する。
+        if (s.recessedWindowMullion) {
+            const owner=depthOwner?.[i1]||0;
+            if(owner && owner!==myOwner && Number.isFinite(z) && z<e.depth-CG.depthEps(e.depth))return false;
+            return true;
+        }
+        // 正投影の同一オブジェクト背面線は、深度画素の輪郭救済前に実三角面で確認する。
+        
         if (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) {
             if (fishPointOccluded(e)) return false;
             if (!onFace && !window.__noFaceCull && depthOwner?.[i1] === myOwner && depthFace?.[i1] &&
@@ -2173,7 +2182,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     // それが「点線状の切れ端」として残る（実測：建物の稜線が 6px おきの点線に見えた）。
     // 短すぎる区間（--minRun px 未満）は、まわりが隠れているなら捨てる。
     // 線そのものが短いとき（--shortLine px 未満）は捨てない（小物の線が消えないように）。
-    const minRun = preciseSignalEdge || (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) ? 0 :
+    const minRun = s.recessedWindowMullion || preciseSignalEdge || (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) ? 0 :
             window.__minRun === undefined ? 4 : Number(window.__minRun) * Math.max(1, Math.abs(tf[0] || 1)),
         shortLine = 10 * Math.max(1, Math.abs(tf[0] || 1));
     let run = [],
@@ -2490,7 +2499,7 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
         fishVisiblePixels=fishBlockedPixels ? new Int32Array(cw*ch) : null;
     } else {
         fishBlockedPixels = null; fishVisiblePixels = null;
-        if (hiddenDepth && S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyPoleRay && s.signalPoleTopRing) || (!window.__legacySignalSmoothRay && s.signalSmoothSide) || s.preciseTubeEdge || s.arrayGeometry || (!orthView && T !== "f" && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge)))))) prepareFishLineOccluders();
+        if (hiddenDepth && (orthView || S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyPoleRay && s.signalPoleTopRing) || (!window.__legacySignalSmoothRay && s.signalSmoothSide) || s.preciseTubeEdge || s.arrayGeometry || (!orthView && T !== "f" && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge))))))) prepareFishLineOccluders();
         else fishLineOccluders = null;
     }
     // ベベルの縦線は「角ごとに輪郭の1本」だけ描く（面ONのとき）。

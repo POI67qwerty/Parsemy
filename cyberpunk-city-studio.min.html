@@ -495,7 +495,7 @@ canvas {
 }
 .workspaceTabs {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 5px;
     margin: 10px 0 9px;
     padding: 3px;
@@ -677,134 +677,6 @@ canvas {
 .primitiveCard small {
     font-size: 10px;
     color: #b6c9c7;
-}
-#floorPlanDock {
-    position: absolute;
-    right: 18px;
-    top: 18px;
-    z-index: 24;
-    display: none;
-    width: min(500px, calc(100% - 36px));
-    pointer-events: none;
-}
-.floorPlanDockInner {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    flex-wrap: wrap;
-    padding: 8px 10px;
-    border: 1px solid rgba(102, 227, 200, 0.55);
-    border-radius: 13px;
-    background: rgba(9, 20, 25, 0.92);
-    box-shadow: 0 14px 35px rgba(0, 0, 0, 0.42);
-    backdrop-filter: blur(14px);
-    pointer-events: auto;
-}
-.floorPlanDockHeader {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    flex: 1 1 100%;
-    min-width: 0;
-}
-.floorPlanDockStatus {
-    flex: 1;
-    min-width: 0;
-    color: #effffb;
-    font-size: 11px;
-    line-height: 1.3;
-}
-.floorPlanDockStatus small {
-    display: block;
-    color: #9eb6b4;
-    font-size: 10px;
-}
-.floorHistoryButtons {
-    display: flex;
-    gap: 4px;
-    flex: none;
-}
-.floorHistoryButton {
-    min-width: 36px !important;
-    padding: 5px 7px !important;
-}
-.floorPlanPanTools {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex: 0 0 auto;
-    color: #9eb1b1;
-    font-size: 10px;
-}
-.floorPlanPanTools button {
-    min-width: 34px !important;
-    padding: 5px 6px !important;
-}
-.floorLensTools {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex: 0 0 auto;
-    color: #9eb1b1;
-    font-size: 10px;
-}
-.floorLensTools input {
-    width: 56px !important;
-    padding: 5px 6px !important;
-    border: 1px solid #4b7779;
-    border-radius: 6px;
-    background: #0d1b21;
-    color: #effffb;
-    font-size: 11px;
-}
-#floorPlanDock button {
-    min-width: 62px;
-    padding: 6px 8px !important;
-    font-size: 11px !important;
-}
-#floorPlanDock button:disabled {
-    opacity: 0.42;
-    cursor: default;
-}
-#floorPlanDock .dockCollapse {
-    flex: none;
-    min-width: 34px !important;
-    padding: 4px 8px !important;
-    color: #baffea !important;
-    border-color: #4b7779 !important;
-}
-#floorPlanDock .dockHint {
-    flex: 1 1 220px;
-    color: #9eb1b1;
-    font-size: 10px;
-    line-height: 1.3;
-}
-.roomModeTabs { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:3px; margin:7px 0; }
-.roomModeTabs button { min-width:0 !important; padding:5px 2px !important; }
-.roomModeTabs button.is-active { background:linear-gradient(135deg,#285e5a,#315d86) !important; border-color:#66e3c8 !important; color:#effffb !important; }
-#floorPlanDock.collapsed {
-    width: auto;
-    right: 18px;
-}
-#floorPlanDock.collapsed .floorPlanDockInner {
-    padding: 6px 8px;
-    flex-wrap: nowrap;
-}
-#floorPlanDock.collapsed .floorPlanDockHeader {
-    flex: 0 0 auto;
-}
-#floorPlanDock.collapsed .floorPlanDockStatus,
-#floorPlanDock.collapsed .dockHint,
-#floorPlanDock.collapsed .floorPlanPanTools,
-#floorPlanDock.collapsed .floorLensTools,
-#floorPlanDock.collapsed [data-floor-dock-action]:not([data-floor-dock-action="collapse"]) {
-    display: none;
-}
-#floorPlanDock.collapsed .dockCollapse {
-    min-width: 88px !important;
-}
-#floorPlanDock.open {
-    display: block;
 }
 #objectList {
     margin-top: 9px;
@@ -1380,7 +1252,7 @@ body.cameraLocked #cv {
 }
 @media (max-width: 520px) {
     #studioQuick .workspaceTabs {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
     }
     #bar {
         gap: 5px;
@@ -1497,12 +1369,6 @@ body.cameraLocked #cv {
 #studioQuick .sceneNote {
     display: none;
 }
-#studioQuick #floorPlanSelectionStatus {
-    display: block;
-    font-size: 10px;
-    margin: 3px 0;
-    color: #9db0b1;
-}
 #studioQuick .sceneTitle {
     margin-top: 7px;
     font-size: 10px;
@@ -1577,59 +1443,6 @@ body.cameraLocked #cv {
 }
 .objectMeta small {
     font-size: 9px;
-}
-#floorPlanDock {
-    right: 10px;
-    top: 10px;
-    width: min(430px, calc(100% - 20px));
-}
-.floorPlanDockInner {
-    gap: 4px;
-    padding: 6px 7px;
-    border-radius: 10px;
-}
-.floorPlanDockStatus {
-    font-size: 10px;
-}
-.floorPlanDockStatus small,
-.floorPlanDock .dockHint {
-    display: none;
-}
-.floorPlanDockHeader {
-    gap: 4px;
-}
-.floorHistoryButtons {
-    gap: 3px;
-}
-.floorHistoryButton {
-    min-width: 30px !important;
-    padding: 4px 6px !important;
-}
-.floorPlanPanTools {
-    gap: 2px;
-    font-size: 9px;
-}
-.floorPlanPanTools button {
-    min-width: 27px !important;
-    padding: 4px 5px !important;
-}
-.floorLensTools {
-    font-size: 9px;
-}
-.floorLensTools input {
-    width: 48px !important;
-    padding: 4px 5px !important;
-}
-.floorPlanDock button {
-    min-width: 40px !important;
-    padding: 5px 6px !important;
-    font-size: 10px !important;
-}
-.floorPlanDock .dockCollapse {
-    min-width: 30px !important;
-}
-.floorPlanDock.collapsed .dockCollapse {
-    min-width: 70px !important;
 }
 #stackFloorRows {
     display: grid;
@@ -1709,12 +1522,6 @@ body.cameraLocked #cv {
     #canvasAssetControl input[type=range] { width:80px; }
     #assetTray, #assetTray.floorAssetTray { margin:0 6px 6px; }
 }
-#floorPlanDock, #floorPlanDock.collapsed { position:relative; top:auto; right:auto; bottom:auto; width:100%; flex:none; pointer-events:auto; }
-#floorPlanDock .floorPlanDockInner { flex-wrap:nowrap; overflow-x:auto; overscroll-behavior-x:contain; border-radius:0; padding:4px 8px; }
-#floorPlanDock .floorPlanDockHeader { flex:0 0 auto; align-items:center; }
-#floorPlanDock .floorPlanDockStatus { display:none; }
-#floorPlanDock .dockHint { display:none; }
-#floorPlanDock .floorPlanDockInner > button { flex:0 0 auto; white-space:nowrap; }
 .trainPreset { border-color: #497e79 !important; background: #21413e !important; }
 </style>
     </head>
@@ -2031,7 +1838,26 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <div class=note>間隔は中心から中心までの距離。マイナスで反対方向に並びます。方向はギズモと同じワールド軸です（位置欄のY・Zとは表記が異なります）。複数選択した場合は全てに適用します。複雑な形状や多数のコピーは表示が重くなる場合があります。</div>
 </div></div>
 <label id=buildingOpeningEnabledRow style="display:none"><input type=checkbox id=buildingOpeningEnabled> 開口をつける</label>
+<label id=cornerCutOpeningQuickRow style="display:none"><input type=checkbox id=cornerCutOpeningQuickEnabled> 赤い隅切り面に開口</label>
 <label id=linkedBuildingOpeningRow style="display:none"><input type=checkbox id=linkedBuildingOpening> 開口をつける</label>
+<div id=cornerCutP style="display:none"><h3>隅切り直方体</h3>
+<label><span>隅切りオフセット</span><input type=number class=nv id=cornerCutOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
+<label><input type=checkbox id=cornerFacadeEnabled> ファサード看板をつける</label>
+<div id=cornerFacadeControls style="display:none">
+<label><input type=checkbox id=cornerFacadeSides> 隅切り両端の辺にも回す</label>
+<label><span>看板の色</span><input type=color id=cornerFacadeColor value="#2f73bc"></label>
+<label><span>看板の高さ</span><input type=number class=nv id=cornerFacadeHeight min=0.01 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>看板の張り出し</span><input type=number class=nv id=cornerFacadeProjection min=0.02 max=2 step=0.01 style="width:100px"><span class=un>m</span></label>
+<div class="note">隅切り面に付く立体の看板です。両端の辺へ回すこともできます。文字・ロゴは含みません。</div></div>
+<label><input type=checkbox id=cornerCutOpeningEnabled> 赤い隅切り面に開口</label>
+<div id=cornerCutOpeningControls style="display:none">
+<label><span>開口の幅</span><input type=number class=nv id=cornerCutOpeningW min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>開口の高さ</span><input type=number class=nv id=cornerCutOpeningH min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
+<label><span>開口の奥行き</span><input type=number class=nv id=cornerCutOpeningDepth min=0.025 step=0.05 style="width:100px"><span class=un>m</span></label>
+<div class="note">開口は赤い斜め隅切り面を分割し、内部の左右側面・上面・奥壁を持つ形状として描画します。幅・高さ・奥行きは数値欄または画面上のハンドルで、3D・正面・横・上ビューから編集できます。</div>
+</div>
+<div class="note">赤い切り口のオレンジ菱形ハンドルを、3D・正面・横・上ビューでドラッグして編集できます。</div>
+</div>
 <div id=buildingDoorP style="display:none"><h3>開口の扉</h3>
 <label id=buildingOpeningPositionRow><span>開口の左右</span><input type=number id=buildingOpeningOffset step=0.05 style="width:100px"><span class=un>m</span></label>
 <button id=buildingDoorCenter type=button>扉を中央へ</button>
@@ -2170,24 +1996,6 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <div class="note">四つの縦角を面取りします。オフセットは面取り幅、セグメント数は角の丸みを分割する数です。1は一枚面、4は4分割です。オフセットはキャンバス上のオレンジのベベルハンドルからも変更できます。幅・奥行き・高さは共通の面ハンドルまたは上の数値欄で編集できます。初期状態は面で、上面を押し出すと高さができます。</div>
 </div>
 <div id=assetEditorP style="display:none"><h3>アセット設定</h3><div id=assetEditorFields></div></div>
-<div id=cornerCutP style="display:none"><h3>隅切り直方体</h3>
-<label><span>隅切りオフセット</span><input type=number class=nv id=cornerCutOffset min=0 step=0.01 style="width:100px"><span class=un>m</span></label>
-<label><input type=checkbox id=cornerFacadeEnabled> ファサード看板をつける</label>
-<div id=cornerFacadeControls style="display:none">
-<label><input type=checkbox id=cornerFacadeSides> 隅切り両端の辺にも回す</label>
-<label><span>看板の色</span><input type=color id=cornerFacadeColor value="#2f73bc"></label>
-<label><span>看板の高さ</span><input type=number class=nv id=cornerFacadeHeight min=0.01 step=0.05 style="width:100px"><span class=un>m</span></label>
-<label><span>看板の張り出し</span><input type=number class=nv id=cornerFacadeProjection min=0.02 max=2 step=0.01 style="width:100px"><span class=un>m</span></label>
-<div class="note">隅切り面に付く立体の看板です。両端の辺へ回すこともできます。文字・ロゴは含みません。</div></div>
-<label><input type=checkbox id=cornerCutOpeningEnabled> 赤い隅切り面に開口</label>
-<div id=cornerCutOpeningControls style="display:none">
-<label><span>開口の幅</span><input type=number class=nv id=cornerCutOpeningW min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
-<label><span>開口の高さ</span><input type=number class=nv id=cornerCutOpeningH min=0.1 step=0.05 style="width:100px"><span class=un>m</span></label>
-<label><span>開口の奥行き</span><input type=number class=nv id=cornerCutOpeningDepth min=0.025 step=0.05 style="width:100px"><span class=un>m</span></label>
-<div class="note">開口は赤い斜め隅切り面を分割し、内部の左右側面・上面・奥壁を持つ形状として描画します。幅・高さ・奥行きは数値欄または画面上のハンドルで、3D・正面・横・上ビューから編集できます。</div>
-</div>
-<div class="note">赤い切り口のオレンジ菱形ハンドルを、3D・正面・横・上ビューでドラッグして編集できます。</div>
-</div>
 <div id=recessedStackedP style="display:none"><h3>凹窓階層建物</h3>
 <label><button id=recessedAlign class="primary">上方向へ整列</button></label>
 <label><span>階数</span><input type=number class=nv id=recessedFloorCount min=1 max=30 step=1 style="width:100px"></label>
@@ -3401,6 +3209,7 @@ function setOb(id, patch) {
     if (patch?.doorEnabled === true && patch.openingBack == null && o.asset === "building" && o.openingBack == null && typeof buildingGeometry === "function")
         patch = { ...patch, openingBack: buildingGeometry(o).backY };
     let next = { ...o, ...patch };
+    if (Object.prototype.hasOwnProperty.call(patch || {}, "facadeWidth")) next.facadeWidthEdited = true;
     if(o.asset==="tLegTable"&&patch&&Object.prototype.hasOwnProperty.call(patch,"h")&&!Object.prototype.hasOwnProperty.call(patch,"tableLegHeight")&&!Object.prototype.hasOwnProperty.call(patch,"tableTopThickness"))
         next.tableLegHeight=Math.max(.2,Number(next.h)-Math.max(.025,Number(next.tableTopThickness)||.07));
     if (typeof buildingOpeningEditConstraint === "function") next = buildingOpeningEditConstraint(next, o, patch || {});
@@ -3485,20 +3294,15 @@ function pickOb(p, includeLocked = false) {
         bestAttached = false;
     S.forEach((s) => {
         if (!s.ob || !objectVisible(s.ob) || (!includeLocked && obLocked(s.ob))) return;
-        for (const v of s.p) {
-            const q = sp(s, v);
-            if (!q.ok) continue;
-            const dd = Math.hypot(q.x - p.x, q.y - p.y),
-                attached = !!s.ob.attachment,
-                childHit = attached && dd < 9 / Z;
-            if (childHit && !bestAttached) {
-                bd = dd;
-                best = s.ob.id;
-                bestAttached = true;
-            } else if ((!bestAttached && dd < bd) || (bestAttached && attached && dd < bd)) {
-                bd = dd;
-                best = s.ob.id;
-            }
+        const points=Array.isArray(s.p)?s.p:[];
+        for(let i=1;i<points.length;i++){
+            const a=sp(s,points[i-1]),b=sp(s,points[i]);
+            if(!a.ok||!b.ok)continue;
+            const dx=b.x-a.x,dy=b.y-a.y,t=clamp(((p.x-a.x)*dx+(p.y-a.y)*dy)/(dx*dx+dy*dy||1),0,1),
+                dd=Math.hypot(a.x+t*dx-p.x,a.y+t*dy-p.y),
+                attached=!!s.ob.attachment,childHit=attached&&dd<9/Z;
+            if(childHit&&!bestAttached){bd=dd;best=s.ob.id;bestAttached=true;}
+            else if((!bestAttached&&dd<bd)||(bestAttached&&attached&&dd<bd)){bd=dd;best=s.ob.id;}
         }
     });
     return best;
@@ -6512,6 +6316,7 @@ function counterGizmo(o) {
 const VEHICLE_CFG = {
     pentaBox: { bed: false, wheels: false, mode: "penta" },
     keiTruck: { bed: true, wheels: true, mode: "penta" },
+    keiTruck2: { bed: true, wheels: true, mode: "penta", bedAboveCab: true, bedHeightMax: 20 },
     keiVan: { bed: false, wheels: true, mode: "penta" },
     sedan: { bed: false, wheels: true, mode: "penta", hex: true },
     sedan2: { bed: false, wheels: true, mode: "step" },
@@ -6539,7 +6344,7 @@ function pentaGeometry(o) {
         yF = -L / 2 - nose,
         yB = L / 2 + tail,
         bedL = clamp(meta("vhBedL", Math.min(L * 0.52, L - 0.6)), 0.2, Math.max(0.25, L - 0.5)),
-        bedH = clamp(meta("vhBedH", H * 0.55), 0.05, Math.max(0.1, H - 0.05)),
+        bedH = clamp(meta("vhBedH", H * 0.55), 0.05, Math.max(0.1, cfg.bedHeightMax || (H - 0.05))),
         backY = cfg.bed ? yB - bedL : yB,
         edgeH = clamp(meta("vhFrontH", H * 0.55), 0.06, Math.max(0.08, H - 0.06)),
         slant = clamp((H - edgeH) * 0.55, 0.02, Math.max(0.03, backY - yF - 0.04)),
@@ -6742,7 +6547,7 @@ function vehicleGizmo(o) {
                 [hw, g.yB, g.bedH + 1],
                 g.bedH,
                 0.05,
-                Math.max(0.1, g.H - 0.05),
+                Math.max(0.1, g.cfg.bedHeightMax || (g.H - 0.05)),
                 "荷台の高さ",
                 { x: 0, y: -1 },
                 "#ffb36f",
@@ -11101,6 +10906,11 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
         if (x < 0 || x >= cw || y < 0 || y >= ch) return false;
         const i1 = y * cw + x,
             z = window.__noDepthInterp ? depth[i1] : depthAtPoint(depth, cw, ch, e.x, e.y);
+        if (s.recessedWindowMullion) {
+            const owner=depthOwner?.[i1]||0;
+            if(owner && owner!==myOwner && Number.isFinite(z) && z<e.depth-CG.depthEps(e.depth))return false;
+            return true;
+        }
         if (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) {
             if (fishPointOccluded(e)) return false;
             if (!onFace && !window.__noFaceCull && depthOwner?.[i1] === myOwner && depthFace?.[i1] &&
@@ -11152,7 +10962,7 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
     };
     const bridgePx = window.__noBridge ? 0 : (window.__bridgePx === undefined ? 9 : Number(window.__bridgePx)) * Math.max(1, Math.abs(tf[0] || 1));
     let lastOk = null;
-    const minRun = preciseSignalEdge || (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) ? 0 :
+    const minRun = s.recessedWindowMullion || preciseSignalEdge || (!orthView && T === "f" && fishLineOccluders && !window.__legacyFishLines) ? 0 :
             window.__minRun === undefined ? 4 : Number(window.__minRun) * Math.max(1, Math.abs(tf[0] || 1)),
         shortLine = 10 * Math.max(1, Math.abs(tf[0] || 1));
     let run = [],
@@ -11401,7 +11211,7 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
         fishVisiblePixels=fishBlockedPixels ? new Int32Array(cw*ch) : null;
     } else {
         fishBlockedPixels = null; fishVisiblePixels = null;
-        if (hiddenDepth && S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyPoleRay && s.signalPoleTopRing) || (!window.__legacySignalSmoothRay && s.signalSmoothSide) || s.preciseTubeEdge || s.arrayGeometry || (!orthView && T !== "f" && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge)))))) prepareFishLineOccluders();
+        if (hiddenDepth && (orthView || S.some(s=>s.ob && objectVisible(s.ob) && ((!window.__legacyPoleRay && s.signalPoleTopRing) || (!window.__legacySignalSmoothRay && s.signalSmoothSide) || s.preciseTubeEdge || s.arrayGeometry || (!orthView && T !== "f" && ((!window.__legacyAccordionRange && s.ob.accordionEnabled) || (!window.__legacyDepthBevelRay && s.depthBevelEdge))))))) prepareFishLineOccluders();
         else fishLineOccluders = null;
     }
     if (hiddenDepth) updateSeamPicks(hiddenDepth, cw, ch, tfEff);
@@ -13485,7 +13295,7 @@ function unpack(d) {
         const st = d.S.map((s) => (s.ob ? { ...s, ob: fixOb(s.ob) } : s)),
             seen = new Set(),
             out = [],
-            needsAssetUpdate = o => !!o && (o.arrayEnabled === true || o.doorEnabled === true || o.openingOffset != null || ["pathPipe", "screenHood", "shopAwning", "displayShelf2", "trafficSignal", "pedSignal", "railing", "streetPavement", "streetMailbox", "streetParcel", "streetPlantBox", "squareStool", "shopWardrobe", "shopWardrobe2", "pictureStairs", "guardPoleHalf", "corrugatedRoof", "securityCamera", "bottleCrate", "chainFence", "ufoCatcher", "gachaMachine"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsAssetUpdate))),
+            needsAssetUpdate = o => !!o && (o.arrayEnabled === true || o.doorEnabled === true || o.openingOffset != null || ["pathPipe", "screenHood", "shopAwning", "displayShelf2", "trafficSignal", "pedSignal", "signPost", "signPost2", "crossingSign", "signTriangle", "signDiamond", "signCombo", "trainBench", "trainSeat", "trainDividedBench", "trainDividedSeat", "trainStraps", "trainPole", "trainHandrail", "trainWindowWall", "trainSlidingDoor", "shopWindow", "railing", "streetPavement", "streetMailbox", "streetParcel", "streetPlantBox", "squareStool", "shopWardrobe", "shopWardrobe2", "pictureStairs", "guardPoleHalf", "corrugatedRoof", "securityCamera", "bottleCrate", "chainFence", "ufoCatcher", "gachaMachine"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsAssetUpdate))),
             regenerate = s => !!s.ob && (!s.d3 || needsAssetUpdate(s.ob));
         st.forEach((s) => {
             if (!regenerate(s)) out.push(s);
@@ -13776,7 +13586,7 @@ function f1FacadeControls() {
     const visible=()=>window.__f1EditFeature==="facade", base={type:"range",handleOnly:true,canvasSlider:true,canvasVisible:visible,f1Feature:"facade",unit:"m",step:.02};
     return [
         {key:"facadeSides",label:"ファサードを左右の側面にも回す",type:"boolean",default:false,canvasVisible:visible,f1Feature:"facade",handleOnly:true},
-        {...base,key:"facadeWidth",label:"ファサード幅",default:4,min:.2,max:o=>Math.max(.2,Math.abs(Number(o.ra)||2)*2),get:o=>Number(o.facadeWidth)||Math.abs(Number(o.ra)||2)*2,
+        {...base,key:"facadeWidth",label:"ファサード幅",default:4,min:.2,max:o=>Math.max(.2,Math.abs(Number(o.ra)||2)*2),get:o=>o.facadeWidthEdited===true ? (Number(o.facadeWidth)||Math.abs(Number(o.ra)||2)*2) : Math.abs(Number(o.ra)||2)*2,
             handle:(o,v)=>({anchor:[0,-Math.abs(Number(o.rb)||1.5),o.h],sample:[v/2,-Math.abs(Number(o.rb)||1.5),o.h],probe:[v/2+1,-Math.abs(Number(o.rb)||1.5),o.h],fallback:{x:1,y:0}})},
         {...base,key:"facadeHeight",label:"ファサード高さ",default:.7,min:.05,max:o=>Math.max(.05,Number(o.h)||3),get:o=>Number(o.facadeHeight)||Math.min(.7,(Number(o.h)||3)*.22),
             handle:(o,v)=>({anchor:[0,-Math.abs(Number(o.rb)||1.5),o.h-v],sample:[0,-Math.abs(Number(o.rb)||1.5),o.h],probe:[0,-Math.abs(Number(o.rb)||1.5),o.h+1],fallback:{x:0,y:-1}})},
@@ -14688,8 +14498,6 @@ function recessedStackedBuildingLines(o) {
                 const mullion = customLineA(o, [to3(back, zA), to3(back, zB)], dark, detailWidth);
                 mullion.onFace = true;
                 mullion.recessedWindowMullion = true;
-                mullion.occludeSelf = true;
-                mullion.selfOcclusionAllowance = q.windowDepth * 2 + 0.1;
                 out.push(mullion);
             });
         };
@@ -16788,7 +16596,7 @@ function buildingFacadeAllowed(o) {
     return !!o && !(o.asset === "building" && ["buildingAwningOpen", "buildingSign"].includes(o.linkedAsset));
 }
 function buildingFasciaGeometry(o) {
-    const fullW=Math.max(.1,Math.abs(Number(o.ra)||2)*2), w=clamp(Number(o.facadeWidth)||fullW,.2,fullW),
+    const fullW=Math.max(.1,Math.abs(Number(o.ra)||2)*2), w=o.facadeWidthEdited===true ? clamp(Number(o.facadeWidth)||fullW,.2,fullW) : fullW,
         d=Math.max(.05,Math.abs(Number(o.rb)||.5)*2), h=Math.max(.01,Math.abs(Number(o.h)||3)),
         height=clamp(Number.isFinite(Number(o.facadeHeight)) ? Number(o.facadeHeight) : Math.min(.7,h*.22), Math.min(.05,h), h),
         projection=clamp(Number.isFinite(Number(o.facadeProjection)) ? Number(o.facadeProjection) : .18, .02, 2);
@@ -17610,6 +17418,12 @@ obBounds = function (o) {
         const vertices=assetKitBoundsPoints(q);
         if(vertices?.length) vertices.forEach(v=>pts.push(v));
         else [0,q.h].forEach(z=>[-q.ra,q.ra].forEach(x=>[-q.rb,q.rb].forEach(y=>pts.push(pt(q,x,y,z)))));
+    } else if (typeof isVehicleAsset === "function" && isVehicleAsset(q)) {
+        const g=pentaGeometry(q);
+        for(const [y,z] of g.profile)for(const x of [-g.W/2,g.W/2])pts.push(L2W(q,x,y,z));
+        if(g.cfg.wheels)for(const wheel of g.wheels)
+            for(const dx of [-g.tireW/2,g.tireW/2])for(const dy of [-g.tireR,g.tireR])for(const dz of [-g.tireR,g.tireR])
+                pts.push(L2W(q,wheel.x+dx,wheel.y+dy,wheel.z+dz));
     } else if (q.asset === "building" && buildingFasciaGeometry(q).enabled) {
         const g=buildingFasciaGeometry(q);
         [-g.w/2-(g.side?g.projection:0),g.w/2+(g.side?g.projection:0)].forEach(x => [-g.d/2-g.projection,g.d/2].forEach(y => [0,g.h].forEach(z => pts.push(customPt(q,x,y,z)))));
@@ -17924,8 +17738,9 @@ const ASSET_KIT = (function () {
             radius=Math.max(0,Math.min(Number(r)||0,Math.min(width,height)*.4999)),
             segments=Math.max(1,Math.min(12,Math.round(Number(opts.seg)||3))),
             z0=Number.isFinite(Number(opts.z0))?Number(opts.z0):0,
-            path=roundRectPath(width,height,radius,segments,0,z0+height/2);
-        return box(path,-depth/2,depth/2,{axis:"y",depthBevelEdge:true});
+            path=roundRectPath(width,height,radius,segments,0,z0+height/2),
+            seamMarks=opts.seamLines?bevelMarks(path,radius,segments,opts.group||"depth-bevel"):undefined;
+        return box(path,-depth/2,depth/2,{axis:"y",depthBevelEdge:true,seamMarks});
     }
     const sheet = (path, z0, z1, extra = {}) => prism(path, z0, z1, { ...extra, sheet: true });
     function cylinder(r, z0, z1, opts = {}) {
@@ -18544,9 +18359,9 @@ const ASSET_KIT = (function () {
             const points=[];
             for(const part of build(o,API)||[]) {
                 if(part && Array.isArray(part.path) && !part.meshEdges && !part.meshTriangles) {
-                    const z0=part.z0, z1=part.z1;
-                    for(const [x,y] of part.path) {
-                        points.push(L2W(o,x,y,z0), L2W(o,x,y,z1));
+                    const z0=part.z0, z1=part.z1, axis=part.axis||"z";
+                    for(const [u,v] of part.path) {
+                        points.push(L2W(o,...toP3(axis,u,v,z0)), L2W(o,...toP3(axis,u,v,z1)));
                     }
                     continue;
                 }
@@ -18998,7 +18813,7 @@ ASSET_KIT.define(
             parts = [],
             frontPanel = (pw, ph, cz, holes, cx = 0) =>
                 K.box(K.rectPath(pw, ph, cx, cz), front - proud, front + panelT, { axis: "y", holes, holeSides: true });
-        parts.push(K.depthBeveledBox(W, D, H, K.param(o, "vmDepthBevel", 0.03), {seg: 3}));
+        parts.push(K.depthBeveledBox(W, D, H, K.param(o, "vmDepthBevel", 0.03), {seg: 3,group:"vending-body",seamLines:true}));
         const winCz = winBottom + winH / 2,
             frameH = winH + Math.min(0.16, winH * 0.28);
         parts.push(frontPanel(winW + Math.min(0.16, winW * 0.22), frameH, winCz, [K.rectPath(winW, winH, 0, 0).map(([u, v]) => [u, winCz + v])]));
@@ -20198,6 +20013,18 @@ ASSET_KIT.define(
     },
     vehicleParts,
 );
+function truck2Parts(o,K){
+    const g=pentaGeometry(o),
+        profile=K.area2(g.profile)<0?g.profile.slice().reverse():g.profile,
+        parts=[
+            K.box(profile,-g.W/2,g.W/2,{axis:"x",color:"#e7dfb1"}),
+            K.box(K.rectPath(g.W,g.bedL,0,g.yB-g.bedL/2),0,g.bedH,{color:"#b6533d"}),
+        ];
+    if(g.cfg.wheels)g.wheels.forEach(wheel=>parts.push(...K.part("tire",{r:g.tireR,t:g.tireW,x:wheel.x,axleY:wheel.y,z:g.tireZ})));
+    return parts;
+}
+ASSET_KIT.define("keiTruck2",{label:"トラック2",glyph:"🚚",group:"vehicle",w:1.72,d:4.4,h:2.25,accent:"#e7dfb1",
+    vhFrontH:1.22,vhNose:.08,vhBedL:2.25,vhBedH:2.30,vhTireR:.34,vhTireW:.2,vhTrack:1.76,vhWb:2.55},truck2Parts);
 ASSET_KIT.define(
     "keiVan",
     {
@@ -20642,7 +20469,7 @@ function streetRoundPart(o,K,profile,marks=[],cx=0,cy=0) {
    {key:'mailSlotHeight',label:'投入口の高さ',min:.04,max:o=>Math.max(.04,o.h-(Number(o.mailPostLength)||.42)-.04),step:.01,unit:'m',get:o=>Math.max(.04,Math.min(o.h-(Number(o.mailPostLength)||.42)-.04,Number.isFinite(Number(o.mailSlotHeight))?Number(o.mailSlotHeight):(o.h-(Number(o.mailPostLength)||.42))*.625)),handle:(o,v)=>vertical(o,v,-o.ra*.7,-o.rb,(Number(o.mailPostLength)||.42))}
  ]},(o,K)=>{const {w,d,h}=size(o),p=val(o,'mailPostLength',.42,.05,Math.max(.05,h-.16)),pd=val(o,'mailPostDiameter',.1,.02,Math.min(w,d)*.65),bh=h-p,y=-d/2-.001,base=Math.min(.035,p*.15),slot=val(o,'mailSlotHeight',bh*.625,.04,Math.max(.04,bh-.04)),sh=Math.min(bh*.045,.03),flag={onFace:true,preciseTubeEdge:true};
  return [K.box(K.rectPath(pd*1.6,pd*1.5),0,base),streetRoundPart(o,K,[[pd/2,pd/2,base],[pd/2,pd/2,p]]),
- K.depthBeveledBox(w,d,bh,Math.min(.025,w*.05,bh*.05),{z0:p,seg:2}),
+ K.depthBeveledBox(w,d,bh,Math.min(.025,w*.05,bh*.05),{z0:p,seg:2,group:"street-mailbox-body",seamLines:true}),
  K.face3([[-w*.31,y,p+slot-sh],[w*.31,y,p+slot-sh],[w*.31,y,p+slot+sh],[-w*.31,y,p+slot+sh]],{onFace:true}),
  K.face3([[-w*.26,y-.002,p+slot-sh/3],[w*.26,y-.002,p+slot-sh/3],[w*.26,y-.002,p+slot+sh/3],[-w*.26,y-.002,p+slot+sh/3]],flag)];});
  ASSET_KIT.define('streetPlant',{...common,label:'鉢植え',glyph:'♧',group:'streetObjects',w:.72,d:.72,h:.9,accent:'#79b974',minHeight:o=>Math.max(.15,(Number(o.plantPotHeight)||.25)+.12),controls:[
@@ -20952,6 +20779,51 @@ ASSET_KIT.define('guardPoleHalf',{
   for(const i of [0,3,6,9])edges.push([pt(outer[i],y0),pt(outer[i],y1)]);
   return {meshTriangles:tris,meshEdges:edges,...flag};
  };
+ ASSET_KIT.define('trainCar',{label:'電車車両',glyph:'🚆',group:'train',w:2.8,d:12,h:3.35,accent:'#547b43',
+  geometryBounds:true,minHalfWidth:()=>.7,minHalfDepth:()=>1,minHeight:()=>1.2,
+  controls:[{key:'trainCarWindowCount',label:'側面窓の数',type:'range',default:6,min:3,max:10,step:1,integer:true,unit:'枚'}]},(o,K)=>{
+  const w=Math.max(1.4,2*Math.abs(o.ra)),len=Math.max(2,2*Math.abs(o.rb)),h=Math.max(1.2,Number(o.h)||3.35),
+   count=Math.max(3,Math.min(10,Math.round(Number(o.trainCarWindowCount)||6))),sideT=.035,
+   lower=.34,bandZ=.92,topZ=1.35,roofZ=h*.88,out=[];
+  const panel=(side,y0,y1,z0,z1,color,extra={})=>{
+   const x0=side<0?-w/2-sideT:w/2-sideT,x1=side<0?-w/2+sideT:w/2+sideT;
+   out.push(K.box(K.rectPath(y1-y0,z1-z0,(y0+y1)/2,(z0+z1)/2),x0,x1,{axis:'x',color,...extra}));
+  };
+  out.push(K.box(K.rectPath(w,len),0,h,{color:'#547b43'}));
+  out.push(K.box(K.rectPath(w*1.04,len*.98),.12,.48,{color:'#51484a'}));
+  for(const side of [-1,1]){
+   panel(side,-len/2,len/2,.48,bandZ,'#a98224');
+   panel(side,-len/2,len/2,bandZ,topZ,'#c6b05a');
+   const doorY=len*.30,usable=len*.78,step=usable/count,winW=step*.72,winH=Math.min(.78,h*.27),winZ=h*.66;
+   for(let i=0;i<count;i++){
+    const cy=-len*.39+(i+.5)*step;
+    if(Math.abs(cy-doorY)<.68)continue;
+    panel(side,cy-winW/2,cy+winW/2,winZ-winH/2,winZ+winH/2,'#473e4b');
+    panel(side,cy-winW/2+.055,cy+winW/2-.055,winZ-winH/2+.055,winZ+winH/2-.055,'#384650');
+   }
+   panel(side,doorY-.44,doorY+.44,.55,2.30,'#594b4a');
+   panel(side,doorY-.31,doorY+.31,1.62,2.20,'#51676a');
+   panel(side,doorY-.27,doorY+.27,1.66,2.16,'#94b5ae');
+   panel(side,doorY+.31,doorY+.35,.85,1.02,'#d3bd6d');
+   panel(side,-len/2,len/2,lower,lower+.045,'#d3bd6d');
+   panel(side,-len/2,len/2,.20,.25,'#81705a');
+  }
+  for(const end of [-1,1]){
+   const y0=end<0?-len/2-.008:len/2-.008,y1=end<0?-len/2+.008:len/2+.008;
+   out.push(K.box(K.rectPath(w*.55,.85,0,h*.68),y0,y1,{axis:'y',color:'#4b424b'}));
+   out.push(K.box(K.rectPath(w*.49,.72,0,h*.68),y0+end*.01,y1+end*.01,{axis:'y',color:'#657c7b'}));
+   for(const sx of [-1,1])out.push(K.box(K.rectPath(.14,.18,sx*w*.34,h*.39),y0,y1,{axis:'y',color:'#db762a'}));
+  }
+  for(const y of [-len*.25,len*.05])out.push(K.box(K.rectPath(w*.34,len*.10,0,y),roofZ,roofZ+.28,{color:'#625954'}));
+  for(const yy of [len*.22,len*.35])out.push(K.box(K.rectPath(.055,.48,0,yy),roofZ+.28,roofZ+.78,{color:'#554b4d'}));
+  out.push(K.box(K.rectPath(.75,.055,0,len*.285),roofZ+.72,roofZ+.79,{color:'#554b4d'}));
+  for(const side of [-1,1])for(const y of [-len*.31,len*.31]){
+   const x=side*(w*.39);
+   out.push(K.box(K.rectPath(.72,1.55,x,y),.28,.55,{color:'#625a54'}));
+   for(const yy of [y-.48,y+.48])out.push(...K.part('tire',{r:.34,t:.16,x:side*(w*.48),axleY:yy,z:0}));
+  }
+  return out;
+ });
  const trainFramePath=(K,w,h,r,x,z)=>{
   const scale=Math.max(1,.02/Math.min(w,h));
   return beveledBoxFootprint(w*scale,h*scale,r*scale,4).map(([u,v])=>[x+u/scale,z+v/scale]);
@@ -21028,7 +20900,7 @@ ASSET_KIT.define('guardPoleHalf',{
  seat('trainDividedSeat','電車の椅子（区切り）',.58,true,true);
  const horizontalPoleLength={key:'trainRailLength',label:'ポールの長さ',min:.2,max:10,step:.05,unit:'m',get:o=>2*Math.abs(o.ra),patch:(o,v)=>({ra:v/2}),
   handle:(o,v)=>({anchor:[0,-o.rb-.16,o.h],sample:[v/2,-o.rb-.16,o.h],probe:[v/2+1,-o.rb-.16,o.h],fallback:{x:1,y:0}})};
- ASSET_KIT.define('trainStraps',{label:'つり革',glyph:'♧',group:'train',w:1.5,d:.12,h:.45,accent:'#bfc3c6',minHalfWidth:()=>.10,minHalfDepth:()=>.025,minHeight:()=>.20,controls:[
+ ASSET_KIT.define('trainStraps',{label:'つり革',glyph:'♧',group:'train',w:1.5,d:.12,h:.45,accent:'#bfc3c6',geometryBounds:true,minHalfWidth:()=>.10,minHalfDepth:()=>.025,minHeight:()=>.20,controls:[
   {key:'trainStrapCount',label:'つり革の数',type:'range',canvasSlider:true,default:4,min:1,max:12,step:1,integer:true,unit:'個'},horizontalPoleLength
  ]},(o,K)=>{const w=Math.max(.2,2*Math.abs(o.ra)),d=Math.max(.05,2*Math.abs(o.rb)),h=Math.max(.2,o.h),n=K.count(o.trainStrapCount,4,1,12),r=Math.min(.016,d*.22,h*.05),out=[cylinder(K,r,-w/2,w/2,{axis:'x',cx:0,cy:h-r})];
   const cell=w/n,rw=Math.min(.16,cell*.72,h*.36),rh=Math.min(.19,h*.42),t=Math.min(.018,rw*.14,rh*.14);
@@ -21038,11 +20910,11 @@ ASSET_KIT.define('guardPoleHalf',{
   handle:(o,v)=>({anchor:[.22,0,0],sample:[.22,0,v],probe:[.22,0,v+1],fallback:{x:0,y:-1}})};
  ASSET_KIT.define('trainPole',{label:'車内の縦ポール',glyph:'│',group:'train',w:.08,d:.08,h:2.2,accent:'#bfc3c6',minHalfWidth:()=>.012,minHalfDepth:()=>.012,minHeight:()=>.2,controls:[poleLength]},(o,K)=>{
   const w=Math.max(.024,Math.abs(o.ra)*2),d=Math.max(.024,Math.abs(o.rb)*2),h=Math.max(.2,o.h),r=Math.min(w,d)*.36;return [cylinder(K,r,0,h),cylinder(K,Math.min(w,d)*.5,0,Math.min(.04,h*.1)),cylinder(K,Math.min(w,d)*.5,h-Math.min(.04,h*.1),h)];});
- ASSET_KIT.define('trainHandrail',{label:'車内の横手すり',glyph:'┰',group:'train',w:1.8,d:.18,h:.12,accent:'#bfc3c6',minHalfWidth:()=>.10,minHalfDepth:()=>.025,minHeight:()=>.04,controls:[horizontalPoleLength]},(o,K)=>{
+ ASSET_KIT.define('trainHandrail',{label:'車内の横手すり',glyph:'┰',group:'train',w:1.8,d:.18,h:.12,accent:'#bfc3c6',geometryBounds:true,minHalfWidth:()=>.10,minHalfDepth:()=>.025,minHeight:()=>.04,controls:[horizontalPoleLength]},(o,K)=>{
   const w=Math.max(.2,2*Math.abs(o.ra)),d=Math.max(.05,2*Math.abs(o.rb)),h=Math.max(.04,o.h),r=Math.min(.022,d*.16,h*.20),out=[cylinder(K,r,-w/2,w/2,{axis:'x',cx:-d*.25,cy:h*.5})];
   for(const x of [-w*.42,w*.42]){const rail=cylinder(K,r,-d*.25,d*.48,{axis:'y',cx:x,cy:h*.5});out.push(rail,box(K,r*4,Math.min(.02,d*.12),x,d*.46,h*.5-r*2,h*.5+r*2));}return out;
  });
- ASSET_KIT.define('trainWindowWall',{label:'窓付き車内壁',glyph:'▣',group:'train',w:2,d:.12,h:2.35,accent:'#9babae',minHalfWidth:()=>.25,minHalfDepth:()=>.025,minHeight:()=>.6,controls:[
+ ASSET_KIT.define('trainWindowWall',{label:'窓付き車内壁',glyph:'▣',group:'train',w:2,d:.12,h:2.35,accent:'#9babae',geometryBounds:true,minHalfWidth:()=>.25,minHalfDepth:()=>.025,minHeight:()=>.6,controls:[
   {key:'trainWindowWidth',label:'窓の幅',default:1.35,min:.2,max:o=>Math.max(.2,2*o.ra-.16),step:.05,unit:'m',handle:(o,v)=>({anchor:[0,-o.rb,o.h*.65],sample:[v/2,-o.rb,o.h*.65],probe:[v/2+1,-o.rb,o.h*.65],fallback:{x:1,y:0}})},
   {key:'trainWindowHeight',label:'窓の高さ',default:.9,min:.2,max:o=>Math.max(.2,o.h-value(o,'trainWindowBottom',1,.08,o.h-value(o,'trainWindowHeight',.9,.2,o.h-.16)-.08)-.08),step:.05,unit:'m',handle:(o,v)=>{const z=value(o,'trainWindowBottom',1,.08,o.h-v-.08);return {anchor:[0,-o.rb,z],sample:[0,-o.rb,z+v],probe:[0,-o.rb,z+v+1],fallback:{x:0,y:-1}}}},
   {key:'trainWindowBottom',label:'窓の下端',default:1.0,min:.08,max:o=>Math.max(.08,o.h-value(o,'trainWindowHeight',.9,.2,o.h-.16)-.08),step:.05,unit:'m',handle:(o,v)=>({anchor:[-o.ra,-o.rb,0],sample:[-o.ra,-o.rb,v],probe:[-o.ra,-o.rb,v+1],fallback:{x:0,y:-1}})}
@@ -22608,7 +22480,6 @@ window.cityGridInstallAssetUI = function (bridge) {
         validStroke,
         sanitizeScene,
         fitFloorPlan,
-        syncFloorPlanDockLayout,
         sceneObjects,
     } = bridge;
     function groundAt(p) {
@@ -23615,7 +23486,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         {
             key: "primitive",
             label: "プリミティブ",
-            kinds: ["rect", "track", "circle", "box", "beveledBox", "awning", "triPrism", "triPyramid", "cone", "sphere", "screenHood"],
+            kinds: ["rect", "track", "circle", "box", "beveledBox", "awning", "triPrism", "triPyramid", "pentaBox", "cone", "sphere", "screenHood"],
         },
         {
             key: "building",
@@ -23642,7 +23513,6 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "uWall",
                 "railing",
                 "outdoorUnit",
-                "pentaBox",
             ],
         },
         {
@@ -23655,7 +23525,6 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "chainFence",
                 "wallSign",
                 "lightboxSign",
-                "windowGrid",
                 "securityCamera",
                 "pathPipe",
                 "bezierCable",
@@ -23676,7 +23545,6 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "signDiamond",
                 "signPost2",
                 "signCombo",
-                "crossingSign",
                 "guardPoleU",
                 "guardPoleM",
                 "streetCone",
@@ -23698,12 +23566,12 @@ window.cityGridInstallAssetUI = function (bridge) {
             ],
         },
         { key: "furniture", label: "家具", kinds: ["roomShell", "stool", "squareStool", "counter", "counterL", "counterU", "shopWardrobe", "shopWardrobe2", "displayShelf", "displayShelf2", "ufoCatcher", "gachaMachine", "tLegTable", "ramenBowl"] },
-        { key: "train", label: "電車", kinds: ["trainBench", "trainSeat", "trainDividedBench", "trainDividedSeat", "trainStraps", "trainPole", "trainHandrail", "trainWindowWall", "trainSlidingDoor"] },
+        { key: "train", label: "電車", kinds: ["trainCar", "trainBench", "trainSeat", "trainDividedBench", "trainDividedSeat", "trainStraps", "trainPole", "trainHandrail", "trainWindowWall", "trainSlidingDoor"] },
         { key: "person", label: "人間", kinds: ["person"] },
-        { key: "vehicle", label: "車", kinds: ["keiTruck", "keiVan", "sedan", "sedan2"] },
-        { key: "old", label: "旧", kinds: ["buildingAwning", "buildingAwningOpen", "buildingSign", "sign", "wallSideSign", "shopFront", "guardPoleHalf", "beveledBox", "beveledStackedBuilding"] },
+        { key: "vehicle", label: "車", kinds: ["keiTruck", "keiTruck2", "keiVan", "sedan", "sedan2"] },
+        { key: "old", label: "旧", kinds: ["buildingAwning", "buildingAwningOpen", "buildingSign"] },
     ];
-    const trayKinds = Object.keys(ASSETS);
+    const trayKinds = Object.keys(ASSETS).filter((kind) => !["shopFront", "f1Accessory", "windowGrid", "crossingSign"].includes(kind));
     ASSET_GROUPS.forEach((g) => {
         g.kinds = g.kinds.filter((k) => trayKinds.includes(k));
     });
@@ -23946,7 +23814,6 @@ window.cityGridInstallAssetUI = function (bridge) {
         el("assetToggle").classList.toggle("on", tray.style.display === "block");
         tray.classList.toggle("floorAssetTray", !!window.cityFloorPlanActive && tray.style.display === "block");
         fit();
-        requestAnimationFrame(syncFloorPlanDockLayout);
     };
     const primitiveKinds = ["rect", "circle", "cone", "sphere", "triPrism", "triPyramid"];
     const primitiveMenu = document.createElement("div");
@@ -24779,11 +24646,15 @@ window.CityCanvasControls = (function () {
     function linkedMemberIds(id) {
         const o = obOf(id);
         if (!o) return [];
-        if (!o.linkedAsset) return groupMemberIds(id);
-        const members = sceneObjects()
-            .filter((q) => q.linkedAsset === o.linkedAsset && q.groupId === o.groupId)
-            .map((q) => q.id);
-        return members.length ? members : [id];
+        if (o.linkedAsset) {
+            const members = sceneObjects()
+                .filter((q) => q.linkedAsset === o.linkedAsset && q.groupId === o.groupId)
+                .map((q) => q.id);
+            return members.length ? members : [id];
+        }
+        const ids=new Set(groupMemberIds(id)),queue=[...ids];
+        while(queue.length){const parentId=queue.pop();for(const child of sceneObjects())if(child.attachment?.sceneParent&&child.attachment.parentId===parentId&&!ids.has(child.id)){ids.add(child.id);queue.push(child.id);}}
+        return [...ids];
     }
     function setObjectVisibility(id, visible) {
         const o = obOf(id);
@@ -25289,10 +25160,12 @@ window.CityCanvasControls = (function () {
         normalizeSelection();
         const objects = sceneObjects().filter(o => objectVisible(o));
         // 通常グループは一体、接続アセットだけのグループは個別選択。
-        const grouped = new Set(objects.filter(o => o.groupId && !o.linkedAsset && !o.attachment?.parentId).map(o => o.groupId));
-        const units = new Map();
+        const grouped = new Set(objects.filter(o => o.groupId && !o.linkedAsset && !o.attachment?.parentId).map(o => o.groupId)),
+            sceneParents = new Set(objects.filter(o=>o.attachment?.sceneParent).map(o=>o.attachment.parentId)),
+            units = new Map();
+        const sceneRoot=o=>{let q=o,seen=new Set();while(q?.attachment?.sceneParent&&q.attachment.parentId&&!seen.has(q.id)){seen.add(q.id);q=obOf(q.attachment.parentId)||q;}return q?.id||o.id;};
         for (const o of objects) {
-            const key = o.groupId && grouped.has(o.groupId) ? "group:" + o.groupId : "object:" + o.id;
+            const root=sceneRoot(o),key=o.groupId&&grouped.has(o.groupId)?"group:"+o.groupId:!o.linkedAsset&&(o.attachment?.sceneParent||sceneParents.has(root))?"scene:"+root:"object:"+o.id;
             if (!units.has(key)) units.set(key, []);
             units.get(key).push(o.id);
         }
@@ -27134,6 +27007,9 @@ window.CityCanvasControls = (function () {
             isCornerCut = !!(o && o.type === "asset" && o.asset === "cornerCutBox");
         if (!panel) return;
         panel.style.display = isCornerCut ? "" : "none";
+        const quickRow=el("cornerCutOpeningQuickRow"),quickCheck=el("cornerCutOpeningQuickEnabled");
+        if(quickRow)quickRow.style.display=isCornerCut?"":"none";
+        if(quickCheck)quickCheck.checked=!!o?.cornerCutOpeningEnabled;
         if (!isCornerCut) {
             cornerCutEditSession = false;
             return;
@@ -27229,6 +27105,12 @@ window.CityCanvasControls = (function () {
             cornerCutEditSession = false;
         };
     }
+    const cornerCutOpeningQuickEnabled=el("cornerCutOpeningQuickEnabled");
+    if(cornerCutOpeningQuickEnabled)cornerCutOpeningQuickEnabled.onchange=()=>{
+        cornerCutEditSession=false;
+        applyCornerCutProp("cornerCutOpeningEnabled",cornerCutOpeningQuickEnabled.checked);
+        cornerCutEditSession=false;
+    };
     cornerCutOpeningInputs.forEach(([id, name]) => {
         const input = el(id);
         if (!input) return;
@@ -27310,8 +27192,6 @@ window.CityCanvasControls = (function () {
         for(const [id,v] of [["viewFloorFront","front"],["viewFloorBack","back"],["viewFloorTop","top"],["viewFloorBottom","bottom"],["viewFloorSide","side"],["viewFloorLeft","left"],["viewHome",null]]) {
             const b=el(id);if(!b)continue;const on=orthView===v;b.classList.toggle("on",on);b.setAttribute("aria-pressed",String(on));
         }
-        const status=el("floorPlanStatus"),name={front:"前",back:"後",top:"上",bottom:"下",side:"右",left:"左"}[orthView];
-        if(status&&window.cityFloorPlanActive&&name)status.textContent=`間取りモード中：${name}（表示面内でオブジェクトを移動・編集できます）`;
     }
     const baseRender = render;
     render = function () {
@@ -27346,7 +27226,6 @@ window.CityCanvasControls = (function () {
         syncAssetAxis();
         syncPersonControls();
         window.cityGridSyncObjectInfoActions?.();
-        SH.syncFloorPlanSelection?.();
     };
     // ===== 4.1 標準ビューと間取りショートカット（8=間取り横 / 9=間取り真上 / 0=元の視点） =====
     // 標準ビューだけは透視ではなく正投影にし、真横90°・真上90°を正確に扱う。
@@ -27650,9 +27529,7 @@ window.CityCanvasControls = (function () {
             setSide(true);
             fit();
         }
-        SH.floorPlanDock?.classList.add("open");
         fitCanvasDisplay();
-        SH.syncFloorPlanDockLayout?.();
         Z = 1;
         ox = 0;
         oy = 0;
@@ -27661,16 +27538,12 @@ window.CityCanvasControls = (function () {
         fitFloorPlan();
         if (tool !== "edit") setTool("edit");
         setMode("draw");
-        const status = el("floorPlanStatus");
-        if (status)
-            status.textContent = `間取りモード中：${{front:"前",back:"後",side:"右",right:"右",left:"左",top:"上",bottom:"下"}[kind] || "上"}（表示面内でオブジェクトを移動・編集できます）`;
         render();
     }
     function exitFloorPlan(restore = true) {
         if (!window.cityFloorPlanActive) return;
         // 間取り中に変更した共有カメラ設定は、そのまま3D視点へ引き継ぐ。
         window.cityFloorPlanActive = false;
-        SH.floorPlanDock?.classList.remove("open");
         fitCanvasDisplay();
         const saved = floorPlanView,
             restoreSide = floorPlanAutoHidSide && !floorPlanSideWasHidden;
@@ -27689,9 +27562,6 @@ window.CityCanvasControls = (function () {
             fit();
         }
         el("assetTray")?.classList.remove("floorAssetTray");
-        SH.syncFloorPlanDockLayout?.();
-        const status = el("floorPlanStatus");
-        if (status) status.textContent = "間取りモードを開くと、X・Z方向へドラッグできます";
     }
     window.cityFloorPlanActive = false;
     window.cityFloorPlanEnter = enterFloorPlan;
@@ -28179,7 +28049,6 @@ window.CityCanvasControls = (function () {
         validStroke,
         sanitizeScene,
         fitFloorPlan,
-        syncFloorPlanDockLayout: (...a) => SH.syncFloorPlanDockLayout?.(...a),
         sceneObjects,
         syncAssetAxis: () => syncAssetAxis(),
     };
@@ -28195,8 +28064,7 @@ window.CityCanvasControls = (function () {
    もとは studio-ui.js の「5. 間取りモードの選択・移動・編集」セクション（2,718行）で、
    中身はそのまま移した。studio-ui.js とやり取りする名前だけ `window.CityGridStudio` を通す。
    外から使うもの（studio-ui.js 側で使う）
-   - FLOOR_CAMERA_RAY / floorPlanDock / floorPlanDrag
-   - syncFloorPlanDockLayout / syncFloorPlanSelection
+   - FLOOR_CAMERA_RAY / floorPlanDrag
    - floorPlanWorldAt / floorPlanSideWorldAt / floorPlanFrontWorldAt
    外から借りるもの
    - el / side / capturePointer / orthHandleGap（studio-lib.js）
@@ -28359,7 +28227,6 @@ window.CityCanvasControls = (function () {
         if (document.hidden) resetFloorTouch();
     });
     // 間取り操作バーは撤回。正投影ビューのキャンバス操作はジェスチャーで継続する。
-    function syncFloorPlanDockLayout() {}
     const angle360 = (a) => (((Number(a) || 0) % 360) + 360) % 360;
     const floorPlanObject = () => { const o = sel && obOf(sel); return o && !obLocked(o) ? o : null; };
     function floorPlanWorldAt(p) {
@@ -29702,25 +29569,6 @@ window.CityCanvasControls = (function () {
         c.restore();
     }
     window.cityFloorPlanOverlay = drawFloorPlanOverlay;
-    function syncFloorPlanSelection() {
-        const o = floorPlanObject(),
-            canRotate = !!(o && !o.attachment?.verticalOnly),
-            label = o ? (o.type === "asset" ? assetLabel(o) || "アセット" : "図形") : "オブジェクト";
-        const text = o
-            ? `${label} を選択中（向き ${Math.round(angle360(o.rot))}°）`
-            : "オブジェクトを選択すると、移動・回転できます。";
-        const status = el("floorPlanSelectionStatus");
-        if (status) status.textContent = text;
-        [
-            ["floorRotateLeft", canRotate],
-            ["floorRotateRight", canRotate],
-            ["floorRotate90", canRotate],
-            ["floorDelete", !!o],
-        ].forEach(([id, on]) => {
-            const b = el(id);
-            if (b) b.disabled = !on;
-        });
-    }
     // Y生成面の幅・奥行き・高さハンドルを、オブジェクト定義の差分へ変換する。
     // X/Z生成面は上のfloorWallDimensionPatchへ分岐する。
     function floorDimensionPatch(o, name, value, side = 1) {
@@ -30292,9 +30140,9 @@ window.CityCanvasControls = (function () {
                         group,
                         base0: base,
                         bb: snap.bb,
-                        targets: snap.targets,
-                        tau: snap.tau,
-                        dx: orthPlane() === "front" ? base[0] - w.x : 0,
+                    targets: snap.targets,
+                    tau: snap.tau,
+                    dx: orthPlane() === "front" ? base[0] - w.x : 0,
                         dz: orthPlane() === "side" ? base[2] - w.z : 0,
                         dy: base[1] - w.y,
                         started: false,
@@ -30626,18 +30474,9 @@ window.CityCanvasControls = (function () {
                         RD = [];
                         floorPlanDrag.started = true;
                     }
-                    const delta =
-                        floorPlanDrag.axis === "front"
-                            ? [
-                                  w.x + floorPlanDrag.dx - floorPlanDrag.base0[0],
-                                  w.y + floorPlanDrag.dy - floorPlanDrag.base0[1],
-                                  0,
-                              ]
-                            : [
-                                  0,
-                                  w.y + floorPlanDrag.dy - floorPlanDrag.base0[1],
-                                  w.z + floorPlanDrag.dz - floorPlanDrag.base0[2],
-                              ];
+                    const delta = floorPlanDrag.axis === "front"
+                        ? [w.x + floorPlanDrag.dx - floorPlanDrag.base0[0], w.y + floorPlanDrag.dy - floorPlanDrag.base0[1], 0]
+                        : [0, w.y + floorPlanDrag.dy - floorPlanDrag.base0[1], w.z + floorPlanDrag.dz - floorPlanDrag.base0[2]];
                     const axes = floorPlanDrag.axis === "front" ? [0, 1] : [1, 2];
                     const q = $("snp")?.checked
                         ? snapShift(floorPlanDrag.bb, delta, axes, floorPlanDrag.targets, floorPlanDrag.tau)
@@ -30706,11 +30545,9 @@ window.CityCanvasControls = (function () {
                         floorPlanDrag.started = true;
                     }
                     /* 家具本体の間取り移動はX/Zだけ。磁石ONなら選択全体の外周を他オブジェクトへ吸着する。 */
-                    const delta = [
-                        w.x + floorPlanDrag.dx - floorPlanDrag.base0[0],
-                        0,
-                        w.z + floorPlanDrag.dz - floorPlanDrag.base0[2],
-                    ];
+                    const delta = floorPlanDrag.axis === "front"
+                        ? [w.x + floorPlanDrag.dx - floorPlanDrag.base0[0], w.y + floorPlanDrag.dy - floorPlanDrag.base0[1], 0]
+                        : [0, w.y + floorPlanDrag.dy - floorPlanDrag.base0[1], w.z + floorPlanDrag.dz - floorPlanDrag.base0[2]];
                     const q = $("snp")?.checked
                         ? snapShift(floorPlanDrag.bb, delta, [0, 2], floorPlanDrag.targets, floorPlanDrag.tau)
                         : { d: delta, hit: new Set() };
@@ -30860,12 +30697,9 @@ window.CityCanvasControls = (function () {
     addEventListener("blur", () => (floorPlanPanMode = false));
     // ===== 外（studio-ui.js）から使うもの =====
     SH.FLOOR_CAMERA_RAY = FLOOR_CAMERA_RAY;
-    SH.floorPlanDock = null;
-    SH.syncFloorPlanDockLayout = syncFloorPlanDockLayout;
     SH.floorPlanWorldAt = floorPlanWorldAt;
     SH.floorPlanSideWorldAt = floorPlanSideWorldAt;
     SH.floorPlanFrontWorldAt = floorPlanFrontWorldAt;
-    SH.syncFloorPlanSelection = syncFloorPlanSelection;
     // floorPlanDrag は studio-ui.js 側からも書き換えるので、値ではなく入れ物を見せる。
     Object.defineProperty(SH, "floorPlanDrag", {
         get: () => floorPlanDrag,

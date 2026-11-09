@@ -22,7 +22,6 @@ window.cityGridInstallAssetUI = function (bridge) {
         validStroke,
         sanitizeScene,
         fitFloorPlan,
-        syncFloorPlanDockLayout,
         sceneObjects,
     } = bridge;
     // ===== 1. 接地と配置位置 =====
@@ -1132,8 +1131,8 @@ window.cityGridInstallAssetUI = function (bridge) {
         {
             key: "primitive",
             label: "プリミティブ",
-            // 平面・押し出し元 → 直方体・角柱・角錐 → 円錐・球・ひさしの順。
-            kinds: ["rect", "track", "circle", "box", "beveledBox", "awning", "triPrism", "triPyramid", "cone", "sphere", "screenHood"],
+            // 平面・押し出し元 → 直方体・角柱・角錐 → 五角形塊 → 円錐・球・ひさしの順。
+            kinds: ["rect", "track", "circle", "box", "beveledBox", "awning", "triPrism", "triPyramid", "pentaBox", "cone", "sphere", "screenHood"],
         },
         {
             key: "building",
@@ -1151,7 +1150,7 @@ window.cityGridInstallAssetUI = function (bridge) {
         {
             key: "buildingParts",
             label: "建物パーツ",
-            // 屋根・テント → 窓・ベランダ・壁・手すり → 室外機・五角形塊の順。
+            // 屋根・テント → 窓・ベランダ・壁・手すり → 室外機の順。
             kinds: [
                 "gableRoof",
                 "shedRoof",
@@ -1162,7 +1161,6 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "uWall",
                 "railing",
                 "outdoorUnit",
-                "pentaBox",
             ],
         },
         // 既存の street キーを保ち、階段・フェンス → 看板・窓・カメラ → 配管・ケーブル → 自販機・遊具の順に整理。
@@ -1176,7 +1174,6 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "chainFence",
                 "wallSign",
                 "lightboxSign",
-                "windowGrid",
                 "securityCamera",
                 "pathPipe",
                 "bezierCable",
@@ -1198,7 +1195,6 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "signDiamond",
                 "signPost2",
                 "signCombo",
-                "crossingSign",
                 "guardPoleU",
                 "guardPoleM",
                 "streetCone",
@@ -1222,16 +1218,17 @@ window.cityGridInstallAssetUI = function (bridge) {
         },
         // 家具：椅子・スツール → カウンター → タンス・棚の順。
         { key: "furniture", label: "家具", kinds: ["roomShell", "stool", "squareStool", "counter", "counterL", "counterU", "shopWardrobe", "shopWardrobe2", "displayShelf", "displayShelf2", "ufoCatcher", "gachaMachine", "tLegTable", "ramenBowl"] },
-        { key: "train", label: "電車", kinds: ["trainBench", "trainSeat", "trainDividedBench", "trainDividedSeat", "trainStraps", "trainPole", "trainHandrail", "trainWindowWall", "trainSlidingDoor"] },
+        { key: "train", label: "電車", kinds: ["trainCar", "trainBench", "trainSeat", "trainDividedBench", "trainDividedSeat", "trainStraps", "trainPole", "trainHandrail", "trainWindowWall", "trainSlidingDoor"] },
         { key: "person", label: "人間", kinds: ["person"] },
         // 車（人物の隣）。キャブは五角形の立体、荷台は直方体、タイヤは円柱で作る。
         // 寸法はすべて画面上の専用ハンドルで変えられる（engine-gizmo.js の vehicleGizmo）。
-        { key: "vehicle", label: "車", kinds: ["keiTruck", "keiVan", "sedan", "sedan2"] },
+        { key: "vehicle", label: "車", kinds: ["keiTruck", "keiTruck2", "keiVan", "sedan", "sedan2"] },
         // 互換用の旧アセットは棚の最後にまとめ、新しい通常カテゴリには混ぜない。
-        { key: "old", label: "旧", kinds: ["buildingAwning", "buildingAwningOpen", "buildingSign", "sign", "wallSideSign", "shopFront", "guardPoleHalf", "beveledBox", "beveledStackedBuilding"] },
+        { key: "old", label: "旧", kinds: ["buildingAwning", "buildingAwningOpen", "buildingSign"] },
     ];
     // 旧IDは互換性を保ったまま「旧」カテゴリにだけ配置する。
-    const trayKinds = Object.keys(ASSETS);
+    // 内部生成用・棚から外したアセットは一覧カードへ自動追加しない。
+    const trayKinds = Object.keys(ASSETS).filter((kind) => !["shopFront", "f1Accessory", "windowGrid", "crossingSign"].includes(kind));
     ASSET_GROUPS.forEach((g) => {
         g.kinds = g.kinds.filter((k) => trayKinds.includes(k));
     });
@@ -1490,7 +1487,6 @@ window.cityGridInstallAssetUI = function (bridge) {
         el("assetToggle").classList.toggle("on", tray.style.display === "block");
         tray.classList.toggle("floorAssetTray", !!window.cityFloorPlanActive && tray.style.display === "block");
         fit();
-        requestAnimationFrame(syncFloorPlanDockLayout);
     };
 
     // ===== 8. 4本指プリミティブクイックメニュー =====

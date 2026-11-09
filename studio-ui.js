@@ -428,11 +428,17 @@
     function linkedMemberIds(id) {
         const o = obOf(id);
         if (!o) return [];
-        if (!o.linkedAsset) return groupMemberIds(id);
-        const members = sceneObjects()
-            .filter((q) => q.linkedAsset === o.linkedAsset && q.groupId === o.groupId)
-            .map((q) => q.id);
-        return members.length ? members : [id];
+        if (o.linkedAsset) {
+            const members = sceneObjects()
+                .filter((q) => q.linkedAsset === o.linkedAsset && q.groupId === o.groupId)
+                .map((q) => q.id);
+            return members.length ? members : [id];
+        }
+        const ids=new Set(groupMemberIds(id)),queue=[...ids];
+        // 親子グループの親を非表示／削除するときは子孫も一緒に扱う。
+        // 子を単独で操作した場合は、親や兄弟を巻き込まない。
+        while(queue.length){const parentId=queue.pop();for(const child of sceneObjects())if(child.attachment?.sceneParent&&child.attachment.parentId===parentId&&!ids.has(child.id)){ids.add(child.id);queue.push(child.id);}}
+        return [...ids];
     }
     function setObjectVisibility(id, visible) {
         const o = obOf(id);
@@ -943,10 +949,12 @@
         normalizeSelection();
         const objects = sceneObjects().filter(o => objectVisible(o));
         // 通常グループは一体、接続アセットだけのグループは個別選択。
-        const grouped = new Set(objects.filter(o => o.groupId && !o.linkedAsset && !o.attachment?.parentId).map(o => o.groupId));
-        const units = new Map();
+        const grouped = new Set(objects.filter(o => o.groupId && !o.linkedAsset && !o.attachment?.parentId).map(o => o.groupId)),
+            sceneParents = new Set(objects.filter(o=>o.attachment?.sceneParent).map(o=>o.attachment.parentId)),
+            units = new Map();
+        const sceneRoot=o=>{let q=o,seen=new Set();while(q?.attachment?.sceneParent&&q.attachment.parentId&&!seen.has(q.id)){seen.add(q.id);q=obOf(q.attachment.parentId)||q;}return q?.id||o.id;};
         for (const o of objects) {
-            const key = o.groupId && grouped.has(o.groupId) ? "group:" + o.groupId : "object:" + o.id;
+            const root=sceneRoot(o),key=o.groupId&&grouped.has(o.groupId)?"group:"+o.groupId:!o.linkedAsset&&(o.attachment?.sceneParent||sceneParents.has(root))?"scene:"+root:"object:"+o.id;
             if (!units.has(key)) units.set(key, []);
             units.get(key).push(o.id);
         }
@@ -2794,6 +2802,9 @@
             isCornerCut = !!(o && o.type === "asset" && o.asset === "cornerCutBox");
         if (!panel) return;
         panel.style.display = isCornerCut ? "" : "none";
+        const quickRow=el("cornerCutOpeningQuickRow"),quickCheck=el("cornerCutOpeningQuickEnabled");
+        if(quickRow)quickRow.style.display=isCornerCut?"":"none";
+        if(quickCheck)quickCheck.checked=!!o?.cornerCutOpeningEnabled;
         if (!isCornerCut) {
             cornerCutEditSession = false;
             return;
@@ -2889,6 +2900,12 @@
             cornerCutEditSession = false;
         };
     }
+    const cornerCutOpeningQuickEnabled=el("cornerCutOpeningQuickEnabled");
+    if(cornerCutOpeningQuickEnabled)cornerCutOpeningQuickEnabled.onchange=()=>{
+        cornerCutEditSession=false;
+        applyCornerCutProp("cornerCutOpeningEnabled",cornerCutOpeningQuickEnabled.checked);
+        cornerCutEditSession=false;
+    };
     cornerCutOpeningInputs.forEach(([id, name]) => {
         const input = el(id);
         if (!input) return;
@@ -2970,8 +2987,6 @@
         for(const [id,v] of [["viewFloorFront","front"],["viewFloorBack","back"],["viewFloorTop","top"],["viewFloorBottom","bottom"],["viewFloorSide","side"],["viewFloorLeft","left"],["viewHome",null]]) {
             const b=el(id);if(!b)continue;const on=orthView===v;b.classList.toggle("on",on);b.setAttribute("aria-pressed",String(on));
         }
-        const status=el("floorPlanStatus"),name={front:"前",back:"後",top:"上",bottom:"下",side:"右",left:"左"}[orthView];
-        if(status&&window.cityFloorPlanActive&&name)status.textContent=`間取りモード中：${name}（表示面内でオブジェクトを移動・編集できます）`;
     }
     const baseRender = render;
     render = function () {
@@ -3006,7 +3021,6 @@
         syncAssetAxis();
         syncPersonControls();
         window.cityGridSyncObjectInfoActions?.();
-        SH.syncFloorPlanSelection?.();
     };
 
     // ===== 4.1 標準ビューと間取りショートカット（8=間取り横 / 9=間取り真上 / 0=元の視点） =====
@@ -3313,9 +3327,7 @@
             setSide(true);
             fit();
         }
-        SH.floorPlanDock?.classList.add("open");
         fitCanvasDisplay();
-        SH.syncFloorPlanDockLayout?.();
         Z = 1;
         ox = 0;
         oy = 0;
@@ -3324,16 +3336,12 @@
         fitFloorPlan();
         if (tool !== "edit") setTool("edit");
         setMode("draw");
-        const status = el("floorPlanStatus");
-        if (status)
-            status.textContent = `間取りモード中：${{front:"前",back:"後",side:"右",right:"右",left:"左",top:"上",bottom:"下"}[kind] || "上"}（表示面内でオブジェクトを移動・編集できます）`;
         render();
     }
     function exitFloorPlan(restore = true) {
         if (!window.cityFloorPlanActive) return;
         // 間取り中に変更した共有カメラ設定は、そのまま3D視点へ引き継ぐ。
         window.cityFloorPlanActive = false;
-        SH.floorPlanDock?.classList.remove("open");
         fitCanvasDisplay();
         const saved = floorPlanView,
             restoreSide = floorPlanAutoHidSide && !floorPlanSideWasHidden;
@@ -3352,9 +3360,6 @@
             fit();
         }
         el("assetTray")?.classList.remove("floorAssetTray");
-        SH.syncFloorPlanDockLayout?.();
-        const status = el("floorPlanStatus");
-        if (status) status.textContent = "間取りモードを開くと、X・Z方向へドラッグできます";
     }
     window.cityFloorPlanActive = false;
     window.cityFloorPlanEnter = enterFloorPlan;
@@ -3849,7 +3854,6 @@
         validStroke,
         sanitizeScene,
         fitFloorPlan,
-        syncFloorPlanDockLayout: (...a) => SH.syncFloorPlanDockLayout?.(...a),
         sceneObjects,
         syncAssetAxis: () => syncAssetAxis(),
     };

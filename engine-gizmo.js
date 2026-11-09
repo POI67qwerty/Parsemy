@@ -2885,6 +2885,7 @@ const VEHICLE_CFG = {
     // pentaBox は「五角形の立体」そのもの（建物の塊）。荷台もタイヤも無い。
     pentaBox: { bed: false, wheels: false, mode: "penta" },
     keiTruck: { bed: true, wheels: true, mode: "penta" },
+    keiTruck2: { bed: true, wheels: true, mode: "penta", bedAboveCab: true, bedHeightMax: 20 },
     keiVan: { bed: false, wheels: true, mode: "penta" },
     // 乗用車：前も後ろも斜めに落とした六角形（前の下がってる線＋後ろの下がってる線）。
     sedan: { bed: false, wheels: true, mode: "penta", hex: true },
@@ -2918,7 +2919,7 @@ function pentaGeometry(o) {
         yB = L / 2 + tail,
         // 荷台の長さ・高さ。荷台が無い種類でも値は持つ（切り替えても形が保たれる）。
         bedL = clamp(meta("vhBedL", Math.min(L * 0.52, L - 0.6)), 0.2, Math.max(0.25, L - 0.5)),
-        bedH = clamp(meta("vhBedH", H * 0.55), 0.05, Math.max(0.1, H - 0.05)),
+        bedH = clamp(meta("vhBedH", H * 0.55), 0.05, Math.max(0.1, cfg.bedHeightMax || (H - 0.05))),
         // キャブ（五角形）の後ろ＝荷台の前。
         backY = cfg.bed ? yB - bedL : yB,
         // 「下がってる線」＝前の面の上端。ここから斜めの面が屋根へ上がる。
@@ -3141,7 +3142,7 @@ function vehicleGizmo(o) {
                 [hw, g.yB, g.bedH + 1],
                 g.bedH,
                 0.05,
-                Math.max(0.1, g.H - 0.05),
+                Math.max(0.1, g.cfg.bedHeightMax || (g.H - 0.05)),
                 "荷台の高さ",
                 { x: 0, y: -1 },
                 "#ffb36f",

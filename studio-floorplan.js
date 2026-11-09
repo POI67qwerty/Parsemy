@@ -4,8 +4,7 @@
    中身はそのまま移した。studio-ui.js とやり取りする名前だけ `window.CityGridStudio` を通す。
 
    外から使うもの（studio-ui.js 側で使う）
-   - FLOOR_CAMERA_RAY / floorPlanDock / floorPlanDrag
-   - syncFloorPlanDockLayout / syncFloorPlanSelection
+   - FLOOR_CAMERA_RAY / floorPlanDrag
    - floorPlanWorldAt / floorPlanSideWorldAt / floorPlanFrontWorldAt
 
    外から借りるもの
@@ -171,7 +170,6 @@
         if (document.hidden) resetFloorTouch();
     });
     // 間取り操作バーは撤回。正投影ビューのキャンバス操作はジェスチャーで継続する。
-    function syncFloorPlanDockLayout() {}
     const angle360 = (a) => (((Number(a) || 0) % 360) + 360) % 360;
     const floorPlanObject = () => { const o = sel && obOf(sel); return o && !obLocked(o) ? o : null; };
     function floorPlanWorldAt(p) {
@@ -1514,25 +1512,6 @@
         c.restore();
     }
     window.cityFloorPlanOverlay = drawFloorPlanOverlay;
-    function syncFloorPlanSelection() {
-        const o = floorPlanObject(),
-            canRotate = !!(o && !o.attachment?.verticalOnly),
-            label = o ? (o.type === "asset" ? assetLabel(o) || "アセット" : "図形") : "オブジェクト";
-        const text = o
-            ? `${label} を選択中（向き ${Math.round(angle360(o.rot))}°）`
-            : "オブジェクトを選択すると、移動・回転できます。";
-        const status = el("floorPlanSelectionStatus");
-        if (status) status.textContent = text;
-        [
-            ["floorRotateLeft", canRotate],
-            ["floorRotateRight", canRotate],
-            ["floorRotate90", canRotate],
-            ["floorDelete", !!o],
-        ].forEach(([id, on]) => {
-            const b = el(id);
-            if (b) b.disabled = !on;
-        });
-    }
     // Y生成面の幅・奥行き・高さハンドルを、オブジェクト定義の差分へ変換する。
     // X/Z生成面は上のfloorWallDimensionPatchへ分岐する。
     function floorDimensionPatch(o, name, value, side = 1) {
@@ -2104,9 +2083,9 @@
                         group,
                         base0: base,
                         bb: snap.bb,
-                        targets: snap.targets,
-                        tau: snap.tau,
-                        dx: orthPlane() === "front" ? base[0] - w.x : 0,
+                    targets: snap.targets,
+                    tau: snap.tau,
+                    dx: orthPlane() === "front" ? base[0] - w.x : 0,
                         dz: orthPlane() === "side" ? base[2] - w.z : 0,
                         dy: base[1] - w.y,
                         started: false,
@@ -2438,18 +2417,9 @@
                         RD = [];
                         floorPlanDrag.started = true;
                     }
-                    const delta =
-                        floorPlanDrag.axis === "front"
-                            ? [
-                                  w.x + floorPlanDrag.dx - floorPlanDrag.base0[0],
-                                  w.y + floorPlanDrag.dy - floorPlanDrag.base0[1],
-                                  0,
-                              ]
-                            : [
-                                  0,
-                                  w.y + floorPlanDrag.dy - floorPlanDrag.base0[1],
-                                  w.z + floorPlanDrag.dz - floorPlanDrag.base0[2],
-                              ];
+                    const delta = floorPlanDrag.axis === "front"
+                        ? [w.x + floorPlanDrag.dx - floorPlanDrag.base0[0], w.y + floorPlanDrag.dy - floorPlanDrag.base0[1], 0]
+                        : [0, w.y + floorPlanDrag.dy - floorPlanDrag.base0[1], w.z + floorPlanDrag.dz - floorPlanDrag.base0[2]];
                     const axes = floorPlanDrag.axis === "front" ? [0, 1] : [1, 2];
                     const q = $("snp")?.checked
                         ? snapShift(floorPlanDrag.bb, delta, axes, floorPlanDrag.targets, floorPlanDrag.tau)
@@ -2518,11 +2488,9 @@
                         floorPlanDrag.started = true;
                     }
                     /* 家具本体の間取り移動はX/Zだけ。磁石ONなら選択全体の外周を他オブジェクトへ吸着する。 */
-                    const delta = [
-                        w.x + floorPlanDrag.dx - floorPlanDrag.base0[0],
-                        0,
-                        w.z + floorPlanDrag.dz - floorPlanDrag.base0[2],
-                    ];
+                    const delta = floorPlanDrag.axis === "front"
+                        ? [w.x + floorPlanDrag.dx - floorPlanDrag.base0[0], w.y + floorPlanDrag.dy - floorPlanDrag.base0[1], 0]
+                        : [0, w.y + floorPlanDrag.dy - floorPlanDrag.base0[1], w.z + floorPlanDrag.dz - floorPlanDrag.base0[2]];
                     const q = $("snp")?.checked
                         ? snapShift(floorPlanDrag.bb, delta, [0, 2], floorPlanDrag.targets, floorPlanDrag.tau)
                         : { d: delta, hit: new Set() };
@@ -2674,12 +2642,9 @@
 
     // ===== 外（studio-ui.js）から使うもの =====
     SH.FLOOR_CAMERA_RAY = FLOOR_CAMERA_RAY;
-    SH.floorPlanDock = null;
-    SH.syncFloorPlanDockLayout = syncFloorPlanDockLayout;
     SH.floorPlanWorldAt = floorPlanWorldAt;
     SH.floorPlanSideWorldAt = floorPlanSideWorldAt;
     SH.floorPlanFrontWorldAt = floorPlanFrontWorldAt;
-    SH.syncFloorPlanSelection = syncFloorPlanSelection;
     // floorPlanDrag は studio-ui.js 側からも書き換えるので、値ではなく入れ物を見せる。
     Object.defineProperty(SH, "floorPlanDrag", {
         get: () => floorPlanDrag,

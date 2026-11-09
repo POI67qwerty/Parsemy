@@ -35,7 +35,7 @@ function f1FacadeControls() {
     const visible=()=>window.__f1EditFeature==="facade", base={type:"range",handleOnly:true,canvasSlider:true,canvasVisible:visible,f1Feature:"facade",unit:"m",step:.02};
     return [
         {key:"facadeSides",label:"ファサードを左右の側面にも回す",type:"boolean",default:false,canvasVisible:visible,f1Feature:"facade",handleOnly:true},
-        {...base,key:"facadeWidth",label:"ファサード幅",default:4,min:.2,max:o=>Math.max(.2,Math.abs(Number(o.ra)||2)*2),get:o=>Number(o.facadeWidth)||Math.abs(Number(o.ra)||2)*2,
+        {...base,key:"facadeWidth",label:"ファサード幅",default:4,min:.2,max:o=>Math.max(.2,Math.abs(Number(o.ra)||2)*2),get:o=>o.facadeWidthEdited===true ? (Number(o.facadeWidth)||Math.abs(Number(o.ra)||2)*2) : Math.abs(Number(o.ra)||2)*2,
             handle:(o,v)=>({anchor:[0,-Math.abs(Number(o.rb)||1.5),o.h],sample:[v/2,-Math.abs(Number(o.rb)||1.5),o.h],probe:[v/2+1,-Math.abs(Number(o.rb)||1.5),o.h],fallback:{x:1,y:0}})},
         {...base,key:"facadeHeight",label:"ファサード高さ",default:.7,min:.05,max:o=>Math.max(.05,Number(o.h)||3),get:o=>Number(o.facadeHeight)||Math.min(.7,(Number(o.h)||3)*.22),
             handle:(o,v)=>({anchor:[0,-Math.abs(Number(o.rb)||1.5),o.h-v],sample:[0,-Math.abs(Number(o.rb)||1.5),o.h],probe:[0,-Math.abs(Number(o.rb)||1.5),o.h+1],fallback:{x:0,y:-1}})},
@@ -1064,8 +1064,8 @@ function recessedStackedBuildingLines(o) {
                 mullion.recessedWindowMullion = true;
                 // 凹みの奥面にある線。近い同一オブジェクトの面との食い違いは許すが、
                 // 建物の反対側など明らかに遠い線は隠す。許容は窓の凹み寸法に追従。
-                mullion.occludeSelf = true;
-                mullion.selfOcclusionAllowance = q.windowDepth * 2 + 0.1;
+                // 桟は奥面上の意図線。遮蔽は他オブジェクトと実際の開口形状に任せ、
+                // 同一建物の外壁深度バッファによる過剰な自己遮蔽を避ける。
                 out.push(mullion);
             });
         };
@@ -3477,7 +3477,7 @@ function buildingFacadeAllowed(o) {
     return !!o && !(o.asset === "building" && ["buildingAwningOpen", "buildingSign"].includes(o.linkedAsset));
 }
 function buildingFasciaGeometry(o) {
-    const fullW=Math.max(.1,Math.abs(Number(o.ra)||2)*2), w=clamp(Number(o.facadeWidth)||fullW,.2,fullW),
+    const fullW=Math.max(.1,Math.abs(Number(o.ra)||2)*2), w=o.facadeWidthEdited===true ? clamp(Number(o.facadeWidth)||fullW,.2,fullW) : fullW,
         d=Math.max(.05,Math.abs(Number(o.rb)||.5)*2), h=Math.max(.01,Math.abs(Number(o.h)||3)),
         height=clamp(Number.isFinite(Number(o.facadeHeight)) ? Number(o.facadeHeight) : Math.min(.7,h*.22), Math.min(.05,h), h),
         projection=clamp(Number.isFinite(Number(o.facadeProjection)) ? Number(o.facadeProjection) : .18, .02, 2);
@@ -4357,6 +4357,14 @@ obBounds = function (o) {
         const vertices=assetKitBoundsPoints(q);
         if(vertices?.length) vertices.forEach(v=>pts.push(v));
         else [0,q.h].forEach(z=>[-q.ra,q.ra].forEach(x=>[-q.rb,q.rb].forEach(y=>pts.push(pt(q,x,y,z)))));
+    } else if (typeof isVehicleAsset === "function" && isVehicleAsset(q)) {
+        // 車両の既定boundsは車体の床だけを見ており、負の vhTireZ が反映されない。
+        // タイヤ外周を含めた実形状で地面スナップ・選択枠の範囲を取る。
+        const g=pentaGeometry(q);
+        for(const [y,z] of g.profile)for(const x of [-g.W/2,g.W/2])pts.push(L2W(q,x,y,z));
+        if(g.cfg.wheels)for(const wheel of g.wheels)
+            for(const dx of [-g.tireW/2,g.tireW/2])for(const dy of [-g.tireR,g.tireR])for(const dz of [-g.tireR,g.tireR])
+                pts.push(L2W(q,wheel.x+dx,wheel.y+dy,wheel.z+dz));
     } else if (q.asset === "building" && buildingFasciaGeometry(q).enabled) {
         const g=buildingFasciaGeometry(q);
         [-g.w/2-(g.side?g.projection:0),g.w/2+(g.side?g.projection:0)].forEach(x => [-g.d/2-g.projection,g.d/2].forEach(y => [0,g.h].forEach(z => pts.push(customPt(q,x,y,z)))));
