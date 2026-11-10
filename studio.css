@@ -375,26 +375,6 @@ canvas {
 .quickCheck input {
     accent-color: var(--mint);
 }
-.floorTintBox {
-    margin-top: 9px;
-    padding: 8px 9px;
-    border: 1px solid rgba(116, 180, 174, 0.2);
-    border-radius: 9px;
-    background: rgba(7, 16, 21, 0.18);
-}
-.floorTintBox .quickField {
-    margin: 6px 0 2px;
-}
-.floorTintBox input[type="color"] {
-    height: 26px;
-    padding: 1px;
-}
-.floorTintBox output {
-    width: auto;
-    text-align: right;
-    color: var(--mint);
-    font-size: 11px;
-}
 .quickHint {
     margin-top: 9px;
     padding-top: 8px;
@@ -1206,10 +1186,6 @@ body.cameraLocked #cv {
 }
 #studioQuick .compactPresets button {
     font-size: 10px;
-}
-#studioQuick .floorTintBox {
-    margin-top: 6px;
-    padding: 6px 7px;
 }
 #studioQuick .sceneTools {
     margin-top: 5px;

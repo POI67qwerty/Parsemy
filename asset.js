@@ -80,9 +80,13 @@ function f1PartControls(kind) {
 
 const ASSETS = {
     rect: { label: "長方形", glyph: "□", w: 1.5, d: 1.0, h: 0, accent: "#66e3c8" },
-    box: { label: "直方体", glyph: "▣", w: 3.2, d: 2.4, h: 1.8, bevelOffset: 0, bevelSegments: 4, controls: [{ key: "bevelOffset", label: "ベベル", type: "range", canvasSlider: true, default: 0, min: 0, max: o => Math.min(Math.abs(o.ra), Math.abs(o.rb)) * 0.49, step: 0.01, unit: "m", handle: (o,v) => { const x=Math.abs(Number(o.ra)||.5), y=-Math.abs(Number(o.rb)||.5), z=Math.max(.01,Number(o.h)||.01); return {anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}}; } }], accent: "#7dd8ff" },
+    box: { label: "直方体", glyph: "▣", w: 3.2, d: 2.4, h: 1.8, bevelOffset: 0, bevelSegments: 4, controls: [
+        { key: "bevelOffset", label: "ベベル", type: "range", canvasSlider: true, default: 0, min: 0, max: o => Math.min(Math.abs(o.ra), Math.abs(o.rb)) * 0.49, step: 0.01, unit: "m", handle: (o,v) => { const x=Math.abs(Number(o.ra)||.5), y=-Math.abs(Number(o.rb)||.5), z=Math.max(.01,Number(o.h)||.01); return {anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}}; } },
+        { key: "bevelSegments", label: "ベベル分割", type: "range", default: 4, min: 1, max: 4, step: 1, unit: "段" }
+    ], accent: "#7dd8ff" },
     beveledBox: {
-        label: "ベベル直方体",
+        // 旧保存データ用の互換ID。新規配置は「直方体」へ統一。
+        label: "ベベル直方体（旧形式）",
         glyph: "⬡",
         w: 3.2,
         d: 2.4,
@@ -90,6 +94,7 @@ const ASSETS = {
         bevelOffset: 0.28,
         bevelSegments: 4,
         accent: "#ff9f68",
+        internalOnly: true,
     },
     cornerCutBox: {
         label: "隅切り直方体",
@@ -2155,7 +2160,8 @@ function assetLines(o) {
         w = o.ra * 2,
         d = o.rb * 2,
         h = o.h,
-        c = o.c || "#222222",
+        // アセットの線画は指定により一律黒。面色（accent/surfaceColor）とは分離する。
+        c = "#000000",
         // a はアセットも線画と同じ色で描くための別名。
         ctx = { o, kind, w, d, h, c, a: c, out: [] };
     const build = ASSET_LINE_BUILDERS[kind];
@@ -4331,7 +4337,7 @@ function buildingDoorTriangles(o) {
 // 正規化済みアセットを線画へ変換する入口。
 function genAsset(o) {
     const q = normalizedAsset(o);
-    return [...assetLines(q), ...buildingDoorLines(q)].map((s) => ({ ...s, ...(q.doorEnabled && buildingDoorSupported(q) ? { onFace:true, preciseTubeEdge:true, tubeContourView:orthView||"3d" } : {}), ob: q, d3: true, cs: sigNow() }));
+    return [...assetLines(q), ...buildingDoorLines(q)].map((s) => ({ ...s, c: "#000000", ...(q.doorEnabled && buildingDoorSupported(q) ? { onFace:true, preciseTubeEdge:true, tubeContourView:orthView||"3d" } : {}), ob: q, d3: true, cs: sigNow() }));
 }
 
 // ===== 9. 既存エンジンへの接続 =====

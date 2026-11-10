@@ -214,10 +214,14 @@ const ASSET_KIT = (function () {
     }
 
     // ===== 部品（parts）=====
-    function prism(path, z0, z1, extra = {}) {
-        return { path, z0: Math.min(z0, z1), z1: Math.max(z0, z1), ...extra };
+    // 汎用押し出し（2D輪郭を指定軸の start→end へ立体化）。
+    // 部品・形状ジェネレーターから同じ規約で呼べる再利用API。
+    function extrude(path, start, end, extra = {}) {
+        return { path, z0: Math.min(start, end), z1: Math.max(start, end), ...extra };
     }
-    const box = (path, z0, z1, extra = {}) => prism(path, z0, z1, extra);
+    const prism = extrude;
+    // box は従来名との互換・読みやすさ用。幾何生成の本体は extrude に集約。
+    const box = extrude;
     // x-z断面の四隅だけを丸め、前後（y）にそのまま押し出す。
     // 前後端面の外周には別のベベルを作らない。
     function depthBeveledBox(w, d, h, r, opts = {}) {
@@ -1004,7 +1008,8 @@ const ASSET_KIT = (function () {
         scalePath,
         insetPath,
         rotatePath,
-        // 部品
+        // 部品・汎用押し出し
+        extrude,
         prism,
         box,
         sheet,

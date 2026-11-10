@@ -2075,8 +2075,14 @@ function strokeWVisible(c, s, depth, cw, ch, tf) {
                 faceCullAround(cw, ch, x, y, depthFace[i1], myOwner) && fishFaceInterior(e, s.ob.id, tf)) return false;
             return true;
         }
+        // 押し出し円柱の接線位置にある2本だけは、表面との同一深度競合で切れないよう
+        // 連続線として扱う。ただし別オブジェクトがその画素で手前にあれば遮蔽を維持。
+        if(s.silhouetteEdge){const owner=depthOwner?.[i1]||0,front=depth?.[i1];if(owner&&owner!==myOwner&&Number.isFinite(front)&&front<e.depth-CG.depthEps(e.depth))return false;return true;}
         if (fishLineOccluders && preciseSignalAt(e))
             return !(orthView ? signalOrthOccluded(e, (s.signalSmoothSide || s.preciseTubeEdge) ? 0.004 : 0.008) : exactPerspectiveOccluded(e));
+        // 押し出し円柱の2本の外形母線は、同一面の深度丸めで欠けやすい。
+        // その線だけ、外側が背景／線より奥であることを確認してから先行救済する。
+        if(s.silhouetteEdge&&depthOwner?.[i1]===myOwner&&!window.__noShapeEdge&&shapeEdgeAt(depth,cw,ch,x,y,e.depth,myOwner))return true;
         // 小さな灯器や自販機の前後ベベルは、細い曲面の隣で深度近似だけでは
         // 背面の線が漏れることがある。面より奥の候補だけ実光線で再判定する。
         if (!orthView && T !== "f" && s.depthBevelEdge && fishLineOccluders && !window.__legacyDepthBevelRay &&
@@ -2450,6 +2456,82 @@ function freeLineSig() {
     }
     return n + ":" + h;
 }
+// 高密度シーンの操作中だけ使う独立WebGL線描画プロトタイプ。
+// 3D線分はGPUバッファへ一度アップロードし、カメラ行列だけを毎フレーム更新する。
+let gpuPreviewState=null;
+function gpuPreviewInit(){
+    if(gpuPreviewState)return gpuPreviewState;
+    const canvas=document.createElement("canvas");
+    let gl=canvas.getContext("webgl2",{alpha:true,antialias:true,premultipliedAlpha:true})||canvas.getContext("webgl",{alpha:true,antialias:true,premultipliedAlpha:true});
+    if(!gl)return null;
+    const vs=`attribute vec3 aPosition;attribute vec4 aColor;uniform mat3 uCamera;uniform vec3 uOffset;uniform vec2 uResolution;uniform vec2 uViewSize;uniform vec2 uShift;uniform float uFocal;uniform float uCenterY;uniform float uZoom;uniform float uLineWidth;varying vec4 vColor;void main(){vec3 q=uCamera*(aPosition+uOffset);if(q.z<=0.02){gl_Position=vec4(2.0,2.0,0.0,1.0);return;}vec2 s=vec2(uViewSize.x*0.5+uFocal*q.x/q.z,uCenterY-uFocal*q.y/q.z)*uZoom+uShift;vec2 n=vec2(s.x/uResolution.x*2.0-1.0,1.0-s.y/uResolution.y*2.0);gl_Position=vec4(n,0.0,1.0);gl_PointSize=max(1.0,uLineWidth);vColor=aColor;}`;
+    const fs=`precision mediump float;varying vec4 vColor;void main(){gl_FragColor=vColor;}`;
+    const compile=(type,src)=>{const sh=gl.createShader(type);gl.shaderSource(sh,src);gl.compileShader(sh);if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(sh)||"GPU preview shader error");return sh;};
+    try{const program=gl.createProgram();gl.attachShader(program,compile(gl.VERTEX_SHADER,vs));gl.attachShader(program,compile(gl.FRAGMENT_SHADER,fs));gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(program)||"GPU preview link error");
+        const buffer=gl.createBuffer(),pos=gl.getAttribLocation(program,"aPosition"),color=gl.getAttribLocation(program,"aColor"),u={camera:gl.getUniformLocation(program,"uCamera"),offset:gl.getUniformLocation(program,"uOffset"),resolution:gl.getUniformLocation(program,"uResolution"),viewSize:gl.getUniformLocation(program,"uViewSize"),shift:gl.getUniformLocation(program,"uShift"),focal:gl.getUniformLocation(program,"uFocal"),centerY:gl.getUniformLocation(program,"uCenterY"),zoom:gl.getUniformLocation(program,"uZoom"),width:gl.getUniformLocation(program,"uLineWidth"),color:gl.getUniformLocation(program,"uColor")};
+        gpuPreviewState={canvas,gl,program,buffer,pos,color,u,groupsStatic:new Map(),groupsDynamic:new Map(),scene:null,sceneToken:"",movedKey:"",ready:false,lineRange:gl.getParameter(gl.ALIASED_LINE_WIDTH_RANGE)||[1,1]};return gpuPreviewState;
+    }catch(e){console.warn("WebGL line preview unavailable",e);return null;}
+}
+function gpuPreviewColor(value){
+    const s=String(value||"#222222");let m=s.match(/^#([0-9a-f]{3,8})$/i);if(m){let h=m[1];if(h.length===3)h=h.split("").map(x=>x+x).join("");if(h.length>=6)return[parseInt(h.slice(0,2),16)/255,parseInt(h.slice(2,4),16)/255,parseInt(h.slice(4,6),16)/255,h.length>=8?parseInt(h.slice(6,8),16)/255:1];}m=s.match(/^rgba?\(([^)]+)\)/i);if(m){const a=m[1].split(/[ ,/]+/).filter(Boolean).map(Number);return[(a[0]||0)/255,(a[1]||0)/255,(a[2]||0)/255,a[3]??1];}return[0.13,0.13,0.13,1];
+}
+function gpuPreviewVertexData(lines){
+    if(!lines.length)return null;
+    const s0=lines[0],width=typeof layerLineWidth==="function"?layerLineWidth(s0):effectiveLineWidth(s0);let segments=0;
+    for(const s of lines){if(s.seam!==undefined&&s.seam!==null&&!s.seamApex)continue;for(let i=1;i<s.p.length;i++)if(!s.dup?.[i-1])segments++;}
+    if(!segments)return{width,vertices:new Uint8Array(0)};
+    // 3x float position + 4x normalized RGBA bytes: halve vertex bandwidth vs 7 floats.
+    const buffer=new ArrayBuffer(segments*32),vertices=new Uint8Array(buffer),pos=new Float32Array(buffer);let byteAt=0,hasAlpha=false;
+    for(const s of lines){if(s.seam!==undefined&&s.seam!==null&&!s.seamApex)continue;const color=gpuPreviewColor(s.c),r=Math.round(color[0]*255),g=Math.round(color[1]*255),b=Math.round(color[2]*255),a=Math.round(color[3]*255);if(a<255)hasAlpha=true;for(let i=1;i<s.p.length;i++){if(s.dup?.[i-1])continue;const p=s.p[i-1],q=s.p[i];pos[byteAt>>2]=p[0];pos[(byteAt>>2)+1]=p[1];pos[(byteAt>>2)+2]=p[2];vertices[byteAt+12]=r;vertices[byteAt+13]=g;vertices[byteAt+14]=b;vertices[byteAt+15]=a;byteAt+=16;pos[byteAt>>2]=q[0];pos[(byteAt>>2)+1]=q[1];pos[(byteAt>>2)+2]=q[2];vertices[byteAt+12]=r;vertices[byteAt+13]=g;vertices[byteAt+14]=b;vertices[byteAt+15]=a;byteAt+=16;}}
+    return{width,vertices,hasAlpha};
+}
+function gpuPreviewUpload(vertices,width,hasAlpha=true){const st=gpuPreviewInit();if(!st)return null;const gl=st.gl,buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STATIC_DRAW);return{buffer:buf,count:vertices.length/16,width,hasAlpha};}
+function gpuPreviewBuildGroup(lines){const data=gpuPreviewVertexData(lines);return data?gpuPreviewUpload(data.vertices,data.width,data.hasAlpha):null;}
+function setGpuPreviewOverlay(visible){
+    const state=gpuPreviewState,canvas=state?.canvas,cv=document.getElementById("cv"),host=document.getElementById("stage");if(!canvas||!cv||!host)return;
+    if(visible){if(canvas.parentElement!==host)host.appendChild(canvas);if(canvas.style.display!=="block"||state.overlayKey!==`${cv.clientWidth},${cv.clientHeight},${cv.offsetLeft},${cv.offsetTop}`){state.overlayKey=`${cv.clientWidth},${cv.clientHeight},${cv.offsetLeft},${cv.offsetTop}`;canvas.style.position="absolute";canvas.style.left=cv.offsetLeft+"px";canvas.style.top=cv.offsetTop+"px";canvas.style.width=cv.clientWidth+"px";canvas.style.height=cv.clientHeight+"px";canvas.style.zIndex="4";canvas.style.pointerEvents="none";canvas.style.boxShadow="none";canvas.style.display="block";}}
+    else if(canvas.style.display!=="none")canvas.style.display="none";
+}
+function presentLineLayer(c,layer){
+    if(gpuPreviewState&&layer===gpuPreviewState.canvas){setGpuPreviewOverlay(true);return;}
+    setGpuPreviewOverlay(false);c.drawImage(layer,0,0,W,H);
+}
+let gpuWarmScene=null,gpuWarmToken=0;
+function scheduleGpuPreviewWarmup(){
+    if(T==="f"||orthView||S.length<3000)return;
+    const st=gpuPreviewInit();if(!st||st.scene===S||gpuWarmScene===S)return;
+    gpuWarmScene=S;const scene=S,token=++gpuWarmToken;
+    setTimeout(()=>{
+        if(scene!==S||token!==gpuWarmToken){if(token===gpuWarmToken){gpuWarmScene=null;scheduleGpuPreviewWarmup();}return;}
+        const byObject=new Map();for(const s of scene){if(!s?.d3||!objectVisible(s.ob))continue;const id=s.ob?.id||"__free__";let a=byObject.get(id);if(!a)byObject.set(id,a=[]);a.push(s);}
+        for(const g of st.groupsStatic.values())st.gl.deleteBuffer(g.buffer);for(const g of st.groupsDynamic.values())st.gl.deleteBuffer(g.buffer);st.groupsStatic.clear();st.groupsDynamic.clear();
+        const objects=[...byObject.entries()],partsByWidth=new Map();let index=0;
+        const step=()=>{
+            if(scene!==S||token!==gpuWarmToken){if(token===gpuWarmToken){gpuWarmScene=null;scheduleGpuPreviewWarmup();}return;}
+            const stop=Math.min(objects.length,index+1);
+            for(;index<stop;index++){
+                const[id,lines]=objects[index],byWidth=new Map();
+                for(const line of lines){const width=typeof layerLineWidth==="function"?layerLineWidth(line):effectiveLineWidth(line);let a=byWidth.get(width);if(!a)byWidth.set(width,a=[]);a.push(line);}
+                for(const[width,arr]of byWidth){const data=gpuPreviewVertexData(arr);if(data){let parts=partsByWidth.get(width);if(!parts)partsByWidth.set(width,parts=[]);parts.push(data.vertices);if(data.hasAlpha)parts.hasAlpha=true;}}
+            }
+            if(index<objects.length)setTimeout(step,0);
+            else{
+                for(const[width,parts]of partsByWidth){const total=parts.reduce((n,a)=>n+a.length,0),all=new Uint8Array(total);let at=0;for(const p of parts){all.set(p,at);at+=p.length;}const g=gpuPreviewUpload(all,width,!!parts.hasAlpha);if(g)st.groupsStatic.set(String(width),g);}
+                st.scene=scene;st.sceneToken=String(scene.length)+"|"+(scene[0]?.ob?.id||"")+"|"+(scene[scene.length-1]?.ob?.id||"");st.movedKey="";st.ready=true;gpuWarmScene=null;
+            }
+        };step();
+    },0);
+}
+function renderGpuPreviewLines(workW,workH,previewScale,tfEff){
+    if(T==="f"||orthView||cur||prev||window.__previewMovedObjectIds?.size||S.some(s=>s?.d3===false&&(!s.ob||objectVisible(s.ob))))return null;
+    const st=gpuPreviewInit();if(!st||!st.ready)return null;
+    const gl=st.gl;
+    if(st.scene!==S){scheduleGpuPreviewWarmup();return null;}    if(st.canvas.width!==workW||st.canvas.height!==workH){st.canvas.width=workW;st.canvas.height=workH;gl.viewport(0,0,workW,workH);}gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);gl.useProgram(st.program);
+    const m=camMatrix();gl.uniformMatrix3fv(st.u.camera,false,new Float32Array([m[0],m[3],m[6],m[1],m[4],m[7],m[2],m[5],m[8]]));gl.uniform3fv(st.u.offset,new Float32Array(CO()));gl.uniform2f(st.u.resolution,workW,workH);gl.uniform2f(st.u.viewSize,W,H);gl.uniform2f(st.u.shift,tfEff[4],tfEff[5]);gl.uniform1f(st.u.focal,(W*P.lens)/36);gl.uniform1f(st.u.centerY,H*P.hz/100);gl.uniform1f(st.u.zoom,tfEff[0]);
+    gl.enableVertexAttribArray(st.pos);gl.enableVertexAttribArray(st.color);for(const g of st.groupsStatic.values()){if(g.hasAlpha){gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);}else gl.disable(gl.BLEND);drawGpuGroup(gl,st,g,tfEff);}gl.enable(gl.BLEND);
+    return st.canvas;
+}
+function drawGpuGroup(gl,st,g,tfEff){if(!g.count)return;gl.bindBuffer(gl.ARRAY_BUFFER,g.buffer);gl.vertexAttribPointer(st.pos,3,gl.FLOAT,false,16,0);gl.vertexAttribPointer(st.color,4,gl.UNSIGNED_BYTE,true,16,12);const lw=Math.min(st.lineRange[1]||1,Math.max(st.lineRange[0]||1,g.width*tfEff[0]));gl.uniform1f(st.u.width,lw);gl.lineWidth(lw);gl.drawArrays(gl.LINES,0,g.count);}
 function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     // tf=書き出し用の変換 [拡大,0,0,拡大,ずれx,ずれy]
     // このフレームの投影キー（投影キャッシュの判定に使う）。
@@ -2481,14 +2563,14 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     if (!fastInteractionPreview && !window.__noLineCache && LC && LC.width === cw && LC.height === ch && lineLayerKey && key === lineLayerKey) {
         return LC;
     }
-    if (!LC || LC.width !== cw || LC.height !== ch) {
+    if (!fastInteractionPreview && (!LC || LC.width !== cw || LC.height !== ch)) {
         LC = document.createElement("canvas");
         LC.width = cw;
         LC.height = ch;
     }
     // ドラッグ中は深度バッファと線層を半解像度で処理し、最後に画面サイズへ拡大する。
     // 精密なBVH判定を省くだけだった前方式より、ピクセル数に比例する隠線処理も軽くする。
-    const previewScale=fastInteractionPreview ? 0.5 : 1,
+    const previewScale=fastInteractionPreview ? (window.__previewMovedObjectIds?.size ? 0.5 : (S.length>8000?0.35:0.5)) : 1,
         workW=Math.max(1,Math.ceil(cw*previewScale)),workH=Math.max(1,Math.ceil(ch*previewScale)),
         work=fastInteractionPreview?(fastPreviewLayer||(fastPreviewLayer=document.createElement("canvas"))):LC;
     if(work.width!==workW||work.height!==workH){work.width=workW;work.height=workH;}
@@ -2501,7 +2583,12 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     // 「隠れていない線まで隠れる」＝正投影で線がほぼ出ない状態になっていた（実測 ink 0）。
     const vs = viewShift(),baseTf=tf||[Z,0,0,Z,vs[0],vs[1]],
         tfEff=previewScale===1?baseTf:baseTf.map(v=>v*previewScale);
+    previewProjectionKey=projKeyValue+"|"+workW+","+workH+"|"+previewScale+"|w"+P.pw+"|b"+(binOn?1:0);
+    previewFastCameraMatrix=fastInteractionPreview&&!orthView&&T!=="f"?camMatrix():null;
+    previewFastCameraOffset=fastInteractionPreview?CO():null;
+    previewFastFocal=previewFastCameraMatrix?(W*P.lens)/36:0;
     x.setTransform(...tfEff);
+    if(fastInteractionPreview&&!window.__disableGpuPreview){const gpu=renderGpuPreviewLines(workW,workH,previewScale,tfEff);if(gpu)return gpu;}
     const hiddenDepth = effectiveHidden ? buildExportDepth(workW, workH, tfEff) : null;
     if (hiddenDepth && !fastInteractionPreview && !orthView && T === "f" && !window.__legacyFishLines) {
         prepareFishLineOccluders();
@@ -2519,13 +2606,34 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
     const binNow = $("bin").checked;
     lineDevMin = binNow && !window.__noBinMinW ? (window.__minDevW === undefined ? 1.15 : Number(window.__minDevW)) : 0;
     lineDevMinScale = tf ? Math.abs(tf[0] || 1) : view ? Z : 1;
-    S.forEach((s) => {
-        if (s.ob && !objectVisible(s.ob)) return;
-        effectiveHidden ? strokeWVisible(x, s, hiddenDepth, workW, workH, tfEff) : strokeW(x, s);
-    });
+    const movedIds=fastInteractionPreview?window.__previewMovedObjectIds:null,
+        movedKey=movedIds?.size?[...movedIds].sort().join(","):"",
+        cachedScene=!!(movedKey&&previewScenePathCache?.key===previewProjectionKey&&previewScenePathCache.movedKey===movedKey),
+        buildSceneCache=!!(movedKey&&!cachedScene);
+    if(buildSceneCache)previewPathBuilder={movedIds,groups:new Map()};
+    if(cachedScene){
+        flushPreviewStrokeBatch();
+        for(const g of previewScenePathCache.groups){x.strokeStyle=g.color;x.lineWidth=g.width;x.lineCap=x.lineJoin="round";x.stroke(g.path);}
+        S.forEach(s=>{if(s.ob&&movedIds.has(s.ob.id)&&objectVisible(s.ob))strokeW(x,s);else if(!s.ob)strokeW(x,s);});
+    }else{
+        S.forEach((s) => {
+            if (s.ob && !objectVisible(s.ob)) return;
+            if(buildSceneCache&&s.ob&&movedIds.has(s.ob.id))return;
+            effectiveHidden ? strokeWVisible(x, s, hiddenDepth, workW, workH, tfEff) : strokeW(x, s);
+        });
+        if(buildSceneCache){
+            flushPreviewStrokeBatch();
+            const groups=[...previewPathBuilder.groups.values()];
+            for(const g of groups){x.strokeStyle=g.color;x.lineWidth=g.width;x.lineCap=x.lineJoin="round";x.stroke(g.path);}
+            previewScenePathCache={key:previewProjectionKey,movedKey,groups};previewPathBuilder=null;
+            S.forEach(s=>{if(s.ob&&movedIds.has(s.ob.id)&&objectVisible(s.ob))strokeW(x,s);});
+        }
+    }
+    if(fastInteractionPreview)flushPreviewStrokeBatch();
     drawPersonSilhouettes(x,effectiveHidden,hiddenDepth,workW,workH,tfEff);
     if (withCur) drawCur(x);
     if (withCur && prev) prev.forEach((s) => strokeW(x, s));
+    if(fastInteractionPreview)flushPreviewStrokeBatch();
     lineDevMin = 0;
     lineLayerKey = (curEff || fastInteractionPreview) ? null : key;
     if ($("bin").checked && !fastInteractionPreview) {
@@ -2559,11 +2667,7 @@ function lineLayer(view, withCur, cw = W, ch = H, tf = null, hidden = false) {
             x.putImageData(im, box.x, box.y);
         }
     }
-    if(fastInteractionPreview){
-        const out=LC.getContext("2d");out.setTransform(1,0,0,1,0,0);out.clearRect(0,0,cw,ch);
-        out.imageSmoothingEnabled=true;out.drawImage(work,0,0,workW,workH,0,0,cw,ch);
-    }
-    return LC;
+    return fastInteractionPreview ? work : LC;
 }
 
 // 二値化した線の 1px の切れ目・欠けを埋める。
@@ -3245,23 +3349,10 @@ let BG = null,
 const imgTag = () => (IMG ? IMG.__tag || (IMG.__tag = ++imgSeq) : -1);
 function backgroundLayer() {
     const key = [
-        W,
-        H,
-        Z,
-        ox,
-        oy,
-        T,
-        imgTag(),
-        P.pa,
-        $("bgw").checked,
-        $("gg").checked,
-        $("floorTint")?.checked ? 1 : 0,
-        window.cityFloorTint ? 1 : 0,
+        W,H,Z,ox,oy,T,imgTag(),P.pa,$("bgw").checked,$("gg").checked,
         // 正投影（正面・横・上）の向き・倍率・中心も入れる。
-        // 入れないと、3Dから正面へ切り替えても**前の透視の背景（床グリッド）がそのまま残る**
-        // （実測：正面ビューに消失点へ向かうグリッドが描かれていた）。
-        orthoProjectionKey(),
-        JSON.stringify(P),
+        // 入れないと、3Dから正面へ切り替えても前の透視の背景（床グリッド）が残る。
+        orthoProjectionKey(),JSON.stringify(P),
     ].join("|");
     if (!window.__noBgCache && BG && BGKey === key && BG.width === W && BG.height === H) return BG;
     if (!BG || BG.width !== W || BG.height !== H) {
@@ -3285,7 +3376,6 @@ function backgroundLayer() {
         g.drawImage(IMG, (W - w) / 2, (H - h) / 2, w, h);
         g.globalAlpha = 1;
     }
-    if (window.cityFloorTint && $("floorTint")?.checked) window.cityFloorTint(g);
     if ($("gg").checked) floorGrid(g);
     g.restore();
     BGKey = key;
@@ -3310,6 +3400,8 @@ let lastObjectGeometryScene = null,
     lastObjectGeometryLast = null,
     lastObjectGeometryProjection = null;
 function render() {
+    const fastInteractionPreview=!!window.__fastInteractionPreview;
+    if(!fastInteractionPreview){previewScenePathCache=null;window.__previewMovedObjectIds=null;setGpuPreviewOverlay(false);}
     // 予約済みの描画は、この同期描画1回にまとめる（二重に描かない）。
     if (RAF) {
         cancelAnimationFrame(RAF);
@@ -3335,8 +3427,10 @@ function render() {
         lastObjectGeometryLast !== sceneLast ||
         lastObjectGeometryProjection !== T
     ) {
+        const geometryReady=!!window.__objectGeometryReady&&window.__objectGeometryReadyScene===S&&lastObjectGeometrySignature===currentSignature&&lastObjectGeometryProjection===T;
+        window.__objectGeometryReady=false;
         const projectionChanged=lastObjectGeometryProjection!==T,
-            needsRegen=projectionChanged||S.some((s)=>s.ob&&((T==="f"&&s.cs!==currentSignature)||(s.signalPoleTopRing&&s.signalPoleContourView!==(orthView||"3d"))||(s.preciseTubeEdge&&s.tubeContourView!==(orthView||"3d"))));
+            needsRegen=!geometryReady&&(projectionChanged||S.some((s)=>s.ob&&((T==="f"&&s.cs!==currentSignature)||(s.signalPoleTopRing&&s.signalPoleContourView!==(orthView||"3d"))||(s.preciseTubeEdge&&s.tubeContourView!==(orthView||"3d")))));
         if(needsRegen)regenObjects();
         else if(T!=="f"&&lastObjectGeometrySignature!==currentSignature)S.forEach(s=>{if(s.ob)s.cs=currentSignature;});
         lastObjectGeometryScene = S;
@@ -3346,7 +3440,8 @@ function render() {
         lastObjectGeometryLast = S.length ? S[S.length - 1] : null;
         lastObjectGeometryProjection = T;
     }
-    syncSel();
+    // 選択パネルのDOM同期はドラッグ中に毎フレーム行わず、操作終了時の通常描画でまとめる。
+    if(!window.__fastInteractionPreview)syncSel();
     T === "f" ? calcF() : calc();
     const c = ctx;
     c.setTransform(1, 0, 0, 1, 0, 0);
@@ -3385,12 +3480,15 @@ function render() {
             S.forEach((s) => { if (!s?.d3 && (!s.ob || objectVisible(s.ob))) strokeW(c,s); });
             drawCur(c);
         } else {
-            c.save(); c.setTransform(1,0,0,1,0,0); c.drawImage(lineLayer(true,true,W,H,null,true),0,0); c.restore();
+            c.save(); c.setTransform(1,0,0,1,0,0); presentLineLayer(c,lineLayer(true,true,W,H,null,true)); c.restore();
         }
     } else if ($("bin").checked) {
         if (threeMainLines) S.forEach((s) => { if (!s?.d3 && (!s.ob || objectVisible(s.ob))) strokeW(c,s); });
-        else { c.save(); c.setTransform(1,0,0,1,0,0); c.drawImage(lineLayer(true,true),0,0); c.restore(); }
+        else { c.save(); c.setTransform(1,0,0,1,0,0); presentLineLayer(c,lineLayer(true,true)); c.restore(); }
         drawCur(c);
+    } else if (fastInteractionPreview) {
+        // 通常表示でも操作中は線層を半解像度で描き、通常品質の線層を作り直さない。
+        c.save();c.setTransform(1,0,0,1,0,0);presentLineLayer(c,lineLayer(true,true,W,H,null,false));c.restore();
     } else if (threeMainLines) {
         S.forEach((s) => { if (!s?.d3 && (!s.ob || objectVisible(s.ob))) strokeW(c,s); });
         drawCur(c);
@@ -3451,4 +3549,5 @@ function render() {
     const q = (v) => (v ? `(${((v.x / W) * 100).toFixed(0)}%, ${((v.y / H) * 100).toFixed(0)}%)` : "無限遠(平行)");
     $("info").innerHTML =
         `画角 ${((2 * Math.atan(18 / P.lens) * 180) / Math.PI).toFixed(1)}°<br>VP1 ${q(AX[0].vp)}<br>VP2 ${q(AX[1].vp)}<br>垂直 ${AX[2].vp ? "VP3 " + q(AX[2].vp) : "平行（垂直）"}<br>地平線 ${((AX.hy / H) * 100).toFixed(1)}%`;
+    if(!fastInteractionPreview)scheduleGpuPreviewWarmup();
 }

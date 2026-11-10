@@ -1,5 +1,6 @@
 #!/bin/bash
-# 1コマンドで「構文チェック → 単体HTML生成 → ドキュメントHTML生成」までやる。
+# 1コマンドで構文チェックと配布用単体HTMLの生成を行う。
+# 解説書は CODE_GUIDE.html を直接編集・閲覧する。
 #   ./build.sh
 set -e
 cd "$(dirname "$0")"
@@ -12,12 +13,6 @@ done
 echo "== 単体HTML生成 =="
 python3 build-city-grid.py "$@"
 
-echo "== ドキュメントHTML生成 =="
-python3 build-guide.py CITY_GRID_STUDIO.md
-python3 build-guide.py OBJECT_GEOMETRY_GUIDE.md
-python3 build-guide.py ASSET_JS_GUIDE.md
-python3 build-guide.py ASSET_KIT_GUIDE.md
-
 echo "== できあがり =="
-ls -la cyberpunk-city-studio.html CITY_GRID_STUDIO.html OBJECT_GEOMETRY_GUIDE.html ASSET_JS_GUIDE.html
+ls -la cyberpunk-city-studio.html
 echo "動作の点検は  node check-all-assets.js  （失敗すると exit=1）"

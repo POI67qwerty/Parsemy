@@ -17,6 +17,13 @@ const pos = (e) => {
     return { x: (r.x - vs[0]) / Z, y: (r.y - vs[1]) / Z };
 }; // ズーム・移動を戻した描画座標
 const TC = new Map(); // いま触れている指(touch)
+let zoomQualityTimer=0;
+function scheduleZoomPreview(){
+    window.__fastInteractionPreview=true;
+    if(zoomQualityTimer)clearTimeout(zoomQualityTimer);
+    zoomQualityTimer=setTimeout(()=>{zoomQualityTimer=0;if(ptr==null&&!drag){window.__fastInteractionPreview=false;renderSoon();}},140);
+    renderSoon();
+}
 function clampView() {
     Z = clamp(Z, 1, 10);
     // 正投影の原点は画面中央ではなく orthSetup の ax/ay。通常透視の枠で
@@ -42,10 +49,16 @@ cv.addEventListener(
             flashHint("カメラ固定中：3D視点は動きません（L で解除）");
             return;
         }
-        if (mode === "view" && !orthView) {
+        if (orthView) {
+            const current=Number(window.cityFloorPlanScale)||Math.min(W,H)/7.2;
+            window.cityFloorPlanScale=clamp(current*Math.exp(-e.deltaY*.001),Math.min(W,H)/1000,Math.min(W,H)/.25);
+            scheduleZoomPreview();
+            return;
+        }
+        if (mode === "view") {
             P.lens = clamp(P.lens * Math.exp(-e.deltaY * 0.0012), 14, 200);
             sync();
-            render();
+            scheduleZoomPreview();
             return;
         }
         const r = rawOf(e.clientX, e.clientY),
@@ -57,7 +70,7 @@ cv.addEventListener(
         oy = r.y - q.y * Z - anchor.ay * (1 - Z);
         clampView();
         updZ();
-        render();
+        scheduleZoomPreview();
     },
     { passive: false },
 ); // ビューではレンズ、描画ではキャンバスズーム
@@ -647,6 +660,9 @@ cv.onpointerdown = (e) => {
             } else armBoxPending(p, e.pointerId, "canvas");
         }
         syncSel();
+        // オブジェクト移動開始時に軽量パスを先に温め、最初のドラッグ移動での
+        // 大規模シーンの引っ掛かりを減らす。
+        if(ed?.t==="mv"){window.__fastInteractionPreview=true;window.__previewMovedObjectIds=new Set([ed.id]);}
         renderSoon();
         return;
     }
@@ -867,19 +883,6 @@ cv.onpointerup = cv.onpointercancel = (e) => {
     cur = null;
     renderSoon();
 }; // 向きに変換して保存
-cv.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    if (orthView) {
-        if (cameraLock) { flashHint("カメラ固定中：L で解除"); return; }
-        const current=Number(window.cityFloorPlanScale)||Math.min(W,H)/7.2;
-        window.cityFloorPlanScale=clamp(current*Math.exp(-e.deltaY*.001),Math.min(W,H)/1000,Math.min(W,H)/.25);
-    } else {
-        if (cameraLock) { flashHint("カメラ固定中：L で解除"); return; }
-        setP("lens",clamp(P.lens*Math.exp(-e.deltaY*.001),8,180));
-    }
-    renderSoon();
-},{passive:false});
-
 // iPad Safariでキャンバス外へ指／ペンを離した場合の一般操作用保険.
 // ボックス選択以外の編集でも、古いpointerIdが次の操作をブロックしないようにする。
 function releaseInputState(e) {

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>City Grid Studio コードとライブラリのやさしい解説</title>
+<style>
+:root{color-scheme:light;--ink:#182536;--muted:#526276;--line:#d9e1eb;--paper:#fff;--bg:#f2f5f9;--blue:#1769aa;--pale:#eaf4fc;--gold:#fff3d5}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.75 system-ui,-apple-system,"Segoe UI",sans-serif}header{background:linear-gradient(125deg,#10243a,#1769aa);color:#fff;padding:44px max(22px,calc((100% - 1080px)/2)) 38px}header p{max-width:820px;color:#e0edf8}h1{font-size:clamp(28px,5vw,46px);line-height:1.2;margin:0 0 14px}main{max-width:1080px;margin:26px auto;padding:0 18px 70px}nav,.card{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:20px 24px;margin:16px 0;box-shadow:0 4px 15px #1a35500a}nav a{display:inline-block;color:var(--blue);margin:4px 18px 4px 0}h2{font-size:27px;margin:4px 0 12px;border-bottom:1px solid var(--line);padding-bottom:8px}h3{margin:20px 0 5px;font-size:19px;color:#174f7a}p{margin:8px 0}ul,ol{padding-left:24px}code,pre{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}code{background:#eef2f7;border-radius:4px;padding:2px 5px;font-size:.92em}pre{white-space:pre-wrap;background:#142235;color:#e9f1f9;padding:16px;border-radius:10px;overflow:auto}.note{padding:12px 15px;background:var(--pale);border-left:4px solid var(--blue);border-radius:6px;margin:12px 0}.caution{background:var(--gold);border-left-color:#c68712}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}.mini{background:#f7f9fc;border:1px solid var(--line);border-radius:10px;padding:14px}table{border-collapse:collapse;width:100%;margin:12px 0}td,th{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}th{background:#edf3f8}a{color:var(--blue)}.tag{display:inline-block;border-radius:99px;background:#e7f2fa;color:#14527c;padding:1px 9px;font-size:13px}footer{color:var(--muted);font-size:14px;padding:20px 4px}
+</style></head><body>
+<header><h1>City Grid Studio<br>コードとライブラリのやさしい解説</h1><p>このページは、街のパース定規・間取り編集アプリのソース一式を「何を担当するファイルか」「ファイル同士がどうつながるか」の順に案内します。コードを初めて読む人向けに、専門用語は短く説明しています。</p><span class="tag">この文書だけで全体像をつかむ</span></header>
+<main>
+<nav><b>このページの案内</b><br><a href="#overview">全体像</a><a href="#flow">処理の流れ</a><a href="#modules">主要ファイル</a><a href="#assets">アセットの作り方</a><a href="#libraries">ライブラリ</a><a href="#terms">用語集</a><a href="#work">変更・テスト方法</a></nav>
+<section class="card" id="overview"><h2>1. まず全体像</h2><p>アプリは、ブラウザーの中で動くJavaScriptとHTML Canvasを中心に作られています。画面の操作を受け取り、オブジェクトの位置・形を更新し、線や面をキャンバスへ描きます。</p><div class="grid"><div class="mini"><b>画面・操作</b><br>ボタン、一覧、数値入力、ドラッグ、タッチを扱います。</div><div class="mini"><b>3D風の計算</b><br>物体の座標をカメラから見た2D座標に変換します。</div><div class="mini"><b>描画</b><br>面や輪郭を描き、手前の面に隠れる線を省きます。</div><div class="mini"><b>アセット</b><br>建物・家具・街路物など、棚から置ける形を定義します。</div></div><div class="note"><b>大切な設計上の見方：</b>「データを持つ」「形を計算する」「画面に描く」「ユーザー操作を処理する」は、できるだけ別のファイルに分けています。機能の場所を探すときは、この4つのどれかを考えると見つけやすくなります。</div></section>
+<section class="card" id="flow"><h2>2. 起動から表示まで</h2><ol><li><code>index.html</code> が画面の土台、キャンバス、ボタン類を用意します。</li><li><code>style.css</code> と <code>studio.css</code> が見た目を整えます。</li><li>JavaScriptが決めた順番で読み込まれます。共通状態や計算関数が先に必要なので、順序を入れ替えると動かないことがあります。</li><li>ユーザー操作でシーンのデータが変わり、UI更新と描画が呼ばれます。</li><li>書き出し操作では、現在の絵を画像として出力したり、シーン情報を保存・読み込みしたりします。</li></ol><pre>HTML / CSS（画面）
+   ↓
+engine-lib → engine-core → gizmo / render / input / io
+   ↓
+asset.js → asset-kit → asset-kit-assets → asset-controller
+   ↓
+studio-lib → floorplan / canvas-controls / studio-ui</pre><p class="note">実際のロード順と取り込み方法の正本は <code>build-city-grid.py</code> と <code>index.html</code> です。この図は役割を理解するための概略図です。</p></section>
+<section class="card" id="modules"><h2>3. ファイル別ガイド</h2><table><thead><tr><th>ファイル</th><th>やさしい説明・探す機能</th></tr></thead><tbody>
+<tr><td><code>index.html</code></td><td>開発時の画面の骨組み。キャンバスや操作パネルのHTMLとCSS・スクリプトの読み込みを持ちます。画面の要素IDを変えるなら、JavaScript側が参照していないか確認します。</td></tr>
+<tr><td><code>style.css</code><br><code>studio.css</code></td><td>基本の見た目とスタジオ画面の見た目。色、余白、レイアウト、選択状態などを管理します。形状計算や保存処理は担当しません。</td></tr>
+<tr><td><code>engine-lib.js</code></td><td>複数モジュールから使う小さな共通道具。画面に依存しない計算、値の範囲制限、線の重複抑止や隠線用の許容誤差などを置きます。独立した小物入れです。</td></tr>
+<tr><td><code>engine-core.js</code></td><td>エンジンの中心。シーンやカメラの状態、座標変換、投影、基本図形、選択関連の基本処理を担当します。ワールド座標と画面座標の変換など、他のエンジン機能の土台です。</td></tr>
+<tr><td><code>engine-gizmo.js</code></td><td>キャンバス上に出る操作ハンドル（ギズモ）の描画・当たり判定・ドラッグ処理やアセット寸法操作を担当します。ギズモは物体を動かす矢印や輪などの操作部品です。</td></tr>
+<tr><td><code>engine-render.js</code></td><td>画面を描き直す処理。面、輪郭、補助線、床グリッド、深度情報（どの面が手前か）を組み立て、隠れている線を整理します。描画品質や表示不具合を調べるときの中心です。</td></tr>
+<tr><td><code>engine-input.js</code></td><td>マウス・ペン・タッチ・ホイール入力、ドラッグ、パン、ズーム、消しゴムなどを扱います。操作感の不具合はここから追い、必要に応じて描画処理との接続を確認します。</td></tr>
+<tr><td><code>engine-io.js</code></td><td>画像書き出し、参考画像、保存・読み込み、ロックや起動時の接続など、入出力と初期化を担当します。</td></tr>
+<tr><td><code>asset.js</code></td><td>個別アセットの形・線・寸法の扱いを持つカタログ。既存アセットの形を直接直すとき、正規化や線の生成方法を調べる場所です。</td></tr>
+<tr><td><code>asset-kit.js</code></td><td>再利用できるアセット生成道具箱。同じ形状定義から線や面などの表現を作る共通機能を提供します。</td></tr>
+<tr><td><code>asset-kit-parts.js</code></td><td>複数のアセットで使い回す部品の定義。小物の共通形状や構成要素をまとめます。</td></tr>
+<tr><td><code>asset-kit-assets.js</code></td><td>キット方式で定義されたアセットのデータ。形状の宣言と初期値をまとめて扱います。</td></tr>
+<tr><td><code>asset-controller.js</code></td><td>アセットをシーンに追加する、既定値を適用する、棚に並べる、選択・配置を制御する層です。</td></tr>
+<tr><td><code>studio-lib.js</code></td><td>スタジオUIと間取り機能で共有する関数や要素への接続をまとめます。複数画面で同じ道具を使うための橋渡しです。</td></tr>
+<tr><td><code>studio-floorplan.js</code></td><td>間取り・正投影モードの選択、移動、回転、寸法編集など。床面図上の操作を追う場所です。</td></tr>
+<tr><td><code>studio-canvas-controls.js</code></td><td>キャンバス上のアセット操作と数値コントロールをつなぐ共通接続層。各アセット固有の寸法規則を勝手に置き換えず、既存の処理へつなぎます。</td></tr>
+<tr><td><code>studio-ui.js</code></td><td>画面UI全体の司令塔。アセット棚、シーン一覧、選択・グループ、数値パネル、プリセット、初期化などの操作をつなぎます。</td></tr>
+<tr><td><code>build-city-grid.py</code></td><td>ソースHTML・CSS・JavaScriptをまとめて配布用の単体HTMLを作るビルドスクリプトです。ソースを直接編集する場所ではありません。</td></tr>
+<tr><td><code>build-guide.py</code></td><td>以前のMarkdown解説をHTMLに変換するための補助スクリプトです。現在の解説書はこのファイルに依存せず、<code>CODE_GUIDE.html</code> 単体で読めます。</td></tr>
+<tr><td><code>build.sh</code></td><td>構文チェックとビルドをまとめて実行するシェルスクリプトです。実行後に生成される配布HTMLはビルド成果物です。</td></tr>
+<tr><td><code>check-all-assets.js</code></td><td>登録アセットが壊れていないかをブラウザー上で点検する検査コードです。形・線・操作の最低限の異常をまとめて見つけます。</td></tr>
+<tr><td><code>tests/</code></td><td>個別機能の回帰テスト群。隠線、ズーム、選択、アセット形状、書き出しなどを小さなシナリオで確認します。テスト名が調べたい機能の入口になります。</td></tr>
+<tr><td><code>vendor/</code></td><td>外部ライブラリのライセンス等を置く場所。ライセンス表示を残し、外部コードの利用条件を確認します。</td></tr>
+</tbody></table></section>
+<section class="card" id="assets"><h2>4. アセット（置ける物）の追加・変更を読む</h2><p>アセットは「棚に出す登録情報」と「形を作る処理」に分かれます。既存アセットの値を直すだけか、新しい形を作るかで調べる範囲が変わります。</p><ol><li><b>棚に出る名前・分類・初期サイズ：</b><code>asset.js</code> の登録情報を確認。</li><li><b>共通部品から形を組む：</b><code>asset-kit-parts.js</code> の部品定義、<code>asset-kit.js</code> の組立道具、<code>asset-kit-assets.js</code> のアセット宣言を見る。</li><li><b>配置・選択・追加の挙動：</b><code>asset-controller.js</code> を確認。</li><li><b>線の見え方や面・隠線：</b>アセットの生成元に加えて <code>engine-render.js</code> を調べる。</li><li><b>画面上の専用操作：</b><code>engine-gizmo.js</code>、<code>studio-canvas-controls.js</code>、<code>studio-ui.js</code> を追う。</li></ol><div class="note caution"><b>性能表現に注意：</b>関数やジオメトリを共通化することと、GPUの実インスタンシングは別の技術です。コードが実際にインスタンシングを使っていると確認できない限り、「GPU負荷が下がった」とは言えません。</div></section>
+<section class="card" id="asset-kit-details"><h2>5. アセットスクリプトキットを詳しく</h2>
+<p><code>asset-kit.js</code> は、アセットの立体を組み立てるための独自ライブラリです。アセットごとに「線を作る処理」と「塗り・隠線判定に使う面」を別々に実装すると、両者の形がずれることがあります。キットでは同じ部品定義から線と三角形の面を導き、ずれにくくします。</p>
+<div class="note"><b>一言でいうと：</b>アセット定義は「部品をどう置くか」を返す。キットがそれを線画・面・範囲情報へ変換し、登録処理がアプリ本体につなぐ。</div>
+<h3>5-1. 4つの関連ファイルの役割</h3><table><tr><th>ファイル</th><th>担当</th></tr><tr><td><code>asset-kit.js</code></td><td>形状API本体。道筋、押し出し、円柱、繰り返し、回転体、部品登録、線と面の変換などを実装。</td></tr><tr><td><code>asset-kit-parts.js</code></td><td>再利用可能な部品カタログ。窓・扉・ベンチなどを登録し、個々のアセットから呼び出せるようにする。</td></tr><tr><td><code>asset-kit-assets.js</code></td><td>キットを利用するアセット定義。アセット名・初期値・操作項目と、部品を組み立てる関数を登録。</td></tr><tr><td><code>asset.js</code> / <code>asset-controller.js</code></td><td>従来アセットのカタログ・線画登録、および棚への配置などのアプリ接続。キット定義はこの登録経路へ統合される。</td></tr></table>
+<h3>5-2. アセット定義の基本形</h3><pre>ASSET_KIT.define("simpleBench", {
+  label: "ベンチ", glyph: "▰", group: "street",
+  w: 1.6, d: 0.42, h: 0.45, accent: "#9b7654",
+  controls: []
+}, (o, K) =&gt; {
+  const width = Math.abs(2 * o.ra);
+  const depth = Math.abs(2 * o.rb);
+  const height = Math.abs(o.h);
+  return [
+    K.box(K.rectPath(width, depth), height - 0.05, height),
+    K.box(K.rectPath(0.06, 0.06, -width * 0.4), 0, height - 0.05),
+    K.box(K.rectPath(0.06, 0.06,  width * 0.4), 0, height - 0.05)
+  ];
+});</pre>
+<ul><li><code>kind</code> は内部ID。英数字の一意な名前にします。</li><li><code>meta</code> は棚表示名 <code>label</code>、アイコン <code>glyph</code>、分類 <code>group</code>、初期幅・奥行き・高さ、色 <code>accent</code>、固有初期値、編集項目 <code>controls</code> など。</li><li><code>(o, K) =&gt; parts</code> は形状ビルダー。<code>o</code> はシーン内の現在のアセット設定、<code>K</code> はキットAPI。戻り値は部品オブジェクトの配列。</li><li>通常は <code>ASSET_KIT.define</code> がアセット登録と線生成を接続します。既存IDを上書きする特別な場合は <code>opts.replace</code> の有無、線の置換設定を実装と合わせて慎重に確認します。</li></ul>
+<h3>5-3. 座標の約束</h3><p>部品の座標はアセット中心のローカル座標です。<b>X＝左右、Y＝奥行き、Z＝高さ（上がプラス）</b>。長さの単位はメートルです。アセット全体の位置・回転・拡大・接着面への追従は、エンジン側の座標変換 <code>L2W()</code> が行います。ビルダー内でワールド座標に変換しないでください。</p><p>標準の部品は正面を -Y 側に置く約束です。前面パネルを作るときの <code>axis:"y"</code> は、2D輪郭をX-Z平面上に置いてY方向へ押し出す意味です。</p>
+<h3>5-4. よく使うAPI</h3><table><tr><th>API</th><th>用途・考え方</th></tr><tr><td><code>K.rectPath(w,d,cx,cy)</code></td><td>幅・奥行き・中心位置を指定して2D四角形の頂点列を作る。これ自体はまだ立体ではありません。</td></tr><tr><td><code>K.circlePath(r,n,cx,cy)</code></td><td>円をn角形の頂点列として表現。線画は多角形の分割数に応じた折れ線になります。</td></tr><tr><td><code>K.roundRectPath(w,d,r,seg)</code></td><td>角丸長方形の輪郭。丸み0なら四角形に戻ります。</td></tr><tr><td><code>K.box(path,start,end,opts)</code></td><td>輪郭を指定軸に押し出して立体化。名前は箱ですが、任意の多角形も押し出せます。実装の中心は <code>extrude</code>。</td></tr><tr><td><code>axis:"z"</code></td><td>既定値。輪郭をX-Y平面に置き、高さ方向Zへ押し出す。柱・箱など。</td></tr><tr><td><code>axis:"y"</code></td><td>輪郭をX-Z平面に置き、前後Y方向へ押し出す。正面板、壁、窓枠など。</td></tr><tr><td><code>axis:"x"</code></td><td>輪郭をY-Z平面に置き、左右X方向へ押し出す。</td></tr><tr><td><code>holes:[path]</code></td><td>押し出す輪郭の穴を指定。<code>holeSides:true</code> なら穴の内壁も立体として作ります。</td></tr><tr><td><code>K.sheet(path,a,b,opts)</code></td><td>薄い板やシートを表す。用途によって側面・端の線を抑えるオプションを使います。</td></tr><tr><td><code>K.cylinder(r,a,b,{axis,seg})</code></td><td>円柱を作る。軸・円周分割数を指定でき、細い棒やノブなどに使う。</td></tr><tr><td><code>K.revolution(profile,opts)</code></td><td>半径と高さの断面を回転して、鉢・球・円錐など回転対称形を作る。</td></tr><tr><td><code>K.loft(rings,opts)</code></td><td>複数の断面輪郭をつないで立体化。断面ごとに幅や位置が変わる形に使う。</td></tr><tr><td><code>K.face3(points,opts)</code></td><td>3D点で定義する自由な面。傾いた板など通常の押し出しで表しにくい形向け。</td></tr><tr><td><code>K.moveParts(parts,dx,dy,dz)</code></td><td>部品群をローカル座標で平行移動。部品を作ってから置き位置を調整する。</td></tr><tr><td><code>K.repeat(n,fn)</code> / <code>K.grid(rows,cols,fn)</code></td><td>同形状を規則的に繰り返す。窓の桟・階段・商品列などをループで生成。</td></tr><tr><td><code>K.repeatParts(parts,opts)</code></td><td>部品一式を指定方向と間隔で複製。位置だけでなく、角の線選別用マークも複製ごとに分ける。</td></tr><tr><td><code>K.param(o,key,fallback)</code></td><td>編集値を読む共通関数。現在のオブジェクト値を優先し、なければアセット定義値、コントロール既定値、最後にfallbackを使う。</td></tr><tr><td><code>K.registerPart(name,build)</code> / <code>K.part(name,opts)</code></td><td>部品カタログへ形を登録し、寸法や位置などの引数で呼び出す。</td></tr></table>
+<h3>5-5. 部品カタログを使う</h3><p><code>asset-kit-parts.js</code> は形そのものを登録します。例えば窓部品は、外枠に穴を開け、必要なら穴へガラスと縦桟を加えます。扉部品は枠・扉板・取っ手をまとめます。部品を使う側は、細かな三角形を毎回作らず、サイズや位置を渡します。</p><pre>// 部品カタログへの登録例（概念例）
+K.registerPart("panel", (o) =&gt; {
+  const path = K.rectPath(o.w, o.h);
+  return [K.box(path, -o.t/2, o.t/2, {axis:"y"})];
+});
+
+// アセット側ではサイズと配置を指定して呼ぶ
+const panelParts = K.part("panel", {
+  w: 0.8, h: 0.5, t: 0.04, at: [0, 0, 1.2]
+});</pre><p>部品は通常、原点中心で正面を -Y に向けます。<code>at:[x,y,z]</code> は配置位置。部品カタログ内では既定値や安全な最小寸法を設け、ゼロや負値でも破綻しないか確認してください。</p>
+<h3>5-6. 編集項目（controls）と形状の連動</h3><p><code>meta.controls</code> はUIに出す編集値の定義です。キー、表示名、初期値、最小・最大、刻み、単位、ハンドル情報などを指定するものがあります。形状ビルダーも同じキーを読み、UIで値を変えた時に実際の形が変わるようにします。</p><pre>controls: [{
+  key: "seatThickness",
+  label: "座面の厚さ",
+  type: "range",
+  default: 0.05,
+  min: 0.01,
+  max: 0.2,
+  step: 0.005,
+  unit: "m"
+}]
+
+// ビルダーでは編集値を同じキーで読む
+const t = Math.max(0.01, K.param(o, "seatThickness", 0.05));</pre><p>キー名の不一致は「UIは動くのに形が変わらない」原因になります。初期値、保存・読み込み、複製後の独立性、最小値と形の重なりもテストします。</p>
+<h3>5-7. キット内部で線と面になるまで</h3><ol><li><code>define(kind,meta,build)</code> がアセットを登録し、形状ビルダーを呼べるようにする。</li><li>ビルダーが返したpartsを <code>partEdges()</code> が頂点のつながり（稜線）へ変換。線画側はその線を既存の描画系へ渡す。</li><li><code>partTris()</code> が部品を三角形の集合へ分解。穴や断面を考慮した面が、深度・隠線判定に使われる。</li><li>ローカル頂点を <code>L2W()</code> でワールド位置へ変換する。</li><li>選択範囲用の点、描画線、面が同じ部品定義を起点に得られるため、形の不一致を減らせる。</li></ol><p>ただし、幾何を共通定義にしただけで描画負荷が必ず下がるわけではありません。実際の性能は生成回数、線・三角形数、キャッシュの有無、ブラウザー計測で判断します。</p>
+<h3>5-8. 追加時のチェックリスト</h3><ul><li>kindが重複していないか。棚のlabel・分類・初期寸法・色が妥当か。</li><li>ローカル座標の正面（-Y）と高さ（+Z）が意図どおりか。</li><li>幅・奥行き・高さを極端に小さくしてもゼロ面やNaNが出ないか。</li><li>線画と塗り面が一致し、穴・内壁・裏面が正しく見えるか。</li><li>正面・側面・上面・透視など複数の投影で、隠線と輪郭を確認。</li><li>選択範囲が形に合うか。回転・移動・寸法ハンドルが使えるか。</li><li>保存・読込・複製・JSON入出力で固有値が保たれるか。</li><li>既存アセットを置き換える場合、従来の見た目と編集仕様を比較するテストを追加。</li></ul>
+<div class="note caution"><b>補足：</b>この章はキットの設計と代表APIの読み方をまとめた案内です。APIの完全な引数・例外・実装仕様は <code>asset-kit.js</code> および <code>asset-kit-parts.js</code> が正本です。</div></section>
+<section class="card" id="libraries"><h2>6. ライブラリ・開発ツールの説明</h2><table><tr><th>名前</th><th>何に使うか</th><th>補足</th></tr>
+<tr><td>ブラウザー標準機能<br>Canvas 2D / DOM</td><td>キャンバスに線や面を描く、HTML要素を更新する、ポインターやキーボードのイベントを受ける。</td><td>アプリの基本実行環境です。線画エンジンの中心は独自JavaScriptで、ライブラリ任せではありません。</td></tr>
+<tr><td>Node.js</td><td>開発用スクリプトとテストを実行するJavaScript実行環境。</td><td>ブラウザーで使う本体と、開発環境で使う検査コードの両方を支えます。</td></tr>
+<tr><td>Playwright</td><td>自動でブラウザーを起動し、クリック・入力・画面状態・エラーを検査する。</td><td>回帰テスト用。ユーザーの操作を模した検証に利用します。</td></tr>
+<tr><td>Chromium</td><td>Playwrightがテストに使うブラウザー。</td><td>テストは実ブラウザー描画で確認できる一方、別ブラウザーや端末差は必要に応じて追加確認します。</td></tr>
+<tr><td>esbuild</td><td>JavaScriptをまとめたり変換したりする開発ツール。</td><td><code>package.json</code> の開発依存として記録されています。実際のビルドでどう使われるかはスクリプトの記述に従います。</td></tr>
+<tr><td>Three.js</td><td>JavaScript向けの3Dライブラリ。</td><td><code>package.json</code> に開発依存として記録されています。Three.jsが依存一覧にあるだけで、このアプリの主要描画がThree.jsで行われるとは限りません。主要な線画描画の入口は独自の <code>engine-*.js</code> 群です。</td></tr>
+<tr><td>Python 3</td><td>HTMLを組み立てるビルドスクリプトを実行する。</td><td><code>build-city-grid.py</code> が使用します。</td></tr></table><p class="note">ライブラリの「導入済み」と「本番の画面で実際に使われる」は区別してください。最新の実使用箇所はJavaScript内のimport・参照、およびビルドスクリプトで確認できます。</p></section>
+<section class="card" id="terms"><h2>7. 用語を短く</h2><div class="grid"><div class="mini"><b>シーン</b><br>キャンバスに置かれた物体と、それらの設定一式。</div><div class="mini"><b>アセット</b><br>棚から追加できる、建物・家具などのテンプレート。</div><div class="mini"><b>ワールド座標</b><br>シーン内での物体の位置。画面サイズに依存しない。</div><div class="mini"><b>投影</b><br>3D風の位置を、カメラから見た2D画面上の位置へ変換すること。</div><div class="mini"><b>深度・隠線</b><br>どの面が手前かを使い、奥に隠れた線を見せない仕組み。</div><div class="mini"><b>ギズモ</b><br>ドラッグで移動・回転・寸法変更するための画面上のハンドル。</div><div class="mini"><b>回帰テスト</b><br>修正後に、以前動いていた機能が壊れていないか再確認するテスト。</div><div class="mini"><b>単体HTML</b><br>複数のソースをまとめ、配布しやすくした1つのHTMLファイル。</div></div></section>
+<section class="card" id="work"><h2>8. 変更するときのおすすめ手順</h2><ol><li><b>症状を分ける：</b>画面表示、形状、操作、保存、速度のどれかを特定。</li><li><b>担当ファイルを探す：</b>上のファイル表から入口を選び、呼び出し元・呼び出し先も追う。</li><li><b>既存の類似機能を確認：</b>同じ処理を二重に足さず、既存の正規ルートに合わせる。</li><li><b>変更範囲に合うテストを実行：</b><code>tests/run.sh</code> の使い方は下記を参照。</li><li><b>構文・ビルドを確認：</b>プロジェクトのルートで <code>bash build.sh</code>。</li><li><b>結果を正確に報告：</b>成功した検査、失敗した検査、未計測の性能を分けて記録。</li></ol><pre># 構文チェック・配布用HTML生成
+bash build.sh
+
+# 個別ブラウザーテスト
+bash tests/run.sh tests/fast-interaction-preview.js
+bash tests/run.sh tests/scene-parent-hierarchy.js
+
+# 全アセット点検（環境準備が必要な場合あり）
+bash tests/run.sh check-all-assets.js</pre><p>テスト名は <code>tests/</code> の実ファイル名に合わせます。実行前に各スクリプトの先頭や <code>tests/run.sh</code> を見ると、引数や環境要件を確認できます。</p><div class="note caution"><b>注意：</b>生成された配布HTMLはソースではありません。修正は元の <code>.js</code>・<code>.css</code>・<code>index.html</code> に行い、必要なときにビルドし直します。生成ファイルを直接編集すると、次のビルドで変更が消えることがあります。</div></section>
+<footer>City Grid Studio 開発ガイド — ファイルの役割を理解するための案内です。関数名や読み込み順などの細部は、各ソースファイルを正本として確認してください。</footer>
+</main></body></html>

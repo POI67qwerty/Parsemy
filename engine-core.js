@@ -930,25 +930,55 @@ function effectiveLineWidth(s) {
     const base = Number(s && s.w);
     return Math.max(0.1, ((Number.isFinite(base) ? base : MASTER_W) * (Number(P.pw) || MASTER_W)) / MASTER_W);
 }
+let previewStrokeBatch=null, previewProjectResult={x:0,y:0,ok:false}, previewStrokeProjectionCache=new WeakMap(), previewProjectionKey="", previewScenePathCache=null, previewPathBuilder=null, previewFastCameraMatrix=null, previewFastCameraOffset=null, previewFastFocal=0;
+function flushPreviewStrokeBatch(){if(previewStrokeBatch){previewStrokeBatch.c.stroke();previewStrokeBatch=null;}}
 function strokeW(c, s) {
     // ベベルの縦線は線だけ表示では「角ごとに1本」だけ描く（全部描くと角が黒く潰れる）。
     if (s.seam !== undefined && s.seam !== null && !s.seamApex) return;
-    c.strokeStyle = s.c;
     // 二値化する層では、線が最小限の太さを持つようにする（lineLayer が設定する）。
-    c.lineWidth = typeof layerLineWidth === "function" ? layerLineWidth(s) : effectiveLineWidth(s);
-    c.lineCap = c.lineJoin = "round";
-    c.beginPath();
-    let on = false;
-    const co = s.d3 ? CO() : null,
+    const lineWidth=typeof layerLineWidth === "function" ? layerLineWidth(s) : effectiveLineWidth(s),
+        lineColor=s.c,
+        captureStatic=!!(previewPathBuilder&&s.d3&&(!s.ob||!previewPathBuilder.movedIds.has(s.ob.id))),
+        batching=!!window.__fastInteractionPreview&&!captureStatic;
+    if(batching){
+        if(previewStrokeBatch&&(previewStrokeBatch.c!==c||previewStrokeBatch.color!==lineColor||previewStrokeBatch.width!==lineWidth))flushPreviewStrokeBatch();
+        if(!previewStrokeBatch){c.strokeStyle=lineColor;c.lineWidth=lineWidth;c.lineCap=c.lineJoin="round";c.beginPath();previewStrokeBatch={c,color:lineColor,width:lineWidth};}
+    }else if(!captureStatic){flushPreviewStrokeBatch();c.strokeStyle=lineColor;c.lineWidth=lineWidth;c.lineCap=c.lineJoin="round";c.beginPath();}
+    let on = false, previewX=NaN, previewY=NaN;
+    const useProjectionCache=!!(window.__fastInteractionPreview&&s.d3&&!captureStatic&&!orthView&&T!=="f"),
+        cachedProjection=useProjectionCache?previewStrokeProjectionCache.get(s):null;
+    if(cachedProjection&&cachedProjection.key===previewProjectionKey){
+        const a=cachedProjection.path;for(let i=0;i<a.length;i+=3){if(a[i])c.moveTo(a[i+1],a[i+2]);else c.lineTo(a[i+1],a[i+2]);}
+        return;
+    }
+    const projectedPath=useProjectionCache?[]:null;
+    const co = s.d3 ? (window.__fastInteractionPreview&&previewFastCameraOffset?previewFastCameraOffset:CO()) : null,
+        fastM=window.__fastInteractionPreview&&s.d3&&!orthView&&T!=="f"?previewFastCameraMatrix:null,
+        fastF=fastM?previewFastFocal:0,
         rl = (v) => (co ? V.add(v, co) : v); // 3D点はカメラからの相対位置にする
     const put = (v) => {
-        const q = scr3(rl(v));
+        // 透視投影は正規化してもしなくても画面座標が同じ。プレビュー中の3D線では
+        // V.add + V.nrm の一時配列を省き、カメラ相対座標を直接投影する。
+        let q;
+        if(window.__fastInteractionPreview&&s.d3&&!orthView&&T!=="f"){
+            // 透視投影は正規化してもしなくても同じ。行列を直接適用し、一時配列と
+            // cam()/scr() の中間オブジェクトを作らずに線点を投影する。
+            const m=fastM,vx=v[0]+co[0],vy=v[1]+co[1],vz=v[2]+co[2],
+                px=m[0]*vx+m[1]*vy+m[2]*vz,py=m[3]*vx+m[4]*vy+m[5]*vz,pz=m[6]*vx+m[7]*vy+m[8]*vz;
+            q=previewProjectResult;q.ok=pz>0.02;
+            if(q.ok){q.x=W/2+fastF*px/pz;q.y=(H*P.hz)/100-fastF*py/pz;}
+        }else q=scr3(rl(v));
         if (!q.ok) {
-            on = false;
+            on = false; previewX=previewY=NaN;
             return;
         }
-        on ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y);
-        on = true;
+        // 半解像度プレビューでは、画面上でほぼ同一点に重なる細分点を間引く。
+        // 形状データは変更せず、通常品質の確定描画では全点を使う。
+        if(window.__fastInteractionPreview&&on&&Math.abs(q.x-previewX)<0.45&&Math.abs(q.y-previewY)<0.45)return;
+        const move=!on;
+        if(captureStatic){const key=String(lineColor)+"|"+lineWidth;let g=previewPathBuilder.groups.get(key);if(!g){g={color:lineColor,width:lineWidth,path:new Path2D()};previewPathBuilder.groups.set(key,g);}move?g.path.moveTo(q.x,q.y):g.path.lineTo(q.x,q.y);}
+        else{if(projectedPath)projectedPath.push(move?1:0,q.x,q.y);move?c.moveTo(q.x,q.y):c.lineTo(q.x,q.y);}
+        on = true; previewX=q.x; previewY=q.y;
     };
     // 透視・正投影では3D線分の投影も直線なので中間点は不要。魚眼だけ曲線化する。
     // 以前は通常透視でも角度分割し、直線1本が何十〜数百点に増えていた。
@@ -956,10 +986,13 @@ function strokeW(c, s) {
     // 直前の点の正規化ベクトルを次の区間で使い回す（以前は区間ごとに2点とも正規化し直していた）。
     let pna = null;
     s.p.forEach((v, i) => {
+        // 長い曲線・円周線は操作中のみ頂点間隔を広げる。半解像度では1px未満の細分が
+        // 見分けにくいため、確定描画の全頂点精度を保ったまま投影計算も減らす。
+        if(window.__fastInteractionPreview&&T!=="f"&&s.p.length>16&&i>0&&i<s.p.length-1&&(i&1))return;
         const pnv = subdivide ? V.nrm(rl(v)) : null;
         // 同じ線分を2回描かない（印は genShape が付けている）。
         // 間引いた区間は線を切るだけなので、見た目は1本ぶんになる。
-        if (i && s.dup && s.dup[i - 1]) on = false;
+        if (i && s.dup && s.dup[i - 1]) { on = false; previewX=previewY=NaN; }
         else if (i && subdivide && pna) {
             const a = s.p[i - 1],
                 n = Math.ceil(Math.acos(Math.max(-1, Math.min(1, V.dot(pna, pnv)))) / 0.03);
@@ -968,7 +1001,8 @@ function strokeW(c, s) {
         put(v);
         pna = pnv;
     });
-    c.stroke();
+    if(projectedPath)previewStrokeProjectionCache.set(s,{key:previewProjectionKey,path:new Float32Array(projectedPath)});
+    if(!batching&&!captureStatic)c.stroke();
 }
 const AXW = [
     [1, 0, 0],
@@ -1183,7 +1217,8 @@ function genShapeCore(ob) {
         return typeof applyObjectTilt === "function" ? applyObjectTilt(ob, spun) : spun;
     }; // 面内(a,b)を中心まわりに回転＋法線方向の3D点（＋オブジェクトの傾き）
     const e = -d * ob.h,
-        L = []; // eは押し出し量（カメラ側へ）
+        L = [],
+        silhouetteSegments = new Set(); // 円柱の母線輪郭だけ、深度画素の揺れを個別救済する。
     const ring = (ee, t0 = 0, t1 = 2 * Math.PI) => {
         const o = [],
             n = Math.max(8, Math.ceil((160 * (t1 - t0)) / (2 * Math.PI)));
@@ -1230,12 +1265,10 @@ function genShapeCore(ob) {
                 ph = Math.atan2(vy, vx),
                 t0 = ph + Math.PI / 2,
                 t1 = ph - Math.PI / 2;
-            [t0, t1].forEach((t) =>
-                L.push([
-                    q(ca + ra * Math.cos(t), cb + rb * Math.sin(t), 0),
-                    q(ca + ra * Math.cos(t), cb + rb * Math.sin(t), e),
-                ]),
-            );
+            [t0, t1].forEach((t) => {
+                const segment=[q(ca + ra * Math.cos(t), cb + rb * Math.sin(t), 0),q(ca + ra * Math.cos(t), cb + rb * Math.sin(t), e)];
+                silhouetteSegments.add(segment);L.push(segment);
+            });
         }
     } else if (type === "triPyramid") {
         const b0 = q(ca - ra, cb - rb, 0),
@@ -1307,7 +1340,7 @@ function genShapeCore(ob) {
         });
         // 円柱の側面の縦エッジは描かない。上下輪郭だけで表現する。
     }
-    return L.map((pl) => ({ c: ob.c, w: ob.w, ob, d3: true, cs: sigNow(), p: dens3(pl) }));
+    return L.map((pl) => ({ c: ob.c, w: ob.w, ob, d3: true, cs: sigNow(), ...(silhouetteSegments.has(pl)?{silhouetteEdge:true}:{}), p: dens3(pl) }));
 }
 // ===== 10. 図形の編集（選択・移動・回転・大きさ・浮かせる） =====
 let _obCacheS = null,
@@ -1794,6 +1827,11 @@ function setOb(id, patch) {
     const childIds=[],seen=new Set([id]);let frontier=[id];
     while(frontier.length){const nextIds=[];for(const parentId of frontier)for(const s of S){const child=s?.ob;if(child?.attachment?.parentId===parentId&&!seen.has(child.id)){seen.add(child.id);nextIds.push(child.id);}}childIds.push(...nextIds);frontier=nextIds;}
     childIds.forEach(childId=>{const child=obOf(childId);if(child)replace(child);});
+    if(window.__fastInteractionPreview)window.__previewMovedObjectIds=new Set([id,...childIds]);
+    // setOb()は対象自身と子孫の線形状をここで再生成済み。直後のrenderで全シーンを
+    // 再走査して再生成要否を調べる必要がないことを伝える。
+    window.__objectGeometryReady=true;
+    window.__objectGeometryReadyScene=S;
 }
 // 近くにある図形の線を探す（24px以内）
 function pickOb(p, includeLocked = false) {
@@ -2334,3 +2372,4 @@ $("obOff").onclick = () => {
     clearSelection();
     render();
 };
+

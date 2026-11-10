@@ -33,7 +33,6 @@ function out(m, hidden = false, strengthenClipboardLines = false) {
     if (m !== "line") {
         x.setTransform(...tf);
         T === "f" ? calcF() : calc();
-        if (window.cityFloorTint && $("floorTint")?.checked) window.cityFloorTint(x);
         if ($("gg").checked) floorGrid(x);
         orthView ? orthGuides(x) : T === "f" ? guidesF(x) : guides(x);
         if ($("hzl").checked && !orthView) {
@@ -450,15 +449,14 @@ function drawLockGlyph(c, x, y, s, color) {
 }
 // ロック中のオブジェクトに小さな鍵、カメラ固定中は画面の左下にラベルを出す。
 // どちらも「今どういう状態か」を画面だけで判断できるようにするためのもの。
+let lockMarksScene=null, lockMarksObjects=[];
 function drawLockMarks(c) {
-    const locked = [];
-    const seen = new Set();
-    S.forEach((s) => {
-        const o = s && s.ob;
-        if (!o || seen.has(o.id)) return;
-        seen.add(o.id);
-        if (obLocked(o) && objectVisible(o)) locked.push(o);
-    });
+    if(lockMarksScene!==S){
+        const seen=new Set();lockMarksObjects=[];
+        S.forEach(s=>{const o=s&&s.ob;if(o&&!seen.has(o.id)){seen.add(o.id);lockMarksObjects.push(o);}});
+        lockMarksScene=S;
+    }
+    const locked=lockMarksObjects.filter(o=>obLocked(o)&&objectVisible(o));
     if (!locked.length && !cameraLock) return;
     c.save();
     c.setTransform(1, 0, 0, 1, 0, 0); // 画面座標で描く（ズームの影響を受けない）

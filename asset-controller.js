@@ -93,6 +93,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 ),
                 fan = clamp(span * 0.28, ASSET_PLACEMENT.fanMin, ASSET_PLACEMENT.fanMax);
             q = [q[0] + ((n % 4) - 1.5) * fan, q[1], q[2] + Math.floor(n / 4) * fan * 1.2];
+
         }
         // 生成方向は「その軸に立つ面」の法線。Y=地面、X/Z=壁面として配置する。
         // 生成面はアセット共通の設定なので、種類ごとに固定しない
@@ -1132,7 +1133,7 @@ window.cityGridInstallAssetUI = function (bridge) {
             key: "primitive",
             label: "プリミティブ",
             // 平面・押し出し元 → 直方体・角柱・角錐 → 五角形塊 → 円錐・球・ひさしの順。
-            kinds: ["rect", "track", "circle", "box", "beveledBox", "awning", "triPrism", "triPyramid", "pentaBox", "cone", "sphere", "screenHood"],
+            kinds: ["rect", "track", "circle", "box", "awning", "triPrism", "triPyramid", "pentaBox", "cone", "sphere", "screenHood"],
         },
         {
             key: "building",
@@ -1228,7 +1229,7 @@ window.cityGridInstallAssetUI = function (bridge) {
     ];
     // 旧IDは互換性を保ったまま「旧」カテゴリにだけ配置する。
     // 内部生成用・棚から外したアセットは一覧カードへ自動追加しない。
-    const trayKinds = Object.keys(ASSETS).filter((kind) => !["shopFront", "f1Accessory", "windowGrid", "crossingSign"].includes(kind));
+    const trayKinds = Object.keys(ASSETS).filter((kind) => !ASSETS[kind]?.internalOnly && !["shopFront", "f1Accessory", "windowGrid", "crossingSign"].includes(kind));
     ASSET_GROUPS.forEach((g) => {
         g.kinds = g.kinds.filter((k) => trayKinds.includes(k));
     });

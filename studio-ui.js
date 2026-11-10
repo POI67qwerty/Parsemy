@@ -22,9 +22,6 @@
     // ===== 1. クイック操作パネルと作業画面 =====
     // HTMLの既存サイドバーへ、人物・視点・オブジェクトの操作UIを追加する。
     if (P.hm == null) P.hm = 1.7;
-    if (P.floorOn == null) P.floorOn = true;
-    if (P.floorColor == null) P.floorColor = "#7fa8d8";
-    if (P.floorAlpha == null) P.floorAlpha = 0.24;
     if (P.assetDepth == null) P.assetDepth = 5;
     if (P.assetAxis == null) P.assetAxis = 1;
     const quick = document.createElement("section");
@@ -83,10 +80,6 @@
       <div class="quickField"><span>アセット配置距離（最小）</span><input id="assetDepth" type="number" min="1" max="80" step="0.5" value="5"><em>m</em></div>
       <div class="quickField"><span>生成方向</span><select id="assetAxis"><option value="1">Y：地面／上下</option><option value="0">X：左右の面</option><option value="2">Z：正面／背面</option></select><em></em></div>
       <div class="quickRow" id="activeReferenceAction" hidden><button id="clearRef">表示中の参照を外す</button></div>
-      <div class="floorTintBox"><label class="quickCheck"><input id="floorTint" type="checkbox"> 床に透明色をつける</label>
-        <div class="quickField"><span>床の色</span><input id="floorTintColor" type="color" value="#7fa8d8"><em></em></div>
-        <div class="quickField"><span>透明度</span><input id="floorTintA" type="range" min="0" max="0.60" step="0.01" value="0.16"><output id="floorTintAO">0.16</output></div>
-      </div>
     </section>
 
     <section class="workspaceScreen" data-workspace-screen="object" hidden>
@@ -190,28 +183,7 @@
     el("applyPersonEdit").onclick = applySelectedPerson;
     syncPersonControls();
 
-    // ===== 2.1 床の半透明表示 =====
-    // ===== 3. 床・生成方向・シーン一覧 =====
-    const floorToggle = el("floorTint"),
-        floorColor = el("floorTintColor"),
-        floorAlpha = el("floorTintA"),
-        floorAlphaOut = el("floorTintAO");
-    function syncFloorControls() {
-        if (!floorToggle) return;
-        floorToggle.checked = !!P.floorOn;
-        if (document.activeElement !== floorColor) floorColor.value = P.floorColor || "#7fa8d8";
-        if (document.activeElement !== floorAlpha) floorAlpha.value = Number(P.floorAlpha ?? 0.16).toFixed(2);
-        floorAlphaOut.textContent = Number(P.floorAlpha ?? 0.16).toFixed(2);
-    }
-    function updateFloor() {
-        P.floorOn = floorToggle.checked;
-        P.floorColor = floorColor.value;
-        P.floorAlpha = +floorAlpha.value;
-        floorAlphaOut.textContent = P.floorAlpha.toFixed(2);
-        render();
-    }
-    [floorToggle, floorColor, floorAlpha].forEach((x) => x && x.addEventListener("input", updateFloor));
-    syncFloorControls();
+    // ===== 3. 生成方向・シーン一覧 =====
     const assetDepthInput = el("assetDepth");
     function syncAssetDepth() {
         if (assetDepthInput && document.activeElement !== assetDepthInput)
@@ -245,31 +217,6 @@
     }
     assetAxisInput.onchange = () => setAssetAxis(assetAxisInput.value);
     syncAssetAxis();
-    window.cityFloorTint = function (c) {
-        // 床はカメラから見える地平線より下を、透明な平面色として塗る。
-        // 画角や魚眼でも必ず見えるよう、投影前の巨大四角ではなく画面上の台形で描く。
-        // 正面・横・上（正投影）は消失点も地平線も無い。
-        // 真上は地面の塗り分け自体が意味を持たないので塗らない。
-        // 正面・横は「地面の高さ」より下を塗る（実際の床の見え方に合わせる）。
-        let horizon;
-        if (orthView) {
-            if (orthPlane() === "top") return;
-            const g = projPoint([0, -1, 0], [1, 0, 0, 1, 0, 0]);
-            horizon = g && g.ok ? clamp(g.y, 0, H) : H;
-        } else horizon = T === "f" ? H * 0.5 : clamp(AX.hy, 0, H);
-        c.save();
-        c.globalAlpha = Math.max(0, Math.min(0.8, Number(P.floorAlpha) || 0));
-        c.fillStyle = P.floorColor || "#7fa8d8";
-        c.beginPath();
-        c.moveTo(0, horizon);
-        c.lineTo(W, horizon);
-        c.lineTo(W, H);
-        c.lineTo(0, H);
-        c.closePath();
-        c.fill();
-        c.restore();
-    };
-
     // Asset catalog and geometry generator are provided by asset.js.
 
     // Asset placement, asset tray, object JSON and primitive menu are installed by asset.js.
@@ -303,7 +250,7 @@
         HU.push(S);RD=[];
         children.forEach(child=>setSceneParent(child.id,parent.id));
         setOb(parent.id,{groupId:null});
-        outlinerInitializedParents.add(parent.id);outlinerCollapsed.delete(parent.id);
+        outlinerInitializedParents.add(parent.id);outlinerCollapsed.add(parent.id);
         selIds.clear();selIds.add(parent.id);sel=parent.id;normalizeSelection();render();
     }
     function ungroupSelectedScene() {
@@ -559,7 +506,9 @@
         const listScroll=list.scrollTop,display=[],visited=new Set();
         const emit=(o,depth=0)=>{if(!o||visited.has(o.id))return;visited.add(o.id);const kids=children.get(o.id)||[];display.push({o,i:objects.indexOf(o),kids,depth});if(kids.length&&!outlinerCollapsed.has(o.id))kids.forEach(child=>emit(child,depth+1));};
         objects.filter(o=>!childParent.has(o.id)).forEach(o=>emit(o,0));
-        objects.forEach(o=>{if(!visited.has(o.id))emit(o,0);});
+        // A collapsed parent's valid children are intentionally unvisited; never promote them to roots.
+        // Only unattached objects are eligible for the orphan fallback.
+        objects.forEach(o=>{if(!visited.has(o.id)&&!childParent.has(o.id))emit(o,0);});
         list.innerHTML=display.length?display.map(({o,i,kids,depth})=>{
             if(o.__featureRow){const owner=o.owner,on=!!owner[o.key],active=window.__f1EditFeature===o.feature;return `<div class="objectRow objectChildRow objectFeatureRow ${active?"activeObject":""}" data-feature-child="${o.feature}" data-feature-owner="${owner.id}" style="margin-left:18px"><button type="button" class="objectVisibility" data-feature-visibility="${o.feature}" title="${on?"部品を非表示":"部品を表示"}" aria-label="${on?"非表示":"表示"}">${on?"◉":"○"}</button><span class="objectDisclosureSpacer"></span><input class="objectCheck" type="checkbox" data-feature-select="${o.feature}" ${(active||window.__f1SelectedFeature===o.feature)?"checked":""} aria-label="${o.label}を選択"><span class="objectIcon">◇</span><span class="objectMeta"><span class="objectName">${o.label}</span><small>${on?"表示 · 選択／ダブルクリックで編集":"非表示"}</small></span></div>`;}
             const group=o.type==="compound"?'<span class="compoundMark">結合</span>':o.groupId?'<span class="groupMark">グループ</span>':'',
@@ -1075,13 +1024,6 @@
         el("p3").disabled = true;
         render();
     };
-    try {
-        if (!localStorage.getItem("city-grid-v4-floor")) {
-            P.floorOn = true;
-            P.floorAlpha = 0.24;
-            localStorage.setItem("city-grid-v4-floor", "1");
-        }
-    } catch (e) {}
 
     let signEditSession = false,
         buildingEditSession = false;
@@ -3016,7 +2958,6 @@
         syncRecessedStackedPanel();
         syncStackedPanel();
         syncSignShapePanel();
-        syncFloorControls();
         syncAssetDepth();
         syncAssetAxis();
         syncPersonControls();
