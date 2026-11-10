@@ -77,112 +77,137 @@ function depthBevelControl(key, initial, signal=false) {
             return {anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}};}};
 }
 
-// ===== 自販機（前後辺だけを丸めた胴と穴あき前面）=====
-// ・胴は前後方向に沿う4辺だけを丸める。
-// ・前面の窓・小銭入れ・取り出し口は K.box(..., { axis:"y", holes:[...] })。
-// ・看板の板は無地。
-ASSET_KIT.define(
-    "vendingMachine",
-    {
-        label: "自販機",
-        glyph: "▯",
-        w: 1.0,
-        d: 0.75,
-        h: 1.83,
-        accent: "#d94a4a",
-        geometryBounds: false,
-        controls: [depthBevelControl("vmDepthBevel", 0.03)],
-        // 固有値（画面の数値欄・JSONにもそのまま載る）
-        // 【割合の値】幅・高さに対する 0〜1 の割合。枠を広げると中の装飾も一緒に広がる。
-        vmWindowWRatio: 0.62, // 商品の窓の幅（幅に対して）
-        vmWindowHRatio: 0.35, // 商品の窓の高さ（高さに対して）
-        vmWindowBottomRatio: 0.36, // 窓の下端（高さに対して）
-        vmBandHeightRatio: 0.11, // 窓の上の看板の高さ（高さに対して）
-        vmOutletWRatio: 0.46, // 取り出し口の幅（幅に対して）
-        vmOutletHeightRatio: 0.11, // 取り出し口の高さ（高さに対して）
-        vmOutletBottomRatio: 0.04, // 取り出し口の下端（高さに対して）
-        vmCoinWRatio: 0.18, // 小銭入れの幅（幅に対して）
-        // 【実寸（m）】前面板の位置と厚み。
-        vmPanelProud: 0.015, // 前面の板を胴から出す量
-        vmPanelThickness: 0.05,
-    },
-    (o, K) => {
-        const W = Math.max(0.2, Math.abs(2 * o.ra)),
-            D = Math.max(0.2, Math.abs(2 * o.rb)),
-            H = Math.max(0.3, Math.abs(o.h)),
-            // 割合の固有値を 0〜1 に収めてから幅・高さへ掛ける（枠を広げると中も広がる）。
-            ratio = (key, dflt, lo, hi) => Math.max(lo, Math.min(hi, K.param(o, key, dflt))),
-            winW = W * ratio("vmWindowWRatio", 0.62, 0.2, 0.94),
-            winH = H * ratio("vmWindowHRatio", 0.35, 0.08, 0.6),
-            winBottom = H * ratio("vmWindowBottomRatio", 0.36, 0.05, 0.7),
-            bandH = H * ratio("vmBandHeightRatio", 0.11, 0.03, 0.25),
-            proud = Math.max(0.002, K.param(o, "vmPanelProud", 0.015)),
-            panelT = Math.max(0.01, K.param(o, "vmPanelThickness", 0.05)),
-            outW = W * ratio("vmOutletWRatio", 0.46, 0.2, 0.86),
-            outH = H * ratio("vmOutletHeightRatio", 0.11, 0.04, 0.25),
-            outBottom = H * ratio("vmOutletBottomRatio", 0.04, 0.005, 0.2),
-            outCz = outBottom + outH / 2,
-            front = -D / 2,
-            parts = [],
-            // 前面の板（axis:"y" で x-z 面に立てる）。outer は [幅, 高さ] と中心高さで作る。
-            frontPanel = (pw, ph, cz, holes, cx = 0) =>
-                K.box(K.rectPath(pw, ph, cx, cz), front - proud, front + panelT, { axis: "y", holes, holeSides: true });
+// ===== 自販機：商品窓と取り出し口は画面ハンドルで編集可能 =====
+const vendingControls = (windowPart) => {
+    const prefix = windowPart ? "vmWindow" : "vmOutlet";
+    const widthKey = prefix + "WRatio", heightKey = prefix + (windowPart ? "HRatio" : "HeightRatio");
+    const bottomKey = prefix + "BottomRatio", xKey = prefix + "OffsetX";
+    const widthDefault = windowPart ? .62 : .46, heightDefault = windowPart ? .35 : .11;
+    const widthMin = windowPart ? .2 : .2, widthMax = windowPart ? .94 : .86;
+    const heightMin = windowPart ? .08 : .04, heightMax = windowPart ? .6 : .25;
+    const bottomDefault = windowPart ? .36 : .04, bottomMin = windowPart ? .05 : .005, bottomMax = windowPart ? .7 : .2;
+    const front = o => -Math.max(.2,Math.abs(2*o.rb))/2;
+    const width = o => Math.max(.2,Math.abs(2*o.ra))*Math.max(widthMin,Math.min(widthMax,Number(o[widthKey])||widthDefault));
+    const height = o => Math.max(.3,Math.abs(o.h))*Math.max(heightMin,Math.min(heightMax,Number(o[heightKey])||heightDefault));
+    const bottom = o => Math.max(.3,Math.abs(o.h))*Math.max(bottomMin,Math.min(bottomMax,Number(o[bottomKey])||bottomDefault));
+    const cx = o => Number(o[xKey])||0;
+    return [
+      {key:widthKey,label:windowPart?"商品窓の横幅":"取り出し口の横幅",default:widthDefault,min:o=>Math.max(.2,Math.abs(2*o.ra))*widthMin,max:o=>Math.max(.2,Math.abs(2*o.ra))*widthMax,step:.01,unit:"m",handleOnly:true,
+       get:width,patch:(o,v)=>{const old=width(o),W=Math.max(.2,Math.abs(2*o.ra));return {[widthKey]:v/W,[xKey]:cx(o)+(v-old)/2};},
+       handle:(o,v)=>{const z=windowPart?bottom(o)+height(o)/2:bottom(o)+height(o)/2,x=cx(o)+v/2;return {anchor:[cx(o)+v/2,front(o)-.02,z],sample:[x,front(o)-.02,z],probe:[x+1,front(o)-.02,z],fallback:{x:1,y:0}};}},
+      {key:heightKey,label:windowPart?"商品窓の高さ":"取り出し口の高さ",default:heightDefault,min:o=>Math.max(.3,Math.abs(o.h))*heightMin,max:o=>Math.max(.3,Math.abs(o.h))*heightMax,step:.01,unit:"m",handleOnly:true,
+       get:height,patch:(o,v)=>({[heightKey]:v/Math.max(.3,Math.abs(o.h))}),
+       handle:(o,v)=>{const z=bottom(o)+v,x=cx(o);return {anchor:[x,front(o)-.02,z],sample:[x,front(o)-.02,z],probe:[x,front(o)-.02,z+1],fallback:{x:0,y:-1}};}},
+      {key:xKey,label:windowPart?"商品窓の左右位置":"取り出し口の左右位置",default:0,min:o=>-Math.max(.0,Math.abs(2*o.ra)/2-width(o)/2),max:o=>Math.max(.0,Math.abs(2*o.ra)/2-width(o)/2),step:.01,unit:"m",handleOnly:true,
+       handle:(o,v)=>{const z=bottom(o)+height(o)/2;return {anchor:[v,front(o)-.02,z],sample:[v,front(o)-.02,z],probe:[v+1,front(o)-.02,z],fallback:{x:1,y:0}};}},
+      {key:bottomKey,label:windowPart?"商品窓の上下位置":"取り出し口の上下位置",default:bottomDefault,min:o=>Math.max(.3,Math.abs(o.h))*bottomMin,max:o=>Math.max(.3,Math.abs(o.h))*bottomMax,step:.01,unit:"m",handleOnly:true,
+       get:o=>Math.max(.3,Math.abs(o.h))*Math.max(bottomMin,Math.min(bottomMax,Number(o[bottomKey])||bottomDefault)),patch:(o,v)=>({[bottomKey]:v/Math.max(.3,Math.abs(o.h))}),
+       handle:(o,v)=>{const z=v;return {anchor:[cx(o),front(o)-.02,z],sample:[cx(o),front(o)-.02,z],probe:[cx(o),front(o)-.02,z+1],fallback:{x:0,y:-1}};}}
+    ];
+};
+ASSET_KIT.define("vendingMachine",{
+ label:"自販機",glyph:"▯",w:1.0,d:.75,h:1.83,accent:"#d94a4a",geometryBounds:false,
+ controls:[depthBevelControl("vmDepthBevel",.03),...vendingControls(true),...vendingControls(false)],
+ vmWindowWRatio:.62,vmWindowHRatio:.35,vmWindowBottomRatio:.36,vmWindowOffsetX:0,
+ vmOutletWRatio:.46,vmOutletHeightRatio:.11,vmOutletBottomRatio:.04,vmOutletOffsetX:0,
+ vmPanelProud:.015,vmPanelThickness:.05
+},(o,K)=>{
+ const W=Math.max(.2,Math.abs(2*o.ra)),D=Math.max(.2,Math.abs(2*o.rb)),H=Math.max(.3,Math.abs(o.h)),
+  ratio=(key,dflt,lo,hi)=>Math.max(lo,Math.min(hi,K.param(o,key,dflt))),
+  // 外枠まで含めて胴体の幅・高さ内に必ず収める。
+  winW=Math.min(W*.94,W*ratio("vmWindowWRatio",.62,.2,.94)),winH=Math.min(H*.8,H*ratio("vmWindowHRatio",.35,.08,.6)),
+  winBottom=Math.min(H*.7,Math.max(0,Math.min(H,H*ratio("vmWindowBottomRatio",.36,.05,.7)))),
+  proud=Math.max(.002,K.param(o,"vmPanelProud",.015)),panelT=Math.max(.01,K.param(o,"vmPanelThickness",.05)),
+  outW=Math.min(W*.86,W*ratio("vmOutletWRatio",.46,.2,.86)),outH=Math.min(H*.25,H*ratio("vmOutletHeightRatio",.11,.04,.25)),
+  outBottom=Math.max(0,Math.min(H,H*ratio("vmOutletBottomRatio",.04,.005,.2))),
+  front=-D/2,parts=[],
+  frontPanel=(pw,ph,cz,holes,cx=0)=>K.box(K.rectPath(pw,ph,cx,cz),front-proud,front+panelT,{axis:"y",holes,holeSides:true});
+ parts.push(K.depthBeveledBox(W,D,H,K.param(o,"vmDepthBevel",.03),{seg:3,group:"vending-body",seamLines:true}));
+ const frameH=Math.min(H,winH+Math.min(.16,winH*.28)),frameW=Math.min(W,winW+Math.min(.16,winW*.22)),
+  windowBottom=Math.max(0,Math.min(winBottom,H-frameH)),winCz=windowBottom+winH/2,
+  winX=Math.max(-(W-frameW)/2,Math.min((W-frameW)/2,Number(o.vmWindowOffsetX)||0));
+ parts.push(frontPanel(frameW,frameH,winCz,[K.rectPath(winW,winH,winX,0).map(([u,v])=>[u,winCz+v])],winX));
+ const shelfY=front-proud+Math.min(.012,proud*.8);
+ for(let i=1;i<=2;i++){const z=windowBottom+winH*i/3;parts.push(K.box(K.rectPath(winW*.94,.035,winX,z),shelfY-.004,shelfY+.004,{axis:"y",sheet:true}));}
+ parts.push(K.box(K.rectPath(winW*.94,.035,winX,windowBottom+.02),shelfY-.004,shelfY+.004,{axis:"y",sheet:true}));
+ // 小銭投入口・操作ボタン群と上部看板板は設けない。
+ const outFrameW=Math.min(W,Math.max(outW+.08,winW+.14)),outFrameH=Math.min(H,outH+.1),
+  outletBottom=Math.max(0,Math.min(outBottom,H-outFrameH)),outCz=outletBottom+outH/2,
+  outX=Math.max(-(W-outFrameW)/2,Math.min((W-outFrameW)/2,Number(o.vmOutletOffsetX)||0));
+ parts.push(frontPanel(outFrameW,outFrameH,outCz,[K.rectPath(outW,outH,outX,outCz)],outX));
+ return parts;
+});
 
-        // 1) 前後方向の稜線だけを丸める。旧丸胴値は使用しない。
-        parts.push(K.depthBeveledBox(W, D, H, K.param(o, "vmDepthBevel", 0.03), {seg: 3,group:"vending-body",seamLines:true}));
-        // 2) 商品の窓（板に穴をあける）
-        const winCz = winBottom + winH / 2,
-            frameH = winH + Math.min(0.16, winH * 0.28);
-        parts.push(frontPanel(winW + Math.min(0.16, winW * 0.22), frameH, winCz, [K.rectPath(winW, winH, 0, 0).map(([u, v]) => [u, winCz + v])]));
-        // 3) 窓の中（商品の棚）。枠の穴の中に薄い棚を入れて、奥行きがあるように見せる。
-        const shelfY = front - proud + Math.min(0.012, proud * 0.8);
-        for (let i = 1; i <= 2; i++) {
-            const sz = winBottom + (winH * i) / 3;
-            parts.push(K.box(K.rectPath(winW * 0.94, 0.035, 0, sz), shelfY - 0.004, shelfY + 0.004, { axis: "y", sheet: true }));
-        }
-        parts.push(K.box(K.rectPath(winW * 0.94, 0.035, 0, winBottom + 0.02), shelfY - 0.004, shelfY + 0.004, { axis: "y", sheet: true }));
-        // 4) 看板の板（窓の上）。文字は入れない（無地の板）。
-        const bandBottom = winBottom + frameH + H * 0.02,
-            bandTop = Math.min(H - H * 0.04, bandBottom + bandH);
-        if (bandTop - bandBottom > 0.02)
-            parts.push(frontPanel(winW + Math.min(0.16, winW * 0.22), bandTop - bandBottom, (bandBottom + bandTop) / 2, []));
-        // 6) 小銭入れ（小さな板＋縦長の穴）。窓の右に入る幅が無いときは、窓の下の右へ置く。
-        const frameW = winW + Math.min(0.16, winW * 0.22),
-            sideGap = W / 2 - frameW / 2 - W * 0.03,
-            coinW = Math.max(W * 0.08, Math.min(W * 0.24, W * ratio("vmCoinWRatio", 0.18, 0.08, 0.3))),
-            coinH = Math.min(H * 0.2, frameH * 0.62);
-        if (sideGap >= coinW + W * 0.02) {
-            // 窓の右脇に、縦長の穴（小銭入れ）をあけた板
-            const coinX = frameW / 2 + coinW / 2 + 0.02,
-                cz = winCz + frameH * 0.12,
-                slotH = Math.min(0.1, coinH * 0.4);
-            parts.push(frontPanel(coinW, coinH, cz, [K.rectPath(coinW * 0.28, slotH, 0, cz + coinH * 0.18)], coinX));
-            // 押しボタン（小さな四角を縦に3つ）
-            for (let i = 0; i < 3; i++)
-                parts.push(
-                    K.box(
-                        K.rectPath(coinW * 0.42, 0.045, coinX, cz - coinH * 0.1 - i * 0.075),
-                        front - proud - 0.025,
-                        front - proud,
-                        { axis: "y" },
-                    ),
-                );
-        } else {
-            // 窓のすぐ下、右寄りに小さな操作パネル（窓の枠とも取り出し口とも重ねない）
-            const gapTop = winCz - frameH / 2,
-                gapBottom = outCz + outH / 2 + 0.05,
-                gap = gapTop - gapBottom;
-            if (gap > 0.14) {
-                const ph = Math.min(0.12, gap - 0.04),
-                    cz = (gapTop + gapBottom) / 2;
-                parts.push(frontPanel(Math.min(0.34, W * 0.34), ph, cz, [K.rectPath(0.06, Math.min(0.06, ph * 0.5), 0.06, cz)], 0.1));
-            }
-        }
-        // 7) 取り出し口（板に横長の穴）
-        parts.push(frontPanel(Math.min(W * 0.86, winW + 0.14), outH + 0.1, outCz, [K.rectPath(outW, outH, 0, outCz)]));
-        return parts;
-    },
-);
+// ===== 卓上扇風機（線だけのワイヤーガード）=====
+ASSET_KIT.define("deskFan",{
+ label:"扇風機",glyph:"◉",group:"furniture",w:.62,d:.42,h:1.08,accent:"#74b989",
+ geometryBounds:true,minHalfWidth:()=>.2,minHalfDepth:()=>.12,minHeight:()=>.55,
+ fanBaseWidth:.55,fanBaseLength:.33,fanBaseThickness:.10,fanPoleHeight:.45,
+ controls:[
+  {key:"fanPoleHeight",label:"支柱の高さ",default:.45,min:o=>.16,max:o=>{const W=Math.max(.4,Math.abs(2*o.ra)),H=Math.max(.55,Math.abs(o.h)),R=Math.min(W*.42,H*.27,.29),b=Math.max(.05,Math.min(.24,Number(o.fanBaseThickness)||.10));return Math.max(.16,H-b-R*1.78);},step:.01,unit:"m",handleOnly:true,
+   get:o=>Number(o.fanPoleHeight)||.45,
+   handle:(o,v)=>{const b=Math.max(.05,Math.min(.24,Number(o.fanBaseThickness)||.10)),z=b+v;return {anchor:[0,-Math.abs(o.rb)-.03,z],sample:[0,-Math.abs(o.rb)-.03,z],probe:[0,-Math.abs(o.rb)-.03,z+1],fallback:{x:0,y:-1}};}},
+  {key:"fanBaseWidth",label:"土台の幅",default:.55,min:.3,max:o=>Math.max(.3,Math.abs(2*o.ra)*1.35),step:.01,unit:"m",handleOnly:true,
+   get:o=>Number(o.fanBaseWidth)||Math.abs(2*o.ra)*.88,
+   handle:(o,v)=>({anchor:[v/2,-Math.abs(o.rb)-.025,.05],sample:[v/2,-Math.abs(o.rb)-.025,.05],probe:[v/2+1,-Math.abs(o.rb)-.025,.05],fallback:{x:1,y:0}})},
+  {key:"fanBaseLength",label:"土台の長さ",default:.33,min:.18,max:o=>Math.max(.18,Math.abs(2*o.rb)*1.4),step:.01,unit:"m",handleOnly:true,
+   get:o=>Number(o.fanBaseLength)||Math.abs(2*o.rb)*.79,
+   handle:(o,v)=>({anchor:[0,-v/2,.05],sample:[0,-v/2,.05],probe:[0,-v/2-1,.05],fallback:{x:0,y:1}})},
+  {key:"fanBaseThickness",label:"土台の厚さ",default:.10,min:.05,max:.24,step:.005,unit:"m",handleOnly:true,
+   get:o=>Number(o.fanBaseThickness)||.10,
+   handle:(o,v)=>({anchor:[0,-Math.abs(o.rb)-.03,v],sample:[0,-Math.abs(o.rb)-.03,v],probe:[0,-Math.abs(o.rb)-.03,v+1],fallback:{x:0,y:-1}})},
+  {key:"fanBladeCount",label:"羽根の枚数",type:"range",default:5,min:3,max:7,step:2,integer:true,unit:"枚",get:o=>[3,5,7].includes(Number(o.fanBladeCount))?Number(o.fanBladeCount):5,
+   patch:(o,v)=>({fanBladeCount:[3,5,7].reduce((best,n)=>Math.abs(n-v)<Math.abs(best-v)?n:best,3)}),
+   handle:(o,v)=>({anchor:[0,-Math.abs(o.rb)-.025,Math.abs(o.h)*.86],sample:[0,-Math.abs(o.rb)-.025,Math.abs(o.h)*.86],probe:[1,-Math.abs(o.rb)-.025,Math.abs(o.h)*.86],fallback:{x:1,y:0},pixelsPerUnit:1})},
+  {key:"fanGuardRibs",label:"カバーの辺の本数",type:"range",default:16,min:8,max:32,step:2,integer:true,unit:"本",get:o=>Math.max(8,Math.min(32,Math.round(Number(o.fanGuardRibs)||16))),
+   patch:(o,v)=>({fanGuardRibs:Math.max(8,Math.min(32,Math.round(v/2)*2))}),
+   handle:(o,v)=>({anchor:[0,-Math.abs(o.rb)-.025,Math.abs(o.h)*.78],sample:[0,-Math.abs(o.rb)-.025,Math.abs(o.h)*.78],probe:[1,-Math.abs(o.rb)-.025,Math.abs(o.h)*.78],fallback:{x:1,y:0},pixelsPerUnit:1})}
+ ]
+},(o,K)=>{
+ const W=Math.max(.4,Math.abs(2*o.ra)),D=Math.max(.24,Math.abs(2*o.rb)),H=Math.max(.55,Math.abs(o.h)),
+  R=Math.min(W*.42,H*.27,.29),baseW=Math.max(.3,Math.min(W*1.35,Number(o.fanBaseWidth)||W*.88)),
+  baseD=Math.max(.18,Math.min(D*1.4,Number(o.fanBaseLength)||D*.79)),
+  baseH=Math.max(.05,Math.min(.24,Number(o.fanBaseThickness)||.10)),
+  poleHeight=Math.max(.16,Math.min(Number(o.fanPoleHeight)||.45,Math.max(.16,H-baseH-R*1.78))),
+  headZ=baseH+poleHeight+R*.78,front=-D/2,rimY=front,
+  backY=front+D*.30,bulge=R*.28,bladeY=front+bulge*.55,neckR=Math.min(W*.09,.055),
+  bladeCount=[3,5,7].includes(Number(o.fanBladeCount))?Number(o.fanBladeCount):5,
+  ribCount=Math.max(8,Math.min(32,Math.round((Number(o.fanGuardRibs)||16)/2)*2)),
+  bevel=Math.min(.035,baseW*.09,baseD*.09,baseH*.28),parts=[],edges=[],N=32;
+ // 直方体プリミティブと同じベベル線画・seam選別を使う台座。
+ parts.push(beveledPrismPart(K,K.rectPath(baseW,baseD),0,baseH,bevel,3,{seamGroup:"desk-fan-base"}));
+ // 支柱は立てた円柱。側面の縦線（verts）を明示し、線画でも形が読めるようにする。
+ const poleTop=baseH+poleHeight;
+ parts.push({...K.cylinder(neckR,baseH*.82,poleTop,{seg:16,verts:4}),preciseTubeEdge:true});
+ // 後部モーターケースと小さな後カバー。円柱は必ずヘッド中心の高さへ移動し、
+ // 台座下に紛れたように見える誤配置を防ぐ。
+ parts.push(...K.moveParts([K.cylinder(R*.40,backY-.015,backY+D*.34,{axis:"y",seg:24,verts:8})],0,0,headZ));
+ parts.push(...K.moveParts([K.cylinder(R*.31,backY+D*.34,backY+D*.40,{axis:"y",seg:20,verts:6})],0,0,headZ));
+ // 羽根は3枚・5枚・7枚の三角形。ガードの内側に置く。
+ const inner=R*.15,outer=R*.76,widthScale=5/bladeCount;
+ for(let i=0;i<bladeCount;i++){
+  const a=i*Math.PI*2/bladeCount+.12,radial=[Math.cos(a),Math.sin(a)],tang=[-Math.sin(a),Math.cos(a)],
+   point=(r,t)=>[radial[0]*r+tang[0]*t,bladeY,headZ+radial[1]*r+tang[1]*t],
+   tri=[point(inner,0),point(outer,-R*.17*widthScale),point(outer*.78,R*.20*widthScale)];
+  parts.push(K.face3(tri,{onFace:true}));
+ }
+ // 前面の丸いハブはファン中心の高さに配置する。
+ parts.push(...K.moveParts([K.cylinder(R*.19,front-bulge*.22,front+bulge*.08,{axis:"y",seg:24,verts:4})],0,0,headZ));
+ // カバーの断面を前後に膨らませる。輪も放射線も厚みのない線分描写。
+ const yFront=r=>rimY-bulge*(1-r/R),yBack=r=>backY+bulge*(1-r/R),
+  ring=(r,yFn)=>{const pts=[];for(let j=0;j<=N;j++){const a=j*2*Math.PI/N;pts.push([Math.cos(a)*r,yFn(r),headZ+Math.sin(a)*r]);}edges.push(pts);};
+ for(const r of [R*.30,R*.48,R*.72,R*.91,R]){ring(r,yFront);ring(r,yBack);}
+ for(let i=0;i<ribCount;i++){
+  const a=i*2*Math.PI/ribCount,x=Math.cos(a),z=Math.sin(a),frontPath=[],backPath=[];
+  for(let j=0;j<=10;j++){const t=j/10,r=R*(.28+.72*t);frontPath.push([x*r,yFront(r),headZ+z*r]);backPath.push([x*r,yBack(r),headZ+z*r]);}
+  edges.push(frontPath,backPath);
+  edges.push([[x*R,yFront(R),headZ+z*R],[x*R,yBack(R),headZ+z*R]]);
+ }
+ parts.push({meshTriangles:[],meshEdges:edges,onFace:true,preciseTubeEdge:true});
+ // 操作ボタンは土台の上面に並べる。
+ for(let i=0;i<3;i++){const bw=Math.min(.065,baseW*.12),x=(i-1)*baseW*.2;parts.push(K.cylinder(bw*.42,baseH,baseH+bw*.32,{seg:12,cx:x,cy:-baseD*.12}));}
+ return parts;
+});
 
 // ===== 既存アセットの移行（バッチ1）=====
 // 既存の線画・面のコードをキットの「部品の一覧」へ置き換える。

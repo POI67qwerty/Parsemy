@@ -245,7 +245,18 @@ function unpack(d) {
     $("em").value = d.em;
     $("pc").value = d.pc;
     {
-        const st = d.S.map((s) => (s.ob ? { ...s, ob: fixOb(s.ob) } : s)),
+        // 1つの3Dオブジェクトは線データS内に何百本もの線として現れる。
+        // 保存JSONでは各線に同じob全体が重複するため、読み込み時はidごとに
+        // fixObを一度だけ行い、同じオブジェクト参照を共有する（線自体は別々のまま）。
+        const objectPool = new Map(),
+            st = d.S.map((s) => {
+                if (!s.ob) return s;
+                const id = s.ob.id;
+                if (id == null) return { ...s, ob: fixOb(s.ob) };
+                let ob = objectPool.get(id);
+                if (!ob) { ob = fixOb(s.ob); objectPool.set(id, ob); }
+                return { ...s, ob };
+            }),
             seen = new Set(),
             out = [],
             needsAssetUpdate = o => !!o && (o.arrayEnabled === true || o.doorEnabled === true || o.openingOffset != null || ["pathPipe", "screenHood", "shopAwning", "displayShelf2", "trafficSignal", "pedSignal", "signPost", "signPost2", "crossingSign", "signTriangle", "signDiamond", "signCombo", "trainBench", "trainSeat", "trainDividedBench", "trainDividedSeat", "trainStraps", "trainPole", "trainHandrail", "trainWindowWall", "trainSlidingDoor", "shopWindow", "railing", "streetPavement", "streetMailbox", "streetParcel", "streetPlantBox", "squareStool", "shopWardrobe", "shopWardrobe2", "pictureStairs", "guardPoleHalf", "corrugatedRoof", "securityCamera", "bottleCrate", "chainFence", "ufoCatcher", "gachaMachine"].includes(o.asset) || (o.type === "compound" && Array.isArray(o.parts) && o.parts.some(needsAssetUpdate))),

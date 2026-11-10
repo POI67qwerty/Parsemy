@@ -2863,6 +2863,8 @@
     function syncGenericAssetEditor() {
         const panel=el("assetEditorP"), fields=el("assetEditorFields"), o=sel && obOf(sel),
             controls=o?assetEditorControls(o).filter(c => !c.handleOnly):[];
+        const centerButton=el("vendingCenterBtn");
+        if(centerButton) centerButton.hidden=!(o && o.type==="asset" && o.asset==="vendingMachine");
         if(!panel || !fields)return;
         panel.style.display=controls.length?"":"none";
         if(!controls.length){genericAssetPanelKind=null;genericAssetPanelId=null;genericAssetEditSession=false;return;}
@@ -2906,6 +2908,10 @@
         if(!genericAssetEditSession){HU.push(S);RD=[];genericAssetEditSession=true;}
         setOb(o.id,typeof control.patch === "function" ? control.patch(o,value) : {[key]:value});render();
     }
+    if(el("vendingCenterBtn")) el("vendingCenterBtn").onclick=()=>{
+        const o=sel&&obOf(sel);if(!o||o.type!=="asset"||o.asset!=="vendingMachine")return;
+        HU.push(S);RD=[];setOb(o.id,{vmWindowOffsetX:0});render();
+    };
     if(el("assetEditorFields")){
         el("assetEditorFields").addEventListener("input",applyGenericAssetEditor);
         el("assetEditorFields").addEventListener("change",()=>{genericAssetEditSession=false;});
