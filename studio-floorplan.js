@@ -1295,6 +1295,25 @@
         });
         c.restore();
     }
+    function drawFloorPlanCameraOverlay(c) {
+        const plane=orthPlane();
+        if(!plane)return;
+        const k=floorPlanHandles().camera,r=9/Z,half=Math.atan(18/Math.max(12,Number(P.lens)||38)),
+            body=k.sBody,target=k.sTarget,
+            cameraY=plane==="side"||plane==="front"?P.ch-1:-1,
+            horiz=Math.cos(k.pitch),
+            coneY=plane==="side"||plane==="front"?cameraY+Math.sin(k.pitch)*FLOOR_CAMERA_RAY:cameraY,
+            left=scrW([P.cx-Math.sin(k.yaw-half)*FLOOR_CAMERA_RAY*horiz,coneY,P.cz+Math.cos(k.yaw-half)*FLOOR_CAMERA_RAY*horiz]),
+            right=scrW([P.cx-Math.sin(k.yaw+half)*FLOOR_CAMERA_RAY*horiz,coneY,P.cz+Math.cos(k.yaw+half)*FLOOR_CAMERA_RAY*horiz]);
+        c.save();c.lineCap="round";c.lineJoin="round";
+        c.fillStyle="rgba(102,227,200,.16)";c.strokeStyle="#66e3c8";c.lineWidth=1.2/Z;
+        c.beginPath();c.moveTo(body.x,body.y);c.lineTo(left.x,left.y);c.lineTo(right.x,right.y);c.closePath();c.fill();c.stroke();
+        c.beginPath();c.moveTo(body.x,body.y);c.lineTo(target.x,target.y);c.stroke();
+        c.fillStyle="#66e3c8";c.strokeStyle="#164c4b";c.lineWidth=1.5/Z;c.beginPath();c.arc(body.x,body.y,r,0,Math.PI*2);c.fill();c.stroke();
+        c.fillStyle="#fff";c.strokeStyle="#66e3c8";c.beginPath();c.arc(target.x,target.y,r*.82,0,Math.PI*2);c.fill();c.stroke();
+        if(k.sLens&&k.sLens.ok){const q=k.sLens,d=6/Z;c.fillStyle="#fff";c.strokeStyle="#ffd34d";c.lineWidth=1.5/Z;c.beginPath();c.moveTo(q.x,q.y-d);c.lineTo(q.x+d,q.y);c.lineTo(q.x,q.y+d);c.lineTo(q.x-d,q.y);c.closePath();c.fill();c.stroke();gzLabel(c,"レンズ",q.x+8/Z,q.y-7/Z,"#ffe6a1",10);}
+        c.restore();
+    }
     function drawFloorPlanOverlay(c) {
         if (orthPlane() !== "top" && orthPlane() !== "side" && orthPlane() !== "front") return;
         const h = floorPlanHandles(),
@@ -1447,71 +1466,11 @@
             // という差が生まれる（実際にその状態になっていた）。
             if (h.object.o?.asset !== "wallSideSign") drawSpecialGizmo(c, h.object.o);
         }
-        // カメラ：本体をドラッグして位置、先端の丸をドラッグして向き
-        const k = h.camera,
-            half = Math.atan(18 / Math.max(12, Number(P.lens) || 38)),
-            body = k.sBody,
-            target = k.sTarget,
-            cameraY = orthPlane() === "side" || orthPlane() === "front" ? P.ch - 1 : -1,
-            horiz = Math.cos(k.pitch),
-            coneY =
-                orthPlane() === "side" || orthPlane() === "front" ? cameraY + Math.sin(k.pitch) * FLOOR_CAMERA_RAY : cameraY,
-            left = scrW([
-                P.cx - Math.sin(k.yaw - half) * FLOOR_CAMERA_RAY * horiz,
-                coneY,
-                P.cz + Math.cos(k.yaw - half) * FLOOR_CAMERA_RAY * horiz,
-            ]),
-            right = scrW([
-                P.cx - Math.sin(k.yaw + half) * FLOOR_CAMERA_RAY * horiz,
-                coneY,
-                P.cz + Math.cos(k.yaw + half) * FLOOR_CAMERA_RAY * horiz,
-            ]);
-        c.fillStyle = "rgba(102,227,200,.16)";
-        c.strokeStyle = "#66e3c8";
-        c.lineWidth = 1.2 / Z;
-        c.beginPath();
-        c.moveTo(body.x, body.y);
-        c.lineTo(left.x, left.y);
-        c.lineTo(right.x, right.y);
-        c.closePath();
-        c.fill();
-        c.stroke();
-        c.beginPath();
-        c.moveTo(body.x, body.y);
-        c.lineTo(target.x, target.y);
-        c.stroke();
-        c.fillStyle = "#66e3c8";
-        c.strokeStyle = "#164c4b";
-        c.lineWidth = 1.5 / Z;
-        c.beginPath();
-        c.arc(body.x, body.y, r, 0, Math.PI * 2);
-        c.fill();
-        c.stroke();
-        c.fillStyle = "#fff";
-        c.strokeStyle = "#66e3c8";
-        c.beginPath();
-        c.arc(target.x, target.y, r * 0.82, 0, Math.PI * 2);
-        c.fill();
-        c.stroke();
-        if (k.sLens && k.sLens.ok) {
-            const q = k.sLens,
-                s = 6 / Z;
-            c.fillStyle = "#fff";
-            c.strokeStyle = "#ffd34d";
-            c.lineWidth = 1.5 / Z;
-            c.beginPath();
-            c.moveTo(q.x, q.y - s);
-            c.lineTo(q.x + s, q.y);
-            c.lineTo(q.x, q.y + s);
-            c.lineTo(q.x - s, q.y);
-            c.closePath();
-            c.fill();
-            c.stroke();
-            gzLabel(c, "レンズ", q.x + 8 / Z, q.y - 7 / Z, "#ffe6a1", 10);
-        }
+        drawFloorPlanCameraOverlay(c);
         c.restore();
     }
     window.cityFloorPlanOverlay = drawFloorPlanOverlay;
+    window.cityFloorPlanCameraOverlay = drawFloorPlanCameraOverlay;
     // Y生成面の幅・奥行き・高さハンドルを、オブジェクト定義の差分へ変換する。
     // X/Z生成面は上のfloorWallDimensionPatchへ分岐する。
     function floorDimensionPatch(o, name, value, side = 1) {

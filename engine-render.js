@@ -3524,6 +3524,7 @@ function render() {
         markF(c);
         drawLockMarks(c);
         overlay(c);
+        if(orthView&&window.cityFloorPlanCameraOverlay){c.save();c.setTransform(1,0,0,1,0,0);window.cityFloorPlanCameraOverlay(c);c.restore();}
         c.restore();
         return;
     }
@@ -3545,6 +3546,7 @@ function render() {
     });
     drawLockMarks(c);
     overlay(c);
+    if(orthView&&window.cityFloorPlanCameraOverlay){c.save();c.setTransform(1,0,0,1,0,0);window.cityFloorPlanCameraOverlay(c);c.restore();}
     c.restore();
     const q = (v) => (v ? `(${((v.x / W) * 100).toFixed(0)}%, ${((v.y / H) * 100).toFixed(0)}%)` : "無限遠(平行)");
     $("info").innerHTML =
