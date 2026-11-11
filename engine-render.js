@@ -2915,8 +2915,8 @@ function surfaceColor(o) {
     return o.surfaceColor || o.accent || "#66e3c8";
 }
 function surfaceAlpha(o) {
-    const v = Number(o.surfaceAlpha);
-    return Number.isFinite(v) ? clamp(v, 0.04, 0.9) : 0.22;
+    // 面ONは形状確認用の不透明表示。元のsurfaceAlpha指定にかかわらず透過させない。
+    return 1;
 }
 // 面表示を「1回だけ半透明で重ねる」ためのオフスクリーン。
 // 三角形を1枚ずつ半透明で塗ると、同じオブジェクトの面が重なる場所だけ
@@ -3024,9 +3024,45 @@ function surfTriBox(t) {
     t.bx1 = x1;
     t.by1 = y1;
 }
+function paintGridTriangle(lc,t,project,spacing){
+    const w=t.world;if(!w)return;
+    const a=w[0],b=w[1],c=w[2],u1=b.map((v,i)=>v-a[i]),u2=c.map((v,i)=>v-a[i]),
+        cross=[u1[1]*u2[2]-u1[2]*u2[1],u1[2]*u2[0]-u1[0]*u2[2],u1[0]*u2[1]-u1[1]*u2[0]],nl=Math.hypot(...cross);
+    if(nl<1e-10)return;
+    const normal=cross.map(v=>v/nl),worldAxes=[[1,0,0],[0,1,0],[0,0,1]],projected=worldAxes.map(axis=>axis.map((v,i)=>v-normal[i]*(axis[0]*normal[0]+axis[1]*normal[1]+axis[2]*normal[2]))),
+        basisU=projected.reduce((best,v)=>Math.hypot(...v)>Math.hypot(...best)?v:best,projected[0]),ul=Math.hypot(...basisU),u=basisU.map(v=>v/ul),
+        basisV=[normal[1]*u[2]-normal[2]*u[1],normal[2]*u[0]-normal[0]*u[2],normal[0]*u[1]-normal[1]*u[0]],
+        axes=[u,basisV],coord=(p,axis)=>p[0]*axis[0]+p[1]*axis[1]+p[2]*axis[2],opacity=Math.max(.1,Math.min(1,Number(window.__surfaceGridOpacity)||.9)),
+        width=Math.max(.5,Math.min(6,Number(window.__surfaceGridLineWidth)||1)),step=Math.max(.05,Number(spacing)||.5),minor=step/4,
+        lo=axes.map(axis=>Math.min(...w.map(p=>coord(p,axis)))),hi=axes.map(axis=>Math.max(...w.map(p=>coord(p,axis))));
+    lc.save();lc.beginPath();lc.moveTo(t.x0,t.y0);lc.lineTo(t.x1,t.y1);lc.lineTo(t.x2,t.y2);lc.closePath();lc.clip();
+    lc.globalAlpha=t.alpha;lc.lineCap="butt";lc.lineJoin="miter";
+    // 各三角形のUVアフィン変換で模様を貼る方式をやめ、3D上の座標面と三角形の交線を
+    // 直接描く。これで透視投影でもマス目が面内で波打ったり三角形ごとにズレなくなる。
+    for(let axis=0;axis<2;axis++){
+        const ax=axes[axis],start=Math.ceil(lo[axis]/minor-1e-9),end=Math.floor(hi[axis]/minor+1e-9);
+        for(let k=start;k<=end;k++){
+            const value=k*minor,pts=[];
+            for(let e=0;e<3;e++){
+                const p=w[e],q=w[(e+1)%3],cp=coord(p,ax),cq=coord(q,ax),d=cq-cp;
+                if(Math.abs(d)<1e-10){if(Math.abs(value-cp)<1e-8){pts.push(p);pts.push(q);}continue;}
+                const r=(value-cp)/d;if(r>=-1e-9&&r<=1+1e-9)pts.push(p.map((v,i)=>v+(q[i]-v)*r));
+            }
+            const uniq=[];for(const p of pts)if(!uniq.some(q=>Math.hypot(p[0]-q[0],p[1]-q[1],p[2]-q[2])<1e-7))uniq.push(p);
+            if(uniq.length<2)continue;
+            const p=uniq[0],q=uniq[uniq.length-1],sp={x:0,y:0,depth:0},sq={x:0,y:0,depth:0};
+            if(!project(p,sp)||!project(q,sq))continue;
+            const major=((k%4)+4)%4===0;
+            lc.strokeStyle=major?`rgba(18,24,32,${opacity})`:`rgba(28,36,44,${opacity*.62})`;
+            lc.lineWidth=(major?width:Math.max(.5,width*.55))/Math.max(.25,Z);
+            lc.beginPath();lc.moveTo(sp.x,sp.y);lc.lineTo(sq.x,sq.y);lc.stroke();
+        }
+    }
+    lc.restore();
+}
 // 集めた三角形を層へ塗る。list は奥→手前の順に並べておくこと。
 // clip を渡すと、その範囲（拡大を掛ける前の座標）だけを塗る。
-function paintSurfaceTris(lc, list, clip) {
+function paintSurfaceTris(lc, list, clip, project) {
     if (!list.length) return;
     if (clip) {
         lc.save();
@@ -3037,6 +3073,19 @@ function paintSurfaceTris(lc, list, clip) {
     lc.lineJoin = "round";
     lc.globalAlpha = 1; // 層の中は不透明。重なっても濃くならない。
     lc.lineWidth = 1 / Math.max(0.25, Z);
+    if(window.__surfaceGridEnabled){
+        const spacing=Math.max(.05,Number(window.__surfaceGridSpacing)||.5);
+        if(project){
+            // 格子ON時だけ三角形ごとに描き、奥の面→手前の面で重ねる。前面が背面の格子を隠す。
+            for(const t of list){
+                lc.save();lc.globalAlpha=t.alpha;lc.fillStyle=t.color;lc.strokeStyle=t.color;lc.lineWidth=1/Math.max(.25,Z);
+                lc.beginPath();lc.moveTo(t.x0,t.y0);lc.lineTo(t.x1,t.y1);lc.lineTo(t.x2,t.y2);lc.closePath();lc.fill();lc.stroke();
+                paintGridTriangle(lc,t,project,spacing);lc.restore();
+            }
+            if(clip)lc.restore();
+            return;
+        }
+    }
     // 色ごとにまとめる（同じ色は1本のパスへ）。
     const byColor = new Map();
     list.forEach((t) => {
@@ -3100,7 +3149,7 @@ function drawObjectSurfaces(c) {
     const cam = projCameraKey(null);
     const sigs = objs.map((o) => o.id + ":" + JSON.stringify(o));
     const ids = objs.map((o) => o.id).join(",");
-    const key = "surf|" + cam + "|" + sigs.join(";");
+    const key = "surf|" + cam + "|grid:" + (window.__surfaceGridEnabled?`${Number(window.__surfaceGridSpacing)||.5}/${Number(window.__surfaceGridOpacity)||.9}/${Number(window.__surfaceGridLineWidth)||1}`:0) + "|" + sigs.join(";");
     // 1. 何も変わっていない：前回の層をそのまま貼る。
     if (!window.__noSurfCache && surfaceLayerCache && surfaceLayerCache.key === key) {
         blitSurfaceLayer(c, surfaceLayerCache);
@@ -3116,17 +3165,19 @@ function drawObjectSurfaces(c) {
             break;
         }
     }
+    const gridKey=window.__surfaceGridEnabled?`${Number(window.__surfaceGridSpacing)||.5}/${Number(window.__surfaceGridOpacity)||.9}/${Number(window.__surfaceGridLineWidth)||1}`:0;
     const prev = surfState;
     const partial =
         !window.__noSurfFull &&
         alphaOne !== null &&
         !!prev &&
+        prev.gridKey===gridKey &&
         prev.cam === cam &&
         prev.ids === ids &&
         prev.alphaOne === alphaOne &&
         !!surfaceLayerCanvas;
     const proj = surfaceProjector(),
-        next = { cam, ids, alphaOne, entries: new Map(), box: prev && partial ? { ...prev.box } : null },
+        next = { cam, ids, alphaOne, gridKey, entries: new Map(), box: prev && partial ? { ...prev.box } : null },
         changed = [];
     objs.forEach((o, i) => {
         const old = partial ? prev.entries.get(o.id) : null;
@@ -3179,6 +3230,7 @@ function drawObjectSurfaces(c) {
                     y1: b.y,
                     x2: e.x,
                     y2: e.y,
+                    world: gridKey ? [tr[0],tr[1],tr[2]] : null,
                 };
                 surfTriBox(t);
                 if (t.bx0 < bx0) bx0 = t.bx0;
@@ -3229,7 +3281,7 @@ function drawObjectSurfaces(c) {
         const lc = surfaceLayerCanvas.getContext("2d");
         const vs2 = viewShift();
         lc.setTransform(Z, 0, 0, Z, vs2[0] - r.dx0, vs2[1] - r.dy0);
-        paintSurfaceTris(lc, all, null);
+        paintSurfaceTris(lc, all, null, proj);
         const box = { alpha: alphaOne, dx0: r.dx0, dy0: r.dy0, dw: r.dw, dh: r.dh };
         next.box = { x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, ...box };
         return box;
@@ -3321,7 +3373,7 @@ function drawObjectSurfaces(c) {
     sortTris(near);
     const vs3 = viewShift();
     lc.setTransform(Z, 0, 0, Z, vs3[0] - cur.dx0, vs3[1] - cur.dy0);
-    paintSurfaceTris(lc, near, clipU);
+    paintSurfaceTris(lc, near, clipU, proj);
     const box = { alpha: cur.alpha, dx0: cur.dx0, dy0: cur.dy0, dw: cur.dw, dh: cur.dh };
     blitSurfaceLayer(c, box);
     next.box = cur;

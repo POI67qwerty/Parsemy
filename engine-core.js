@@ -116,6 +116,7 @@ ${R("gw", "線の太さ", 0.2, 3, 0.1, "px")}
 ${R("gs", "マスの大きさ", 0.1, 10, 0.05)}
 ${R("gn", "マスの数（片側）", 2, 60, 1)}
 <label><input type=checkbox id=gon checked> 補助線を表示</label>
+<div id=surfaceGridControls style="display:grid;gap:5px;padding:7px 9px;margin:3px 0 6px;border:1px solid #bbb;border-radius:5px;font-size:12px"><strong>格子材質 調整</strong><label>線の濃さ <span data-val=opacity>90%</span><input type=range data-key=opacity min=20 max=100 value=90></label><label>網目の細かさ <span data-val=spacing>0.50m</span><input type=range data-key=spacing min=10 max=200 value=50></label><label>線の太さ <span data-val=width>1.0px</span><input type=range data-key=width min=1 max=60 value=10></label></div>
 <label><input type=checkbox id=hzl checked> 地平線を表示</label>
 <label><input type=checkbox id=bgw checked> 背景を白にする</label>
 <h3>表示の詳細</h3>
@@ -454,6 +455,15 @@ surfaceColorToggle.textContent="面色 OFF";surfaceColorToggle.title="面表示�
 surfaceColorToggle.setAttribute("aria-pressed","false");
 $("surfaceToggle").after(surfaceColorToggle);
 surfaceColorToggle.onclick=()=>{window.__surfaceColors=!window.__surfaceColors;surfaceColorToggle.classList.toggle("on",window.__surfaceColors);surfaceColorToggle.textContent=`面色 ${window.__surfaceColors?"ON":"OFF"}`;surfaceColorToggle.setAttribute("aria-pressed",String(window.__surfaceColors));render();};
+// 低負荷のプロシージャル格子材質（面表示時のみ）。Canvas上の一枚タイルを全アセットへ再利用。
+window.__surfaceGridEnabled=false;window.__surfaceGridSpacing=.5;window.__surfaceGridOpacity=.9;window.__surfaceGridLineWidth=1;
+const surfaceGridToggle=document.createElement("button");surfaceGridToggle.type="button";surfaceGridToggle.id="surfaceGridToggle";surfaceGridToggle.className="toolBtn";
+surfaceGridToggle.textContent="格子材質 OFF";surfaceGridToggle.title="全アセットの面に1m間隔の格子材質を表示（面ON時のみ）";surfaceGridToggle.setAttribute("aria-pressed","false");
+surfaceColorToggle.after(surfaceGridToggle);
+surfaceGridToggle.onclick=()=>{window.__surfaceGridEnabled=!window.__surfaceGridEnabled;surfaceGridToggle.classList.toggle("on",window.__surfaceGridEnabled);surfaceGridToggle.textContent=`格子材質 ${window.__surfaceGridEnabled?"ON":"OFF"}`;surfaceGridToggle.setAttribute("aria-pressed",String(window.__surfaceGridEnabled));window.__noSurfCache=true;render();window.__noSurfCache=false;};
+const gridControls=$("surfaceGridControls");
+function refreshGridControl(input,redraw=true){const key=input.dataset.key,n=Number(input.value);if(key==="opacity")window.__surfaceGridOpacity=n/100;else if(key==="spacing")window.__surfaceGridSpacing=n/100;else window.__surfaceGridLineWidth=n/10;const val=gridControls.querySelector(`[data-val="${key}"]`);if(val)val.textContent=key==="opacity"?`${n}%`:key==="spacing"?`${(n/100).toFixed(2)}m`:`${(n/10).toFixed(1)}px`;if(redraw&&typeof render==="function"){window.__noSurfCache=true;render();window.__noSurfCache=false;}}
+gridControls.querySelectorAll("input").forEach(input=>{refreshGridControl(input,false);input.addEventListener("input",()=>refreshGridControl(input));});
 function leaveOrthView(changedKey) {
     if (standardApplying) return;
     // 間取り中は左パネルのカメラ値を変更しても正投影を解除しない。

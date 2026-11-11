@@ -13,58 +13,64 @@ ASSET_KIT.define(
     {
         label: "電光看板",
         glyph: "▤",
-        // 他の小物（自販機 1.0×1.83、屋台など）と並べて大きすぎたので、
-        // 実物のA型看板に近い寸法へ縮めた（2026-11-03）。
-        w: 0.72,
-        d: 0.28,
-        h: 0.92,
-        accent: "#ff5a7a",
+        // 参照画像の「ピンクの検索端末＋2本脚」のキオスク型に合わせた寸法。
+        w: 0.82,
+        d: 0.20,
+        h: 1.58,
+        accent: "#f3a8b3",
         // 固有値（画面の数値欄・JSONにもそのまま載る）
-        lightboxFrame: 0.042, // 縁（フレーム）の幅
-        lightboxPanelThickness: 0.13, // 板の厚み
-        lightboxPanelBottom: 0.26, // 板の下端の高さ（脚が見える長さ）
-        lightboxCorner: 0.038, // 板の角の丸み
-        lightboxLegSize: 0.042, // 脚の太さ（正方形）
-        lightboxFootHeight: 0.03, // 足の高さ
-        lightboxFootLength: 0.16, // 足の前後の長さ
-        lightboxRing: true, // 上の吊り輪を出す
-    },
+        lightboxFrame: 0.032,
+        lightboxPanelThickness: 0.20,
+        lightboxPanelBottom: 0.58,
+        lightboxCorner: 0.025,
+        lightboxLegSize: 0.055,
+        lightboxFootHeight: 0.035,
+        lightboxFootLength: 0.28,
+        lightboxRing: false,
+        controls: [
+            { key: "lightboxWidth", label: "外枠の幅", type: "range", canvasSlider: true, default: 0.82, min: 0.4, max: 2.0, step: 0.02, unit: "m", get: o => 2 * Math.abs(Number(o.ra) || 0.41), patch: (o, v) => ({ ra: v / 2 }), handle: (o,v) => ({anchor:[v/2,-Math.abs(o.rb)-.04,o.h],sample:[v/2,-Math.abs(o.rb)-.04,o.h],probe:[v/2+1,-Math.abs(o.rb)-.04,o.h],fallback:{x:1,y:0}}) },
+            { key: "lightboxBoardHeight", label: "外枠の高さ", type: "range", canvasSlider: true, default: 1.0, min: 0.4, max: 2.2, step: 0.02, unit: "m", get: o => Math.max(0.2, Math.abs(Number(o.h) || 1.58) - Math.max(0, Number(o.lightboxPanelBottom ?? 0.58))), patch: (o, v) => ({ h: v + Math.max(0, Number(o.lightboxPanelBottom ?? 0.58)) }), handle: (o,v) => ({anchor:[0,-Math.abs(o.rb)-.04,o.h],sample:[0,-Math.abs(o.rb)-.04,o.h-v],probe:[0,-Math.abs(o.rb)-.04,o.h-v-1],fallback:{x:0,y:-1}}) },
+            { key: "lightboxDisplayWidth", label: "中の長方形の幅", type: "range", canvasSlider: true, default: 0.60, min: 0.15, max: o => Math.max(0.15,2*Math.abs(Number(o.ra)||.41)-.12), step: 0.01, unit: "m", get: o => Number(o.lightboxDisplayWidth)||Math.max(.15,2*Math.abs(Number(o.ra)||.41)-.22), handle: (o,v) => ({anchor:[v/2,-Math.abs(o.rb)-.06,o.h*.68],sample:[v/2,-Math.abs(o.rb)-.06,o.h*.68],probe:[v/2+1,-Math.abs(o.rb)-.06,o.h*.68],fallback:{x:1,y:0}}) },
+            { key: "lightboxDisplayHeight", label: "中の長方形の高さ", type: "range", canvasSlider: true, default: 0.81, min: 0.15, max: o => Math.max(0.15,Math.abs(Number(o.h)||1.58)-Math.max(0,Number(o.lightboxPanelBottom??.58))-2.2*(Number(o.lightboxFrame)||.032)), step: 0.01, unit: "m", get: o => Number(o.lightboxDisplayHeight)||Math.max(.15,Math.abs(Number(o.h)||1.58)-Math.max(0,Number(o.lightboxPanelBottom??.58))-3.5*(Number(o.lightboxFrame)||.032)), handle: (o,v) => ({anchor:[0,-Math.abs(o.rb)-.06,o.h*.68],sample:[0,-Math.abs(o.rb)-.06,o.h*.68-v/2],probe:[0,-Math.abs(o.rb)-.06,o.h*.68-v/2-1],fallback:{x:0,y:-1}}) },
+            { key: "lightboxPanelBottom", label: "脚の高さ", type: "range", canvasSlider: true, default: 0.58, min: 0.15, max: o => Math.max(0.15, Math.abs(Number(o.h) || 1.58) - 0.4), step: 0.01, unit: "m", handle: (o,v) => ({anchor:[0,0,v],sample:[0,0,v],probe:[0,0,v+1],fallback:{x:0,y:1}}) },
+        ],
+    }, 
     (o, K) => {
         const W = Math.max(0.2, Math.abs(2 * o.ra)),
-            D = Math.max(0.06, Math.abs(2 * o.rb)),
-            H = Math.max(0.2, Math.abs(o.h)),
-            frame = Math.max(0.005, K.param(o, "lightboxFrame", 0.042)),
-            panelT = Math.max(0.02, K.param(o, "lightboxPanelThickness", 0.13)),
-            bottom = Math.max(0, Math.min(H - 0.1, K.param(o, "lightboxPanelBottom", 0.26))),
-            corner = Math.max(0, K.param(o, "lightboxCorner", 0.038)),
-            legS = Math.max(0.01, K.param(o, "lightboxLegSize", 0.042)),
-            footH = Math.max(0, K.param(o, "lightboxFootHeight", 0.03)),
-            footL = Math.max(0.02, K.param(o, "lightboxFootLength", 0.16)),
-            ring = K.param(o, "lightboxRing", 1) ? true : false,
+            D = Math.max(0.1, Math.abs(2 * o.rb)),
+            H = Math.max(0.4, Math.abs(o.h)),
+            frame = Math.max(0.012, K.param(o, "lightboxFrame", 0.032)),
+            panelT = Math.max(0.06, K.param(o, "lightboxPanelThickness", 0.20)),
+            legH = Math.max(0.15, Math.min(H - 0.3, K.param(o, "lightboxPanelBottom", 0.58))),
+            corner = Math.max(0.005, K.param(o, "lightboxCorner", 0.025)),
+            legS = Math.max(0.02, K.param(o, "lightboxLegSize", 0.055)),
+            faceY = -panelT / 2 - 0.006,
             parts = [];
 
-        // 1) 板（フレーム）: 丸めた長方形を押し出す
-        parts.push(
-            K.box(K.roundRectPath(W, panelT, corner, 2), bottom, H),
-        );
-        // 2) 印刷面: フレームの内側で、前後へわずかに出っ張らせる
-        //    （段差があるので、縁の線が「面の内側の線」として消えない）
-        const innerW = Math.max(0.05, W - frame * 2),
-            innerH0 = Math.min(H - 0.01, bottom + frame),
-            innerH1 = Math.max(innerH0 + 0.02, H - frame);
-        if (innerW > 0.06 && innerH1 - innerH0 > 0.02)
-            parts.push(
-                K.box(K.roundRectPath(innerW, panelT + 0.014, Math.max(0.005, corner - frame * 0.5), 2), innerH0, innerH1),
-            );
-        // 3) 脚: 板の左右の外側。足の上から板の上端まで。
-        const legX = W / 2 + legS / 2 - Math.min(0.01, legS * 0.2);
-        for (const sx of [-1, 1])
-            parts.push(K.box(K.rectPath(legS, legS, sx * legX, 0), footH, H));
-        // 4) 足: 脚の下。前後へ長く出して、板が倒れない形にする。
-        for (const sx of [-1, 1])
-            parts.push(K.box(K.rectPath(Math.max(legS * 1.6, 0.08), Math.min(footL, D), sx * legX, 0), 0, footH));
-        // 5) 上の吊り輪（小さな輪の代わりに、細い板で作る）
-        if (ring) parts.push(K.box(K.rectPath(Math.min(0.11, W * 0.12), Math.min(0.05, panelT), 0, 0), H, H + 0.06));
+        // 外側筐体はX-Z正面形状をY方向へ押し出す。ベベルは奥行き(Y)方向の稜線だけ。
+        const outerBevel=Math.min(.055,W*.08,(H-legH)*.06,panelT*.24),outer=K.depthBeveledBox(W,panelT,H-legH,outerBevel,{z0:legH,seg:3,seamLines:true,group:"lightbox-case"});
+        outer.surfaceColor="#dcefeb";parts.push(outer);
+
+        // 画面周囲の濃いベゼルと、中央寄せの表示面。内側寸法は画面上で調整可能。
+        const screenW=Math.max(0.2,W-frame*2), screenH=Math.max(0.25,H-legH-frame*1.5), screenBottom=legH+frame*.75,
+            displayY=faceY-.024;
+        parts.push(K.box(K.roundRectPath(screenW,screenH,Math.min(corner,frame),3),faceY-.012,faceY+.002,{axis:"y",surfaceColor:"#575656"}));
+
+        // 画面内側は無地のベベル長方形。模様・文字・アイコン類は置かない。
+        const requestedW=Number(o.lightboxDisplayWidth)||Math.max(.15,screenW-frame*2),
+            requestedH=Number(o.lightboxDisplayHeight)||Math.max(.15,screenH-frame*2),
+            displayW=Math.min(screenW-frame*.7,Math.max(.15,requestedW)),
+            displayH=Math.min(screenH-frame*.7,Math.max(.15,requestedH)),
+            displayBottom=screenBottom+(screenH-displayH)/2,
+            bevel2=Math.min(frame*.65,displayW*.12,displayH*.12),
+            innerPath=beveledBoxFootprint(displayW,displayH,bevel2,4).map(([x,z])=>[x,z+displayBottom]),
+            innerSeams=[null,null,...innerPath.map((_,i)=>beveledEdgeMark(i,bevel2,4,"lightbox-display"))];
+        parts.push(K.box(innerPath,displayY-.008,displayY+.002,{axis:"y",surfaceColor:"#f6bccb",seamMarks:innerSeams,onFace:true}));
+
+        // 下の中央正面向き板は置かない。幅広の床台座と高さ調整できる細い丸脚を残す。
+        const baseH=.09,baseW=W*.96,baseD=Math.max(.36,D*2.1),legX=W*.28,legRadius=Math.max(.018,legS*.42);
+        parts.push(K.box(K.rectPath(baseW,baseD),0,baseH,{surfaceColor:"#343333"}));
+        for(const sx of [-1,1])parts.push(...K.moveParts([K.cylinder(legRadius,baseH,legH,{seg:10,surfaceColor:"#41403f"})],sx*legX,0,0));
         return parts;
     },
 );
@@ -293,16 +299,18 @@ ASSET_KIT.define(
     "wallSign",
     { label: "壁付け看板" },
     (o, K) => {
-        const p = wallSignParams(o),
-            half = p.thickness * 0.5,
-            parts = [K.box(wallSignFacePoints(p), -half, half, { axis: "y" })];
-        wallSignBrackets(p).forEach((b) => {
-            const bw=b.x1-b.x0,bd=b.y1-b.y0,bevel=Math.max(.003,Math.min(bw,bd)*.22),path=beveledBoxFootprint(bw,bd,bevel,2).map(([x,y])=>[x+(b.x0+b.x1)/2,y+(b.y0+b.y1)/2]);
-            parts.push(K.box(path,b.z-b.h*.5,b.z+b.h*.5,{sideVerticals:path.map((_,i)=>i),seamMarks:[null,null,...path.map((_,i)=>beveledEdgeMark(i,bevel,2,'wall-sign-bracket'))]}));
+        const p=wallSignParams(o),half=p.thickness*.5,facePath=wallSignFacePoints(p),
+            faceSeams=[null,null,...facePath.map((_,i)=>beveledEdgeMark(i,p.bevelOffset,p.bevelSegments,"wall-sign-face"))],
+            parts=[K.box(facePath,-half,half,{axis:"y",seamMarks:faceSeams})];
+        wallSignBrackets(p).forEach((b)=>{
+            const bw=b.x1-b.x0,bd=b.y1-b.y0,bevel=Math.max(.003,Math.min(bw,bd)*.22),seg=2,
+                path=beveledBoxFootprint(bw,bd,bevel,seg).map(([x,y])=>[x+(b.x0+b.x1)/2,y+(b.y0+b.y1)/2]);
+            parts.push(K.box(path,b.z-b.h*.5,b.z+b.h*.5,{sideVerticals:path.map((_,i)=>i),seamMarks:[null,null,...path.map((_,i)=>beveledEdgeMark(i,bevel,seg,"wall-sign-bracket"))]}));
         });
         return parts;
     },
-    { replace: true },
+    // 線画は既存の専用ビルダーを維持し、面形状だけ置き換える。
+    { replace: true, lines: false },
 );
 
 // 丸椅子：座面・ポール・台座の3つの円柱。断面の角数は既存の面と同じ（20 / 12 / 16）。

@@ -883,10 +883,14 @@ const ASSET_KIT = (function () {
         const lineBuilder = (ctx) => {
             const parts = build(ctx.o, API) || [];
             for (const part of parts) {
+                if (part.suppressLine === true) continue;
                 const color = part.color || ctx.c,
                     width = part.width || ctx.o.w;
                 let edgeIndex = 0;
-                for (const seg of partEdges({...part,__owner:ctx.o})) {
+                for (const rawEdge of partEdges({...part,__owner:ctx.o})) {
+                    const edgePieces=Array.isArray(part.suppressLineEdges)&&rawEdge.length>2?rawEdge.slice(1).map((p,i)=>[rawEdge[i],p]):[rawEdge];
+                    for(const seg of edgePieces){
+                    if(part.suppressLineEdges?.includes(edgeIndex)){edgeIndex++;continue;}
                     const line=lineA(ctx.o, seg, color, width);
                     if (part.roomShellWallSide) line.roomShellWallSide=part.roomShellWallSide;
                     if (part.roomShellFloor) line.roomShellFloor=true;
@@ -902,6 +906,7 @@ const ASSET_KIT = (function () {
                     edgeIndex++;
                     if (part.signalSmoothSide) line.signalSmoothSide = true;
                     if (part.onFace) line.onFace = true;
+                    if (Array.isArray(part.meshEdges) && !(part.meshTriangles?.length)) line.lineOnly = true;
                     if (part.preciseTinyGaps) line.preciseTinyGaps = true;
                     if (part.preciseTubeEdge) {
                         line.preciseTubeEdge = true;
@@ -909,6 +914,7 @@ const ASSET_KIT = (function () {
                     }
                     if(part.depthBevelEdge) line.depthBevelEdge=true;
                     ctx.out.push(line);
+                    }
                 }
             }
         };
