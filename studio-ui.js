@@ -3356,7 +3356,7 @@
     const studioPresetNameInput = el("studioPresetName"),
         studioPresetSelect = el("studioPresetSelect");
     // オブジェクトを除く、カメラ・グリッド・補助線・ペン・消しゴム・表示設定をまとめて保存する。
-    const presetCheckIds = ["gon", "hzl", "bgw", "bin", "zf", "gg", "p3", "snp", "pn"];
+    const presetCheckIds = ["gon", "hzl", "bgw", "bin", "gg", "p3", "snp", "pn"];
     const presetSelectIds = ["snap", "em"];
     function readStudioPresets() {
         try {
@@ -3469,7 +3469,6 @@
             });
         if (d.snap != null) el("snap").value = d.snap;
         if (d.pc != null) el("pc").value = d.pc;
-        if (d.cr !== undefined) CR = d.cr ? { ...d.cr } : null;
         if (d.zoom && Number.isFinite(Number(d.zoom.Z))) {
             Z = clamp(Number(d.zoom.Z), 1, 10);
             ox = Number(d.zoom.ox) || 0;

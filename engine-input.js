@@ -95,7 +95,6 @@ function multiStart() {
     cur = null;
     er = null;
     prev = null;
-    bd = false;
     ed = null;
     ptr = null;
     ptrType = null;
@@ -551,8 +550,7 @@ cv.onpointerdown = (e) => {
         cur = null;
         er = null;
         prev = null;
-        bd = false;
-        ed = null;
+            ed = null;
         ptr = null;
         mg = null;
         TC.clear();
@@ -666,12 +664,6 @@ cv.onpointerdown = (e) => {
         renderSoon();
         return;
     }
-    if (act === "draw" && tool === "border") {
-        bd = true;
-        CR = { x0: clamp(p.x, 0, W), y0: clamp(p.y, 0, H), x1: clamp(p.x, 0, W), y1: clamp(p.y, 0, H) };
-        renderSoon();
-        return;
-    }
     if (act === "draw" && tool === "erase") {
         er = { base: S, last: p };
         stepErase(p, p);
@@ -749,13 +741,6 @@ cv.onpointermove = (e) => {
         // pointerupでフラグを戻して通常品質を再描画する。
         window.__fastInteractionPreview=true;
         dragEdit(pos(e), !!e.shiftKey);
-        return;
-    }
-    if (bd) {
-        const p = pos(e);
-        CR.x1 = clamp(p.x, 0, W);
-        CR.y1 = clamp(p.y, 0, H);
-        renderSoon();
         return;
     }
     if (er) {
@@ -859,11 +844,6 @@ cv.onpointerup = cv.onpointercancel = (e) => {
         }
         er = null;
     }
-    if (bd) {
-        bd = false;
-        const r = crect();
-        if (r.w < 8 || r.h < 8) CR = null;
-    }
     ed = null;
     window.__fastInteractionPreview=false;
     snapHit = null;
@@ -899,8 +879,7 @@ function releaseInputState(e) {
         window.__fastInteractionPreview=false;
         drag = null;
         cur = null;
-        bd = false;
-        er = null;
+            er = null;
         snapHit = null;
     }
     if(restoreQuality) renderSoon();
@@ -915,8 +894,7 @@ addEventListener("blur", () => {
         window.__fastInteractionPreview=false;
         drag = null;
         cur = null;
-        bd = false;
-        er = null;
+            er = null;
         TC.clear();
         mg = null;
     }

@@ -78,6 +78,15 @@ function f1PartControls(kind) {
     ];
 }
 
+function stackedRimCanvasControls(){
+ const last=o=>(Array.isArray(o.floors)&&o.floors.length?o.floors:[{w:Math.abs(o.ra||2)*2,d:Math.abs(o.rb||1.5)*2,h:2.2}]).at(-1),
+ update=(o,key,v)=>{const fs=Array.isArray(o.floors)&&o.floors.length?o.floors.map(f=>({...f})): [{x:0,y:0,z:0,w:Math.abs(o.ra||2)*2,d:Math.abs(o.rb||1.5)*2,h:2.2,rimHeight:.16,rimOverhang:.18}];fs.forEach(f=>{f[key]=v;});return {floors:fs};};
+ return [
+  {key:"rimHeight",label:"縁の高さ",type:"range",canvasSlider:true,min:.01,max:o=>Math.max(.01,Number(last(o).h)||2.2),step:.01,unit:"m",get:o=>Number(last(o).rimHeight)||Number(o.rimHeight)||.16,patch:(o,v)=>update(o,"rimHeight",v),handle:(o,v)=>{const f=last(o),w=Math.abs(Number(f.w)||Math.abs(o.ra||2)*2),d=Math.abs(Number(f.d)||Math.abs(o.rb||1.5)*2),z=(Number(f.z)||0)+(Number(f.h)||2.2),x=(Number(f.x)||0)+w/2+.22,y=(Number(f.y)||0)-d/2-.18;return {anchor:[x,y,z],sample:[x,y,z-v],probe:[x,y,z-v-1],fallback:{x:0,y:-1}};}},
+  {key:"rimOverhang",label:"縁の出幅",type:"range",canvasSlider:true,min:0,max:1,step:.01,unit:"m",get:o=>Number(last(o).rimOverhang)||Number(o.rimOverhang)||.18,patch:(o,v)=>update(o,"rimOverhang",v),handle:(o,v)=>{const f=last(o),w=Math.abs(Number(f.w)||Math.abs(o.ra||2)*2),d=Math.abs(Number(f.d)||Math.abs(o.rb||1.5)*2),z=(Number(f.z)||0)+(Number(f.h)||2.2),x=(Number(f.x)||0)+w/2+v,y=(Number(f.y)||0)-d/2-.18;return {anchor:[x,y,z],sample:[x,y,z],probe:[x+1,y,z],fallback:{x:1,y:0}};}}
+ ];
+}
+
 const ASSETS = {
     rect: { label: "長方形", glyph: "□", w: 1.5, d: 1.0, h: 0, accent: "#66e3c8" },
     box: { label: "直方体", glyph: "▣", w: 3.2, d: 2.4, h: 1.8, bevelOffset: 0, bevelSegments: 4, controls: [
@@ -165,8 +174,8 @@ const ASSETS = {
     buildingAwning: { label: "テント付き建物（旧）", glyph: "▣", w: 4, d: 3, h: 5, accent: "#d98b68" },
     buildingAwningOpen: { label: "テント付き開口建物（旧）", glyph: "▤", w: 4, d: 3, h: 5, accent: "#e3a06c" },
     buildingSign: { label: "看板付き開口建物（旧）", glyph: "▣", w: 4, d: 3, h: 5, accent: "#76d9ff" },
-    cornerCutStackedBuilding: { label: "隅切りの縁付き階層建物", glyph: "▧", w: 4.2, d: 3.6, h: 8.98, cornerOffset: 0.8, accent: "#8ed7e8" },
-    stackedBuilding: { label: "縁付き階層建物", glyph: "▥", w: 4, d: 3, h: 8.98, bevelOffset: 0, bevelSegments: 4, controls: [{ key: "bevelOffset", label: "各階のベベル", type: "range", canvasSlider: true, default: 0, min: 0, max: o => Math.min(Math.abs(o.ra), Math.abs(o.rb)) * 0.49, step: 0.01, unit: "m", patch: (o,v) => ({ bevelOffset: v, floors: (o.floors||[]).map(f => ({ ...f, bevelOffset: v })) }), handle: (o,v) => { const f=(o.floors||[]).at(-1)||{}, x=Math.abs(Number(f.w)||Math.abs(Number(o.ra)||2)*2)/2, y=-Math.abs(Number(f.d)||Math.abs(Number(o.rb)||1.5)*2)/2, z=(Number(f.z)||0)+(Number(f.h)||2.2); return {anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}}; } }], accent: "#8ce6c2" },
+    cornerCutStackedBuilding: { label: "隅切りの縁付き階層建物", glyph: "▧", w: 4.2, d: 3.6, h: 8.98, cornerOffset: 0.8, controls:[{key:"topFloorRimEnabled",label:"最上階の縁を表示",type:"boolean",default:true}, ...stackedRimCanvasControls()], accent: "#8ed7e8" },
+    stackedBuilding: { label: "縁付き階層建物", glyph: "▥", w: 4, d: 3, h: 8.98, bevelOffset: 0, bevelSegments: 4, controls: [{ key:"topFloorRimEnabled",label:"最上階の縁を表示",type:"boolean",default:true}, ...stackedRimCanvasControls(), { key: "bevelOffset", label: "各階のベベル", type: "range", canvasSlider: true, default: 0, min: 0, max: o => Math.min(Math.abs(o.ra), Math.abs(o.rb)) * 0.49, step: 0.01, unit: "m", patch: (o,v) => ({ bevelOffset: v, floors: (o.floors||[]).map(f => ({ ...f, bevelOffset: v })) }), handle: (o,v) => { const f=(o.floors||[]).at(-1)||{}, x=Math.abs(Number(f.w)||Math.abs(Number(o.ra)||2)*2)/2, y=-Math.abs(Number(f.d)||Math.abs(Number(o.rb)||1.5)*2)/2, z=(Number(f.z)||0)+(Number(f.h)||2.2); return {anchor:[x,y,z],sample:[x-v,y,z],probe:[x-v-1,y,z],fallback:{x:-1,y:0}}; } }], accent: "#8ce6c2" },
     recessedStackedBuilding: {
         label: "凹窓階層建物",
         glyph: "▤",
@@ -201,6 +210,7 @@ const ASSETS = {
         h: 8.98,
         bevelOffset: 0.28,
         bevelSegments: 4,
+        controls:[{key:"topFloorRimEnabled",label:"最上階の縁を表示",type:"boolean",default:true}, ...stackedRimCanvasControls()],
         accent: "#ff9f68",
     },
     crosswalk: { label: "横断歩道", glyph: "▥", w: 3.2, d: 4.2, h: 0.02, accent: "#668cff" },
@@ -2721,7 +2731,8 @@ function linesStackedBuilding(ctx) {
     floors.forEach((f, i) => {
         const g=stackedFloorGeometry(o,f,i,{w:Number(o.ra||2)*2,d:Number(o.rb||1.5)*2,h:2.2}),
             {w,d,h,opening,bevelOffset,bevelSegments}=g,
-            rh=g.rimHeight,ro=g.rimOverhang;
+            rh=g.rimHeight,ro=g.rimOverhang,
+            showThisRim=!(o.topFloorRimEnabled===false && i===floors.length-1);
         // 本体の上辺は上側の縁に隠れるため描かず、下側の縁は全階で作らない。
         // 開口をONにした場合だけ、1F本体へ開口枠・内側面を追加する。
         if (kind === "cornerCutStackedBuilding") {
@@ -2734,17 +2745,17 @@ function linesStackedBuilding(ctx) {
             if(opening) append(cornerCutOpeningWireBoxA(part,cq,h,f.c||c,o.cutColor||"#e24b4b"));
             else append(cornerCutWireBoxA(part,w,d,0,h,cq.cornerOffset,cq.cornerCutCorner,f.c||c,o.cutColor||"#e24b4b"));
             const rimOffset=cq.cornerOffset+(2-Math.SQRT2)*ro;
-            append(cornerCutWireBoxA(part,w+2*ro,d+2*ro,h-rh,h,rimOffset,cq.cornerCutCorner,f.rimColor||a,f.rimColor||a));
+            if(showThisRim)append(cornerCutWireBoxA(part,w+2*ro,d+2*ro,h-rh,h,rimOffset,cq.cornerCutCorner,f.rimColor||a,f.rimColor||a));
         } else if (bevelOffset > 1e-5) {
             addBeveledBox(f, w, d, 0, h, bevelOffset, bevelSegments, f.c || c, { bottom: i === 0, top: false, verticalHeight: h - rh });
             if (opening) addOpeningWire(f, w, d, h, opening);
-            // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
-            addBeveledBox(f, w + ro * 2, d + ro * 2, h - rh, rh, bevelOffset, bevelSegments, f.rimColor || a);
+            // 最上階の縁だけ個別に非表示可能。
+            if(showThisRim)addBeveledBox(f, w + ro * 2, d + ro * 2, h - rh, rh, bevelOffset, bevelSegments, f.rimColor || a);
         } else {
             addBox(f, w, d, 0, h, f.c || c, { bottom: i === 0, top: false, verticalHeight: h - rh });
             if (opening) addOpeningWire(f, w, d, h, opening);
-            // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
-            addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
+            // 最上階の縁だけ個別に非表示可能。
+            if(showThisRim)addBox(f, w + ro * 2, d + ro * 2, h - rh, rh, f.rimColor || a);
         }
     });
 }

@@ -233,9 +233,9 @@ window.CityCanvasControls = (function () {
     }
     function install(stage){
         const panel=document.createElement('div');panel.id='canvasAssetControl';panel.hidden=true;
-        panel.innerHTML='<div class="canvasAssetFixed"><button type="button" class="canvasGround">地面につける</button><button type="button" class="canvasReset" title="位置・向きは維持して形と寸法を初期状態に戻す">リセットする</button><span class="canvasAssetControlLock" hidden>ロック中</span></div><div class="canvasAssetControlItems" aria-label="選択中の形状調整"></div>';
+        panel.innerHTML='<div class="canvasAssetFixed"><button type="button" class="canvasGround">地面につける</button><button type="button" class="canvasReset" title="位置・向きは維持して形と寸法を初期状態に戻す">リセットする</button><label class="canvasPoleSignalToggle" hidden><input type="checkbox" aria-label="電柱に歩行者信号を付ける">歩行者信号</label><span class="canvasAssetControlLock" hidden>ロック中</span></div><div class="canvasAssetControlItems" aria-label="選択中の形状調整"></div>';
         stage.parentNode.insertBefore(panel,stage);
-        const items=panel.querySelector('.canvasAssetControlItems'),ground=panel.querySelector('.canvasGround'),reset=panel.querySelector('.canvasReset'),lockBadge=panel.querySelector('.canvasAssetControlLock');
+        const items=panel.querySelector('.canvasAssetControlItems'),ground=panel.querySelector('.canvasGround'),reset=panel.querySelector('.canvasReset'),lockBadge=panel.querySelector('.canvasAssetControlLock'),poleSignalToggle=panel.querySelector('.canvasPoleSignalToggle'),poleSignalInput=poleSignalToggle.querySelector('input');
         const rowMap=new Map();
         let selectedId=null,signature='',session=null;
         ground.addEventListener('click',()=>{
@@ -250,6 +250,11 @@ window.CityCanvasControls = (function () {
             }
             const o=selectedObjects();
             if(o.length===1&&!obLocked(o[0]))window.cityResetAssetShape?.(o[0]);
+        });
+        poleSignalInput.addEventListener('change',()=>{
+            const picked=selectedObjects(),o=picked.length===1?picked[0]:null;
+            if(!o||o.asset!=="utilityPole"||obLocked(o))return;
+            HU.push(S);RD=[];session=null;setOb(o.id,{polePedestrianSignal:poleSignalInput.checked});render();
         });
         function rebuildRows(controls){
             items.replaceChildren();
@@ -293,6 +298,7 @@ window.CityCanvasControls = (function () {
                 if(selectedId!=='__camera__'){selectedId='__camera__';signature='';session=null;items.scrollLeft=0;}
                 items.setAttribute('aria-label','カメラの調整');
                 ground.hidden=true;
+                poleSignalToggle.hidden=true;
                 reset.hidden=false;
                 reset.disabled=locked;
                 reset.title='カメラの位置・向き・レンズを現在のグリッド種別の初期状態に戻す';
@@ -326,11 +332,13 @@ window.CityCanvasControls = (function () {
                 controls=o&&objectVisible(o)?[...toggles(o),...list(o),...faces(o)]:[],show=!!o&&objectVisible(o);
             const visibilityChanged=panel.hidden===show;
             panel.hidden=!show;
+            poleSignalToggle.hidden=!o||o.asset!=="utilityPole";
             if(visibilityChanged)fitCanvasDisplay();
             if(!show){selectedId=null;signature='';session=null;return;}
             if(selectedId!==o.id){selectedId=o.id;signature='';session=null;items.scrollLeft=0;}
             const locked=obLocked(o);
             ground.disabled=locked;reset.disabled=locked||!ASSETS[o.asset];
+            if(o.asset==="utilityPole"){poleSignalInput.checked=!!o.polePedestrianSignal;poleSignalInput.disabled=locked;}
             lockBadge.hidden=!locked;
             const sig=controls.map(c=>c.id).join('|');
             if(sig!==signature){

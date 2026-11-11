@@ -942,7 +942,7 @@ const ASSET_KIT = (function () {
         KIT_TRIS[kind] = (o) => {
             const parts = build(o, API) || [],
                 tris = [];
-            for (const part of parts) for (const t of partTris(part)) { const tri=[L2W(o,...t[0]),L2W(o,...t[1]),L2W(o,...t[2])]; if(part.roomShellWallSide)tri.roomShellWallSide=part.roomShellWallSide; if(part.roomShellFloor)tri.roomShellFloor=true; if(part.roomShellCeiling)tri.roomShellCeiling=true; tris.push(tri); }
+            for (const part of parts) for (const t of partTris(part)) { const tri=[L2W(o,...t[0]),L2W(o,...t[1]),L2W(o,...t[2])]; if(part.roomShellWallSide)tri.roomShellWallSide=part.roomShellWallSide; if(part.roomShellFloor)tri.roomShellFloor=true; if(part.roomShellCeiling)tri.roomShellCeiling=true; if(part.surfaceColor||part.color)tri.surfaceColor=part.surfaceColor||part.color; tris.push(tri); }
             return tris;
         };
         return true;

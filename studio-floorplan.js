@@ -72,7 +72,6 @@
             cur = null;
             er = null;
             prev = null;
-            bd = false;
             ed = null;
             const pts = [...floorTouchIds.values()],
                 mx = pts.reduce((a, t) => a + t.x, 0) / pts.length,
@@ -260,13 +259,20 @@
                           P.cz + Math.cos(yaw - half) * FLOOR_CAMERA_RAY * horiz,
                       ]
                     : null;
+        const screenHandle=(v)=>{
+            const p=scrW(v),margin=16/Math.max(.05,Z);
+            if(!p?.ok)return p;
+            // カメラ自体が正投影の表示範囲外にある場合も、掴めるハンドルを画面端に残す。
+            return {...p,offscreen:p.x<margin||p.x>W-margin||p.y<margin||p.y>H-margin,
+                x:clamp(p.x,margin,W-margin),y:clamp(p.y,margin,H-margin)};
+        };
         out.camera = {
             body,
             target,
             targetY,
-            sBody: scrW([body.x, cameraY, body.z]),
-            sTarget: scrW([target.x, targetY, target.z]),
-            sLens: lensWorld ? scrW(lensWorld) : null,
+            sBody: screenHandle([body.x, cameraY, body.z]),
+            sTarget: screenHandle([target.x, targetY, target.z]),
+            sLens: lensWorld ? screenHandle(lensWorld) : null,
             lensWorld,
             yaw,
             pitch,
@@ -1462,6 +1468,25 @@
         c.restore();
     }
     window.cityFloorPlanOverlay = drawFloorPlanOverlay;
+    // 正投影の前・横・上ビューにも、3D視点と同じ緑のカメラ／照準ハンドルを描画する。
+    // render() から独立して呼べるようにし、間取り用の家具ハンドルとは分離する。
+    function drawFloorPlanCameraOverlay(c){
+        if(orthPlane()!=="top"&&orthPlane()!=="side"&&orthPlane()!=="front")return;
+        const k=floorPlanHandles().camera;if(!k?.sBody?.ok||!k?.sTarget?.ok)return;
+        const r=9/Z,half=Math.atan(18/Math.max(12,Number(P.lens)||38)),body=k.sBody,target=k.sTarget,
+            cameraY=orthPlane()==="side"||orthPlane()==="front"?P.ch-1:-1,
+            horiz=Math.cos(k.pitch),coneY=orthPlane()==="side"||orthPlane()==="front"?cameraY+Math.sin(k.pitch)*FLOOR_CAMERA_RAY:cameraY,
+            left=scrW([P.cx-Math.sin(k.yaw-half)*FLOOR_CAMERA_RAY*horiz,coneY,P.cz+Math.cos(k.yaw-half)*FLOOR_CAMERA_RAY*horiz]),
+            right=scrW([P.cx-Math.sin(k.yaw+half)*FLOOR_CAMERA_RAY*horiz,coneY,P.cz+Math.cos(k.yaw+half)*FLOOR_CAMERA_RAY*horiz]);
+        c.save();c.fillStyle="rgba(102,227,200,.16)";c.strokeStyle="#66e3c8";c.lineWidth=1.2/Z;
+        c.beginPath();c.moveTo(body.x,body.y);c.lineTo(left.x,left.y);c.lineTo(right.x,right.y);c.closePath();c.fill();c.stroke();
+        c.beginPath();c.moveTo(body.x,body.y);c.lineTo(target.x,target.y);c.stroke();
+        c.fillStyle="#66e3c8";c.strokeStyle="#164c4b";c.lineWidth=1.5/Z;c.beginPath();c.arc(body.x,body.y,r,0,Math.PI*2);c.fill();c.stroke();
+        c.fillStyle="#fff";c.strokeStyle="#66e3c8";c.beginPath();c.arc(target.x,target.y,r*.82,0,Math.PI*2);c.fill();c.stroke();
+        if(k.sLens?.ok){const q=k.sLens,d=6/Z;c.fillStyle="#fff";c.strokeStyle="#ffd34d";c.lineWidth=1.5/Z;c.beginPath();c.moveTo(q.x,q.y-d);c.lineTo(q.x+d,q.y);c.lineTo(q.x,q.y+d);c.lineTo(q.x-d,q.y);c.closePath();c.fill();c.stroke();gzLabel(c,"レンズ",q.x+8/Z,q.y-7/Z,"#ffe6a1",10);}
+        c.restore();
+    }
+    window.cityFloorPlanCameraOverlay=drawFloorPlanCameraOverlay;
     // Y生成面の幅・奥行き・高さハンドルを、オブジェクト定義の差分へ変換する。
     // X/Z生成面は上のfloorWallDimensionPatchへ分岐する。
     function floorDimensionPatch(o, name, value, side = 1) {
@@ -1799,6 +1824,35 @@
         },
         true,
     );
+    // 通常の正投影（間取りモードOFF）でも、緑のカメラ本体・照準・レンズを直接操作できる。
+    // 旧経路は cityFloorPlanActive のときしかpointerdownを拾わず、7/8/9ビューでは
+    // マーカーがなく、カメラを動かす手掛かりも操作経路もなかった。
+    document.addEventListener("pointerdown",(e)=>{
+        if(window.cityFloorPlanActive||e.target!==cv||!orthPlane())return;
+        if(typeof cameraLock!=="undefined"&&cameraLock)return;
+        const p=pos(e),h=floorPlanHandles().camera,lim=22/Z;
+        if(!h)return;
+        if(Math.hypot(h.sTarget.x-p.x,h.sTarget.y-p.y)<lim){
+            e.preventDefault();e.stopImmediatePropagation();
+            floorPlanDrag=orthPlane()==="top"?{kind:"aim",pointerId:e.pointerId}:{kind:"aimSide",axis:orthPlane()==="side"?"side":"front",pointerId:e.pointerId};
+            capturePointer(e.pointerId);return;
+        }
+        if(Math.hypot(h.sBody.x-p.x,h.sBody.y-p.y)<lim){
+            const plane=orthPlane();
+            if(plane==="top"){
+                const w=floorPlanWorldAt(p);if(!w)return;
+                floorPlanDrag={kind:"camera",pointerId:e.pointerId,dx:P.cx-w.x,dz:P.cz-w.z};
+            }else{
+                const w=floorPlanVerticalWorldAt(p);if(!w)return;
+                floorPlanDrag={kind:"cameraSide",axis:plane,pointerId:e.pointerId,dx:plane==="front"?P.cx-w.x:0,dz:plane==="side"?P.cz-w.z:0,dy:P.ch-1-w.y};
+            }
+            e.preventDefault();e.stopImmediatePropagation();capturePointer(e.pointerId);return;
+        }
+        if(orthPlane()==="top"&&h.sLens&&Math.hypot(h.sLens.x-p.x,h.sLens.y-p.y)<lim){
+            e.preventDefault();e.stopImmediatePropagation();
+            floorPlanDrag={kind:"lens",pointerId:e.pointerId,p0:p,lens0:Number(P.lens)||35,started:false};capturePointer(e.pointerId);
+        }
+    },true);
     cv.addEventListener(
         "pointerdown",
         (e) => {

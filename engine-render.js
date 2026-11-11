@@ -1,86 +1,23 @@
 /* City Grid Studio: 描画（分割モジュール2/4）
-   書き出し範囲・隠れ線除去・線画レイヤー・グリッド・補助線・render() 本体。 */
-// ===== 2. 書き出し範囲（ブレンダーのレンダー範囲のような枠） =====
-function crect() {
-    return {
-        x: Math.min(CR.x0, CR.x1),
-        y: Math.min(CR.y0, CR.y1),
-        w: Math.abs(CR.x1 - CR.x0),
-        h: Math.abs(CR.y1 - CR.y0),
-    };
-}
-function overlay(c) {
-    // 範囲の外を暗くして枠を表示（画面だけ。書き出しには入らない）
-    if (!CR) return;
-    const r = crect();
-    c.save();
-    c.fillStyle = "rgba(0,0,0,.45)";
-    c.beginPath();
-    c.rect(0, 0, W, H);
-    c.rect(r.x, r.y, r.w, r.h);
-    c.fill("evenodd");
-    c.strokeStyle = "#ffd34d";
-    c.lineWidth = 2 / Z;
-    c.strokeRect(r.x, r.y, r.w, r.h);
-    c.fillStyle = "#ffd34d";
-    c.font = `${16 / Z}px system-ui`;
-    c.fillText(Math.round(r.w) + "×" + Math.round(r.h), r.x + 4 / Z, r.y > 24 / Z ? r.y - 6 / Z : r.y + 18 / Z);
-    c.restore();
-}
-$("crC").onclick = () => {
-    CR = null;
-    render();
-};
-$("crF").onclick = () => {
-    let x0 = 1e9,
-        y0 = 1e9,
-        x1 = -1e9,
-        y1 = -1e9; // 描いた線がちょうど入る範囲にする
-    S.forEach((s) =>
-        s.p.forEach((v) => {
-            const q = sp(s, v);
-            if (!q.ok) return;
-            x0 = Math.min(x0, q.x);
-            x1 = Math.max(x1, q.x);
-            y0 = Math.min(y0, q.y);
-            y1 = Math.max(y1, q.y);
-        }),
-    );
-    if (x0 > x1) return;
-    const m = 20;
-    CR = { x0: clamp(x0 - m, 0, W), y0: clamp(y0 - m, 0, H), x1: clamp(x1 + m, 0, W), y1: clamp(y1 + m, 0, H) };
-    render();
-};
-
-// ===== 3. ツール切り替え（消しゴム・図形・範囲）と設定パネルの開閉 =====
+   隠れ線除去・線画レイヤー・グリッド・補助線・render() 本体。 */
+// ===== 2. ツール切り替え（消しゴム・図形）と設定パネルの開閉 =====
 function syncInteractionButtons() {
     // 視点／鉛筆と、編集／消しゴム／図形／範囲を同じ「ON」表示にしない。
     // 視点中はツールボタンをすべてOFF、描画中は選択した1ツールだけをONにする。
     $("mV").classList.toggle("on", mode === "view");
     $("mD").classList.toggle("on", mode === "draw" && tool === "pen");
-    [
-        ["tE", "erase"],
-        ["tB", "border"],
-        ["tM", "edit"],
-    ].forEach(([id, n]) => $(id).classList.toggle("on", mode === "draw" && tool === n));
+    [["tE", "erase"], ["tM", "edit"]].forEach(([id, n]) => $(id).classList.toggle("on", mode === "draw" && tool === n));
 }
 function setTool(t) {
     tool = t;
     setMode("draw");
     const HT = {
-        border: "書き出し範囲：ドラッグで枠を指定。範囲指定はPNG保存・コピーに反映されます",
         erase: "消しゴム：なぞったところを消します",
         edit: "図形編集：線にさわって選択。空白を長押ししてドラッグするとボックス選択。Shift/Ctrl/⌘クリックでも複数選択でき、選択済みの線をドラッグするとまとめて移動。iPadは指またはApple Pencilで長押しドラッグ。矢印＝軸に沿って移動／白い四角＝面を押し引き／点線の輪＝回転（上下＝オレンジの輪／左右＝Xのリング／手前奥＝Yのリング）／線をドラッグ＝面の上で移動。看板は絵枠W・絵枠Hと外形の面ハンドル、建物は開口W/H・奥面と外側面、円錐は高さ、球体は半径ハンドルをドラッグできます",
     };
     if (HT[tool]) $("hint").textContent = HT[tool] + " ／ ⌘(Ctrl)+ドラッグ＝視点移動";
 }
 $("tE").onclick = () => setTool("erase");
-// 「範囲」は同じボタンをもう一度押すとOFFに戻せるトグルにする。
-// 指定済みの書き出し範囲(CR)自体は消さず、範囲ドラッグだけを終了する。
-$("tB").onclick = () => {
-    if (mode === "draw" && tool === "border") setMode("view");
-    else setTool("border");
-};
 $("tM").onclick = () => setTool("edit");
 const edge = document.createElement("button");
 edge.id = "edgeTab";
@@ -647,7 +584,8 @@ function exportSurfaceTrianglesBase(o) {
                 fw=floor.w,fd=floor.d,fh=floor.h,
                 fz=Number(f.z)||0,fx=Number(f.x)||0,fy=Number(f.y)||0,
                 rh=floor.rimHeight,ro=floor.rimOverhang,
-                bevelOffset=floor.bevelOffset,bevelSegments=floor.bevelSegments,opening=floor.opening;
+                bevelOffset=floor.bevelOffset,bevelSegments=floor.bevelSegments,opening=floor.opening,
+                showThisRim=!(o.topFloorRimEnabled===false && i===floors.length-1);
             if (kind === "cornerCutStackedBuilding") {
                 // 階ごとの隅切り面は既存の隅切り直方体を共用し、親の回転を保って位置をずらす。
                 const base=customPt(o,0,0,0), dest=customPt(o,fx,fy,fz), shift=dest.map((v,j)=>v-base[j]),
@@ -655,20 +593,22 @@ function exportSurfaceTrianglesBase(o) {
                         cornerCutOpeningW:opening?.openingW,cornerCutOpeningH:opening?.openingH,cornerCutOpeningDepth:opening?.openingBack},
                     append=tris=>tris.forEach(t=>out.push(t.map(p=>p.map((v,j)=>v+shift[j]))));
                 append(surfaceTriangles(part));
-                const offset=cornerCutBoxParams(part).cornerOffset+(2-Math.SQRT2)*ro,
-                    rim={...part,ra:(fw+2*ro)/2,rb:(fd+2*ro)/2,h:rh,cornerOffset:offset,cornerCutOpeningEnabled:false},
-                    rimBase=customPt(o,0,0,fh-rh), origin=customPt(o,0,0,0), rimShift=rimBase.map((v,j)=>v-origin[j]);
-                surfaceTriangles(rim).forEach(t=>out.push(t.map(p=>p.map((v,j)=>v+shift[j]+rimShift[j]))));
+                if(showThisRim){
+                    const offset=cornerCutBoxParams(part).cornerOffset+(2-Math.SQRT2)*ro,
+                        rim={...part,ra:(fw+2*ro)/2,rb:(fd+2*ro)/2,h:rh,cornerOffset:offset,cornerCutOpeningEnabled:false},
+                        rimBase=customPt(o,0,0,fh-rh), origin=customPt(o,0,0,0), rimShift=rimBase.map((v,j)=>v-origin[j]);
+                    surfaceTriangles(rim).forEach(t=>out.push(t.map(p=>p.map((v,j)=>v+shift[j]+rimShift[j]))));
+                }
             } else if (kind === "beveledStackedBuilding" || bevelOffset > 1e-5) {
                 if (opening) beveledOpeningAt(fx, fy, fw, fd, fz, fz + fh, bevelOffset, bevelSegments, opening);
                 else beveledAt(fx, fy, fw, fd, fz, fz + fh, bevelOffset, bevelSegments);
-                // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
-                beveledAt(fx, fy, fw + ro * 2, fd + ro * 2, fz + fh - rh, fz + fh, bevelOffset, bevelSegments);
+                // 最上階の縁だけ個別に非表示可能。
+                if(showThisRim)beveledAt(fx, fy, fw + ro * 2, fd + ro * 2, fz + fh - rh, fz + fh, bevelOffset, bevelSegments);
             } else {
                 if (opening) openingBoxAt(fx, fy, fw, fd, fz, fz + fh, opening);
                 else boxAt(fx, fy, fw, fd, fz, fz + fh);
-                // 下側の縁は全階で作らず、各階の上側だけに縁を配置する。
-                boxAt(fx, fy, fw + ro * 2, fd + ro * 2, fz + fh - rh, fz + fh);
+                // 最上階の縁だけ個別に非表示可能。
+                if(showThisRim)boxAt(fx, fy, fw + ro * 2, fd + ro * 2, fz + fh - rh, fz + fh);
             }
         });
         return out;
@@ -3575,7 +3515,6 @@ function render() {
     if (T === "f") {
         markF(c);
         drawLockMarks(c);
-        overlay(c);
         if(orthView&&window.cityFloorPlanCameraOverlay){c.save();c.setTransform(1,0,0,1,0,0);window.cityFloorPlanCameraOverlay(c);c.restore();}
         c.restore();
         return;
@@ -3597,7 +3536,6 @@ function render() {
         c.fillText(nm + (t < 1 ? " →" : ""), Math.min(px + 10, W - 70), Math.max(py - 10, 20));
     });
     drawLockMarks(c);
-    overlay(c);
     if(orthView&&window.cityFloorPlanCameraOverlay){c.save();c.setTransform(1,0,0,1,0,0);window.cityFloorPlanCameraOverlay(c);c.restore();}
     c.restore();
     const q = (v) => (v ? `(${((v.x / W) * 100).toFixed(0)}%, ${((v.y / H) * 100).toFixed(0)}%)` : "無限遠(平行)");

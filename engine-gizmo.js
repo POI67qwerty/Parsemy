@@ -2650,18 +2650,20 @@ function signalGeometry(o) {
     const dflt = SIGNAL_HEADS[o?.asset] || SIGNAL_HEADS.trafficSignal,
         num = (v, f) => (Number.isFinite(Number(v)) && Number(v) !== 0 ? Math.abs(Number(v)) : f),
         H = Math.max(0.8, num(o?.h, 2.6)),
-        // 頭の幅・奥行きは、ほかのアセットと同じく左右／前後の面ハンドルで変えられる。
-        headW = Math.max(0.12, num(o?.ra, dflt.w / 2) * 2),
-        headD = Math.max(0.03, num(o?.rb, dflt.d / 2) * 2),
-        headH = Math.max(0.12, Math.min(H - 0.25, num(o?.spHeadH, dflt.h))),
-        suspended = (o?.asset === "trafficSignal" || o?.asset === "pedSignal") && !window.__legacySignalMount,
+        polePed = o?.asset === "utilityPole" && o?.polePedestrianSignal === true,
+        // 電柱付属の歩行者灯は、柱寸法とは独立した灯器寸法と取付高さを使う。
+        headW = polePed ? Math.max(.16,Number(o?.polePedSignalW)||.27) : Math.max(0.12, num(o?.ra, dflt.w / 2) * 2),
+        headD = polePed ? Math.max(.06,Number(o?.polePedSignalD)||.16) : Math.max(0.03, num(o?.rb, dflt.d / 2) * 2),
+        headH = polePed ? Math.max(.25,Number(o?.polePedSignalH)||.58) : Math.max(0.12, Math.min(H - 0.25, num(o?.spHeadH, dflt.h))),
+        suspended = polePed || ((o?.asset === "trafficSignal" || o?.asset === "pedSignal") && !window.__legacySignalMount),
         armThickness = suspended ? 0.06 : 0,
-        armGap = suspended ? clamp(Number(o?.signalArmGap ?? 0.4), 0.05, 4) : 0,
-        headX = suspended ? armGap + headW / 2 : 0,
-        headBottom = H - headH - armThickness,
+        armGap = polePed ? clamp(Number(o?.signalArmGap ?? .28), .05, 2) : suspended ? clamp(Number(o?.signalArmGap ?? 0.4), 0.05, 4) : 0,
         poleR = Math.max(0.008, num(o?.spPoleR, 0.042)),
+        headX = polePed ? num(o?.poleDiameter,Math.min(Math.abs(o?.ra)||.21,Math.abs(o?.rb)||.21)*1.64)/1.64 + armGap + headW/2 : suspended ? armGap + headW / 2 : 0,
+        requestedHeadBottom = polePed ? Number(o?.polePedestrianSignalZ ?? H*.56)-headH/2 : H-headH-armThickness,
+        headBottom = polePed ? clamp(requestedHeadBottom,.15,Math.max(.15,H-headH-.08)) : requestedHeadBottom,
         baseR = Math.max(poleR * 2, num(o?.spBaseR, 0.16)),
-        baseH = Math.min(headBottom * 0.5, num(o?.spBaseH, 0.16));
+        baseH = Math.min(Math.max(.05,headBottom * 0.5), num(o?.spBaseH, 0.16));
     return {
         H,
         headW,

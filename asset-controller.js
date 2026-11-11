@@ -1176,6 +1176,7 @@ window.cityGridInstallAssetUI = function (bridge) {
                 "wallSign",
                 "lightboxSign",
                 "securityCamera",
+                "utilityPole",
                 "pathPipe",
                 "bezierCable",
                 "vendingMachine",

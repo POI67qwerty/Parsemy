@@ -4,23 +4,10 @@
 // m: 'line'=描画のみ / 'guide'=補助線のみ / 'both'=補助線＋描画（どれも背景透過・写真なし）
 // 面表示がONなら、PNGにも面と背面処理を反映する。
 function out(m, hidden = false, strengthenClipboardLines = false) {
-    // 書き出す範囲：ズーム中は「画面に見えている範囲」、範囲指定があればその枠との重なり。拡大率のまま出力する
-    const fit = $("zf").checked && Z > 1;
-    let r = fit ? { x: -ox / Z, y: -oy / Z, w: W / Z, h: H / Z } : { x: 0, y: 0, w: W, h: H };
-    if (CR) {
-        const b = crect();
-        if (b.w >= 8 && b.h >= 8) {
-            const x0 = Math.max(r.x, b.x),
-                y0 = Math.max(r.y, b.y),
-                x1 = Math.min(r.x + r.w, b.x + b.w),
-                y1 = Math.min(r.y + r.h, b.y + b.h);
-            if (x1 - x0 >= 1 && y1 - y0 >= 1) r = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
-        }
-    }
-    const sc = fit ? Z : 1,
-        cw = Math.max(1, Math.round(r.w * sc)),
-        ch = Math.max(1, Math.round(r.h * sc)),
-        tf = [sc, 0, 0, sc, -r.x * sc, -r.y * sc];
+    // 範囲切り抜き機能は廃止。常にキャンバス全体を現在の表示倍率で書き出す。
+    const cw = Math.max(1, Math.round(W)),
+        ch = Math.max(1, Math.round(H)),
+        tf = [1, 0, 0, 1, 0, 0];
     const c = document.createElement("canvas");
     c.width = cw;
     c.height = ch;
@@ -211,10 +198,8 @@ function pack(withPhoto) {
         hzl: $("hzl").checked,
         bgw: $("bgw").checked,
         bin: $("bin").checked,
-        zf: $("zf").checked,
         gg: $("gg").checked,
         p3: $("p3").checked,
-        cr: CR,
         snap: $("snap").value,
         em: $("em").value,
         pc: $("pc").value,
@@ -238,7 +223,7 @@ function unpack(d) {
         show[i] = v;
         document.querySelector('[data-i="' + i + '"]').checked = v;
     });
-    ["gon", "hzl", "bgw", "bin", "zf", "gg", "p3"].forEach((k) => {
+    ["gon", "hzl", "bgw", "bin", "gg", "p3"].forEach((k) => {
         if (d[k] !== undefined) $(k).checked = d[k];
     });
     $("snap").value = d.snap;
@@ -272,7 +257,6 @@ function unpack(d) {
         });
         S = out;
     }
-    CR = d.cr || null;
     HU = [];
     RD = [];
     cur = null;

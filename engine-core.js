@@ -68,8 +68,6 @@ let S = [],
     er = null,
     tool = "pen",
     prev = null,
-    CR = null,
-    bd = false,
     snapHit = null,
     sel = null,
     selIds = new Set(),
@@ -360,10 +358,6 @@ ${RO("rot", "回転", -180, 180, 0.1, "°")}
 <div class="note">JSON保存は寸法・位置・向き・アセット固有設定をテキストで書き出します。後から線画化できる定義形式です。</div>
 <div class="note">位置は底面の中心です。Yは地面からの高さ（0で地面につく）、X・Zは床の方向（VP1・VP2側）です</div>
 </div>
-<h3>書き出し範囲（上の「範囲」ボタン）</h3>
-<label><input type=checkbox id=zf checked> ズーム中は画面に見えている範囲だけ保存</label>
-<label><button id=crF>線画に合わせる</button><button id=crC>範囲を解除</button></label>
-<div class="note">範囲を指定すると、PNG保存・コピーはその範囲だけ切り取られます（補助線・線画とも）</div>
 <h3>消しゴム（上の「消しゴム」ボタンでON/OFF）</h3>
 <label><span>方式</span><select id=em><option value=part>部分消し<option value=all>線ごと消す</select></label>
 ${R("ew", "大きさ", 4, 150, 1, "px")}
@@ -382,7 +376,6 @@ ${R("ew", "大きさ", 4, 150, 1, "px")}
             "補助線",
             "ペン",
             "編集・スナップ",
-            "書き出し範囲",
             "消しゴム",
             "保存",
             "読み取り",

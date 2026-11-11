@@ -4126,11 +4126,14 @@ function gachaMachineBuild(o, K = ASSET_KIT) {
   return out;
  });
  // コンクリート電柱：頭部キャップ、金属バンド、腕金・碍子、側面の柱上変圧器を追加。
- ASSET_KIT.define('utilityPole',{label:'電柱',glyph:'⚡',group:'street',w:.42,d:.42,h:5.5,accent:'#77766e',minHalfWidth:()=>.08,minHalfDepth:()=>.08,minHeight:()=>1,controls:[
+ ASSET_KIT.define('utilityPole',{label:'電柱',glyph:'⚡',group:'street',w:.42,d:.42,h:5.5,accent:'#77766e',polePedestrianSignal:false,minHalfWidth:()=>.08,minHalfDepth:()=>.08,minHeight:()=>1,controls:[
   {key:'poleArms',label:'腕金の段数',type:'range',canvasSlider:true,default:2,min:1,max:4,step:1,integer:true,unit:'段'},
   {key:'transformerZ',label:'変圧器の上下位置',type:'range',canvasSlider:true,gizmoMode:'moveZ',min:o=>Math.max(.1,o.h*.1),max:o=>Math.max(.1,o.h*.9),step:.02,unit:'m',get:o=>V(o,'transformerZ',o.h*.47),handle:(o,v)=>({anchor:[o.ra*.35,-o.rb*.4,v],sample:[o.ra*.35,-o.rb*.4,v],probe:[o.ra*.35,-o.rb*.4,v+1],fallback:{x:0,y:-1}})},
-  {key:'poleDiameter',label:'電柱の太さ',type:'range',canvasSlider:true,min:.08,max:o=>Math.max(.08,Math.min(o.ra,o.rb)*1.9),step:.005,unit:'m',get:o=>V(o,'poleDiameter',Math.min(o.ra,o.rb)*1.64),handle:(o,v)=>({anchor:[0,-o.rb*.4,o.h*.55],sample:[v/2,-o.rb*.4,o.h*.55],probe:[v/2+1,-o.rb*.4,o.h*.55],fallback:{x:1,y:0}})}
- ]},(o,K)=>{
+  {key:'poleDiameter',label:'電柱の太さ',type:'range',canvasSlider:true,min:.08,max:o=>Math.max(.08,Math.min(o.ra,o.rb)*1.9),step:.005,unit:'m',get:o=>V(o,'poleDiameter',Math.min(o.ra,o.rb)*1.64),handle:(o,v)=>({anchor:[0,-o.rb*.4,o.h*.55],sample:[v/2,-o.rb*.4,o.h*.55],probe:[v/2+1,-o.rb*.4,o.h*.55],fallback:{x:1,y:0}})},
+  ...pedSignalHoodControls().map(c=>({...c,canvasVisible:o=>o.polePedestrianSignal===true})),
+  {...signalArmControl(),type:'range',canvasSlider:true,label:'歩行者信号の横腕の長さ',default:.28,min:.05,max:2,step:.02,unit:'m',get:o=>Number(o.signalArmGap)||.28,patch:(o,v)=>({signalArmGap:clamp(Number(v)||.28,.05,2)}),canvasVisible:o=>o.polePedestrianSignal===true,handle:o=>{const g=signalGeometry(o),left=g.headX-g.headW/2;return {anchor:[0,0,g.headCz],sample:[left,0,g.headCz],probe:[left+1,0,g.headCz],fallback:{x:1,y:0}};}},
+  {key:'polePedestrianSignalZ',label:'歩行者信号の上下位置',type:'range',canvasSlider:true,gizmoMode:'moveZ',default:o=>o.h*.56,min:o=>.7,max:o=>Math.max(.7,o.h-.45),step:.02,unit:'m',get:o=>clamp(Number(o.polePedestrianSignalZ)||o.h*.56,.7,Math.max(.7,o.h-.45)),patch:(o,v)=>({polePedestrianSignalZ:clamp(Number(v)||o.h*.56,.7,Math.max(.7,o.h-.45))}),canvasVisible:o=>o.polePedestrianSignal===true,handle:(o)=>{const g=signalGeometry(o);return {anchor:[g.headX,0,g.headCz],sample:[g.headX,0,g.headCz+1],probe:[g.headX,0,g.headCz+2],fallback:{x:0,y:-1}};}}
+ ]},(o,K)=>{ 
   const h=o.h,poleDiameter=clamp(V(o,'poleDiameter',Math.min(Math.abs(o.ra),Math.abs(o.rb))*1.64),.08,Math.min(Math.abs(o.ra),Math.abs(o.rb))*1.9),r=poleDiameter/1.64,n=Math.round(V(o,'poleArms',2)),span=r*7.2,out=[];
   const tube=(radius,z0,z1,opt={})=>({...K.cylinder(radius,z0,z1,{seg:24,...opt}),preciseTubeEdge:true,onFace:true});
   out.push(tube(r*.82,0,h*.99,{verts:2}),tube(r*.96,0,h*.045),tube(r*.7,h*.98,h));
@@ -4151,9 +4154,28 @@ function gachaMachineBuild(o, K = ASSET_KIT) {
   const tx=r*1.55,tr=r*1.02,th=h*.16,tz=clamp(V(o,'transformerZ',h*.47),th/2,h-th/2);
   out.push(box(K,r*1.65,r*.7,tz-.07,tz+.07,tx,-r*.24),tube(tr,tz-th/2,tz+th/2,{verts:2,cx:tx,cy:-r*.4}));
   out.push(tube(tr*1.04,tz-th*.32,tz-th*.27,{cx:tx,cy:-r*.4}),tube(tr*1.04,tz+th*.27,tz+th*.32,{cx:tx,cy:-r*.4}));
+  if(o.polePedestrianSignal===true){
+   const g=signalGeometry(o),hp=pedSignalHoodGeometry(o),cy=-r*.62,left=g.headX-g.headW/2,
+    armStart=r*.82,armLength=Math.max(.035,left-armStart),armMid=(armStart+left)/2,rodD=.055,rodH=.045,
+    upperZ=g.headBottom+g.headH*.84,lowerZ=g.headBottom+g.headH*.16;
+   // 電柱との取付クランプに加えて、灯器を上・下2本の金属腕で支える実物寄りの構成。
+   for(const z of [upperZ,lowerZ]){
+    out.push(K.box(K.rectPath(r*2.15,rodH,0,z),cy-rodD/2,cy+rodD/2,{axis:'y',color:'#9aa3a4'}));
+    out.push(K.box(K.rectPath(armLength,rodH,armMid,z),cy-rodD/2,cy+rodD/2,{axis:'y',color:'#9aa3a4'}));
+    out.push(K.box(K.rectPath(r*2.28,.025,0,z),cy-.0125,cy+.0125,{axis:'y',color:'#555f63'}));
+   }
+   const casePart=K.depthBeveledBox(g.headW,g.headD,g.headH,Math.min(.035,g.headW*.08,g.headH*.08),{seg:2,z0:g.headBottom,group:'pole-ped-signal'});
+   out.push(...K.moveParts([{...casePart,color:'#293238'}],g.headX,cy,0));
+   const lens=(z,col)=>K.box(K.rectPath(hp.lamp,hp.lamp,g.headX,z),cy-g.headD/2-.009,cy-g.headD/2+.002,{axis:'y',color:col});
+   out.push(lens(hp.topCz,'#ee3f45'),lens(hp.bottomCz,'#35cf78'));
+   if(hp.enabled) [hp.topCz,hp.bottomCz].forEach((z,i)=>{
+    const hood=signalLampHoodParts(K,g.headX,z,hp.front,hp.w,hp.h,hp.brimLength,hp.bevel,`pole-ped-hood-${i}`,0.25,false,hp.knee,hp.frameDepth);
+    out.push(...K.moveParts(hood,0,cy,0).map(p=>({...p,color:'#4d575b'})));
+   });
+  }
   return out;
- });
- // 空のラーメン鉢。回転断面で内側のくぼみを表現、中身なし。
+ },{replace:true});
+ // 空のラーメン鉢。回転断面で内側のくぼみを表現、中身なし.
  ASSET_KIT.define('ramenBowl',{label:'ラーメン鉢（空）',glyph:'◉',group:'furniture',w:.28,d:.28,h:.11,accent:'#5b4237',minHalfWidth:()=>.05,minHalfDepth:()=>.05,minHeight:()=>.035,controls:[]},(o,K)=>{
   const r=Math.min(Math.abs(o.ra),Math.abs(o.rb)),h=o.h;
   // 外側の丸い椀形、厚い口縁、内側の底面までを一続きの断面で回転。中身は置かない。

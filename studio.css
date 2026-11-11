@@ -1285,6 +1285,8 @@ body.cameraLocked #cv {
 #canvasAssetControl { flex:none; min-width:0; display:flex; align-items:center; gap:8px; padding:6px 10px; background:#101c22; border-bottom:1px solid #344951; color:#eafff9; }
 #canvasAssetControl[hidden], #canvasAssetControl [hidden] { display:none !important; }
 #canvasAssetControl .canvasAssetFixed { display:flex; flex:0 0 auto; align-items:center; gap:5px; }
+#canvasAssetControl .canvasPoleSignalToggle { display:flex; align-items:center; gap:3px; white-space:nowrap; font-size:11px; color:#bfffe7; margin:0; }
+#canvasAssetControl .canvasPoleSignalToggle input { margin:0; accent-color:#66e3c8; }
 #canvasAssetControl button { white-space:nowrap; padding:5px 8px; font-size:11px; }
 #canvasAssetControl .canvasAssetControlItems { display:flex; flex:1 1 auto; min-width:0; align-items:center; gap:9px; overflow-x:auto; overflow-y:hidden; overscroll-behavior-x:contain; scrollbar-width:thin; padding:2px 0 4px; }
 #canvasAssetControl .canvasAssetRow { flex:0 0 auto; display:flex; align-items:center; gap:5px; margin:0; padding:0 5px 0 0; font-size:11px; white-space:nowrap; border-right:1px solid #34514d; }
